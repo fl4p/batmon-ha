@@ -1,0 +1,21 @@
+name: "Offgrid"
+description: "My first real add-on!"
+version: "1.0.6"
+slug: "offgrid"
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+host_dbus: true
+options:
+  daly_address: "Hello world..."
+  mqtt_user: ""
+  mqtt_password: ""
+  mqtt_broker: "localhost"
+schema:
+  daly_address: "str"
+  mqtt_user: "str"
+  mqtt_password: "str"
+  mqtt_broker: "str"
