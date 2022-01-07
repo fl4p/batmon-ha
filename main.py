@@ -32,7 +32,7 @@ def get_logger(verbose=False):
     if verbose:
         level = logging.DEBUG
     else:
-        level = logging.WARNING
+        level = logging.INFO
 
     logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
     return logging.getLogger()
@@ -46,11 +46,13 @@ async def bt_discovery():
         print(d)
 
 
+logger = get_logger(verbose=False)
+
+
 async def main():
-    logger = get_logger(verbose=False)
     bms = DalyBMSBluetooth(request_retries=3, logger=logger)
 
-    print('connecting mqtt %s@%s' % (user_config.mqtt_user, user_config.mqtt_broker))
+    logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
     mqtt_client = paho.Client()
     mqtt_client.enable_logger(logger)
     if user_config.get('mqtt_user', None):
@@ -61,28 +63,29 @@ async def main():
     num_errors_row = 0
     while True:
         try:
-            print('connecting bms')
+            logger.info('connecting bms %s', mac_address)
             t_conn = time.time()
             await bms.connect(mac_address=mac_address)
-            print('fetching data')
+            # print('fetching data')
             t_fetch = time.time()
             result = await bms.get_all()
-            print('result@', datetime.datetime.now().isoformat(), result)
+            logger.info('result@%s %s', datetime.datetime.now().isoformat(), result)
             t_disc = time.time()
             await bms.disconnect()
             mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
 
-            print('times: connect=%.2fs fetch=%.2fs' % (t_fetch - t_conn, t_disc - t_fetch))
+            logger.info('times: connect=%.2fs fetch=%.2fs', t_fetch - t_conn, t_disc - t_fetch)
             num_errors_row = 0
             await asyncio.sleep(8)
+
         except Exception as e:
-            logger.error('Error fetching BMS: %s', e)
+            num_errors_row += 1
+
+            logger.error('Error (num %d) fetching BMS: %s', num_errors_row, e)
 
             if not discovered:
                 await bt_discovery()
                 discovered = True
-
-            num_errors_row += 1
 
             if num_errors_row > 4:
                 print('too many errors, abort')
