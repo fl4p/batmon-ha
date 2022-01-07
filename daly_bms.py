@@ -144,11 +144,14 @@ class DalyBMS:
             return False
 
         parts = struct.unpack('>h h h h', response_data)
+        voltage = parts[0] / 10
+        current = (parts[2] - 30000) / 10  # negative=charging, positive=discharging
         data = {
-            "total_voltage": parts[0] / 10,
+            "total_voltage": voltage,
             # "x_voltage": parts[1] / 10, # always 0
-            "current": (parts[2] - 30000) / 10,  # negative=charging, positive=discharging
-            "soc_percent": parts[3] / 10
+            "current": current,
+            "soc_percent": parts[3] / 10,
+            "power": round(voltage * current, 1),
         }
         return data
 

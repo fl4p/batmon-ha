@@ -1,6 +1,6 @@
 name: "Offgrid"
 description: "My first real add-on!"
-version: "1.0.8"
+version: "1.0.12"
 slug: "offgrid"
 arch:
   - aarch64
@@ -9,12 +9,10 @@ arch:
   - armv7
   - i386
 host_dbus: true
-
 services:
   - mqtt:need
-
 options:
-  daly_address: "MAC address"
+  daly_address: null
   mqtt_user: ""
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
@@ -23,6 +21,3 @@ schema:
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
-
-# https://github.com/hassio-addons/addon-zwavejs2mqtt/blob/main/zwavejs2mqtt/config.yaml
-# https://github.com/hassio-addons/addon-zwavejs2mqtt/blob/d3549ff9d719bee4a770bba038ba3cfbb6bc72aa/zwavejs2mqtt/rootfs/etc/cont-init.d/configuration.sh

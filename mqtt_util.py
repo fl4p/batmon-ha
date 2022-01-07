@@ -13,6 +13,8 @@ def build_mqtt_hass_config_discovery(base, topic):
     hass_config_data["unique_id"] = f'daly_bms_{base.replace("/", "_")}'
     hass_config_data["name"] = f'Daly BMS {base.replace("/", " ")}'
 
+    # see https://www.home-assistant.io/integrations/sensor/
+
     if 'soc_percent' in base:
         hass_config_data["device_class"] = 'battery'
         hass_config_data["unit_of_measurement"] = '%'
@@ -22,6 +24,9 @@ def build_mqtt_hass_config_discovery(base, topic):
     elif 'current' in base:
         hass_config_data["device_class"] = 'current'
         hass_config_data["unit_of_measurement"] = 'A'
+    elif 'power' in base:
+        hass_config_data["device_class"] = 'power'
+        hass_config_data["unit_of_measurement"] = 'W'
     elif 'capacity' in base:
         # hass_config_data["device_class"] = ''
         hass_config_data["unit_of_measurement"] = 'Ah'
