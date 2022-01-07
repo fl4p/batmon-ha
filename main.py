@@ -2,13 +2,13 @@ import asyncio
 import json
 import logging
 import sys
+import time
 
 import paho.mqtt.client as paho
 from bleak import BleakScanner
 
 from daly_bms_bluetooth import DalyBMSBluetooth
 from mqtt_util import mqtt_iterator
-
 from util import dotdict
 
 try:
@@ -34,10 +34,10 @@ def get_logger(verbose=False):
         level = logging.WARNING
 
     logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
-    return  logging.getLogger()
+    return logging.getLogger()
 
 
-def bt_discovery():
+async def bt_discovery():
     print('BT Discovery:')
 
     devices = await BleakScanner.discover()
@@ -46,7 +46,6 @@ def bt_discovery():
 
 
 async def main():
-
     logger = get_logger(verbose=False)
     bms = DalyBMSBluetooth(request_retries=3, logger=logger)
 
@@ -57,23 +56,28 @@ async def main():
         mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
     mqtt_client.connect(user_config.mqtt_broker, port=1883)
 
-
     num_errors = 0
     while True:
         try:
             print('connecting bms')
+            t_conn = time.time()
             await bms.connect(mac_address=mac_address)
             print('fetching data')
+            t_fetch = time.time()
             result = await bms.get_all()
             print('result', result)
+            t_disc = time.time()
             await bms.disconnect()
             mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
+
+            print('times: connect=%.2fs fetch=%.2fs' % (t_fetch - t_conn, t_disc - t_fetch))
+
             await asyncio.sleep(8)
         except Exception as e:
             logger.error('Error fetching BMS: %s', e)
 
             if num_errors == 0:
-                bt_discovery()
+                await bt_discovery()
 
             num_errors += 1
 

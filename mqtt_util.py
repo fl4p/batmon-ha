@@ -22,6 +22,9 @@ def build_mqtt_hass_config_discovery(base, topic):
     elif 'current' in base:
         hass_config_data["device_class"] = 'current'
         hass_config_data["unit_of_measurement"] = 'A'
+    elif 'capacity' in base:
+        # hass_config_data["device_class"] = ''
+        hass_config_data["unit_of_measurement"] = 'Ah'
     elif 'temperatures' in base:
         hass_config_data["device_class"] = 'temperature'
         hass_config_data["unit_of_measurement"] = '°C'

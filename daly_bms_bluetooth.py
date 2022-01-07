@@ -170,15 +170,33 @@ class DalyBMSBluetooth(DalyBMS):
     async def get_all(self):
         return {
             "soc": await self.get_soc(),
-            "cell_voltage_range": await self.get_cell_voltage_range(),
+            # "cell_voltage_range": await self.get_cell_voltage_range(),
             # "temperature_range": await self.get_temperature_range(), TODO
             "mosfet_status": await self.get_mosfet_status(),
             "status": await self.get_status(),
             "cell_voltages": await self.get_cell_voltages(),
             # "temperatures": await self.get_temperatures(), # TODO broken?
-            "balancing_status": await self.get_balancing_status(),
-            "errors": await self.get_errors()
+            # "balancing_status": await self.get_balancing_status(),
+            # "errors": await self.get_errors()
         }
+
+    async def get_all2(self):
+
+        fields = {
+            "soc":  self.get_soc(),
+            # "cell_voltage_range": await self.get_cell_voltage_range(),
+            # "temperature_range": await self.get_temperature_range(), TODO
+            "mosfet_status":  self.get_mosfet_status(),
+            "status":  self.get_status(),
+            "cell_voltages":  self.get_cell_voltages(),
+            # "temperatures": await self.get_temperatures(), # TODO broken?
+            # "balancing_status": await self.get_balancing_status(),
+            # "errors": await self.get_errors()
+        }
+
+        values = await asyncio.gather(*fields.values())
+
+        return dict(zip(fields.keys(), values))
 
     def _calc_cell_voltage_responses(self):
 
