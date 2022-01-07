@@ -57,7 +57,8 @@ async def main():
         mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
     mqtt_client.connect(user_config.mqtt_broker, port=1883)
 
-    num_errors = 0
+    discovered = False
+    num_errors_row = 0
     while True:
         try:
             print('connecting bms')
@@ -72,17 +73,24 @@ async def main():
             mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
 
             print('times: connect=%.2fs fetch=%.2fs' % (t_fetch - t_conn, t_disc - t_fetch))
-
+            num_errors_row = 0
             await asyncio.sleep(8)
         except Exception as e:
             logger.error('Error fetching BMS: %s', e)
 
-            if num_errors == 0:
+            if not discovered:
                 await bt_discovery()
+                discovered = True
 
-            num_errors += 1
+            num_errors_row += 1
+
+            if num_errors_row > 4:
+                print('too many errors, abort')
+                break
 
             await asyncio.sleep(30)
 
 
 asyncio.run(main())
+
+exit(1)

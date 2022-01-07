@@ -1,6 +1,6 @@
 name: "Offgrid"
 description: "My first real add-on!"
-version: "1.0.12"
+version: "1.0.14"
 slug: "offgrid"
 arch:
   - aarch64
