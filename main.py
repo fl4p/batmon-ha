@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import logging
 import sys
@@ -65,7 +66,7 @@ async def main():
             print('fetching data')
             t_fetch = time.time()
             result = await bms.get_all()
-            print('result', result)
+            print('result@', datetime.datetime.now().isoformat(), result)
             t_disc = time.time()
             await bms.disconnect()
             mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)

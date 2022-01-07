@@ -156,7 +156,7 @@ class DalyBMSBluetooth(DalyBMS):
         return super().get_cell_voltages(response_data=response_data)
 
     async def get_temperatures(self, response_data=None):
-        response_data = await self._read_request("95")
+        response_data = await self._read_request("96", max_responses=2)
         return super().get_temperatures(response_data=response_data)
 
     async def get_balancing_status(self, response_data=None):
@@ -175,7 +175,7 @@ class DalyBMSBluetooth(DalyBMS):
             "mosfet_status": await self.get_mosfet_status(),
             "status": await self.get_status(),
             "cell_voltages": await self.get_cell_voltages(),
-            # "temperatures": await self.get_temperatures(), # TODO broken?
+            "temperatures": await self.get_temperatures(), # TODO broken?
             # "balancing_status": await self.get_balancing_status(),
             # "errors": await self.get_errors()
         }
