@@ -37,16 +37,20 @@ def get_logger(verbose=False):
     return  logging.getLogger()
 
 
-async def main():
+def bt_discovery():
     print('BT Discovery:')
 
     devices = await BleakScanner.discover()
     for d in devices:
         print(d)
 
+
+async def main():
+
     logger = get_logger(verbose=False)
     bms = DalyBMSBluetooth(request_retries=3, logger=logger)
 
+    print('connecting mqtt %s@%s' % (user_config.mqtt_user, user_config.mqtt_broker))
     mqtt_client = paho.Client()
     mqtt_client.enable_logger(logger)
     if user_config.get('mqtt_user', None):
@@ -54,15 +58,26 @@ async def main():
     mqtt_client.connect(user_config.mqtt_broker, port=1883)
 
 
+    num_errors = 0
     while True:
-        print('connecting bms')
-        await bms.connect(mac_address=mac_address)
-        print('fetching data')
-        result = await bms.get_all()
-        print('result', result)
-        await bms.disconnect()
-        mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
-        await asyncio.sleep(8)
+        try:
+            print('connecting bms')
+            await bms.connect(mac_address=mac_address)
+            print('fetching data')
+            result = await bms.get_all()
+            print('result', result)
+            await bms.disconnect()
+            mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
+            await asyncio.sleep(8)
+        except Exception as e:
+            logger.error('Error fetching BMS: %s', e)
+
+            if num_errors == 0:
+                bt_discovery()
+
+            num_errors += 1
+
+            await asyncio.sleep(30)
 
 
 asyncio.run(main())

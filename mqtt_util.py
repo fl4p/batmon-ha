@@ -45,7 +45,7 @@ def build_mqtt_hass_config_discovery(base, topic):
 
 def mqtt_single_out(client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
-    print('mqtt: ' + topic, data)
+    # print('mqtt: ' + topic, data)
     client.publish(topic, data, retain=retain)
 
 
