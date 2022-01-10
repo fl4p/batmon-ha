@@ -1,21 +1,25 @@
 import json
 
+import paho.mqtt.client as paho
 
+from util import get_logger
+
+logger = get_logger()
 
 
 def build_mqtt_hass_config_discovery(base, topic):
     # Instead of daly_bms should be here added a proper name (unique), like serial or something
     # At this point it can be used only one daly_bms system with hass discovery
 
-    hass_config_topic = f'homeassistant/sensor/daly_bms/{base.replace("/", "_")}/config'
+    hass_config_topic = f'homeassistant/sensor/{topic}/{base.replace("/", "_")}/config'
     hass_config_data = {}
 
-    hass_config_data["unique_id"] = f'daly_bms_{base.replace("/", "_")}'
-    hass_config_data["name"] = f'Daly BMS {base.replace("/", " ")}'
+    hass_config_data["unique_id"] = f'{topic}_{base.replace("/", "_")}'
+    hass_config_data["name"] = f'{topic} {base.replace("/", " ")}'
 
     # see https://www.home-assistant.io/integrations/sensor/
 
-    if 'soc_percent' in base:
+    if 'soc_percent' in base or '/soc' in base:
         hass_config_data["device_class"] = 'battery'
         hass_config_data["unit_of_measurement"] = '%'
     elif 'voltage' in base:
@@ -27,7 +31,7 @@ def build_mqtt_hass_config_discovery(base, topic):
     elif 'power' in base:
         hass_config_data["device_class"] = 'power'
         hass_config_data["unit_of_measurement"] = 'W'
-    elif 'capacity' in base:
+    elif 'capacity' in base or 'charge' in base:
         # hass_config_data["device_class"] = ''
         hass_config_data["unit_of_measurement"] = 'Ah'
     elif 'temperatures' in base:
@@ -40,10 +44,10 @@ def build_mqtt_hass_config_discovery(base, topic):
     hass_config_data["state_topic"] = f'{topic}{base}'
 
     hass_device = {
-        "identifiers": ['daly_bms'],
-        "manufacturer": 'Daly',
+        "identifiers": [topic], # daly_bms
+        "manufacturer": topic, # Daly
         "model": 'Currently not available',
-        "name": 'Daly BMS',
+        "name": topic, # Daly BMS
         "sw_version": 'Currently not available'
     }
     hass_config_data["device"] = hass_device
@@ -51,10 +55,14 @@ def build_mqtt_hass_config_discovery(base, topic):
     return hass_config_topic, json.dumps(hass_config_data)
 
 
-def mqtt_single_out(client, topic, data, retain=False):
+def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
     # print('mqtt: ' + topic, data)
-    client.publish(topic, data, retain=retain)
+    mqi: paho.MQTTMessageInfo = client.publish(topic, data, retain=retain)
+    if mqi.rc != paho.MQTT_ERR_SUCCESS:
+        logger.warning('mqtt publish %s failed: %s', topic, mqi)
+    if not mqi.is_published():
+        logger.warning('mqtt msg %s not published: %s', topic, mqi)
 
 
 def mqtt_iterator(client, result, topic, base='', hass=True):

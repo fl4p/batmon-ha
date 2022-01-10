@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import json
-import logging
 import sys
 import time
 
@@ -10,7 +9,8 @@ from bleak import BleakScanner
 
 from daly_bms_bluetooth import DalyBMSBluetooth
 from mqtt_util import mqtt_iterator
-from util import dotdict
+from util import dotdict, get_logger
+import victron
 
 try:
     with open('/data/options.json') as f:
@@ -19,23 +19,13 @@ except Exception as e:
     print('error reading /data/options.json', e)
     user_config = dotdict(
         daly_address=sys.argv[1],
+        victron_address=sys.argv[2],
         mqtt_broker='homeassistant.local',
         mqtt_user='pv',
         mqtt_password='0ffgrid',
     )
 
 mac_address = user_config.get('daly_address')
-
-
-def get_logger(verbose=False):
-    log_format = '%(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
-    if verbose:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-
-    logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
-    return logging.getLogger()
 
 
 async def bt_discovery():
@@ -63,18 +53,24 @@ async def main():
     num_errors_row = 0
     while True:
         try:
-            logger.info('connecting bms %s', mac_address)
-            t_conn = time.time()
-            await bms.connect(mac_address=mac_address)
-            # print('fetching data')
-            t_fetch = time.time()
-            result = await bms.get_all()
-            logger.info('result@%s %s', datetime.datetime.now().isoformat(), result)
-            t_disc = time.time()
-            await bms.disconnect()
-            mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
+            if mac_address:
+                logger.info('connecting bms %s', mac_address)
+                t_conn = time.time()
+                await bms.connect(mac_address=mac_address)
+                # print('fetching data')
+                t_fetch = time.time()
+                result = await bms.get_all()
+                logger.info('result@%s %s', datetime.datetime.now().isoformat(), result)
+                t_disc = time.time()
+                await bms.disconnect()
+                mqtt_iterator(mqtt_client, result=result, topic='daly_bms', hass=True)
 
-            logger.info('times: connect=%.2fs fetch=%.2fs', t_fetch - t_conn, t_disc - t_fetch)
+                logger.info('bms times: connect=%.2fs fetch=%.2fs', t_fetch - t_conn, t_disc - t_fetch)
+
+            if user_config.get('victron_address'):
+                result = await victron.fetch_device(user_config.get('victron_address'))
+                mqtt_iterator(mqtt_client, result=result, topic='victron_shunt1', hass=True)
+
             num_errors_row = 0
             await asyncio.sleep(8)
 
