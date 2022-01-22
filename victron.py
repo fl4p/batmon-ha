@@ -41,6 +41,8 @@ async def fetch_device(mac_address):
     async with BleakClient(mac_address) as client:
         logger.info(f"Connected: {client.is_connected}")
 
+        # await client.pair()
+
         ret = {}
 
         for field_name, char in victron_chars.items():
