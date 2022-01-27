@@ -13,7 +13,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
-    <option name="PARAMETERS" value="3D7394B1-BCFD-4CDC-A10D-3D113E2317A6 &quot;&quot; 980B4D75-B14B-4871-9DA4-D0B440CD3D85" />
+    <option name="PARAMETERS" value="&quot;3D7394B1-BCFD-4CDC-A10D-3D113E2317A6&quot; &quot;&quot; &quot;&quot;" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

@@ -6,20 +6,6 @@ from typing import Dict
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
-"""
-class AsyncMsg():
-
-    def __init__(self,timeout):
-        self.timeout = timeout
-        self.futures = defaultdict(asyncio.Future)
-
-    def set_result(self, tag, value):
-        self.futures[tag].set_result(value)
-
-    async def get(self, tag):
-        return await asyncio.wait_for(self.futures[tag], timeout=self.timeout)
-"""
-
 
 def calc_crc(message_bytes):
     return bytes([sum(message_bytes) & 0xFF])
@@ -38,8 +24,6 @@ class DalyBt(BtBms):
 
     def _notification_callback(self, sender, data):
         RESP_LEN = 13
-
-        # print('msg message', data)
 
         # split responses into chunks with length RESP_LEN
         responses = [data[i:i + RESP_LEN] for i in range(0, len(data), RESP_LEN)]
@@ -73,8 +57,8 @@ class DalyBt(BtBms):
 
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
+        self._fetch_futures.clear()
         await super().disconnect()
-
 
     async def _q(self, command: int, num_responses: int = 1):
         msg = self.daly_command_message(command)
@@ -139,9 +123,22 @@ class DalyBt(BtBms):
         voltages = []
         for i in range(num_resp):
             v = struct.unpack(">b 3h x", resp[i])
-            assert v[0] == i + 1
+            assert v[0] == i + 1, "out-of-order frame %s != #%s" % (v, i + 1)
             voltages += v[1:]
         return voltages[0:num_cells]
+
+    async def fetch_temperatures(self, num_sensors=0):
+        if not num_sensors:
+            warnings.warn('num_sensors not given, assuming 1')
+            num_sensors = 1
+        temperatures = []
+        n_resp = 2
+        resp = await self._q(0x96, num_responses=n_resp)
+        for i in range(n_resp):
+            v = struct.unpack(">b 7b", resp[i])
+            assert v[0] == i + 1, "out-of-order frame %s != #%s" % (v, i + 1)
+            temperatures += v[1:]
+        return [t - 40 for t in temperatures[:num_sensors]]
 
     def daly_command_message(self, command: int, extra=""):
         """

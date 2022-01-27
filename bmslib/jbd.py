@@ -26,7 +26,7 @@ class JbdBt(BtBms):
 
     def _notification_handler(self, sender, data):
 
-        print("bms msg {0}: {1}".format(sender, data))
+        #print("bms msg {0}: {1}".format(sender, data))
         self._buffer += data
 
         if self._buffer.endswith(b'w'):
@@ -34,7 +34,7 @@ class JbdBt(BtBms):
             buf = self._buffer[:]
             self._buffer.clear()
 
-            print(command, 'buffer endswith w', self._buffer)
+            # print(command, 'buffer endswith w', self._buffer)
 
             fut = self._fetch_futures.pop(command, None)
             if fut:
@@ -44,12 +44,18 @@ class JbdBt(BtBms):
         await super().connect()
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
+    async def disconnect(self):
+        await self.client.stop_notify(self.UUID_RX)
+        self._fetch_futures.clear()
+        await super().disconnect()
+
+
     async def _q(self, cmd):
         assert cmd not in self._fetch_futures, "%s already waiting" % cmd
         self._fetch_futures[cmd] = asyncio.Future()
         await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
         res = await asyncio.wait_for(self._fetch_futures[cmd], self.TIMEOUT)
-        print('cmd', cmd, 'result', res)
+        # print('cmd', cmd, 'result', res)
         return res
 
     async def fetch(self) -> BmsSample:
@@ -64,7 +70,7 @@ class JbdBt(BtBms):
 
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=True) / 100.0,
-            current=int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100.0,
+            current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100.0,
 
             charge=int.from_bytes(buf[4:6], byteorder='big', signed=True) / 100.,
             charge_full=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
@@ -94,6 +100,7 @@ class JbdBt(BtBms):
         return voltages
 
 
+
 async def main():
     mac_address = 'A3161184-6D54-4B9E-8849-E755F10CEE12'
     # mac_address = 'A4:C1:38:44:48:E7'
@@ -101,7 +108,7 @@ async def main():
 
     bms = JbdBt(mac_address)
     await bms.connect()
-    voltages = await bms.get_voltages()
+    voltages = await bms.fetch_voltages()
     print(voltages)
     # sample = await bms.fetch()
     # print(sample)

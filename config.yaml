@@ -1,6 +1,6 @@
 name: "Offgrid"
 description: "My first real add-on!"
-version: "1.0.18"
+version: "1.0.34"
 slug: "offgrid"
 arch:
   - aarch64
@@ -14,14 +14,18 @@ services:
 options:
   daly_address: ""
   victron_address: ""
+  victron_pin: "000000"
   jbd_address: ""
   mqtt_user: ""
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
+  concurrent_sampling: false
 schema:
   daly_address: "str?"
   victron_address: "str?"
+  victron_pin: "str?"
   jbd_address: "str?"
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
+  concurrent_sampling: "bool"

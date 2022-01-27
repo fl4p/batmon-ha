@@ -4,9 +4,10 @@ FROM $BUILD_FROM
 WORKDIR /app
 
 # Install requirements for add-on
+# (alpine image)
 RUN \
   apk add --no-cache \
-    python3 bluez py-pip
+    python3 bluez py-pip git
 
 # py3-pip
 

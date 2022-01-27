@@ -27,7 +27,7 @@ class BmsSample:
 
     @property
     def soc(self):
-        return self.charge / self.charge_full
+        return round(self.charge / self.charge_full * 100, 2)
 
     def __str__(self):
         # noinspection PyStringFormat

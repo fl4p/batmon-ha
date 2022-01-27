@@ -20,5 +20,20 @@ class BtBms():
     async def fetch_voltages(self):
         raise NotImplementedError()
 
+    async def fetch_temperatures(self):
+        raise NotImplementedError()
+
     def __str__(self):
         return f'{self.__class__.__name__}({self.client.address})'
+
+    async def __aenter__(self):
+        # print("enter")
+        await self.connect()
+
+    async def __aexit__(self, *args):
+        # print("exit")
+        await self.disconnect()
+
+    def __await__(self):
+        return self.__aexit__().__await__()
+
