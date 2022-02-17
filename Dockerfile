@@ -15,10 +15,9 @@ RUN \
 COPY run.sh run.sh
 COPY main.py main.py
 COPY requirements.txt requirements.txt
-
-RUN chmod a+x run.sh
-RUN pip3 install -r requirements.txt
-
 COPY . .
+
+RUN pip3 install -r requirements.txt
+RUN chmod a+x run.sh
 
 CMD [ "./run.sh" ]

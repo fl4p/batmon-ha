@@ -21,10 +21,10 @@ from util import dotdict, get_logger
 def load_user_config():
     try:
         with open('/data/options.json') as f:
-            user_config = dotdict(json.load(f))
+            conf = dotdict(json.load(f))
     except Exception as e:
         print('error reading /data/options.json', e)
-        user_config = dotdict(
+        conf = dotdict(
             daly_address=sys.argv[1],
             jbd_address=sys.argv[2],
             victron_address=sys.argv[3],
@@ -33,13 +33,12 @@ def load_user_config():
             mqtt_user='pv',
             mqtt_password='0ffgrid',
             concurrent_sampling=False,
+            keep_alive=False,
         )
-    return user_config
+    return conf
 
 
 user_config = load_user_config()
-
-mac_address = user_config.get('daly_address')
 
 
 async def bt_discovery():
@@ -52,7 +51,7 @@ async def bt_discovery():
 logger = get_logger(verbose=False)
 
 
-async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client):
+async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client,):
     logger.info('connecting bms %s', bms)
     t_conn = time.time()
 
@@ -89,6 +88,9 @@ async def main():
 
     if user_config.get('jbd_address'):
         bms_list.append(bmslib.jbd.JbdBt(user_config.get('jbd_address'), name='jbd_bms'))
+
+    for bms in bms_list:
+        bms.set_keep_alive(user_config.get('keep_alive', False))
 
     if user_config.get('victron_address') and not user_config.get('victron_address').startswith('#'):
         import victron

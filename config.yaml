@@ -1,6 +1,6 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.1"
+version: "0.0.5"
 slug: "batmon"
 arch:
   - aarch64
@@ -20,6 +20,7 @@ options:
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
   concurrent_sampling: false
+  keep_alive: false
 schema:
   daly_address: "str?"
   victron_address: "str?"
@@ -29,3 +30,4 @@ schema:
   mqtt_password: "str?"
   mqtt_broker: "str"
   concurrent_sampling: "bool"
+  keep_alive: "bool"
