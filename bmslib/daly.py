@@ -19,7 +19,7 @@ class DalyBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._fetch_futures: Dict[int, asyncio.Future] = {}
-        self._fetch_nr = {}
+        self._fetch_nr: Dict[int, list] = {}
         self._num_cells = 0
 
     def _notification_callback(self, sender, data):
@@ -67,8 +67,15 @@ class DalyBt(BtBms):
             self._fetch_nr[command] = [None] * num_responses
         else:
             self._fetch_nr.pop(command, None)
+
         await self.client.write_gatt_char(self.UUID_TX, msg)
-        sample = await asyncio.wait_for(self._fetch_futures[command], self.TIMEOUT)
+
+        try:
+            sample = await asyncio.wait_for(self._fetch_futures[command], self.TIMEOUT)
+        except TimeoutError:
+            n_recv = num_responses - self._fetch_nr[command].count(None)
+            raise TimeoutError("timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
+
         return sample
 
     async def fetch(self) -> BmsSample:
@@ -131,8 +138,9 @@ class DalyBt(BtBms):
         if not num_sensors:
             warnings.warn('num_sensors not given, assuming 1')
             num_sensors = 1
+
         temperatures = []
-        n_resp = 2
+        n_resp = 1
         resp = await self._q(0x96, num_responses=n_resp)
         for i in range(n_resp):
             v = struct.unpack(">b 7b", resp[i])
