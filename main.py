@@ -42,10 +42,13 @@ user_config = load_user_config()
 
 
 async def bt_discovery():
-    print('BT Discovery:')
+    logger.info('BT Discovery:')
     devices = await BleakScanner.discover()
+    if not devices:
+        logger.info(' - no devices found - ')
     for d in devices:
-        logger.info("BT Device: %s", d)
+        logger.info("BT Device   %s   address=%s", d.name, d.address)
+    return devices
 
 
 logger = get_logger(verbose=False)
@@ -83,11 +86,20 @@ async def main():
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
 
+    try:
+        devices = await bt_discovery()
+    except Exception as e:
+        devices = []
+        logger.error('Error discovering devices: %s', e)
+
+    def dev2addr(name:str):
+        return next((d.address for d in devices if d.name.strip() == name.strip()), name)
+
     if user_config.get('daly_address'):
-        bms_list.append(bmslib.daly.DalyBt(user_config.get('daly_address'), name='daly_bms'))
+        bms_list.append(bmslib.daly.DalyBt(dev2addr(user_config.get('daly_address')), name='daly_bms'))
 
     if user_config.get('jbd_address'):
-        bms_list.append(bmslib.jbd.JbdBt(user_config.get('jbd_address'), name='jbd_bms'))
+        bms_list.append(bmslib.jbd.JbdBt(dev2addr(user_config.get('jbd_address')), name='jbd_bms'))
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))

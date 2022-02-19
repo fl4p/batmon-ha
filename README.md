@@ -21,7 +21,7 @@ I tested the add on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 ## Installation
 
-* Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons
+* Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons`
 * Install Batmon add-on
   
 
@@ -33,7 +33,8 @@ The add on can either fetch a Daly BMS, JBD (xiaoxiang) BMS or both at the same 
   add-on log.
 * Set MQTT user and password. MQTT broker is usually `core-mosquitto`.
 * `concurrent_sampling` tries to read all BMSs at the same time (instead of a serial read one after another). This can increase sampling rate for more timely-accurate data. Might cause Bluetooth connection issues.
-* `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect to the BMS from your phone anymore.
+* `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect to the BMS from your phone anymore while the add-on is running.
+
 ## Links
 
 * [dalybms: similar add-on](https://github.com/MindFreeze/dalybms)
