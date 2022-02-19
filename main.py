@@ -79,7 +79,7 @@ async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client,):
         # logger.error('Stack: %s', traceback.format_exc())
         raise
 
-    logger.info('bms times: connect=%.2fs fetch=%.2fs', t_fetch - t_conn, t_disc - t_fetch)
+    logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, t_fetch - t_conn, t_disc - t_fetch)
 
 
 async def main():

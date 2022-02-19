@@ -142,6 +142,8 @@ class DalyBt(BtBms):
         temperatures = []
         n_resp = 1
         resp = await self._q(0x96, num_responses=n_resp)
+        if n_resp == 1:
+            resp = [resp]
         for i in range(n_resp):
             v = struct.unpack(">b 7b", resp[i])
             assert v[0] == i + 1, "out-of-order frame %s != #%s" % (v, i + 1)
