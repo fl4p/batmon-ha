@@ -20,4 +20,7 @@ def get_logger(verbose=False):
         level = logging.INFO
 
     logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
-    return logging.getLogger()
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    return logger

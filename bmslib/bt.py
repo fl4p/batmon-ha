@@ -3,18 +3,19 @@ from bleak import BleakClient
 from util import get_logger
 from .bms import BmsSample
 
-logger = get_logger()
+#logger = get_logger()
 
 
 class BtBms():
-    def __init__(self, address, name, keep_alive=False):
+    def __init__(self, address, name, keep_alive=False, verbose_log=False):
         self.client = BleakClient(address, disconnected_callback=self._on_disconnect)
         self.name = name
         self.keep_alive = keep_alive
+        self.logger = get_logger(verbose_log)
 
     def _on_disconnect(self, client):
         if self.keep_alive:
-            logger.warning('BMS %s disconnected!', self.__str__())
+            self.logger.warning('BMS %s disconnected!', self.__str__())
 
     async def connect(self):
         await self.client.connect()
@@ -51,5 +52,5 @@ class BtBms():
 
     def set_keep_alive(self, keep):
         if keep:
-            logger.info("BMS %s keep alive enabled", self.__str__())
+            self.logger.info("BMS %s keep alive enabled", self.__str__())
         self.keep_alive = keep

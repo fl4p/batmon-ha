@@ -29,6 +29,8 @@ class DalyBt(BtBms):
         responses = [data[i:i + RESP_LEN] for i in range(0, len(data), RESP_LEN)]
 
         for response_bytes in responses:
+            self.logger.debug('daly resp: %s', response_bytes)
+
             command = response_bytes[2]
             response_bytes = response_bytes[4:-1]
 
@@ -68,6 +70,7 @@ class DalyBt(BtBms):
         else:
             self._fetch_nr.pop(command, None)
 
+        self.logger.debug("daly send: %s", msg)
         await self.client.write_gatt_char(self.UUID_TX, msg)
 
         try:

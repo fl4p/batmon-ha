@@ -34,6 +34,7 @@ def load_user_config():
             mqtt_password='0ffgrid',
             concurrent_sampling=False,
             keep_alive=False,
+            verbose_log=False,
         )
     return conf
 
@@ -95,11 +96,15 @@ async def main():
     def dev2addr(name:str):
         return next((d.address for d in devices if d.name.strip() == name.strip()), name)
 
+    verbose_log = user_config.get('verbose_log', False)
+    if verbose_log:
+        logger.info('Verbose logging enabled')
+
     if user_config.get('daly_address'):
-        bms_list.append(bmslib.daly.DalyBt(dev2addr(user_config.get('daly_address')), name='daly_bms'))
+        bms_list.append(bmslib.daly.DalyBt(dev2addr(user_config.get('daly_address')), name='daly_bms', verbose_log=verbose_log))
 
     if user_config.get('jbd_address'):
-        bms_list.append(bmslib.jbd.JbdBt(dev2addr(user_config.get('jbd_address')), name='jbd_bms'))
+        bms_list.append(bmslib.jbd.JbdBt(dev2addr(user_config.get('jbd_address')), name='jbd_bms', verbose_log=verbose_log))
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
