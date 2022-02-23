@@ -1,6 +1,6 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.11"
+version: "0.0.18"
 slug: "batmon"
 arch:
   - aarch64
@@ -22,6 +22,7 @@ options:
   concurrent_sampling: false
   keep_alive: false
   verbose_log: false
+  sample_period: 1.0
 schema:
   daly_address: "str?"
   victron_address: "str?"
@@ -33,3 +34,4 @@ schema:
   concurrent_sampling: "bool"
   keep_alive: "bool"
   verbose_log: "bool"
+  sample_period: "float"

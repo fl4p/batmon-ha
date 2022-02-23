@@ -7,7 +7,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 ## Features
 
-* Records SoC, Current, Power and individual cell voltages
+* Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * MQTT Discovery
 
@@ -32,9 +32,9 @@ The add on can either fetch a Daly BMS, JBD (xiaoxiang) BMS or both at the same 
   address, just put any random characters, start the add-on and you'll find a list of visible Bluetooth devices in the
   add-on log.
 * Set MQTT user and password. MQTT broker is usually `core-mosquitto`.
-* `concurrent_sampling` tries to read all BMSs at the same time (instead of a serial read one after another). This can increase sampling rate for more timely-accurate data. Might cause Bluetooth connection issues.
+* `concurrent_sampling` tries to read all BMSs at the same time (instead of a serial read one after another). This can increase sampling rate for more timely-accurate data. Might cause Bluetooth connection issues if `keep_alive` is disabled.
 * `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect to the BMS from your phone anymore while the add-on is running.
-
+* `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
 ## Links
 
 * [dalybms: similar add-on](https://github.com/MindFreeze/dalybms)

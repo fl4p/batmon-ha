@@ -1,10 +1,13 @@
 import asyncio
+import atexit
 import datetime
 import json
 import random
+import signal
 import sys
 import time
 import traceback
+from functools import partial
 from typing import List
 
 import paho.mqtt.client as paho
@@ -40,7 +43,8 @@ def load_user_config():
 
 
 user_config = load_user_config()
-
+logger = get_logger(verbose=False)
+shutdown = False
 
 async def bt_discovery():
     logger.info('BT Discovery:')
@@ -52,15 +56,19 @@ async def bt_discovery():
     return devices
 
 
-logger = get_logger(verbose=False)
 
 
-async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client,):
-    logger.info('connecting bms %s', bms)
+async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client):
+    was_connected = bms.client.is_connected
+
+    if not was_connected:
+        logger.info('connecting bms %s', bms)
     t_conn = time.time()
 
     try:
         async with bms:
+            if not was_connected:
+                logger.info('connected bms %s!', bms)
             t_fetch = time.time()
             sample = await bms.fetch()
             publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
@@ -68,20 +76,33 @@ async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client,):
 
             voltages = await bms.fetch_voltages()
             publish_cell_voltages(mqtt_client, device_topic=bms.name, voltages=voltages)
-            logger.info('%s Voltages: %s', bms.name, voltages)
 
             temperatures = sample.temperatures or await bms.fetch_temperatures()
             publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
-            logger.info('%s Temperatures: %s', bms.name, temperatures)
+            logger.info('%s volt=%s temp=%s', bms.name, voltages, temperatures)
 
             t_disc = time.time()
     except Exception as ex:
         logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
-        # logger.error('Stack: %s', traceback.format_exc())
         raise
 
     logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, t_fetch - t_conn, t_disc - t_fetch)
 
+
+async def fetch_loop(fn, period, max_errors=4):
+    num_errors_row =0
+    while not shutdown:
+        try:
+            await fn()
+            num_errors_row = 0
+        except Exception as e:
+            num_errors_row += 1
+            logger.error('Error (num %d) reading BMS: %s', num_errors_row, e)
+            logger.error('Stack: %s', traceback.format_exc())
+            if num_errors_row > max_errors:
+                logger.warning('too many errors, abort')
+                break
+        await asyncio.sleep(period)
 
 async def main():
     bms_list: List[bmslib.bt.BtBms] = []
@@ -141,15 +162,29 @@ async def main():
     for bms in bms_list:
         publish_hass_discovery(mqtt_client, device_topic=bms.name, num_cells=8, num_temp_sensors=1)
 
-    discovered = False
-    num_errors_row = 0
+    sample_period = float(user_config.get('sample_period', 1.0))
     parallel_fetch = user_config.get('concurrent_sampling', False)
+    if parallel_fetch:
+        # parallel_fetch now uses a loop for each BMS so they don't delay each other
+        tasks = [partial(sample_bms, bms, mqtt_client) for bms in bms_list] + extra_tasks
 
-    while True:
-        tasks = ([sample_bms(bms, mqtt_client) for bms in bms_list] + [t() for t in extra_tasks])
+        # before we start the loops connect to each bms
+        for t in tasks:
+            try:
+                await t()
+            except:
+                pass
 
-        try:
+        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period)) for fn in tasks]
+        await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+
+    else:
+        async def fn():
+            tasks = ([sample_bms(bms, mqtt_client) for bms in bms_list] + [t() for t in extra_tasks])
+
             if parallel_fetch:
+                # concurrent synchronised fetch
+                # this branch is currently not reachable!
                 await asyncio.gather(*tasks, return_exceptions=False)
             else:
                 random.shuffle(tasks)
@@ -162,24 +197,29 @@ async def main():
                 if exceptions:
                     logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
                     raise exceptions[0]
+        await fetch_loop(fn, period=sample_period)
 
-            num_errors_row = 0
-        except Exception as e:
-            num_errors_row += 1
+    global shutdown
+    shutdown = True
 
-            logger.error('Error (num %d) reading BMS: %s', num_errors_row, e)
-            logger.error('Stack: %s', traceback.format_exc())
+    for bms in bms_list:
+        try:
+            logger.info("Disconnecting %s", bms)
+            await bms.disconnect()
+        except:
+            pass
 
-            if not discovered:
-                await bt_discovery()
-                discovered = True
 
-            if num_errors_row > 4:
-                print('too many errors, abort')
-                break
+def on_exit(*args, **kwargs):
+    global shutdown
+    logger.info('exit signal handler...')
+    shutdown = True
 
-        await asyncio.sleep(1)
-
+atexit.register(on_exit)
+# noinspection PyTypeChecker
+signal.signal(signal.SIGTERM, on_exit)
+# noinspection PyTypeChecker
+signal.signal(signal.SIGINT, on_exit)
 
 asyncio.run(main())
 
