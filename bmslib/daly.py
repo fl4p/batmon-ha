@@ -1,6 +1,11 @@
+"""
+
+References
+https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py
+
+"""
 import asyncio
 import struct
-import warnings
 from typing import Dict
 
 from bmslib.bms import BmsSample
@@ -20,7 +25,14 @@ class DalyBt(BtBms):
         super().__init__(address, **kwargs)
         self._fetch_futures: Dict[int, asyncio.Future] = {}
         self._fetch_nr: Dict[int, list] = {}
-        self._num_cells = 0
+        # self._num_cells = 0
+        self._states = None
+
+    async def get_states_cached(self, key):
+        if not self._states:
+            self._states = await self.fetch_states()
+            self.logger.info('got daly states: %s', self._states)
+        return self._states.get(key)
 
     def _notification_callback(self, sender, data):
         RESP_LEN = 13
@@ -121,14 +133,37 @@ class DalyBt(BtBms):
             "capacity_ah": parts[4] / 1000,
         }
 
+    async def fetch_states(self):
+
+        response_data = await self._q(0x94)
+
+        parts = struct.unpack('>b b ? ? b h x', response_data)
+
+        state_bits = bin(parts[4])[2:]
+        state_names = ["DI1", "DI2", "DI3", "DI4", "DO1", "DO2", "DO3", "DO4"]
+        states = {}
+        state_index = 0
+        for bit in reversed(state_bits):
+            if len(state_bits) == state_index:
+                break
+            states[state_names[state_index]] = bool(int(bit))
+            state_index += 1
+        data = {
+            "num_cells": parts[0],
+            "num_temps": parts[1],
+            "charging": parts[2],
+            "discharging": parts[3],
+            "states": states,
+            "num_cycles": parts[5],
+        }
+        return data
+
     async def fetch_voltages(self, num_cells=0):
         if not num_cells:
-            if not self._num_cells:
-                warnings.warn('num_cells not given, assuming 8')
-                self._num_cells = 8
-            num_cells = self._num_cells
+            num_cells = await self.get_states_cached('num_cells')
+            assert isinstance(num_cells, int) and 0 < num_cells <= 32, "num_cells %s outside range" % num_cells
 
-        num_resp = round(num_cells / 3 + .5)  # bms sends tuples of 3
+        num_resp = round(num_cells / 3 + .5)  # bms sends tuples of 3 (ceil)
         resp = await self._q(0x95, num_responses=num_resp)
         voltages = []
         for i in range(num_resp):
@@ -139,11 +174,11 @@ class DalyBt(BtBms):
 
     async def fetch_temperatures(self, num_sensors=0):
         if not num_sensors:
-            warnings.warn('num_sensors not given, assuming 1')
-            num_sensors = 1
+            num_sensors = await self.get_states_cached('num_temps')
+            assert isinstance(num_sensors, int) and 0 < num_sensors <= 32, "num_sensors %s outside range" % num_sensors
 
         temperatures = []
-        n_resp = 1
+        n_resp = round(num_sensors / 7 + .5)  # bms sends tuples of 7 (ceil)
         resp = await self._q(0x96, num_responses=n_resp)
         if n_resp == 1:
             resp = [resp]
