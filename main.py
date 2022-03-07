@@ -1,13 +1,10 @@
 import asyncio
 import atexit
-import datetime
 import json
 import random
 import signal
 import sys
-import time
 import traceback
-from functools import partial
 from typing import List
 
 import paho.mqtt.client as paho
@@ -16,8 +13,8 @@ from bleak import BleakScanner
 import bmslib.bt
 import bmslib.daly
 import bmslib.jbd
-
-from mqtt_util import mqtt_iterator, publish_hass_discovery, publish_sample, publish_cell_voltages, publish_temperatures
+from bmslib.sampling import BmsSampler
+from mqtt_util import mqtt_iterator
 from util import dotdict, get_logger
 
 
@@ -46,6 +43,7 @@ user_config = load_user_config()
 logger = get_logger(verbose=False)
 shutdown = False
 
+
 async def bt_discovery():
     logger.info('BT Discovery:')
     devices = await BleakScanner.discover()
@@ -56,41 +54,8 @@ async def bt_discovery():
     return devices
 
 
-
-
-async def sample_bms(bms: bmslib.bt.BtBms, mqtt_client):
-    was_connected = bms.client.is_connected
-
-    if not was_connected:
-        logger.info('connecting bms %s', bms)
-    t_conn = time.time()
-
-    try:
-        async with bms:
-            if not was_connected:
-                logger.info('connected bms %s!', bms)
-            t_fetch = time.time()
-            sample = await bms.fetch()
-            publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
-            logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
-
-            voltages = await bms.fetch_voltages()
-            publish_cell_voltages(mqtt_client, device_topic=bms.name, voltages=voltages)
-
-            temperatures = sample.temperatures or await bms.fetch_temperatures()
-            publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
-            logger.info('%s volt=%s temp=%s', bms.name, voltages, temperatures)
-
-            t_disc = time.time()
-    except Exception as ex:
-        logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
-        raise
-
-    logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, t_fetch - t_conn, t_disc - t_fetch)
-
-
 async def fetch_loop(fn, period, max_errors=4):
-    num_errors_row =0
+    num_errors_row = 0
     while not shutdown:
         try:
             await fn()
@@ -104,6 +69,7 @@ async def fetch_loop(fn, period, max_errors=4):
                 break
         await asyncio.sleep(period)
 
+
 async def main():
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
@@ -114,18 +80,25 @@ async def main():
         devices = []
         logger.error('Error discovering devices: %s', e)
 
-    def dev2addr(name:str):
+    def dev2addr(name: str):
         return next((d.address for d in devices if d.name.strip() == name.strip()), name)
 
     verbose_log = user_config.get('verbose_log', False)
     if verbose_log:
         logger.info('Verbose logging enabled')
 
-    if user_config.get('daly_address'):
-        bms_list.append(bmslib.daly.DalyBt(dev2addr(user_config.get('daly_address')), name='daly_bms', verbose_log=verbose_log))
-
-    if user_config.get('jbd_address'):
-        bms_list.append(bmslib.jbd.JbdBt(dev2addr(user_config.get('jbd_address')), name='jbd_bms', verbose_log=verbose_log))
+    bms_registry = dict(
+        daly=bmslib.daly.DalyBt,
+        jbd=bmslib.jbd.JbdBt,
+    )
+    for slug, bms_class in bms_registry.items():
+        addr: str = user_config.get(f'{slug}_address')
+        if addr and not addr.startswith('#'):
+            bms_debug = addr.endswith('?')
+            if bms_debug:
+                logger.info('Verbose log for %s enabled', addr)
+            addr = dev2addr(addr[:-1] if bms_debug else addr)
+            bms_list.append(bms_class(addr, name='%s_bms' % slug, verbose_log=verbose_log or bms_debug))
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
@@ -159,14 +132,13 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
-    for bms in bms_list:
-        publish_hass_discovery(mqtt_client, device_topic=bms.name, num_cells=8, num_temp_sensors=1)
+    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
 
     sample_period = float(user_config.get('sample_period', 1.0))
     parallel_fetch = user_config.get('concurrent_sampling', False)
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
-        tasks = [partial(sample_bms, bms, mqtt_client) for bms in bms_list] + extra_tasks
+        tasks = [smp() for smp in sampler_list] + extra_tasks
 
         # before we start the loops connect to each bms
         for t in tasks:
@@ -180,7 +152,7 @@ async def main():
 
     else:
         async def fn():
-            tasks = ([sample_bms(bms, mqtt_client) for bms in bms_list] + [t() for t in extra_tasks])
+            tasks = ([smp() for smp in sampler_list] + [t() for t in extra_tasks])
 
             if parallel_fetch:
                 # concurrent synchronised fetch
@@ -197,6 +169,7 @@ async def main():
                 if exceptions:
                     logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
                     raise exceptions[0]
+
         await fetch_loop(fn, period=sample_period)
 
     global shutdown
@@ -215,6 +188,7 @@ def on_exit(*args, **kwargs):
     logger.info('exit signal handler...')
     shutdown = True
 
+
 atexit.register(on_exit)
 # noinspection PyTypeChecker
 signal.signal(signal.SIGTERM, on_exit)
@@ -222,5 +196,4 @@ signal.signal(signal.SIGTERM, on_exit)
 signal.signal(signal.SIGINT, on_exit)
 
 asyncio.run(main())
-
 exit(1)

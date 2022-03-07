@@ -32,7 +32,7 @@ The add on can either fetch a Daly BMS, JBD (xiaoxiang) BMS or both at the same 
 
 * In the add-on configration set either `daly_address` or `jbd_address` MAC address or both. If you don't know the MAC
   address, just put any random characters, start the add-on and you'll find a list of visible Bluetooth devices in the
-  add-on log.
+  add-on log. For verbose logs of a particular BMS append `?` to the address, e.g.  `'A4:E1:93:44:52:C8?'`
 * Set MQTT user and password. MQTT broker is usually `core-mosquitto`.
 * `concurrent_sampling` tries to read all BMSs at the same time (instead of a serial read one after another). This can increase sampling rate for more timely-accurate data. Might cause Bluetooth connection issues if `keep_alive` is disabled.
 * `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect to the BMS from your phone anymore while the add-on is running.
