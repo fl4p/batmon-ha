@@ -138,7 +138,7 @@ async def main():
     parallel_fetch = user_config.get('concurrent_sampling', False)
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
-        tasks = [smp() for smp in sampler_list] + extra_tasks
+        tasks = sampler_list + extra_tasks
 
         # before we start the loops connect to each bms
         for t in tasks:

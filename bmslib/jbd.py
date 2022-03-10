@@ -83,7 +83,7 @@ class JbdBt(BtBms):
             # discharge_enabled
         )
 
-        print(dict(num_cell=num_cell, num_temp=num_temp))
+        # print(dict(num_cell=num_cell, num_temp=num_temp))
 
         # self.rawdat['P']=round(self.rawdat['Vbat']*self.rawdat['Ibat'], 1)
         # self.rawdat['Bal'] = int.from_bytes(self.response[12:14], byteorder='big', signed=False)

@@ -18,7 +18,8 @@ class Integrator():
         :return:
         """
         assert isinstance(other, tuple)
-        return self.add_linear(*other)
+        self.add_linear(*other)
+        return self
 
     def add_linear(self, x, y):
         # assert timestamp, ""
