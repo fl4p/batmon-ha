@@ -18,8 +18,8 @@ class BtBms():
         if self.keep_alive:
             self.logger.warning('BMS %s disconnected!', self.__str__())
 
-    async def connect(self):
-        await self.client.connect()
+    async def connect(self, timeout=20):
+        await self.client.connect(timeout=timeout)
 
     async def disconnect(self):
         await self.client.disconnect()
