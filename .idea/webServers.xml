@@ -10,6 +10,13 @@
         </fileTransfer>
         <option name="numberOfConnections" value="2" />
       </webServer>
+      <webServer id="a102079f-023b-4b2e-b271-26bdf12ae1ac" name="raspberrypi.local">
+        <fileTransfer accessType="SFTP" host="raspberrypi.local" port="22" sshConfigId="e1423d50-a821-49ea-91d4-cdb2c5cece76" sshConfig="pi@raspberrypi.local:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
     </option>
   </component>
 </project>

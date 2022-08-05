@@ -106,7 +106,7 @@ async def main():
     # mac_address = 'A4:C1:38:44:48:E7'
     # serial_service = '0000ff00-0000-1000-8000-00805f9b34fb'
 
-    bms = JbdBt(mac_address)
+    bms = JbdBt(mac_address, name='jbd')
     await bms.connect()
     voltages = await bms.fetch_voltages()
     print(voltages)
