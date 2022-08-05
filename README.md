@@ -13,11 +13,12 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Monitor multiple devices at the same time
 * MQTT Discovery
 
-### Supported Devices
+### Supported Devices (bluetooth)
 
-* Daly BMS (bluetooth)
-* JBD / Xiaoxiang BMS (bluetooth)
-* Victron SmartShunt (bluetooth)
+* Daly BMS
+* JBD / Xiaoxiang BMS
+* JK BMS (jikong) (JK02 protocol)
+* Victron SmartShunt
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
@@ -28,9 +29,9 @@ I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 ## Configuration
 
-The add-on can either fetch a Daly BMS, JBD (xiaoxiang) BMS or both at the same time.
+The add-on can read multiple BMS at the same time.
 
-* In the add-on configuration set either `daly_address` or `jbd_address` MAC address or both. If you don't know the MAC
+* In the add-on configuration set either one or more MAC addresses. If you don't know the MAC
   address, just put any random characters, start the add-on, and you'll find a list of visible Bluetooth devices in the
   add-on log. Alternatively you can enter the device name here as displayed in the discovery list. For verbose logs of a
   particular BMS append `?` to the address, e.g.  `'A4:E1:93:44:52:C8?'`
@@ -46,8 +47,11 @@ The add-on can either fetch a Daly BMS, JBD (xiaoxiang) BMS or both at the same 
 
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
+* Pairing a Victron using a PIN doesn't work properly
 
-## Links
+## References
 
 * [dalybms: similar add-on](https://github.com/MindFreeze/dalybms)
 * [Daly_RS485_UART_Protocol.pdf](https://github.com/jblance/mpp-solar/blob/master/docs/protocols/DALY-Daly_RS485_UART_Protocol.pdf)
+* [JK-bms esphome](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336) 
+* [JK02 protocol](https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py)
