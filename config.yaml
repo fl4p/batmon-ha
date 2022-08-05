@@ -1,6 +1,6 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.23"
+version: "0.0.24"
 slug: "batmon"
 init: false
 arch:
