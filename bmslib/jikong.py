@@ -2,20 +2,32 @@
 
 https://github.com/jblance/mpp-solar
 https://github.com/jblance/jkbms
+https://github.com/sshoecraft/jktool/blob/main/jk_info.c
 https://github.com/syssi/esphome-jk-bms
 https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp
 https://github.com/PurpleAlien/jk-bms_grafana
 
 
+fix connection abort:
+- https://github.com/hbldh/bleak/issues/631 (use bluetoothctl !)
+- https://github.com/hbldh/bleak/issues/666
+
+
+
+
 """
 import asyncio
+from struct import unpack
 from typing import Dict
 
 from bms import BmsSample
 from bt import BtBms
 
 def calc_crc(message_bytes):
-    return bytes([sum(message_bytes) & 0xFF])
+    return sum(message_bytes) & 0xFF
+
+def to_hex_str(data):
+    return " ".join(map(lambda b: hex(b)[2:], data))
 
 def _jk_command(address, value, length):
 
@@ -23,10 +35,9 @@ def _jk_command(address, value, length):
                   value[0], value[1], value[2], value[3]] + [0]*9)
 
     assert len(frame) == 19
-    frame += calc_crc(frame)
+    frame += bytes([calc_crc(frame)])
     return frame
 
-COMMAND_CELL_INFO = 0x96
 
 MIN_RESPONSE_SIZE = 300
 """
@@ -39,8 +50,10 @@ readUuid            = '0000ffe3-0000-1000-8000-00805f9b34fb'  # noqa: E221
 
 class JKBt(BtBms):
     UUID_RX = "0000ffe1-0000-1000-8000-00805f9b34fb"
-    # f000ffc1-0451-4000-b000-000000000000
     UUID_TX = '0000ffe2-0000-1000-8000-00805f9b34fb'
+
+    # UUID_RX = "f000ffc1-0451-4000-b000-000000000000"
+    # UUID_TX = UUID_RX
 
     TIMEOUT = 8
 
@@ -50,10 +63,10 @@ class JKBt(BtBms):
         self._fetch_futures: Dict[int, asyncio.Future] = {}
 
     def _notification_handler(self, sender, data):
-        print("bms msg {0}: {1}".format(sender, data))
+        print("bms msg({2}) {0}: {1}\n".format(sender, to_hex_str(data), len(data)))
 
-        if data[0:4] == bytes([0x55, 0xAA, 0xEB, 0x90]):
-            self.logger.info("preamble, clear buf %s", data)
+        if data[0:4] == bytes([0x55, 0xAA, 0xEB, 0x90]): #  and len(self._buffer)
+            self.logger.info("preamble, clear buf %s", self._buffer)
             self._buffer.clear()
 
         self._buffer += data
@@ -65,6 +78,7 @@ class JKBt(BtBms):
                 self.logger.error("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
             else:
                 resp_type = self._buffer[4]
+                self.logger.info('got response %d (len%d)', resp_type, len(self._buffer))
                 fut = self._fetch_futures.pop(resp_type, None)
                 if fut:
                     fut.set_result(self._buffer[:])
@@ -72,7 +86,39 @@ class JKBt(BtBms):
             self._buffer.clear()
 
     async def connect(self, timeout=20):
-        await super().connect(timeout=timeout)
+        """
+        Connecting JK with bluetooth appears to require a prior bluetooth scan and discovery, otherwise the connectiong fails with
+        `[org.bluez.Error.Failed] Software caused connection abort`. Maybe the scan triggers some wake up?
+        :param timeout:
+        :return:
+        """
+        import bleak
+        scanner = bleak.BleakScanner()
+        self.logger.debug("starting scan")
+        await scanner.start()
+
+        attempt = 1
+        while True:
+            try:
+                discovered = set(b.address for b in scanner.discovered_devices)
+                if self.client.address not in discovered:
+                    raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
+
+                self.logger.info("connect attempt %d", attempt)
+                await super().connect(timeout=timeout)
+                break
+            except Exception as e:
+                await self.client.disconnect()
+                if attempt < 8:
+                    self.logger.info('retry after error %s', e)
+                    await asyncio.sleep(0.2 * (1.5 ** attempt))
+                    attempt += 1
+                else:
+                    await scanner.stop()
+                    raise
+
+        await scanner.stop()
+
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
@@ -93,13 +139,13 @@ class JKBt(BtBms):
         return res
 
     async def fetch(self) -> BmsSample:
-        # binary reading
-        #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
+        buf = await self._q(cmd=0x96, resp=0x01)
 
-        buf = await self._q(cmd=0x03)
-        buf = buf[4:]
+        # https://github.com/syssi/esphome-jk-bms/blob/fc6007433d3d69fdbc700c23af41a70ff8ed45db/components/jk_bms_ble/jk_bms_ble.cpp#L740
 
-        num_cell = int.from_bytes(buf[21:22], 'big')
+        num_cell = buf[114]
+        capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
+
         num_temp = int.from_bytes(buf[22:23], 'big')
 
         sample = BmsSample(
@@ -128,8 +174,16 @@ class JKBt(BtBms):
         return sample
 
     async def fetch_voltages(self):
-        buf = await self._q(cmd=COMMAND_CELL_INFO, resp=0x02)
-
+        #buf = await self._q(cmd=0x96, resp=0x01) # 0x02
+        buf = await self._q(cmd=0x03, resp=0x01)  # 0x02
+        # buf = await self._q(cmd=0x97, resp=0x03)  # 0x02
+        #buf = await self._q(cmd=0xFF, resp=0x03)  # 0x02
+        print(buf)
+        await asyncio.sleep(10)
+        print(
+            int.from_bytes(buf[5:7], 'big'),
+            int.from_bytes(buf[6:8], 'big')
+        )
         num_cell = int(buf[3] / 2)
         voltages = [(int.from_bytes(buf[4 + i * 2:i * 2 + 6], 'big')) for i in range(num_cell)]
         return voltages
@@ -184,5 +238,18 @@ INFO:__main__:		[Descriptor] 00002901-0000-1000-8000-00805f9b34fb (Handle: 47): 
 INFO:__main__:	[Characteristic] f000ffc2-0451-4000-b000-000000000000 (Handle: 48): Unknown (write-without-response,write,notify), Value: None
 INFO:__main__:		[Descriptor] 00002902-0000-1000-8000-00805f9b34fb (Handle: 50): Client Characteristic Configuration) | Value: b'\x00\x00'
 INFO:__main__:		[Descriptor] 00002901-0000-1000-8000-00805f9b34fb (Handle: 51): Characteristic User Description) | Value: b'Img Block\x00'
+
+"""
+
+
+"""
+
+INFO     [jikong.py:91] write b'\xaaU\x90\xeb\x96\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10'
+bms msg 17: bytearray(b'U\xaa\xeb\x90\x01\xdaX\x02\x00\x00(\n\x00\x00Z\n\x00\x00\xac\r\x00\x00\x16\r\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc4\t\x00\x00\xa0\x86\x01\x00\x1e\x00\x00\x00<\x00\x00\x00\xc0\xd4\x01\x00,\x01\x00\x00<\x00\x00\x00<\x00\x00\x00\xd0\x07\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\x00\x00\x00\x002\x00\x00\x00\x84\x03\x00\x00\xbc\x02\x00\x00\x08\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00')
+INFO     [jikong.py:58] preamble, clear buf bytearray(b'U\xaa\xeb\x90\x01\xdaX\x02\x00\x00(\n\x00\x00Z\n\x00\x00\xac\r\x00\x00\x16\r\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc4\t\x00\x00\xa0\x86\x01\x00\x1e\x00\x00\x00<\x00\x00\x00\xc0\xd4\x01\x00,\x01\x00\x00<\x00\x00\x00<\x00\x00\x00\xd0\x07\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\x00\x00\x00\x002\x00\x00\x00\x84\x03\x00\x00\xbc\x02\x00\x00\x08\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00')
+bms msg 17: bytearray(b'\x00\x0082\x04\x00\xdc\x05\x00\x00\xb8\x0b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+bms msg 17: bytearray(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x8a\xaaU\x90\xeb\xc8\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00D')
+ERROR    [jikong.py:67] crc check failed, b'\x8a' != 138, bytearray(b'U\xaa\xeb\x90\x01\xdaX\x02\x00\x00(\n\x00\x00Z\n\x00\x00\xac\r\x00\x00\x16\r\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc4\t\x00\x00\xa0\x86\x01\x00\x1e\x00\x00\x00<\x00\x00\x00\xc0\xd4\x01\x00,\x01\x00\x00<\x00\x00\x00<\x00\x00\x00\xd0\x07\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\xa4\x01\x00\x00\x90\x01\x00\x00\x00\x00\x00\x002\x00\x00\x00\x84\x03\x00\x00\xbc\x02\x00\x00\x08\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x0082\x04\x00\xdc\x05\x00\x00\xb8\x0b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x8a\xaaU\x90\xeb\xc8\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00D')
+INFO     [jikong.py:81] disconnect jk
 
 """
