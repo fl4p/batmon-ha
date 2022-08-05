@@ -14,9 +14,10 @@ services:
   - mqtt:need
 options:
   daly_address: ""
+  jbd_address: ""
+  jk_address: ""
   victron_address: ""
   victron_pin: "000000"
-  jbd_address: ""
   mqtt_user: ""
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
@@ -26,9 +27,10 @@ options:
   sample_period: 1.0
 schema:
   daly_address: "str?"
+  jbd_address: "str?"
+  jk_address: "str?"
   victron_address: "str?"
   victron_pin: "str?"
-  jbd_address: "str?"
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"

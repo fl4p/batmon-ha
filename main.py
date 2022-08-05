@@ -13,6 +13,7 @@ from bleak import BleakScanner
 import bmslib.bt
 import bmslib.daly
 import bmslib.jbd
+import bmslib.jikong
 from bmslib.sampling import BmsSampler
 from mqtt_util import mqtt_iterator
 from util import dotdict, get_logger
@@ -90,6 +91,7 @@ async def main():
     bms_registry = dict(
         daly=bmslib.daly.DalyBt,
         jbd=bmslib.jbd.JbdBt,
+        jk=bmslib.jikong.JKBt,
     )
     for slug, bms_class in bms_registry.items():
         addr: str = user_config.get(f'{slug}_address')
