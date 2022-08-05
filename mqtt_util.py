@@ -102,9 +102,11 @@ def mqtt_iterator(client, result, topic, base='', hass=True):
 sample_desc = {
     "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V"},
     "soc/current": {"field": "current", "class": "current", "unit_of_measurement": "A"},
+    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A"},
     "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%"},
     "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W"},
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
+    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C"},
 }
 
 
