@@ -15,8 +15,8 @@ fix connection abort:
 import asyncio
 from typing import Dict
 
-from bms import BmsSample
-from bt import BtBms
+from .bms import BmsSample
+from .bt import BtBms
 
 
 def calc_crc(message_bytes):
@@ -98,13 +98,13 @@ class JKBt(BtBms):
                 if self.client.address not in discovered:
                     raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
 
-                self.logger.info("connect attempt %d", attempt)
+                self.logger.debug("connect attempt %d", attempt)
                 await super().connect(timeout=timeout)
                 break
             except Exception as e:
                 await self.client.disconnect()
                 if attempt < 8:
-                    self.logger.info('retry after error %s', e)
+                    self.logger.debug('retry after error %s', e)
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
@@ -125,7 +125,6 @@ class JKBt(BtBms):
         self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
     async def disconnect(self):
-        self.logger.info("disconnect jk")
         await self.client.stop_notify(self.UUID_RX)
         self._fetch_futures.clear()
         await super().disconnect()
@@ -134,7 +133,7 @@ class JKBt(BtBms):
         assert cmd not in self._fetch_futures, "%s already waiting" % cmd
         self._fetch_futures[resp] = asyncio.Future()
         frame = _jk_command(cmd, bytes([0, 0, 0, 0]), 0)
-        self.logger.info("write %s", frame)
+        self.logger.debug("write %s", frame)
         await self.client.write_gatt_char(self.UUID_TX, data=frame)
         res = await asyncio.wait_for(self._fetch_futures[resp], self.TIMEOUT)
         # print('cmd', cmd, 'result', res)
@@ -158,9 +157,9 @@ class JKBt(BtBms):
             await asyncio.wait_for(self._fetch_futures[0x02], self.TIMEOUT)
 
         buf = self._resp_table[0x02]
-        i16 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little')
-        u32 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little', signed=False)
-        f32u = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=False) * 1e-3
+        i16 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little', signed=True)
+        u32 = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=False)
+        f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
         assert f32u(146) == self.capacity, "capacity mismatch %s != %s" % (f32u(146), self.capacity)

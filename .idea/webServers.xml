@@ -2,14 +2,6 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="85ab9e74-f780-4dd7-9171-189f2f032371" name="homeassistant.local" url="http://homeassistant.local">
-        <fileTransfer rootFolder="/addons/batmon-ha" host="homeassistant.local" port="21">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" connections="2" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
-        <option name="numberOfConnections" value="2" />
-      </webServer>
       <webServer id="a102079f-023b-4b2e-b271-26bdf12ae1ac" name="raspberrypi.local">
         <fileTransfer accessType="SFTP" host="raspberrypi.local" port="22" sshConfigId="e1423d50-a821-49ea-91d4-cdb2c5cece76" sshConfig="pi@raspberrypi.local:22 password">
           <advancedOptions>

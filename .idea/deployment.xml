@@ -6,11 +6,11 @@
       <paths name="homeassistant.local">
         <serverdata>
           <mappings>
-            <mapping deploy="/" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
           </mappings>
           <excludedPaths>
             <excludedPath path="/venv" />
-            <excludedPath local="true" path="~/dev/pv/batmon-ha/venv" />
+            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
           </excludedPaths>
         </serverdata>
       </paths>
