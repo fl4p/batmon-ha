@@ -2,22 +2,23 @@
 
 ![Home Assistant Dashboard Screenshot](https://repository-images.githubusercontent.com/445289350/03f3d531-37cf-48be-84c8-e6c75270fc87)
 
-Monitor various Battery management systems (BMS). This add-on reads the BMS and sends sensor data through MQTT to Home
-Assistant.
+Monitor various Battery management systems (BMS) over Bluetooth. This add-on reads the BMS and sends sensor data through MQTT to Home
+Assistant. Using bluetooth on the Home Assistant host system, it does not need any additional hardware.
 
 I created this to compare BMS readings for a detailed evaluation of BMS reliability and accuracy.
 
 ## Features
 
+* Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * MQTT Discovery
 
 ### Supported Devices (bluetooth)
 
+* JK BMS (jikong) (JK02 protocol)
 * Daly BMS
 * JBD / Xiaoxiang BMS
-* JK BMS (jikong) (JK02 protocol)
 * Victron SmartShunt
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
@@ -52,6 +53,7 @@ The add-on can read multiple BMS at the same time.
 ## References
 
 * [dalybms: similar add-on](https://github.com/MindFreeze/dalybms)
+* [JK-BMS: similar add-on using ESP-Home](https://github.com/syssi/esphome-jk-bms) (needs extra hardware)
 * [Daly_RS485_UART_Protocol.pdf](https://github.com/jblance/mpp-solar/blob/master/docs/protocols/DALY-Daly_RS485_UART_Protocol.pdf)
 * [JK-bms esphome](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336) 
 * [JK02 protocol](https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py)

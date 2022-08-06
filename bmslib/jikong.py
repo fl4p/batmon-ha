@@ -179,8 +179,12 @@ class JKBt(BtBms):
         # TODO  154   4   0x3D 0x04 0x00 0x00    Cycle_Capacity       1.0
 
     async def fetch_voltages(self):
+        """
+
+        :return: list of cell voltages in mV
+        """
         buf = self._resp_table[0x02]
-        voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') / 1000 for i in
+        voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') for i in
                     range(self.num_cells)]
         return voltages
 
