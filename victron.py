@@ -1,11 +1,11 @@
 import math
 from typing import Union
 
-#import dbus
-#import dbus.service
+# import dbus
+# import dbus.service
 from bleak import BleakClient
 
-from util import get_logger
+from bmslib.util import get_logger
 
 logger = get_logger()
 
@@ -40,7 +40,7 @@ victron_chars = {
 }
 
 
-async def fetch_device(address, psk:str = None):
+async def fetch_device(address, psk: str = None):
     try:
         import bleak.backends.bluezdbus.agent
     except ImportError:
@@ -79,7 +79,7 @@ async def fetch_device(address, psk:str = None):
 
 
 def get_passkey(
-    device: str, pin: Union[None, str], passkey: Union[None, int]
+        device: str, pin: Union[None, str], passkey: Union[None, int]
 ) -> Union[bool, int, str, None]:
     print('get_passkey', device)
 
@@ -100,6 +100,7 @@ def get_passkey(
 
     # Return None if psk is empty string (pincode 0 is valid pin, but "0" is True)
     return psk or None
+
 
 if __name__ == "__main__":
     import asyncio
@@ -129,11 +130,10 @@ if __name__ == "__main__":
     setup_logger()
 
 
-
     async def main():
         logging.getLogger('bleak.backends.corebluetooth.client').setLevel(logging.DEBUG)
-        #logging.getLogger('bleak.backends.bluezdbus.client').setLevel(logging.DEBUG)
-        #logging.getLogger('bleak.backends.bluezdbus.client').debug('TEsT debug msg')
+        # logging.getLogger('bleak.backends.bluezdbus.client').setLevel(logging.DEBUG)
+        # logging.getLogger('bleak.backends.bluezdbus.client').debug('TEsT debug msg')
         # devices = await BleakScanner.discover()
         # for d in devices:
         #    logger.info("BT Device: %s", d)
@@ -143,7 +143,6 @@ if __name__ == "__main__":
 
         # r = await fetch_device(mac_address)
         # print('fetch_device', r)
-
 
         async with BleakClient(mac_address, handle_pairing=True) as client:
             logger.info('connected  %s', mac_address)

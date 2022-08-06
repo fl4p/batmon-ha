@@ -4,7 +4,7 @@ import time
 import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample
-from util import get_logger
+from bmslib.util import get_logger
 
 logger = get_logger()
 
@@ -59,13 +59,14 @@ def build_mqtt_hass_config_discovery(base, topic):
 
 _last_values = {}
 
+
 def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
     # print('mqtt: ' + topic, data)
     # return
 
     lv = _last_values.get(topic, None)
-    if lv and lv[1] == data and (time.time() - lv[0]) < 30. :
+    if lv and lv[1] == data and (time.time() - lv[0]) < 30.:
         # logger.info('topic %s data not changed', topic)
         return False
 
@@ -115,29 +116,29 @@ def publish_sample(client, device_topic, sample: BmsSample):
         topic = f"{device_topic}/{k}"
         mqtt_single_out(client, topic, getattr(sample, v['field']))
 
-def publish_cell_voltages(client, device_topic, voltages):
 
-    #"highest_voltage": parts[0] / 1000,
-    #"highest_cell": parts[1],
-    #"lowest_voltage": parts[2] / 1000,
+def publish_cell_voltages(client, device_topic, voltages):
+    # "highest_voltage": parts[0] / 1000,
+    # "highest_cell": parts[1],
+    # "lowest_voltage": parts[2] / 1000,
     # "lowest_cell": parts[3],
 
     x = range(len(voltages))
-    high_i = max(x, key=lambda i : voltages[i])
-    low_i = min(x, key=lambda i : voltages[i])
-
+    high_i = max(x, key=lambda i: voltages[i])
+    low_i = min(x, key=lambda i: voltages[i])
 
     for i in range(0, len(voltages)):
-        topic = f"{device_topic}/cell_voltages/{i+1}"
-        mqtt_single_out(client, topic, voltages[i]/1000)
+        topic = f"{device_topic}/cell_voltages/{i + 1}"
+        mqtt_single_out(client, topic, voltages[i] / 1000)
+
 
 def publish_temperatures(client, device_topic, temperatures):
     for i in range(0, len(temperatures)):
-        topic = f"{device_topic}/temperatures/{i+1}"
+        topic = f"{device_topic}/temperatures/{i + 1}"
         mqtt_single_out(client, topic, temperatures[i])
 
-def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
 
+def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
     discovery_msg = {}
 
     def _hass_discovery(k, device_class, unit):
@@ -161,11 +162,11 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
         _hass_discovery(k, d["class"], unit=d["unit_of_measurement"])
 
     for i in range(0, num_cells):
-        k = 'cell_voltages/%d' % (i+1)
+        k = 'cell_voltages/%d' % (i + 1)
         _hass_discovery(k, "voltage", unit="V")
 
     for i in range(0, num_temp_sensors):
-        k = 'temperatures/%d' % (i+1)
+        k = 'temperatures/%d' % (i + 1)
         _hass_discovery(k, "temperature", unit="°C")
 
     for topic, data in discovery_msg.items():

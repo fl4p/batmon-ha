@@ -15,8 +15,8 @@ import bmslib.daly
 import bmslib.jbd
 import bmslib.jikong
 from bmslib.sampling import BmsSampler
+from bmslib.util import dotdict, get_logger
 from mqtt_util import mqtt_iterator
-from util import dotdict, get_logger
 
 
 def load_user_config():

@@ -8,8 +8,8 @@ import asyncio
 import struct
 from typing import Dict
 
-from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from .bms import BmsSample
+from .bt import BtBms
 
 
 def calc_crc(message_bytes):

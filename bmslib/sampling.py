@@ -3,8 +3,8 @@ import time
 
 import bmslib.bt
 from bmslib.pwmath import Integrator
+from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery
-from util import get_logger
 
 logger = get_logger(verbose=False)
 
@@ -57,7 +57,7 @@ class BmsSampler():
 
                 temperatures = sample.temperatures or await bms.fetch_temperatures()
                 publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
-                logger.info('%s volt=%s temp=%s', bms.name, voltages, temperatures)
+                logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
                 if self.num_samples == 0:
                     publish_hass_discovery(mqtt_client, device_topic=bms.name,
