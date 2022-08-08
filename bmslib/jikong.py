@@ -15,12 +15,16 @@ fix connection abort:
 import asyncio
 from typing import Dict
 
-from .bms import BmsSample
+from .bms import BmsSample, DeviceInfo
 from .bt import BtBms
 
 
 def calc_crc(message_bytes):
     return sum(message_bytes) & 0xFF
+
+def read_str(buf, offset,encoding='utf-8'):
+    return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
+
 
 
 def to_hex_str(data):
@@ -39,7 +43,7 @@ MIN_RESPONSE_SIZE = 300
 
 class JKBt(BtBms):
     UUID_RX = "0000ffe1-0000-1000-8000-00805f9b34fb"
-    UUID_TX = '0000ffe1-0000-1000-8000-00805f9b34fb'
+    UUID_TX = UUID_RX
 
     TIMEOUT = 8
 
@@ -52,13 +56,12 @@ class JKBt(BtBms):
     def _notification_handler(self, sender, data):
 
         if data[0:4] == bytes([0x55, 0xAA, 0xEB, 0x90]):  # and len(self._buffer)
-            self.logger.debug("preamble, clear buf %s", self._buffer)
+            self.logger.debug("header, clear buf %s", self._buffer)
             self._buffer.clear()
 
         self._buffer += data
 
-        self.logger.debug(
-            "bms msg({2}) (buf {3}) {0}: {1}\n".format(sender, to_hex_str(data), len(data), len(self._buffer)))
+        self.logger.debug("bms msg(%d) (buf%d): %s\n", len(data), len(self._buffer), to_hex_str(data))
 
         if len(self._buffer) >= MIN_RESPONSE_SIZE:
             crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -116,12 +119,12 @@ class JKBt(BtBms):
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
         await self._q(cmd=0x97, resp=0x03)  # device info
-        await self._q(cmd=0x96, resp=0x02)  # device state
+        await self._q(cmd=0x96, resp=0x02)  # device state (resp 0x01 & 0x02)
         # after these 2 commands the bms will continuously send 0x02-type messages
 
         buf = self._resp_table[0x01]
         self.num_cells = buf[114]
-        assert 0 < self.num_cells <= 48, "num_cells unexpected %s" % self.num_cells
+        assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
         self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
     async def disconnect(self):
@@ -139,6 +142,17 @@ class JKBt(BtBms):
         # print('cmd', cmd, 'result', res)
         return res
 
+    async def device_info(self):
+        # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
+        # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1059
+        buf = self._resp_table[0x03]
+        return DeviceInfo(
+            model= read_str(buf, 6),
+            hw_version=read_str(buf, 6 + 16),
+            sw_version=read_str(buf, 6 + 16 + 8),
+            name=read_str(buf, 6 + 16 + 8 + 16),
+        )
+
     async def fetch(self, wait=True) -> BmsSample:
 
         """
@@ -146,7 +160,7 @@ class JKBt(BtBms):
         Decode JK02
 
         references
-        * https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336
+        * https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L360
         * https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 
         :return:
@@ -162,16 +176,24 @@ class JKBt(BtBms):
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
-        assert f32u(146) == self.capacity, "capacity mismatch %s != %s" % (f32u(146), self.capacity)
+        # assert f32u(146) == self.capacity, "capacity mismatch %s != %s" % (f32u(146), self.capacity)
+
+        # self.capacity is user-set capacity
+        nominal_capacity = f32u(146)  # computed capacity (starts at self.capacity)
 
         return BmsSample(
             voltage=f32u(118),
             current=f32s(126),
-            charge_full=self.capacity,
+
+
+            cycle_capacity=f32u(154),
+            capacity=nominal_capacity,
+            charge=f32u(142),  # "remaining capacity"
+
             temperatures=[i16(130) / 10, i16(132) / 10],
             mos_temperature=i16(134) / 10,
             balance_current=i16(138) / 1000,
-            charge=f32u(142),
+
             # 146 charge_full (see above)
             num_cycles=u32(150),
         )

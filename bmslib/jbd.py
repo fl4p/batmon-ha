@@ -40,8 +40,8 @@ class JbdBt(BtBms):
             if fut:
                 fut.set_result(buf)
 
-    async def connect(self):
-        await super().connect()
+    async def connect(self, **kwargs):
+        await super().connect(**kwargs)
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
@@ -73,7 +73,7 @@ class JbdBt(BtBms):
             current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100.0,
 
             charge=int.from_bytes(buf[4:6], byteorder='big', signed=True) / 100.,
-            charge_full=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
+            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
 
             num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=True),
 

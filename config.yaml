@@ -1,6 +1,6 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.28"
+version: "0.0.36"
 slug: "batmon"
 init: false
 arch:
@@ -13,11 +13,10 @@ host_dbus: true
 services:
   - mqtt:need
 options:
-  daly_address: ""
-  jbd_address: ""
-  jk_address: ""
-  victron_address: ""
-  victron_pin: "000000"
+  devices:
+    - address: CC:44:88:FF:AA:BB
+      type: jk
+      alias: battery1
   mqtt_user: ""
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
@@ -26,11 +25,12 @@ options:
   verbose_log: false
   sample_period: 1.0
 schema:
-  daly_address: "str?"
-  jbd_address: "str?"
-  jk_address: "str?"
-  victron_address: "str?"
-  victron_pin: "str?"
+  devices:
+    - address: str
+      type: str
+      alias: "str?"
+      debug: "bool?"
+      pin: "str?"
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"

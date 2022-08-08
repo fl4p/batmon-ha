@@ -5,7 +5,8 @@ import random
 import signal
 import sys
 import traceback
-from typing import List
+from functools import partial
+from typing import List, Any
 
 import paho.mqtt.client as paho
 from bleak import BleakScanner
@@ -23,6 +24,7 @@ def load_user_config():
     try:
         with open('/data/options.json') as f:
             conf = dotdict(json.load(f))
+            _user_config_migrate_addresses(conf)
     except Exception as e:
         print('error reading /data/options.json', e)
         conf = dotdict(
@@ -40,8 +42,33 @@ def load_user_config():
     return conf
 
 
-user_config = load_user_config()
+def _user_config_migrate_addresses(conf):
+    changed = False
+    slugs = ["daly", "jbd", "jk", "victron"]
+    conf["devices"] = conf.get('devices') or []
+    devices_by_address = {d['address']: d for d in conf["devices"]}
+    for slug in slugs:
+        addr = conf.get(f'{slug}_address')
+        if addr and not devices_by_address.get(addr):
+            device = dict(
+                address=addr.strip('?'),
+                type=slug,
+                alias=slug + '_bms',
+            )
+            if addr.endswith('?'):
+                device["debug"] = True
+            if conf.get(f'{slug}_pin'):
+                device['pin'] = conf.get(f'{slug}_pin')
+            conf["devices"].append(device)
+            del conf[f'{slug}_address']
+            logger.info('Migrated %s_address to device %s', slug, device)
+            changed = True
+    if changed:
+        logger.info('Please update add-on configuration manually.')
+
+
 logger = get_logger(verbose=False)
+user_config = load_user_config()
 shutdown = False
 
 
@@ -81,8 +108,11 @@ async def main():
         devices = []
         logger.error('Error discovering devices: %s', e)
 
-    def dev2addr(name: str):
+    def name2addr(name: str):
         return next((d.address for d in devices if d.name.strip() == name.strip()), name)
+
+    def dev_by_addr(address: str):
+        return next((d for d in devices if d.address == address), None)
 
     verbose_log = user_config.get('verbose_log', False)
     if verbose_log:
@@ -93,35 +123,39 @@ async def main():
         jbd=bmslib.jbd.JbdBt,
         jk=bmslib.jikong.JKBt,
     )
-    for slug, bms_class in bms_registry.items():
-        addr: str = user_config.get(f'{slug}_address')
+
+    async def _fetch_victron(dev):
+        result = await victron.fetch_device(dev['address'], psk=dev.get('pin'))
+        mqtt_iterator(mqtt_client, result=result, topic=dev['alias'], hass=True)
+
+    names = set()
+
+    for dev in user_config.get('devices', []):
+        addr: str = dev['address']
         if addr and not addr.startswith('#'):
-            bms_debug = addr.endswith('?')
-            if bms_debug:
-                logger.info('Verbose log for %s enabled', addr)
-            addr = dev2addr(addr[:-1] if bms_debug else addr)
-            bms_list.append(bms_class(addr, name='%s_bms' % slug, verbose_log=verbose_log or bms_debug))
+            if dev['type'] in bms_registry:
+                bms_class = bms_registry[dev['type']]
+                if dev.get('debug'):
+                    logger.info('Verbose log for %s enabled', addr)
+                addr = name2addr(addr)
+                name: str = dev.get('alias') or dev_by_addr(addr).name
+                assert name not in names, "duplicate name %s" % name
+                bms_list.append(bms_class(addr, name=name, verbose_log=verbose_log or dev.get('debug')))
+                names.add(name)
+            elif dev['type'] == 'victron':
+                import victron
+                if dev.get('pin'):
+                    try:
+                        r = await victron.fetch_device(user_config.get('victron_address'), psk=dev.get('pin'))
+                        logger.info("Victron: %s", r)
+                        r = await victron.fetch_device(user_config.get('victron_address'))
+                        logger.info("Victron2: %s", r)
+                    except Exception as e:
+                        logger.error('Error pairing victron device: %s', e)
+                extra_tasks.append(partial(_fetch_victron, dev))
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
-
-    if user_config.get('victron_address') and not user_config.get('victron_address').startswith('#'):
-        import victron
-        victron_pin = user_config.get('victron_pin', None)
-        if victron_pin:
-            try:
-                r = await victron.fetch_device(user_config.get('victron_address'), psk=victron_pin)
-                logger.info("Victron: %s", r)
-                r = await victron.fetch_device(user_config.get('victron_address'))
-                logger.info("Victron2: %s", r)
-            except Exception as e:
-                logger.error('Error pairing victron device: %s', e)
-
-        async def _fetch_victron():
-            result = await victron.fetch_device(user_config.get('victron_address'), psk=victron_pin)
-            mqtt_iterator(mqtt_client, result=result, topic='victron_shunt1', hass=True)
-
-        extra_tasks.append(_fetch_victron)
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
     mqtt_client = paho.Client()
@@ -134,7 +168,7 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
-    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
+    sampler_list  = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
 
     sample_period = float(user_config.get('sample_period', 1.0))
     parallel_fetch = user_config.get('concurrent_sampling', False)
