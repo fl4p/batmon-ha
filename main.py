@@ -82,7 +82,7 @@ async def bt_discovery():
     return devices
 
 
-async def fetch_loop(fn, period, max_errors=4):
+async def fetch_loop(fn, period, max_errors=20):
     num_errors_row = 0
     while not shutdown:
         try:
@@ -168,10 +168,14 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
-    sampler_list  = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
+    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
 
     sample_period = float(user_config.get('sample_period', 1.0))
     parallel_fetch = user_config.get('concurrent_sampling', False)
+
+    logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
+                'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
+
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
         tasks = sampler_list + extra_tasks
