@@ -67,6 +67,10 @@ For verbose logs of particular BMS add `debug: true`.
 
 ## TODO
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
+* Stand-alone
+
+## Stand-alone
+You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI). See [doc/Standalone.md](doc/Standalone.md)
 
 ## References
 

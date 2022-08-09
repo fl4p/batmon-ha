@@ -3,10 +3,9 @@ import atexit
 import json
 import random
 import signal
-import sys
 import traceback
 from functools import partial
-from typing import List, Any
+from typing import List
 
 import paho.mqtt.client as paho
 from bleak import BleakScanner
@@ -26,19 +25,9 @@ def load_user_config():
             conf = dotdict(json.load(f))
             _user_config_migrate_addresses(conf)
     except Exception as e:
-        print('error reading /data/options.json', e)
-        conf = dotdict(
-            daly_address=sys.argv[1],
-            jbd_address=sys.argv[2],
-            victron_address=sys.argv[3],
-            victron_pin='000000',
-            mqtt_broker='homeassistant.local',
-            mqtt_user='pv',
-            mqtt_password='0ffgrid',
-            concurrent_sampling=False,
-            keep_alive=False,
-            verbose_log=False,
-        )
+        print('error reading /data/options.json, trying options.json', e)
+        with open('options.json') as f:
+            conf = dotdict(json.load(f))
     return conf
 
 
