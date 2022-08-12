@@ -2,6 +2,9 @@
 
 https://github.com/Bangybug/esp32xiaoxiangble/blob/master/src/main.cpp
 
+Unseen:
+https://github.com/tgalarneau/bms
+
 """
 import asyncio
 from typing import Dict
@@ -54,7 +57,11 @@ class JbdBt(BtBms):
         assert cmd not in self._fetch_futures, "%s already waiting" % cmd
         self._fetch_futures[cmd] = asyncio.Future()
         await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
-        res = await asyncio.wait_for(self._fetch_futures[cmd], self.TIMEOUT)
+        try:
+            res = await asyncio.wait_for(self._fetch_futures[cmd], self.TIMEOUT)
+        except asyncio.TimeoutError:
+            del self._fetch_futures[cmd]
+            raise
         # print('cmd', cmd, 'result', res)
         return res
 
