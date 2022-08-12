@@ -15,6 +15,7 @@ fix connection abort:
 import asyncio
 from typing import Dict
 
+from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .bt import BtBms
 
@@ -50,7 +51,7 @@ class JKBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
-        self._fetch_futures: Dict[int, asyncio.Future] = {}
+        self._fetch_futures = FuturesPool()
         self._resp_table = {}
 
     def _notification_handler(self, sender, data):
@@ -75,12 +76,8 @@ class JKBt(BtBms):
     def _decode_msg(self, buf):
         resp_type = buf[4]
         self.logger.debug('got response %d (len%d)', resp_type, len(buf))
-
         self._resp_table[resp_type] = buf
-
-        fut = self._fetch_futures.pop(resp_type, None)
-        if fut:
-            fut.set_result(self._buffer[:])
+        self._fetch_futures.set_result(resp_type, self._buffer[:])
 
     async def connect(self, timeout=20):
         """
@@ -133,14 +130,11 @@ class JKBt(BtBms):
         await super().disconnect()
 
     async def _q(self, cmd, resp):
-        assert cmd not in self._fetch_futures, "%s already waiting" % cmd
-        self._fetch_futures[resp] = asyncio.Future()
+        self._fetch_futures.acquire(resp)
         frame = _jk_command(cmd, bytes([0, 0, 0, 0]), 0)
         self.logger.debug("write %s", frame)
         await self.client.write_gatt_char(self.UUID_TX, data=frame)
-        res = await asyncio.wait_for(self._fetch_futures[resp], self.TIMEOUT)
-        # print('cmd', cmd, 'result', res)
-        return res
+        return await self._fetch_futures.wait_for(resp, self.TIMEOUT)
 
     async def device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py

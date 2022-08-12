@@ -9,6 +9,7 @@ https://github.com/tgalarneau/bms
 import asyncio
 from typing import Dict
 
+from bmslib import FuturesPool
 from .bms import BmsSample
 from .bt import BtBms
 
@@ -25,7 +26,7 @@ class JbdBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
-        self._fetch_futures: Dict[int, asyncio.Future] = {}
+        self._fetch_futures = FuturesPool()
 
     def _notification_handler(self, sender, data):
 
@@ -38,10 +39,7 @@ class JbdBt(BtBms):
             self._buffer.clear()
 
             # print(command, 'buffer endswith w', self._buffer)
-
-            fut = self._fetch_futures.pop(command, None)
-            if fut:
-                fut.set_result(buf)
+            self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
@@ -54,16 +52,9 @@ class JbdBt(BtBms):
 
 
     async def _q(self, cmd):
-        assert cmd not in self._fetch_futures, "%s already waiting" % cmd
-        self._fetch_futures[cmd] = asyncio.Future()
+        self._fetch_futures.acquire(cmd)
         await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
-        try:
-            res = await asyncio.wait_for(self._fetch_futures[cmd], self.TIMEOUT)
-        except asyncio.TimeoutError:
-            del self._fetch_futures[cmd]
-            raise
-        # print('cmd', cmd, 'result', res)
-        return res
+        return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
         # binary reading

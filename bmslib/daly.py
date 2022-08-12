@@ -8,6 +8,7 @@ import asyncio
 import struct
 from typing import Dict
 
+from bmslib import FuturesPool
 from .bms import BmsSample
 from .bt import BtBms
 
@@ -23,7 +24,7 @@ class DalyBt(BtBms):
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
-        self._fetch_futures: Dict[int, asyncio.Future] = {}
+        self._fetch_futures = FuturesPool()
         self._fetch_nr: Dict[int, list] = {}
         # self._num_cells = 0
         self._states = None
@@ -60,12 +61,10 @@ class DalyBt(BtBms):
                     # this happens if buf is already full and still receiving messages
                     continue
 
-            future = self._fetch_futures.pop(command, None)
-            if future:
-                future.set_result(response_bytes)
+            self._fetch_futures.set_result(command, response_bytes)
 
-    async def connect(self):
-        await super().connect()
+    async def connect(self, **kwargs):
+        await super().connect(**kwargs)
         await self.client.start_notify(self.UUID_RX, self._notification_callback)
         await self.client.write_gatt_char(48, bytearray(b""))
 
@@ -76,17 +75,17 @@ class DalyBt(BtBms):
 
     async def _q(self, command: int, num_responses: int = 1):
         msg = self.daly_command_message(command)
-        self._fetch_futures[command] = asyncio.Future()
         if num_responses > 1:
             self._fetch_nr[command] = [None] * num_responses
         else:
             self._fetch_nr.pop(command, None)
 
+        self._fetch_futures.acquire(command)
         self.logger.debug("daly send: %s", msg)
         await self.client.write_gatt_char(self.UUID_TX, msg)
 
         try:
-            sample = await asyncio.wait_for(self._fetch_futures[command], self.TIMEOUT)
+            sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
         except TimeoutError:
             n_recv = num_responses - self._fetch_nr[command].count(None)
             raise TimeoutError("timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
