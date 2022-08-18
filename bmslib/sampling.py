@@ -11,13 +11,14 @@ logger = get_logger(verbose=False)
 
 class BmsSampler():
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client, dt_max):
+    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client, dt_max, invert_current=False):
         self.bms = bms
         self.current_integrator = Integrator(dx_max=dt_max)
         self.power_integrator = Integrator(dx_max=dt_max)
         self.power_integrator_pos = Integrator(dx_max=dt_max, reset=True)
         self.power_integrator_neg = Integrator(dx_max=dt_max, reset=True)
         self.mqtt_client = mqtt_client
+        self.invert_current = invert_current
         self.num_samples = 0
 
     async def __call__(self):
@@ -40,6 +41,9 @@ class BmsSampler():
                 t_fetch = time.time()
                 sample = await bms.fetch()
                 t_sample = time.time()
+
+                if self.invert_current:
+                    sample = sample.invert_current()
 
                 self.current_integrator += (t_sample, sample.current)
                 self.power_integrator += (t_sample, sample.power)

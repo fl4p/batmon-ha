@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.0.36] - 2022-07-18
+### Added
+- Added user option `invert_current` to change the direction of battery current
 
 ## [0.0.36] - 2022-07-08
 ### Added

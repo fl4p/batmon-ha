@@ -24,6 +24,7 @@ options:
   keep_alive: false
   verbose_log: false
   sample_period: 1.0
+  invert_current: false
 schema:
   devices:
     - address: str
@@ -38,3 +39,4 @@ schema:
   keep_alive: "bool"
   verbose_log: "bool"
   sample_period: "float"
+  invert_current: "bool"

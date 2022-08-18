@@ -157,7 +157,8 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
-    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4) for bms in bms_list]
+    ic = user_config.get('invert_current', False)
+    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4, invert_current=ic) for bms in bms_list]
 
     sample_period = float(user_config.get('sample_period', 1.0))
     parallel_fetch = user_config.get('concurrent_sampling', False)

@@ -1,4 +1,5 @@
 import math
+from copy import copy
 from typing import List
 
 
@@ -61,3 +62,9 @@ class BmsSample:
             **self.__dict__,
             "power": self.power
         }
+
+    def invert_current(self):
+        res = copy(self)
+        res.current *= -1
+        return res
+
