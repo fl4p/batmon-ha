@@ -4,6 +4,10 @@
 ### Added
 - Added user option `invert_current` to change the direction of battery current
 
+### Changed
+- Fixed `already waiting` error
+- Increase max_errors before exit to 40
+
 ## [0.0.36] - 2022-07-08
 ### Added
 - Support for multiple BMS

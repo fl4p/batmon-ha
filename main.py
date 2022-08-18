@@ -71,7 +71,7 @@ async def bt_discovery():
     return devices
 
 
-async def fetch_loop(fn, period, max_errors=20):
+async def fetch_loop(fn, period, max_errors=40):
     num_errors_row = 0
     while not shutdown:
         try:
