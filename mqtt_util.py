@@ -1,4 +1,5 @@
 import json
+import math
 import time
 
 import paho.mqtt.client as paho
@@ -8,6 +9,15 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+def round_to_n(x, n):
+    if isinstance(x, str) or not math.isfinite(x) or not x:
+        return x
+
+    try:
+        return round(x, -int(math.floor(math.log10(abs(x)))) + (n - 1))
+    except ValueError as e:
+        print('error', x, n, e)
+        raise e
 
 def build_mqtt_hass_config_discovery(base, topic):
     # Instead of daly_bms should be here added a proper name (unique), like serial or something
@@ -115,7 +125,7 @@ sample_desc = {
 def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
-        mqtt_single_out(client, topic, getattr(sample, v['field']))
+        mqtt_single_out(client, topic, round_to_n(getattr(sample, v['field']), 5))
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -136,7 +146,7 @@ def publish_cell_voltages(client, device_topic, voltages):
 def publish_temperatures(client, device_topic, temperatures):
     for i in range(0, len(temperatures)):
         topic = f"{device_topic}/temperatures/{i + 1}"
-        mqtt_single_out(client, topic, temperatures[i])
+        mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
 
 
 def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
