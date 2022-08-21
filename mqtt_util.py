@@ -9,15 +9,20 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+
 def round_to_n(x, n):
     if isinstance(x, str) or not math.isfinite(x) or not x:
         return x
 
+    digits = -int(math.floor(math.log10(abs(x)))) + (n - 1)
+
     try:
-        return round(x, -int(math.floor(math.log10(abs(x)))) + (n - 1))
+        return '%.*f' % (digits, x)
+        # return round(x, digits)
     except ValueError as e:
         print('error', x, n, e)
         raise e
+
 
 def build_mqtt_hass_config_discovery(base, topic):
     # Instead of daly_bms should be here added a proper name (unique), like serial or something
@@ -115,7 +120,7 @@ sample_desc = {
     "soc/current": {"field": "current", "class": "current", "unit_of_measurement": "A"},
     "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A"},
     "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%"},
-    "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W"},
+    "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W", "precision": 4},
     "soc/cycle_capacity": {"field": "cycle_capacity", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C"},
@@ -125,7 +130,8 @@ sample_desc = {
 def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
-        mqtt_single_out(client, topic, round_to_n(getattr(sample, v['field']), 5))
+        s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
+        mqtt_single_out(client, topic, s)
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -140,7 +146,7 @@ def publish_cell_voltages(client, device_topic, voltages):
 
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
-        mqtt_single_out(client, topic, voltages[i] / 1000)
+        mqtt_single_out(client, topic, round_to_n(voltages[i] / 1000, 4))
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -225,3 +231,10 @@ mqtt: daly_bms/soc/total_voltage 26.5
     
     :return: 
     """
+
+
+"""
+homeassistant/sensor/jbd_bms/_soc_current/config
+{"unique_id": "jbd_bms__soc_current", "name": "jbd current", "device_class": "current", "unit_of_measurement": "A", "json_attributes_topic": "jbd_bms/soc/current", "state_topic": "jbd_bms/soc/current", "device": {"identifiers": ["jbd_bms"], "manufacturer": "JBD", "model": "Currently not available", "name": "JBD BMS", "sw_version": "Currently not available"}}
+mqtt: daly
+"""
