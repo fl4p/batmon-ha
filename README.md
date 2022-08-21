@@ -58,16 +58,17 @@ For verbose logs of particular BMS add `debug: true`.
 * `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
+* `invert_currents` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 
 ## Known Issues
 
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
+* Raspberry PI's bluetooth can be buggy. If you experience errors and timeouts try to install an external Bluetooth dongle.
 * Pairing a Victron using a PIN doesn't work properly
 
 ## TODO
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
-* Stand-alone
 
 ## Stand-alone
 You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI). See [doc/Standalone.md](doc/Standalone.md)

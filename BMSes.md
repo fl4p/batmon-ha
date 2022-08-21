@@ -2,7 +2,8 @@
 * Noisy Current
 * Buggy Bluetooth dongle
 * Balancing during charger OR discharge (setting) but not both?!
-* 
+* No calibrated Nominal Capacity
+* Slow response time (2s)
 ## JBD BMS
 * Doesn't keep SoC on power loss
 * Buggy SoC?
