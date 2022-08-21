@@ -79,6 +79,7 @@ class JKBt(BtBms):
         self._resp_table[resp_type] = buf
         self._fetch_futures.set_result(resp_type, self._buffer[:])
 
+
     async def connect(self, timeout=20):
         """
         Connecting JK with bluetooth appears to require a prior bluetooth scan and discovery, otherwise the connectiong fails with
@@ -86,6 +87,25 @@ class JKBt(BtBms):
         :param timeout:
         :return:
         """
+
+        try:
+            await super().connect(timeout=timeout)
+        except:
+            await self._connect_with_scanner(timeout=timeout)
+
+
+        await self.client.start_notify(self.UUID_RX, self._notification_handler)
+
+        await self._q(cmd=0x97, resp=0x03)  # device info
+        await self._q(cmd=0x96, resp=0x02)  # device state (resp 0x01 & 0x02)
+        # after these 2 commands the bms will continuously send 0x02-type messages
+
+        buf = self._resp_table[0x01]
+        self.num_cells = buf[114]
+        assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
+        self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
+
+    async def _connect_with_scanner(self, timeout):
         import bleak
         scanner = bleak.BleakScanner()
         self.logger.debug("starting scan")
@@ -112,17 +132,6 @@ class JKBt(BtBms):
                     raise
 
         await scanner.stop()
-
-        await self.client.start_notify(self.UUID_RX, self._notification_handler)
-
-        await self._q(cmd=0x97, resp=0x03)  # device info
-        await self._q(cmd=0x96, resp=0x02)  # device state (resp 0x01 & 0x02)
-        # after these 2 commands the bms will continuously send 0x02-type messages
-
-        buf = self._resp_table[0x01]
-        self.num_cells = buf[114]
-        assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
-        self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
