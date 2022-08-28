@@ -17,8 +17,8 @@ def round_to_n(x, n):
     digits = -int(math.floor(math.log10(abs(x)))) + (n - 1)
 
     try:
-        return '%.*f' % (digits, x)
-        # return round(x, digits)
+        #return ('%.*f' % (digits, x))
+        return str(round(x, digits or None)) # digits=0 will output 12.0, digits=None => 12
     except ValueError as e:
         print('error', x, n, e)
         raise e
@@ -146,7 +146,7 @@ def publish_cell_voltages(client, device_topic, voltages):
 
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
-        mqtt_single_out(client, topic, round_to_n(voltages[i] / 1000, 4))
+        mqtt_single_out(client, topic, voltages[i] / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
