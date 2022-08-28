@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.39] - 2022-07-21
+### Changed
+- Fix number rounding
+- JK try simple connect before scanning
+- Periodically send MQTT sensor discovery messages
+### Added
+- Add capacity sensor
+
 ## [0.0.37] - 2022-07-18
 ### Added
 - Added user option `invert_current` to change the direction of battery current
