@@ -170,8 +170,8 @@ class JKBt(BtBms):
         """
 
         if wait:
-            self._fetch_futures[0x02] = asyncio.Future()
-            await asyncio.wait_for(self._fetch_futures[0x02], self.TIMEOUT)
+            self._fetch_futures.acquire(0x02)
+            await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
         buf = self._resp_table[0x02]
         i16 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little', signed=True)
@@ -187,7 +187,6 @@ class JKBt(BtBms):
         return BmsSample(
             voltage=f32u(118),
             current=f32s(126),
-
 
             cycle_capacity=f32u(154),
             capacity=nominal_capacity,
@@ -208,6 +207,8 @@ class JKBt(BtBms):
 
         :return: list of cell voltages in mV
         """
+        if self.num_cells is None:
+            raise Exception("num_cells not set")
         buf = self._resp_table[0x02]
         voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') for i in
                     range(self.num_cells)]

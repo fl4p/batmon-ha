@@ -12,6 +12,7 @@
 * Sometimes detect false short circuits
 
 ## JK BMS
+* When UVP is reached the BMS shutsdown overnight and needs an activation (i.e. the epever mppt will not start)
 * Weird Bluetooth (Android app doesnt work?, Need to scan & retry on RPI)
 * Insecure! built-in Bluetooth, PIN is validated client-side (is publicly readable in device info) 
 * https://github.com/NEEY-electronic/JK/tree/JK-BMS
