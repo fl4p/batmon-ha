@@ -13,7 +13,6 @@ fix connection abort:
 
 """
 import asyncio
-from typing import Dict
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
@@ -23,9 +22,9 @@ from .bt import BtBms
 def calc_crc(message_bytes):
     return sum(message_bytes) & 0xFF
 
-def read_str(buf, offset,encoding='utf-8'):
-    return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
 
+def read_str(buf, offset, encoding='utf-8'):
+    return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
 
 
 def to_hex_str(data):
@@ -40,6 +39,7 @@ def _jk_command(address, value, length):
 
 
 MIN_RESPONSE_SIZE = 300
+MAX_RESPONSE_SIZE = 320
 
 
 class JKBt(BtBms):
@@ -53,10 +53,18 @@ class JKBt(BtBms):
         self._buffer = bytearray()
         self._fetch_futures = FuturesPool()
         self._resp_table = {}
+        self.num_cells = None
+
+    def _buffer_crc_check(self):
+        crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
+        crc_expected = self._buffer[MIN_RESPONSE_SIZE - 1]
+        self.logger.error("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
+        return crc_comp == crc_expected
 
     def _notification_handler(self, sender, data):
+        HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
 
-        if data[0:4] == bytes([0x55, 0xAA, 0xEB, 0x90]):  # and len(self._buffer)
+        if data[0:4] == HEADER:  # and len(self._buffer)
             self.logger.debug("header, clear buf %s", self._buffer)
             self._buffer.clear()
 
@@ -65,10 +73,19 @@ class JKBt(BtBms):
         self.logger.debug("bms msg(%d) (buf%d): %s\n", len(data), len(self._buffer), to_hex_str(data))
 
         if len(self._buffer) >= MIN_RESPONSE_SIZE:
-            crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
-            crc_expected = self._buffer[MIN_RESPONSE_SIZE - 1]
-            if crc_comp != crc_expected:
-                self.logger.error("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
+            if len(self._buffer) > MAX_RESPONSE_SIZE:
+                self.logger.warning('buffer longer than expected %d %s', len(self._buffer), self._buffer)
+
+            crc_ok = self._buffer_crc_check()
+
+            if not crc_ok and HEADER in self._buffer:
+                idx = self._buffer.index(HEADER)
+                self.logger.warning("crc check failed, header at %d, discarding start of %s", idx, self._buffer)
+                self._buffer = self._buffer[idx:]
+                crc_ok = self._buffer_crc_check()
+
+            if not crc_ok:
+                self.logger.error("crc check failed, discarding buffer %s", self._buffer)
             else:
                 self._decode_msg(bytearray(self._buffer))
             self._buffer.clear()
@@ -79,7 +96,6 @@ class JKBt(BtBms):
         self._resp_table[resp_type] = buf
         self._fetch_futures.set_result(resp_type, self._buffer[:])
 
-
     async def connect(self, timeout=20):
         """
         Connecting JK with bluetooth appears to require a prior bluetooth scan and discovery, otherwise the connectiong fails with
@@ -89,15 +105,14 @@ class JKBt(BtBms):
         """
 
         try:
-            await super().connect(timeout=timeout)
+            await super().connect(timeout=4)
         except:
             await self._connect_with_scanner(timeout=timeout)
-
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
         await self._q(cmd=0x97, resp=0x03)  # device info
-        await self._q(cmd=0x96, resp=0x02)  # device state (resp 0x01 & 0x02)
+        await self._q(cmd=0x96, resp=(0x02, 0x01))  # device state (resp 0x01 & 0x02)
         # after these 2 commands the bms will continuously send 0x02-type messages
 
         buf = self._resp_table[0x01]
@@ -150,7 +165,7 @@ class JKBt(BtBms):
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1059
         buf = self._resp_table[0x03]
         return DeviceInfo(
-            model= read_str(buf, 6),
+            model=read_str(buf, 6),
             hw_version=read_str(buf, 6 + 16),
             sw_version=read_str(buf, 6 + 16 + 8),
             name=read_str(buf, 6 + 16 + 8 + 16),
