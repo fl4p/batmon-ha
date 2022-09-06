@@ -14,3 +14,8 @@
 
 DONE:
 * BMSSample POD class
+
+- Rename MQTT messages
+- cell voltages
+- battery current, voltage, soc, capacity, charge
+- bms mosfet state

@@ -28,6 +28,7 @@ I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 * Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons`
 * Install Batmon add-on
+* Install, configure and start Mosquito MQTT broker (don't forget to configure the MQTT integration)
 
 ## Configuration
 
