@@ -58,7 +58,8 @@ class JKBt(BtBms):
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
         crc_expected = self._buffer[MIN_RESPONSE_SIZE - 1]
-        self.logger.error("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
+        if crc_comp != crc_expected:
+            self.logger.error("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
         return crc_comp == crc_expected
 
     def _notification_handler(self, sender, data):
