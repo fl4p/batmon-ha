@@ -18,12 +18,12 @@ def calc_crc(message_bytes):
 
 
 class DalyBt(BtBms):
-    UUID_RX = 17
-    UUID_TX = 15
     TIMEOUT = 8
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
+        self.UUID_RX = None
+        self.UUID_TX = None
         self._fetch_futures = FuturesPool()
         self._fetch_nr: Dict[int, list] = {}
         # self._num_cells = 0
@@ -65,11 +65,31 @@ class DalyBt(BtBms):
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
-        await self.client.start_notify(self.UUID_RX, self._notification_callback)
-        await self.client.write_gatt_char(48, bytearray(b""))
+
+        CHARACTERISTIC_UUIDS = [
+            (17, 15, 48), # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
+            ('0000fff1-0000-1000-8000-00805f9b34fb', '0000fff2-0000-1000-8000-00805f9b34fb',
+             '02f00000-0000-0000-0000-00000000ff01'),  # (15,19,31)
+        ]
+
+        for rx, tx, sx in CHARACTERISTIC_UUIDS:
+            try:
+                await self.client.start_notify(rx, self._notification_callback)
+                await self.client.write_gatt_char(sx, bytearray(b""))
+                self.UUID_RX = rx
+                self.UUID_TX = tx
+                self.logger.info("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
+                break
+            except Exception as e:
+                self.logger.warning("tried rx/tx/sx uuids %s/%s/%s: %s", rx, tx, sx, e)
+                continue
+
+        if not self.UUID_RX:
+            raise Exception("Notify characteristic (rx) not found")
 
     async def disconnect(self):
-        await self.client.stop_notify(self.UUID_RX)
+        if self.UUID_RX:
+            await self.client.stop_notify(self.UUID_RX)
         self._fetch_futures.clear()
         await super().disconnect()
 
@@ -80,17 +100,17 @@ class DalyBt(BtBms):
         else:
             self._fetch_nr.pop(command, None)
 
-        self._fetch_futures.acquire(command)
-        self.logger.debug("daly send: %s", msg)
-        await self.client.write_gatt_char(self.UUID_TX, msg)
+        with self._fetch_futures.acquire(command):
+            self.logger.debug("daly send: %s", msg)
+            await self.client.write_gatt_char(self.UUID_TX, msg)
 
-        try:
-            sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
-        except TimeoutError:
-            n_recv = num_responses - self._fetch_nr[command].count(None)
-            raise TimeoutError("timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
+            try:
+                sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
+            except TimeoutError:
+                n_recv = num_responses - self._fetch_nr[command].count(None)
+                raise TimeoutError("timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
 
-        return sample
+            return sample
 
     async def fetch(self) -> BmsSample:
         status = await self.fetch_status()
