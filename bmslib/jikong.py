@@ -108,6 +108,7 @@ class JKBt(BtBms):
         try:
             await super().connect(timeout=4)
         except:
+            self.logger.info("normal connect failed, connecting with scanner")
             await self._connect_with_scanner(timeout=timeout)
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
@@ -155,11 +156,11 @@ class JKBt(BtBms):
         await super().disconnect()
 
     async def _q(self, cmd, resp):
-        self._fetch_futures.acquire(resp)
-        frame = _jk_command(cmd, bytes([0, 0, 0, 0]), 0)
-        self.logger.debug("write %s", frame)
-        await self.client.write_gatt_char(self.UUID_TX, data=frame)
-        return await self._fetch_futures.wait_for(resp, self.TIMEOUT)
+        with self._fetch_futures.acquire(resp):
+            frame = _jk_command(cmd, bytes([0, 0, 0, 0]), 0)
+            self.logger.debug("write %s", frame)
+            await self.client.write_gatt_char(self.UUID_TX, data=frame)
+            return await self._fetch_futures.wait_for(resp, self.TIMEOUT)
 
     async def device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
@@ -186,8 +187,8 @@ class JKBt(BtBms):
         """
 
         if wait:
-            self._fetch_futures.acquire(0x02)
-            await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
+            with self._fetch_futures.acquire(0x02):
+                await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
         buf = self._resp_table[0x02]
         i16 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little', signed=True)

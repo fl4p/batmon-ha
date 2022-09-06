@@ -52,9 +52,9 @@ class JbdBt(BtBms):
 
 
     async def _q(self, cmd):
-        self._fetch_futures.acquire(cmd)
-        await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
-        return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+        with self._fetch_futures.acquire(cmd):
+            await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
+            return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
         # binary reading
