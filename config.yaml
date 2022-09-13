@@ -21,10 +21,10 @@ options:
   mqtt_password: ""
   mqtt_broker: "core-mosquitto"
   concurrent_sampling: false
-  keep_alive: false
+  keep_alive: true
   verbose_log: false
   sample_period: 1.0
-  invert_current: false
+  invert_current: true
 schema:
   devices:
     - address: str
