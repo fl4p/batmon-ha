@@ -48,7 +48,7 @@ class FuturesPool:
 
 
 class FutureContext:
-    def __init__(self, name: Union[str, Tuple[str]], pool: FuturesPool):
+    def __init__(self, name: NameType, pool: FuturesPool):
         self.name = name
         self.pool = pool
 

@@ -1,3 +1,6 @@
+import asyncio
+from typing import Dict
+
 from bleak import BleakClient
 
 from .bms import BmsSample
@@ -17,6 +20,34 @@ class BtBms():
 
     async def connect(self, timeout=20):
         await self.client.connect(timeout=timeout)
+
+    async def _connect_with_scanner(self, timeout):
+        import bleak
+        scanner = bleak.BleakScanner()
+        self.logger.debug("starting scan")
+        await scanner.start()
+
+        attempt = 1
+        while True:
+            try:
+                discovered = set(b.address for b in scanner.discovered_devices)
+                if self.client.address not in discovered:
+                    raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
+
+                self.logger.debug("connect attempt %d", attempt)
+                await self.connect(timeout=timeout)
+                break
+            except Exception as e:
+                await self.client.disconnect()
+                if attempt < 8:
+                    self.logger.debug('retry after error %s', e)
+                    await asyncio.sleep(0.2 * (1.5 ** attempt))
+                    attempt += 1
+                else:
+                    await scanner.stop()
+                    raise
+
+        await scanner.stop()
 
     async def disconnect(self):
         await self.client.disconnect()

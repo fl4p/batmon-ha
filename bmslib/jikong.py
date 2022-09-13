@@ -31,9 +31,12 @@ def to_hex_str(data):
     return " ".join(map(lambda b: hex(b)[2:], data))
 
 
-def _jk_command(address, value, length):
-    frame = bytes([0xAA, 0x55, 0x90, 0xEB, address, length,
-                   value[0], value[1], value[2], value[3]] + [0] * 9)
+def _jk_command(address, value: list):
+    n = len(value)
+    assert n <= 13, "val %s too long" % value
+    frame = bytes([0xAA, 0x55, 0x90, 0xEB, address, n])
+    frame += bytes(value)
+    frame += bytes([0] * (13 - n))
     frame += bytes([calc_crc(frame)])
     return frame
 
@@ -122,34 +125,6 @@ class JKBt(BtBms):
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
         self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
-    async def _connect_with_scanner(self, timeout):
-        import bleak
-        scanner = bleak.BleakScanner()
-        self.logger.debug("starting scan")
-        await scanner.start()
-
-        attempt = 1
-        while True:
-            try:
-                discovered = set(b.address for b in scanner.discovered_devices)
-                if self.client.address not in discovered:
-                    raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
-
-                self.logger.debug("connect attempt %d", attempt)
-                await super().connect(timeout=timeout)
-                break
-            except Exception as e:
-                await self.client.disconnect()
-                if attempt < 8:
-                    self.logger.debug('retry after error %s', e)
-                    await asyncio.sleep(0.2 * (1.5 ** attempt))
-                    attempt += 1
-                else:
-                    await scanner.stop()
-                    raise
-
-        await scanner.stop()
-
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
         self._fetch_futures.clear()
@@ -157,10 +132,14 @@ class JKBt(BtBms):
 
     async def _q(self, cmd, resp):
         with self._fetch_futures.acquire(resp):
-            frame = _jk_command(cmd, bytes([0, 0, 0, 0]), 0)
+            frame = _jk_command(cmd, [])
             self.logger.debug("write %s", frame)
             await self.client.write_gatt_char(self.UUID_TX, data=frame)
             return await self._fetch_futures.wait_for(resp, self.TIMEOUT)
+
+    async def _write(self, address, value):
+        frame = _jk_command(address, value)
+        await self.client.write_gatt_char(self.UUID_TX, data=frame)
 
     async def device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
@@ -196,17 +175,12 @@ class JKBt(BtBms):
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
-        # assert f32u(146) == self.capacity, "capacity mismatch %s != %s" % (f32u(146), self.capacity)
-
-        # self.capacity is user-set capacity
-        nominal_capacity = f32u(146)  # computed capacity (starts at self.capacity)
-
         return BmsSample(
             voltage=f32u(118),
             current=f32s(126),
 
             cycle_capacity=f32u(154),
-            capacity=nominal_capacity,
+            capacity=f32u(146),  # computed capacity (starts at self.capacity, which is user-defined),
             charge=f32u(142),  # "remaining capacity"
 
             temperatures=[i16(130) / 10, i16(132) / 10],
@@ -221,7 +195,6 @@ class JKBt(BtBms):
 
     async def fetch_voltages(self):
         """
-
         :return: list of cell voltages in mV
         """
         if self.num_cells is None:
