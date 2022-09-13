@@ -11,7 +11,7 @@ logger = get_logger(verbose=False)
 
 class BmsSampler():
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client, dt_max, invert_current=False):
+    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client, dt_max, expire_after_seconds, invert_current=False):
         self.bms = bms
         self.current_integrator = Integrator(dx_max=dt_max)
         self.power_integrator = Integrator(dx_max=dt_max)
@@ -19,6 +19,7 @@ class BmsSampler():
         self.power_integrator_neg = Integrator(dx_max=dt_max, reset=True)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
+        self.expire_after_seconds = expire_after_seconds
         self.num_samples = 0
 
     async def __call__(self):
@@ -66,7 +67,8 @@ class BmsSampler():
                 # publish home assistant discovery every 60 samples
                 if (self.num_samples % 60) == 0:
                     publish_hass_discovery(mqtt_client, device_topic=bms.name,
-                                           num_cells=len(voltages), num_temp_sensors=len(temperatures))
+                                           num_cells=len(voltages), num_temp_sensors=len(temperatures),
+                                           expire_after_seconds=self.expire_after_seconds)
 
                 self.num_samples += 1
                 t_disc = time.time()

@@ -4,7 +4,7 @@ import time
 
 import paho.mqtt.client as paho
 
-from bmslib.bms import BmsSample
+from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -17,8 +17,8 @@ def round_to_n(x, n):
     digits = -int(math.floor(math.log10(abs(x)))) + (n - 1)
 
     try:
-        #return ('%.*f' % (digits, x))
-        return str(round(x, digits or None)) # digits=0 will output 12.0, digits=None => 12
+        # return ('%.*f' % (digits, x))
+        return str(round(x, digits or None))  # digits=0 will output 12.0, digits=None => 12
     except ValueError as e:
         print('error', x, n, e)
         raise e
@@ -81,7 +81,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # return
 
     lv = _last_values.get(topic, None)
-    if lv and lv[1] == data and (time.time() - lv[0]) < 30.:
+    if lv and lv[1] == data and (time.time() - lv[0]) < (MIN_VALUE_EXPIRY / 2):
         # logger.info('topic %s data not changed', topic)
         return False
 

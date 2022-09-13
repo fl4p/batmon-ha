@@ -14,6 +14,7 @@ import bmslib.bt
 import bmslib.daly
 import bmslib.jbd
 import bmslib.jikong
+from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
 from mqtt_util import mqtt_iterator
@@ -157,10 +158,13 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
-    ic = user_config.get('invert_current', False)
-    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client, dt_max=4, invert_current=ic) for bms in bms_list]
-
     sample_period = float(user_config.get('sample_period', 1.0))
+    ic = user_config.get('invert_current', False)
+    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client,
+                               dt_max=4,
+                               expire_after_seconds=max(MIN_VALUE_EXPIRY, int(sample_period * 2 + .5)),
+                               invert_current=ic) for bms in bms_list]
+
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
     logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
