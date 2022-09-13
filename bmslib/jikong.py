@@ -201,6 +201,22 @@ class JKBt(BtBms):
                     range(self.num_cells)]
         return voltages
 
+    async def fetch_switches(self):
+        buf = self._resp_table[0x02]
+        return dict(
+            charge=bool(buf[166]),
+            discharge=bool(buf[167])
+        )
+
+    async def set_switch(self, switch: str, state: bool):
+        # from https://github.com/syssi/esphome-jk-bms/blob/4079c22eaa40786ffa0cabd45d0d98326a1fdd29/components/jk_bms_ble/switch/__init__.py
+        addresses = dict(
+            charge=0x1D,
+            discharge=0x1E,
+            balance=0x1F
+        )
+        await self._write(addresses[switch], [0x1 if state else 0x0])
+
 
 async def main():
     mac_address = 'C8:47:8C:F7:AD:B4'
