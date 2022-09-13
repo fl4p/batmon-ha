@@ -65,6 +65,6 @@ class BmsSample:
 
     def invert_current(self):
         res = copy(self)
-        res.current *= -1
+        if res.current != 0:  # prevent -0 values
+            res.current *= -1
         return res
-
