@@ -156,7 +156,8 @@ def publish_temperatures(client, device_topic, temperatures):
         mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
 
 
-def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
+def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, expire_after_seconds: int,
+                           device_info: DeviceInfo = None):
     discovery_msg = {}
 
     def _hass_discovery(k, device_class, unit):
@@ -167,12 +168,14 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors):
             "unit_of_measurement": unit,
             "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
+            "expire_after": expire_after_seconds,
             "device": {
-                "identifiers": [device_topic],  # daly_bms
-                "manufacturer": device_topic,  # Daly
-                "model": 'Currently not available',
-                "name": device_topic,  # Daly BMS
-                "sw_version": 'Currently not available'
+                "identifiers": [(device_info and device_info.sn) or device_topic],  # daly_bms
+                # "manufacturer": device_topic,  # Daly
+                "name": (device_info and device_info.name) or device_topic,
+                "model": (device_info and device_info.model) or None,
+                "sw_version": (device_info and device_info.sw_version) or None,
+                "hw_version": (device_info and device_info.hw_version) or None,
             },
         }
 

@@ -150,19 +150,16 @@ class JKBt(BtBms):
             hw_version=read_str(buf, 6 + 16),
             sw_version=read_str(buf, 6 + 16 + 8),
             name=read_str(buf, 6 + 16 + 8 + 16),
+            sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
         )
 
     async def fetch(self, wait=True) -> BmsSample:
 
         """
-
         Decode JK02
-
         references
         * https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L360
         * https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
-
-        :return:
         """
 
         if wait:

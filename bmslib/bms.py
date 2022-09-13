@@ -2,13 +2,25 @@ import math
 from copy import copy
 from typing import List
 
+MIN_VALUE_EXPIRY = 20
+
 
 class DeviceInfo():
-    def __init__(self, model, hw_version, sw_version, name):
+    def __init__(self, model, hw_version, sw_version, name, sn):
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version
         self.name = name
+        self.sn = sn
+
+    def __str__(self):
+        s = f'DeviceInfo({self.model},hw-{self.hw_version},sw-{self.sw_version}'
+        if self.name:
+            s += ',' + self.name
+        if self.sn:
+            s += ',#' + self.sn
+        return s + ')'
+
 
 class BmsSample:
     def __init__(self, voltage, current,
@@ -16,7 +28,7 @@ class BmsSample:
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature=math.nan,):
+                 mos_temperature=math.nan, ):
         """
 
         :param voltage:
@@ -42,8 +54,8 @@ class BmsSample:
         assert math.isfinite(soc)
 
         self.charge: float = charge
-        self.capacity : float = capacity
-        self.cycle_capacity : float = cycle_capacity
+        self.capacity: float = capacity
+        self.cycle_capacity: float = cycle_capacity
         self.num_cycles: float = num_cycles
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature
