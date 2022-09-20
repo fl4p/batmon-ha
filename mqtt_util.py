@@ -23,6 +23,18 @@ def round_to_n(x, n):
         print('error', x, n, e)
         raise e
 
+def remove_none_values(fields:dict):
+    for k in list(fields.keys()):
+        v = fields[k]
+        if v is None:
+            del fields[k]
+        elif isinstance(v, float):
+            if math.isnan(v) or not math.isfinite(v):
+                del fields[k]
+        elif isinstance(v, str):
+            if not v:
+                del fields[k]
+
 
 def build_mqtt_hass_config_discovery(base, topic):
     # Instead of daly_bms should be here added a proper name (unique), like serial or something
@@ -82,7 +94,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
 
     lv = _last_values.get(topic, None)
     if lv and lv[1] == data and (time.time() - lv[0]) < (MIN_VALUE_EXPIRY / 2):
-        # logger.info('topic %s data not changed', topic)
+        logger.debug('topic %s data not changed', topic)
         return False
 
     mqi: paho.MQTTMessageInfo = client.publish(topic, data, retain=retain)
@@ -116,15 +128,15 @@ def mqtt_iterator(client, result, topic, base='', hass=True):
 
 
 sample_desc = {
-    "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4},
+    "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4, "icon": "meter-electric"},
     "soc/current": {"field": "current", "class": "current", "unit_of_measurement": "A", "precision": 4},
-    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A", "precision": 4},
-    "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%", "precision": 4},
-    "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W", "precision": 4},
+    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A", "precision": 4, "icon": "scale-unbalanced"},
+    "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%", "precision": 4, "icon": "battery"},
+    "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W", "precision": 4, "icon": "flash"},
     "soc/capacity": {"field": "capacity", "class": None, "unit_of_measurement": "Ah"},
     "soc/cycle_capacity": {"field": "cycle_capacity", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
-    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C"},
+    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C", "icon": "thermometer"},
 }
 
 
@@ -160,17 +172,17 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
                            device_info: DeviceInfo = None):
     discovery_msg = {}
 
-    def _hass_discovery(k, device_class, unit):
-        discovery_msg[f"homeassistant/sensor/{device_topic}/_{k.replace('/', '_')}/config"] = {
+    def _hass_discovery(k, device_class, unit, icon=None):
+        dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": f"{device_topic} {k.replace('/', ' ')}",
-            **({"device_class": device_class} if device_class else {}),
+            "device_class": device_class or None,
             "unit_of_measurement": unit,
             "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after_seconds,
             "device": {
-                "identifiers": [(device_info and device_info.sn) or device_topic],  # daly_bms
+                "identifiers": [(device_info and device_info.sn) or device_topic],
                 # "manufacturer": device_topic,  # Daly
                 "name": (device_info and device_info.name) or device_topic,
                 "model": (device_info and device_info.model) or None,
@@ -178,9 +190,14 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
                 "hw_version": (device_info and device_info.hw_version) or None,
             },
         }
+        if icon:
+            dm['icon'] = 'mdi:' + icon
+        remove_none_values(dm)
+        remove_none_values(dm['device'])
+        discovery_msg[f"homeassistant/sensor/{device_topic}/_{k.replace('/', '_')}/config"] = dm
 
     for k, d in sample_desc.items():
-        _hass_discovery(k, d["class"], unit=d["unit_of_measurement"])
+        _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
