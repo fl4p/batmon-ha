@@ -9,6 +9,7 @@
 - Fix JK current direction
 - Add `fetch_device_info`
 - Add Icons for some sensors
+- Fix MQTT connection timeout
 ## [0.0.44] - 2022-09-06
 ### Changed
 - JK protocol fix

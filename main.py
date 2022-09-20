@@ -155,6 +155,7 @@ async def main():
 
     try:
         mqtt_client.connect(user_config.mqtt_broker, port=1883)
+        mqtt_client.loop_start()
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
@@ -209,10 +210,14 @@ async def main():
     global shutdown
     shutdown = True
 
+    logger.info('Shutting down ...')
+    await asyncio.sleep(4)
+
     for bms in bms_list:
         try:
             logger.info("Disconnecting %s", bms)
             await bms.disconnect()
+            await asyncio.sleep(2)
         except:
             pass
 
