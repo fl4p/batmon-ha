@@ -174,7 +174,7 @@ class JKBt(BtBms):
 
         return BmsSample(
             voltage=f32u(118),
-            current=f32s(126),
+            current=-f32s(126),
 
             cycle_capacity=f32u(154),
             capacity=f32u(146),  # computed capacity (starts at self.capacity, which is user-defined),
