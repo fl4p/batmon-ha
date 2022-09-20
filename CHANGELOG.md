@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.45] - 2022-09-20
+### Changed
+- Sensor value now use availability status so status expires when BMS is not available
+- Fix zero negative current
+- Set Keep alive and invert_current default value to true
+- Fix Daly zero SoC issue
+- Fix JK current direction
+- Add `fetch_device_info`
+- Add Icons for some sensors
 ## [0.0.44] - 2022-09-06
 ### Changed
 - JK protocol fix
