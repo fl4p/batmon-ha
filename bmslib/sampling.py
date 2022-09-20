@@ -1,7 +1,9 @@
 import datetime
 import time
+from typing import Optional
 
 import bmslib.bt
+from bmslib.bms import DeviceInfo
 from bmslib.pwmath import Integrator
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery
@@ -20,6 +22,7 @@ class BmsSampler():
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
         self.expire_after_seconds = expire_after_seconds
+        self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
 
     async def __call__(self):
@@ -66,9 +69,19 @@ class BmsSampler():
 
                 # publish home assistant discovery every 60 samples
                 if (self.num_samples % 60) == 0:
-                    publish_hass_discovery(mqtt_client, device_topic=bms.name,
-                                           num_cells=len(voltages), num_temp_sensors=len(temperatures),
-                                           expire_after_seconds=self.expire_after_seconds)
+                    if self.device_info is None:
+                        try:
+                            self.device_info = await bms.fetch_device_info()
+                        except NotImplementedError:
+                            pass
+                        except Exception as e:
+                            logger.warning('%s error fetching device info: %s', bms.name, e)
+                    publish_hass_discovery(
+                        mqtt_client, device_topic=bms.name,
+                        num_cells=len(voltages), num_temp_sensors=len(temperatures),
+                        expire_after_seconds=self.expire_after_seconds,
+                        device_info=self.device_info
+                    )
 
                 self.num_samples += 1
                 t_disc = time.time()

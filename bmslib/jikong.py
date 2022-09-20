@@ -141,7 +141,7 @@ class JKBt(BtBms):
         frame = _jk_command(address, value)
         await self.client.write_gatt_char(self.UUID_TX, data=frame)
 
-    async def device_info(self):
+    async def fetch_device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1059
         buf = self._resp_table[0x03]

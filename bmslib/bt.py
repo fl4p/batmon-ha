@@ -3,7 +3,7 @@ from typing import Dict
 
 from bleak import BleakClient
 
-from .bms import BmsSample
+from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
 
@@ -51,6 +51,9 @@ class BtBms():
 
     async def disconnect(self):
         await self.client.disconnect()
+
+    async def fetch_device_info(self) -> DeviceInfo:
+        raise NotImplementedError()
 
     async def fetch(self) -> BmsSample:
         raise NotImplementedError()
