@@ -149,7 +149,7 @@ class DalyBt(BtBms):
             "charging_mosfet": parts[1],
             "discharging_mosfet": parts[2],
             # "bms_cycles": parts[3], unstable result
-            "capacity_ah": parts[4] / 1000,
+            "capacity_ah": parts[4] / 1000, # this is the current charge
         }
 
     async def fetch_states(self):

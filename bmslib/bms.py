@@ -36,7 +36,7 @@ class BmsSample:
         :param charge:
         :param capacity:
         :param num_cycles:
-        :param soc:
+        :param soc: in % (0-100)
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
@@ -48,13 +48,14 @@ class BmsSample:
         if math.isnan(soc):
             soc = round(charge / capacity * 100, 2)
         else:
-            if math.isnan(capacity):
+            if math.isnan(capacity) and soc > .2:
                 capacity = round(charge / soc * 100)
 
         assert math.isfinite(soc)
 
         self.charge: float = charge
         self.capacity: float = capacity
+        self.soc: float = soc
         self.cycle_capacity: float = cycle_capacity
         self.num_cycles: float = num_cycles
         self.temperatures = temperatures
@@ -63,10 +64,6 @@ class BmsSample:
     @property
     def power(self):
         return round(self.voltage * self.current, 2)
-
-    @property
-    def soc(self):
-        return round(self.charge / self.capacity * 100, 2)
 
     def __str__(self):
         # noinspection PyStringFormat
