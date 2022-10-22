@@ -66,6 +66,8 @@ class JbdBt(BtBms):
         num_cell = int.from_bytes(buf[21:22], 'big')
         num_temp = int.from_bytes(buf[22:23], 'big')
 
+        mos_byte = int.from_bytes(buf[20:21], 'big')
+
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=True) / 100,
             current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100,
@@ -76,6 +78,11 @@ class JbdBt(BtBms):
             num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=True),
 
             temperatures=[(int.from_bytes(buf[23 + i * 2:i * 2 + 25], 'big') - 2731) / 10 for i in range(num_temp)],
+
+            switches=dict(
+                discharge=mos_byte == 2 or mos_byte == 3,
+                charge=mos_byte == 1 or mos_byte == 3,
+            ),
 
             # charge_enabled
             # discharge_enabled

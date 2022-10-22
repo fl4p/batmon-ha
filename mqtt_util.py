@@ -177,8 +177,17 @@ def publish_temperatures(client, device_topic, temperatures):
 
 
 def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, expire_after_seconds: int,
-                           device_info: DeviceInfo = None):
+                           device_info: DeviceInfo = None, switches=None):
     discovery_msg = {}
+
+    device_json = {
+        "identifiers": [(device_info and device_info.sn) or device_topic],
+        # "manufacturer": device_topic,  # Daly
+        "name": (device_info and device_info.name) or device_topic,
+        "model": (device_info and device_info.model) or None,
+        "sw_version": (device_info and device_info.sw_version) or None,
+        "hw_version": (device_info and device_info.hw_version) or None,
+    }
 
     def _hass_discovery(k, device_class, unit, icon=None):
         dm = {
@@ -189,14 +198,7 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
             "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after_seconds,
-            "device": {
-                "identifiers": [(device_info and device_info.sn) or device_topic],
-                # "manufacturer": device_topic,  # Daly
-                "name": (device_info and device_info.name) or device_topic,
-                "model": (device_info and device_info.model) or None,
-                "sw_version": (device_info and device_info.sw_version) or None,
-                "hw_version": (device_info and device_info.hw_version) or None,
-            },
+            "device": device_json,
         }
         if icon:
             dm['icon'] = 'mdi:' + icon
@@ -214,6 +216,18 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
     for i in range(0, num_temp_sensors):
         k = 'temperatures/%d' % (i + 1)
         _hass_discovery(k, "temperature", unit="°C")
+
+    if switches:
+        for switch_name in switches:
+            discovery_msg[f"homeassistant/switch/{device_topic}/{switch_name}/config"] = {
+                "unique_id": f"{device_topic}__switch_{switch_name}",
+                "name": f"{device_topic} {switch_name}",
+                "device_class": 'outlet',
+                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                "state_topic": f"{device_topic}/switch/{switch_name}",
+                "expire_after": expire_after_seconds,
+                "device": device_json,
+            }
 
     for topic, data in discovery_msg.items():
         mqtt_single_out(client, topic, json.dumps(data))

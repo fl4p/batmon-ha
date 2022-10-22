@@ -80,7 +80,8 @@ class BmsSampler():
                         mqtt_client, device_topic=bms.name,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
                         expire_after_seconds=self.expire_after_seconds,
-                        device_info=self.device_info
+                        device_info=self.device_info,
+                        switches=(sample.switches and sample.switches.keys()),
                     )
 
                 self.num_samples += 1

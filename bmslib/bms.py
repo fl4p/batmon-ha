@@ -1,6 +1,6 @@
 import math
 from copy import copy
-from typing import List
+from typing import List, Dict, Optional
 
 MIN_VALUE_EXPIRY = 20
 
@@ -28,7 +28,8 @@ class BmsSample:
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature=math.nan, ):
+                 mos_temperature=math.nan,
+                 switches: Optional[Dict[str, bool]] = None):
         """
 
         :param voltage:
@@ -60,6 +61,7 @@ class BmsSample:
         self.num_cycles: float = num_cycles
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature
+        self.switches = switches
 
     @property
     def power(self):

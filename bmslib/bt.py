@@ -64,8 +64,6 @@ class BtBms():
     async def fetch_temperatures(self):
         raise NotImplementedError()
 
-    async def fetch_switches(self) -> Dict[str, bool]:
-        raise NotImplementedError()
 
     async def set_switch(self, switch: str, state: bool):
         raise NotImplementedError()

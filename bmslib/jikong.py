@@ -186,6 +186,10 @@ class JKBt(BtBms):
 
             # 146 charge_full (see above)
             num_cycles=u32(150),
+            switches=dict(
+                charge=bool(buf[166]),
+                discharge=bool(buf[167])
+            ),
         )
 
         # TODO  154   4   0x3D 0x04 0x00 0x00    Cycle_Capacity       1.0
@@ -201,12 +205,6 @@ class JKBt(BtBms):
                     range(self.num_cells)]
         return voltages
 
-    async def fetch_switches(self):
-        buf = self._resp_table[0x02]
-        return dict(
-            charge=bool(buf[166]),
-            discharge=bool(buf[167])
-        )
 
     async def set_switch(self, switch: str, state: bool):
         # from https://github.com/syssi/esphome-jk-bms/blob/4079c22eaa40786ffa0cabd45d0d98326a1fdd29/components/jk_bms_ble/switch/__init__.py
