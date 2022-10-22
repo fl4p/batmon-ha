@@ -13,7 +13,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
-* MQTT Discovery
+* Home Assistant MQTT Discovery
 
 ### Supported Devices (bluetooth)
 

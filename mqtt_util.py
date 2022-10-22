@@ -136,15 +136,19 @@ def mqtt_iterator(client, result, topic, base='', hass=True):
 
 
 sample_desc = {
-    "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4, "icon": "meter-electric"},
+    "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4,
+                          "icon": "meter-electric"},
     "soc/current": {"field": "current", "class": "current", "unit_of_measurement": "A", "precision": 4},
-    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A", "precision": 4, "icon": "scale-unbalanced"},
-    "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%", "precision": 4, "icon": "battery"},
+    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A", "precision": 4,
+                            "icon": "scale-unbalanced"},
+    "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%", "precision": 4,
+                        "icon": "battery"},
     "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W", "precision": 4, "icon": "flash"},
     "soc/capacity": {"field": "capacity", "class": None, "unit_of_measurement": "Ah"},
     "soc/cycle_capacity": {"field": "cycle_capacity", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
-    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C", "icon": "thermometer"},
+    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C",
+                                  "icon": "thermometer"},
 }
 
 

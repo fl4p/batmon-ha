@@ -21,7 +21,7 @@ class BtBms():
     async def connect(self, timeout=20):
         await self.client.connect(timeout=timeout)
 
-    async def _connect_with_scanner(self, timeout):
+    async def _connect_with_scanner(self, timeout=20):
         import bleak
         scanner = bleak.BleakScanner()
         self.logger.debug("starting scan")
