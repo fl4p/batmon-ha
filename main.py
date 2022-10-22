@@ -3,6 +3,7 @@ import atexit
 import json
 import random
 import signal
+import time
 import traceback
 from functools import partial
 from typing import List
@@ -18,7 +19,7 @@ import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator
+from mqtt_util import mqtt_iterator, mqqt_last_publish_time
 
 
 def load_user_config():
@@ -87,6 +88,26 @@ async def fetch_loop(fn, period, max_errors=40):
                 logger.warning('too many errors, abort')
                 break
         await asyncio.sleep(period)
+
+
+async def watchdog_loop(timeout: float):
+    global shutdown
+
+    t_start = time.time()
+
+    logger.info("watchdog loop started %s", t_start)
+
+    while not shutdown:
+        # compute time since last successful publish
+        pdt = time.time() - (mqqt_last_publish_time() or t_start)
+        if pdt > timeout:
+            if mqqt_last_publish_time():
+                logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
+            else:
+                logger.error("MQTT never published a message after %.0fs, exit", timeout)
+            shutdown = True
+            break
+        await asyncio.sleep(30)
 
 
 async def main():
@@ -173,6 +194,8 @@ async def main():
     logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
+    asyncio.create_task(watchdog_loop(timeout=max(60., sample_period * 3)))
+
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
         tasks = sampler_list + extra_tasks
@@ -213,13 +236,13 @@ async def main():
     shutdown = True
 
     logger.info('Shutting down ...')
-    await asyncio.sleep(4)
+    # await asyncio.sleep(4)
 
     for bms in bms_list:
         try:
             logger.info("Disconnecting %s", bms)
             await bms.disconnect()
-            await asyncio.sleep(2)
+            # await asyncio.sleep(2)
         except:
             pass
 

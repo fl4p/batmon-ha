@@ -23,7 +23,8 @@ def round_to_n(x, n):
         print('error', x, n, e)
         raise e
 
-def remove_none_values(fields:dict):
+
+def remove_none_values(fields: dict):
     for k in list(fields.keys()):
         v = fields[k]
         if v is None:
@@ -85,6 +86,7 @@ def build_mqtt_hass_config_discovery(base, topic):
 
 
 _last_values = {}
+_last_publish_time = 0.
 
 
 def mqtt_single_out(client: paho.Client, topic, data, retain=False):
@@ -106,7 +108,13 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
         logger.warning('mqtt msg %s not published: %s', topic, mqi)
         return False
 
-    _last_values[topic] = time.time(), data
+    now = time.time()
+    _last_values[topic] = now, data
+    _last_publish_time = now
+
+
+def mqqt_last_publish_time():
+    return _last_publish_time
 
 
 def mqtt_iterator(client, result, topic, base='', hass=True):
