@@ -1,10 +1,15 @@
+import asyncio
+import inspect
 import json
 import math
+import queue
 import time
+import traceback
 
 import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
+from bmslib.bt import BtBms
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -104,16 +109,14 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
         logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
         return False
 
-    if not mqi.is_published():
-        logger.warning('mqtt msg %s not published: %s', topic, mqi)
-        return False
-
     now = time.time()
     _last_values[topic] = now, data
+    global _last_publish_time
     _last_publish_time = now
 
 
 def mqqt_last_publish_time():
+    global _last_publish_time
     return _last_publish_time
 
 
@@ -149,6 +152,7 @@ sample_desc = {
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C",
                                   "icon": "thermometer"},
+    # "switch/charge": # binary sensor
 }
 
 
@@ -157,6 +161,11 @@ def publish_sample(client, device_topic, sample: BmsSample):
         topic = f"{device_topic}/{k}"
         s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
         mqtt_single_out(client, topic, s)
+
+    if sample.switches:
+        for switch_name, switch_state in sample.switches.items():
+            topic = f"{device_topic}/switch/{switch_name}"
+            mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -229,12 +238,62 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
                 "device_class": 'outlet',
                 "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
-                "expire_after": expire_after_seconds,
+                # "expire_after": expire_after_seconds,
                 "device": device_json,
+                "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
+            }
+
+            discovery_msg[f"homeassistant/binary_sensor/{device_topic}/{switch_name}/config"] = {
+                "unique_id": f"{device_topic}__switch_{switch_name}",
+                "name": f"{device_topic} {switch_name}",
+                "device_class": 'outlet',
+                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                "state_topic": f"{device_topic}/switch/{switch_name}",
+                # "expire_after": expire_after_seconds,
+                "device": device_json,
+                "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
             }
 
     for topic, data in discovery_msg.items():
         mqtt_single_out(client, topic, json.dumps(data))
+
+
+_switch_callbacks = {}
+_message_queue = queue.Queue()
+
+async def mqtt_process_action_queue():
+    while not _message_queue.empty():
+        callback, arg = _message_queue.get(block=False)
+        try:
+            await callback(arg)
+        except Exception as e:
+            logger.error('exception in action callback: %s', e)
+            logger.error('Stack: %s', traceback.format_exc())
+
+
+def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switches):
+    async def set_switch(switch_name, state):
+        await bms.set_switch(switch_name, state)
+        topic = f"{device_topic}/switch/{switch_name}"
+        mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
+
+
+    for switch_name in switches:
+        state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"
+        logger.info("subscribe %s", state_topic)
+        mqtt_client.subscribe(state_topic, qos=2)
+        _switch_callbacks[state_topic] = \
+            lambda msg, switch_name=switch_name: set_switch(switch_name, msg.lower() == "on")
+
+
+def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
+    payload = message.payload.decode("utf-8")
+    logger.info("new message %s: %s", message.topic, payload)
+    callback = _switch_callbacks.get(message.topic, None)
+    if callback:
+        _message_queue.put((callback, payload))
+    else:
+        logger.warning("No callback for topic %s (payload %s)", message.topic, payload)
 
     """
     

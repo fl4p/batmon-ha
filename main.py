@@ -19,7 +19,7 @@ import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator, mqqt_last_publish_time
+from mqtt_util import mqtt_iterator, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 
 def load_user_config():
@@ -98,6 +98,9 @@ async def watchdog_loop(timeout: float):
     logger.info("watchdog loop started %s", t_start)
 
     while not shutdown:
+
+        await mqtt_process_action_queue()
+
         # compute time since last successful publish
         pdt = time.time() - (mqqt_last_publish_time() or t_start)
         if pdt > timeout:
@@ -107,7 +110,7 @@ async def watchdog_loop(timeout: float):
                 logger.error("MQTT never published a message after %.0fs, exit", timeout)
             shutdown = True
             break
-        await asyncio.sleep(30)
+        await asyncio.sleep(.1)
 
 
 async def main():
@@ -176,8 +179,10 @@ async def main():
     if user_config.get('mqtt_user', None):
         mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
 
+    mqtt_client.on_message = mqtt_message_handler
+
     try:
-        mqtt_client.connect(user_config.mqtt_broker, port=1883)
+        mqtt_client.connect(user_config.mqtt_broker, port=user_config.get('mqtt_port', 1883))
         mqtt_client.loop_start()
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
@@ -194,7 +199,7 @@ async def main():
     logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
-    asyncio.create_task(watchdog_loop(timeout=max(60., sample_period * 3)))
+    asyncio.create_task(watchdog_loop(timeout=max(120., sample_period * 3)))
 
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
@@ -231,6 +236,7 @@ async def main():
                     raise exceptions[0]
 
         await fetch_loop(fn, period=sample_period)
+
 
     global shutdown
     shutdown = True

@@ -34,4 +34,6 @@ class DummyBt(BtBms):
         return [3000, 3001, 3002, 3003]
 
     async def set_switch(self, switch: str, state: bool):
-        self.logger.info('set_switch', switch, state)
+        self.logger.info('set_switch %s %s', switch, state)
+        assert isinstance(state, bool)
+        self._switches[switch] = state
