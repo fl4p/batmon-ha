@@ -25,6 +25,7 @@ options:
   verbose_log: false
   sample_period: 1.0
   invert_current: true
+  watchdog: true
 schema:
   devices:
     - address: str
@@ -40,3 +41,4 @@ schema:
   verbose_log: "bool"
   sample_period: "float"
   invert_current: "bool"
+  watchdog: "bool"
