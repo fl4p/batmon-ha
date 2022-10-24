@@ -24,6 +24,16 @@
           </excludedPaths>
         </serverdata>
       </paths>
+      <paths name="raspberrypi.local (project level)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/pi/batmon-ha" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
     </serverData>
     <option name="myAutoUpload" value="ALWAYS" />
   </component>

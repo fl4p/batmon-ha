@@ -12,7 +12,7 @@
 * Small balancing current
 * Balancing during charger OR discharge (setting) but not both?!
 * Sometimes detect false short circuits
-
+* Insecure, no proper bluetooth authentication
 
 ## JK BMS
 * When UVP is reached the BMS shutsdown overnight and needs an activation (i.e. the epever mppt will not start)
