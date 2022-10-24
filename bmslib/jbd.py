@@ -47,11 +47,12 @@ class JbdBt(BtBms):
             self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
-        try:
-            await super().connect(**kwargs)
-        except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", e)
-            await self._connect_with_scanner(**kwargs)
+        await super().connect(**kwargs)
+        #try:
+        #    await super().connect(**kwargs)
+        #except Exception as e:
+        #    self.logger.info("normal connect failed (%s), connecting with scanner", e)
+        #    await self._connect_with_scanner(**kwargs)
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
@@ -135,9 +136,9 @@ class JbdBt(BtBms):
 
         new_switches = {**self._switches, switch: state}
         switches_sum = sum(new_switches.values())
-        if switches_sum == 0:
+        if switches_sum == 2:
             tc = 0x00  # all on
-        elif switches_sum == 2:
+        elif switches_sum == 0:
             tc = 0x03  # all off
         elif switch == "charge" and not state:
             tc = 0x01  # charge off
