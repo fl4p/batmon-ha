@@ -74,7 +74,7 @@ async def bt_discovery():
     return devices
 
 
-async def fetch_loop(fn, period, max_errors=40):
+async def fetch_loop(fn, period, max_errors):
     num_errors_row = 0
     while not shutdown:
         try:
@@ -84,33 +84,35 @@ async def fetch_loop(fn, period, max_errors=40):
             num_errors_row += 1
             logger.error('Error (num %d) reading BMS: %s', num_errors_row, e)
             logger.error('Stack: %s', traceback.format_exc())
-            if num_errors_row > max_errors:
+            if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
         await asyncio.sleep(period)
 
 
-async def watchdog_loop(timeout: float):
+async def background_loop(timeout: float):
     global shutdown
 
     t_start = time.time()
 
-    logger.info("watchdog loop started %s", t_start)
+    if timeout:
+        logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
 
     while not shutdown:
 
         await mqtt_process_action_queue()
 
-        # compute time since last successful publish
-        pdt = time.time() - (mqqt_last_publish_time() or t_start)
-        if pdt > timeout:
-            if mqqt_last_publish_time():
-                logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
-            else:
-                logger.error("MQTT never published a message after %.0fs, exit", timeout)
-            shutdown = True
-            break
-        await asyncio.sleep(.1)
+        if timeout:
+            # compute time since last successful publish
+            pdt = time.time() - (mqqt_last_publish_time() or t_start)
+            if pdt > timeout:
+                if mqqt_last_publish_time():
+                    logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
+                else:
+                    logger.error("MQTT never published a message after %.0fs, exit", timeout)
+                shutdown = True
+                break
+            await asyncio.sleep(.1)
 
 
 async def main():
@@ -199,7 +201,10 @@ async def main():
     logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
-    asyncio.create_task(watchdog_loop(timeout=max(120., sample_period * 3)))
+    watchdog_en = user_config.get('watchdog', False)
+    max_errors = 200 if watchdog_en else 0
+
+    asyncio.create_task(background_loop(timeout=max(120., sample_period * 3) if watchdog_en else 0))
 
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
@@ -212,7 +217,7 @@ async def main():
             except:
                 pass
 
-        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period)) for fn in tasks]
+        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
         await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
     else:
@@ -235,7 +240,7 @@ async def main():
                     logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
                     raise exceptions[0]
 
-        await fetch_loop(fn, period=sample_period)
+        await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
 
     global shutdown
