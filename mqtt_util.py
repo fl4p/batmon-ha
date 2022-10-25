@@ -1,5 +1,3 @@
-import asyncio
-import inspect
 import json
 import math
 import queue
@@ -138,6 +136,7 @@ def mqtt_iterator(client, result, topic, base='', hass=True):
             mqtt_single_out(client, f'{topic}{base}/{key}', val)
 
 
+# units: https://github.com/home-assistant/core/blob/d7ac4bd65379e11461c7ce0893d3533d8d8b8cbf/homeassistant/const.py#L384
 sample_desc = {
     "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4,
                           "icon": "meter-electric"},
@@ -152,6 +151,9 @@ sample_desc = {
     "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
     "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C",
                                   "icon": "thermometer"},
+
+    "bms/uptime": {"field": "uptime", "class": "duration", "unit_of_measurement": "s", "precision": 0,
+                   "icon": "sort-time-descending"},
     # "switch/charge": # binary sensor
 }
 
@@ -261,6 +263,7 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
 _switch_callbacks = {}
 _message_queue = queue.Queue()
 
+
 async def mqtt_process_action_queue():
     while not _message_queue.empty():
         callback, arg = _message_queue.get(block=False)
@@ -276,7 +279,6 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
         await bms.set_switch(switch_name, state)
         topic = f"{device_topic}/switch/{switch_name}"
         mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
-
 
     for switch_name in switches:
         state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"

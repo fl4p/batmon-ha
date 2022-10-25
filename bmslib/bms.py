@@ -29,7 +29,8 @@ class BmsSample:
                  balance_current=math.nan,
                  temperatures: List[float] = None,
                  mos_temperature=math.nan,
-                 switches: Optional[Dict[str, bool]] = None):
+                 switches: Optional[Dict[str, bool]] = None,
+                 uptime=math.nan):
         """
 
         :param voltage:
@@ -41,6 +42,7 @@ class BmsSample:
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
+        :param uptime BMS uptime in seconds
         """
         self.voltage: float = voltage
         self.current: float = current
@@ -62,6 +64,7 @@ class BmsSample:
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature
         self.switches = switches
+        self.uptime = uptime
 
     @property
     def power(self):

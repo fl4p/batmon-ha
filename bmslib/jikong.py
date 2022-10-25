@@ -1,6 +1,6 @@
 """
 
-https://github.com/jblance/mpp-solar
+https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 https://github.com/jblance/jkbms
 https://github.com/sshoecraft/jktool/blob/main/jk_info.c
 https://github.com/syssi/esphome-jk-bms
@@ -172,6 +172,7 @@ class JKBt(BtBms):
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
+
         return BmsSample(
             voltage=f32u(118),
             current=-f32s(126),
@@ -188,8 +189,9 @@ class JKBt(BtBms):
             num_cycles=u32(150),
             switches=dict(
                 charge=bool(buf[166]),
-                discharge=bool(buf[167])
+                discharge=bool(buf[167]),
             ),
+            uptime=float(u32(162)), # seconds
         )
 
         # TODO  154   4   0x3D 0x04 0x00 0x00    Cycle_Capacity       1.0
@@ -204,7 +206,6 @@ class JKBt(BtBms):
         voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') for i in
                     range(self.num_cells)]
         return voltages
-
 
     async def set_switch(self, switch: str, state: bool):
         # from https://github.com/syssi/esphome-jk-bms/blob/4079c22eaa40786ffa0cabd45d0d98326a1fdd29/components/jk_bms_ble/switch/__init__.py
