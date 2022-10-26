@@ -67,7 +67,7 @@ class DalyBt(BtBms):
         await super().connect(**kwargs)
 
         CHARACTERISTIC_UUIDS = [
-            (17, 15, 48), # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
+            (17, 15, 48),  # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
             ('0000fff1-0000-1000-8000-00805f9b34fb', '0000fff2-0000-1000-8000-00805f9b34fb',
              '02f00000-0000-0000-0000-00000000ff01'),  # (15,19,31)
         ]
@@ -108,13 +108,25 @@ class DalyBt(BtBms):
                 sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
             except TimeoutError:
                 n_recv = num_responses - self._fetch_nr[command].count(None)
-                raise TimeoutError("timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
+                raise TimeoutError(
+                    "timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
 
             return sample
 
+    async def set_switch(self, switch: str, state: bool):
+        fet_addr = dict(discharge=0xD9, charge=0xDA)
+        msg = self.daly_command_message(fet_addr[switch], extra="01" if state else "00")
+        await self.client.write_gatt_char(self.UUID_TX, msg)
+
     async def fetch(self) -> BmsSample:
         status = await self.fetch_status()
-        sample = await self.fetch_soc(sample_kwargs=dict(charge=status['capacity_ah']))
+        sample = await self.fetch_soc(sample_kwargs=dict(
+            charge=status['capacity_ah'],
+            switches=dict(
+                charge=bool(status['charging_mosfet']),
+                discharge=bool(status['discharging_mosfet'])
+            )
+        ))
         return sample
 
     async def fetch_soc(self, sample_kwargs=None):
@@ -149,7 +161,7 @@ class DalyBt(BtBms):
             "charging_mosfet": parts[1],
             "discharging_mosfet": parts[2],
             # "bms_cycles": parts[3], unstable result
-            "capacity_ah": parts[4] / 1000, # this is the current charge
+            "capacity_ah": parts[4] / 1000,  # this is the current charge
         }
 
     async def fetch_states(self):
