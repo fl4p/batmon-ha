@@ -118,20 +118,29 @@ def mqqt_last_publish_time():
     return _last_publish_time
 
 
-def mqtt_iterator(client, result, topic, base='', hass=True):
+def is_none_or_nan(val):
+    if val is None:
+        return True
+    if isinstance(val, float) and (math.isnan(val) or not math.isfinite(val)):
+        return True
+    return False
+
+
+def mqtt_iterator_victron(client, result, topic, base='', hass=True):
     for key in result.keys():
         if type(result[key]) == dict:
-            mqtt_iterator(client, result[key], topic, f'{base}/{key}', hass)
+            mqtt_iterator_victron(client, result[key], topic, f'{base}/{key}', hass)
         else:
-            if hass:
-                # logger.debug('Sending out hass discovery message')
-                topic_, output = build_mqtt_hass_config_discovery(f'{base}/{key}', topic=topic)
-                mqtt_single_out(client, topic_, output, retain=True)
 
             if type(result[key]) == list:
                 val = json.dumps(result[key])
             else:
                 val = result[key]
+
+            if hass:  # and not is_none_or_nan(val):
+                # logger.debug('Sending out hass discovery message')
+                topic_, output = build_mqtt_hass_config_discovery(f'{base}/{key}', topic=topic)
+                mqtt_single_out(client, topic_, output, retain=True)
 
             mqtt_single_out(client, f'{topic}{base}/{key}', val)
 
@@ -191,8 +200,9 @@ def publish_temperatures(client, device_topic, temperatures):
         mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
 
 
-def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, expire_after_seconds: int,
-                           device_info: DeviceInfo = None, switches=None):
+def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
+                           num_temp_sensors,
+                           device_info: DeviceInfo = None):
     discovery_msg = {}
 
     device_json = {
@@ -232,6 +242,7 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
         k = 'temperatures/%d' % (i + 1)
         _hass_discovery(k, "temperature", unit="°C")
 
+    switches = (sample.switches and sample.switches.keys())
     if switches:
         for switch_name in switches:
             discovery_msg[f"homeassistant/switch/{device_topic}/{switch_name}/config"] = {
@@ -240,19 +251,19 @@ def publish_hass_discovery(client, device_topic, num_cells, num_temp_sensors, ex
                 "device_class": 'outlet',
                 "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
-                # "expire_after": expire_after_seconds,
+                "expire_after": expire_after_seconds,
                 "device": device_json,
                 "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
             }
 
             discovery_msg[f"homeassistant/binary_sensor/{device_topic}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
-                "name": f"{device_topic} {switch_name}",
+                "name": f"{device_topic} {switch_name} switch",
                 "device_class": 'outlet',
                 "json_attributes_topic": f"{device_topic}/{switch_name}",
-                "state_topic": f"{device_topic}/switch/{switch_name}",
-                # "expire_after": expire_after_seconds,
+                "expire_after": expire_after_seconds,
                 "device": device_json,
+                "state_topic": f"{device_topic}/switch/{switch_name}",
                 "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
             }
 

@@ -66,6 +66,9 @@ class BmsSample:
         self.switches = switches
         self.uptime = uptime
 
+        if switches:
+            assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
+
     @property
     def power(self):
         return round(self.voltage * self.current, 2)

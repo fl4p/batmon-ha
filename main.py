@@ -19,7 +19,7 @@ import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
+from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 
 def load_user_config():
@@ -144,7 +144,7 @@ async def main():
 
     async def _fetch_victron(dev):
         result = await victron.fetch_device(dev['address'], psk=dev.get('pin'))
-        mqtt_iterator(mqtt_client, result=result, topic=dev['alias'], hass=True)
+        mqtt_iterator_victron(mqtt_client, result=result, topic=dev['alias'], hass=True)
 
     names = set()
 
