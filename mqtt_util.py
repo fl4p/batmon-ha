@@ -232,7 +232,8 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         discovery_msg[f"homeassistant/sensor/{device_topic}/_{k.replace('/', '_')}/config"] = dm
 
     for k, d in sample_desc.items():
-        _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None))
+        if not is_none_or_nan(getattr(sample, d["field"])):
+            _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
