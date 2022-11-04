@@ -1,6 +1,6 @@
 import math
 from copy import copy
-from typing import List
+from typing import List, Dict, Optional
 
 MIN_VALUE_EXPIRY = 20
 
@@ -28,7 +28,9 @@ class BmsSample:
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature=math.nan, ):
+                 mos_temperature=math.nan,
+                 switches: Optional[Dict[str, bool]] = None,
+                 uptime=math.nan):
         """
 
         :param voltage:
@@ -40,6 +42,7 @@ class BmsSample:
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
+        :param uptime BMS uptime in seconds
         """
         self.voltage: float = voltage
         self.current: float = current
@@ -60,6 +63,11 @@ class BmsSample:
         self.num_cycles: float = num_cycles
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature
+        self.switches = switches
+        self.uptime = uptime
+
+        if switches:
+            assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
 
     @property
     def power(self):

@@ -1,6 +1,6 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.45"
+version: "0.0.46"
 slug: "batmon"
 init: false
 arch:
@@ -25,6 +25,7 @@ options:
   verbose_log: false
   sample_period: 1.0
   invert_current: true
+  watchdog: true
 schema:
   devices:
     - address: str
@@ -40,3 +41,4 @@ schema:
   verbose_log: "bool"
   sample_period: "float"
   invert_current: "bool"
+  watchdog: "bool"

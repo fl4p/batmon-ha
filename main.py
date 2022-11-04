@@ -3,6 +3,7 @@ import atexit
 import json
 import random
 import signal
+import time
 import traceback
 from functools import partial
 from typing import List
@@ -14,10 +15,11 @@ import bmslib.bt
 import bmslib.daly
 import bmslib.jbd
 import bmslib.jikong
+import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator
+from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 
 def load_user_config():
@@ -72,7 +74,7 @@ async def bt_discovery():
     return devices
 
 
-async def fetch_loop(fn, period, max_errors=40):
+async def fetch_loop(fn, period, max_errors):
     num_errors_row = 0
     while not shutdown:
         try:
@@ -82,10 +84,35 @@ async def fetch_loop(fn, period, max_errors=40):
             num_errors_row += 1
             logger.error('Error (num %d) reading BMS: %s', num_errors_row, e)
             logger.error('Stack: %s', traceback.format_exc())
-            if num_errors_row > max_errors:
+            if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
         await asyncio.sleep(period)
+
+
+async def background_loop(timeout: float):
+    global shutdown
+
+    t_start = time.time()
+
+    if timeout:
+        logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
+
+    while not shutdown:
+
+        await mqtt_process_action_queue()
+
+        if timeout:
+            # compute time since last successful publish
+            pdt = time.time() - (mqqt_last_publish_time() or t_start)
+            if pdt > timeout:
+                if mqqt_last_publish_time():
+                    logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
+                else:
+                    logger.error("MQTT never published a message after %.0fs, exit", timeout)
+                shutdown = True
+                break
+            await asyncio.sleep(.1)
 
 
 async def main():
@@ -112,11 +139,12 @@ async def main():
         daly=bmslib.daly.DalyBt,
         jbd=bmslib.jbd.JbdBt,
         jk=bmslib.jikong.JKBt,
+        dummy=bmslib.dummy.DummyBt,
     )
 
     async def _fetch_victron(dev):
         result = await victron.fetch_device(dev['address'], psk=dev.get('pin'))
-        mqtt_iterator(mqtt_client, result=result, topic=dev['alias'], hass=True)
+        mqtt_iterator_victron(mqtt_client, result=result, topic=dev['alias'], hass=True)
 
     names = set()
 
@@ -153,8 +181,11 @@ async def main():
     if user_config.get('mqtt_user', None):
         mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
 
+    mqtt_client.on_message = mqtt_message_handler
+
     try:
-        mqtt_client.connect(user_config.mqtt_broker, port=1883)
+        mqtt_client.connect(user_config.mqtt_broker, port=user_config.get('mqtt_port', 1883))
+        mqtt_client.loop_start()
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
@@ -170,6 +201,11 @@ async def main():
     logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
+    watchdog_en = user_config.get('watchdog', False)
+    max_errors = 200 if watchdog_en else 0
+
+    asyncio.create_task(background_loop(timeout=max(120., sample_period * 3) if watchdog_en else 0))
+
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
         tasks = sampler_list + extra_tasks
@@ -181,7 +217,7 @@ async def main():
             except:
                 pass
 
-        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period)) for fn in tasks]
+        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
         await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
     else:
@@ -204,15 +240,20 @@ async def main():
                     logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
                     raise exceptions[0]
 
-        await fetch_loop(fn, period=sample_period)
+        await fetch_loop(fn, period=sample_period, max_errors=max_errors)
+
 
     global shutdown
     shutdown = True
+
+    logger.info('Shutting down ...')
+    # await asyncio.sleep(4)
 
     for bms in bms_list:
         try:
             logger.info("Disconnecting %s", bms)
             await bms.disconnect()
+            # await asyncio.sleep(2)
         except:
             pass
 

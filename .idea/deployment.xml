@@ -3,6 +3,17 @@
   <component name="PublishConfigData" autoUpload="Always" serverName="raspberrypi.local" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="homassistant.local caravan">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath path="/venv" />
+            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
       <paths name="homeassistant.local">
         <serverdata>
           <mappings>

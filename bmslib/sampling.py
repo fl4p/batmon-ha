@@ -2,18 +2,21 @@ import datetime
 import time
 from typing import Optional
 
+import paho.mqtt.client
+
 import bmslib.bt
 from bmslib.bms import DeviceInfo
 from bmslib.pwmath import Integrator
 from bmslib.util import get_logger
-from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery
+from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
+    subscribe_switches
 
 logger = get_logger(verbose=False)
 
 
 class BmsSampler():
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client, dt_max, expire_after_seconds, invert_current=False):
+    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max, expire_after_seconds, invert_current=False):
         self.bms = bms
         self.current_integrator = Integrator(dx_max=dt_max)
         self.power_integrator = Integrator(dx_max=dt_max)
@@ -57,6 +60,10 @@ class BmsSampler():
                 else:
                     self.power_integrator_pos += (t_sample, sample.power)
 
+                if self.num_samples == 0 and sample.switches:
+                    logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
+                    subscribe_switches(mqtt_client, device_topic=bms.name, bms=bms, switches=sample.switches.keys())
+
                 publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
                 logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
 
@@ -77,10 +84,10 @@ class BmsSampler():
                         except Exception as e:
                             logger.warning('%s error fetching device info: %s', bms.name, e)
                     publish_hass_discovery(
-                        mqtt_client, device_topic=bms.name,
+                        mqtt_client, device_topic=bms.name,  expire_after_seconds=self.expire_after_seconds,
+                        sample=sample,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
-                        expire_after_seconds=self.expire_after_seconds,
-                        device_info=self.device_info
+                        device_info=self.device_info,
                     )
 
                 self.num_samples += 1

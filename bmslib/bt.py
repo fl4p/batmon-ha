@@ -21,7 +21,7 @@ class BtBms():
     async def connect(self, timeout=20):
         await self.client.connect(timeout=timeout)
 
-    async def _connect_with_scanner(self, timeout):
+    async def _connect_with_scanner(self, timeout=20):
         import bleak
         scanner = bleak.BleakScanner()
         self.logger.debug("starting scan")
@@ -64,8 +64,6 @@ class BtBms():
     async def fetch_temperatures(self):
         raise NotImplementedError()
 
-    async def fetch_switches(self) -> Dict[str, bool]:
-        raise NotImplementedError()
 
     async def set_switch(self, switch: str, state: bool):
         raise NotImplementedError()
