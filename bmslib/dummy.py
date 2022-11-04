@@ -2,6 +2,7 @@
 This is code for a dummy BMS wich doesn't physically exist.
 
 """
+import time
 
 from .bms import BmsSample
 from .bt import BtBms
@@ -11,6 +12,7 @@ class DummyBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._switches = dict(charge=True, discharge=True)
+        self._t0 = time.time()
 
     async def connect(self, **kwargs):
         pass
@@ -27,6 +29,7 @@ class DummyBt(BtBms):
             num_cycles=3,
             temperatures=[21],
             switches=self._switches,
+            uptime=(time.time() - self._t0)
         )
         return sample
 
