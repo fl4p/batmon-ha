@@ -2,9 +2,9 @@
 
 ![Home Assistant Dashboard Screenshot](https://repository-images.githubusercontent.com/445289350/03f3d531-37cf-48be-84c8-e6c75270fc87)
 
-Monitor various Battery management systems (BMS) over Bluetooth. This add-on reads the BMS and sends sensor data through
-MQTT to Home
-Assistant. Using bluetooth on the Home Assistant host system, it does not need any additional hardware.
+Monitor and control various Battery management systems (BMS) over Bluetooth. This add-on reads the BMS and sends sensor
+data through MQTT to Home Assistant. Using bluetooth on the Home Assistant host system, it does not need any additional
+hardware.
 
 I created this to compare BMS readings for a detailed evaluation of BMS reliability and accuracy.
 
@@ -13,6 +13,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
+* Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
 
 ### Supported Devices (bluetooth)
@@ -42,11 +43,13 @@ Add an entry for each device, such as:
 ```
 
 `address` is the MAC address of the Bluetooth device. If you don't know the MAC address start the add-on, and you'll
-find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as displayed in the discovery list.
+find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
+displayed in the discovery list.
 
-`type` can be `jk`, `jbd`, `daly` or `victron`.
+`type` can be `jk`, `jbd`, `daly`, `victron` or `dummy`.
 
-With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth discovery is used.
+With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
+discovery is used.
 
 If the device requires a PIN when pairing add `pin: <device pin>`
 
@@ -60,20 +63,25 @@ For verbose logs of particular BMS add `debug: true`.
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
-* `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on after it exists)
+* `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
+  after it exists)
 
 ## Known Issues
 
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
-* Raspberry PI's bluetooth can be buggy. If you experience errors and timeouts try to install an external Bluetooth dongle.
+* Raspberry PI's bluetooth can be buggy. If you experience errors and timeouts try to install an external Bluetooth
+  dongle.
 * Pairing a Victron using a PIN doesn't work properly
 
 ## TODO
+
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
 
 ## Stand-alone
-You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI). See [doc/Standalone.md](doc/Standalone.md)
+
+You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
+See [doc/Standalone.md](doc/Standalone.md)
 
 ## References
 

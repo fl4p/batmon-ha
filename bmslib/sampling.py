@@ -84,11 +84,10 @@ class BmsSampler():
                         except Exception as e:
                             logger.warning('%s error fetching device info: %s', bms.name, e)
                     publish_hass_discovery(
-                        mqtt_client, device_topic=bms.name,
+                        mqtt_client, device_topic=bms.name,  expire_after_seconds=self.expire_after_seconds,
+                        sample=sample,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
-                        expire_after_seconds=self.expire_after_seconds,
                         device_info=self.device_info,
-                        switches=(sample.switches and sample.switches.keys()),
                     )
 
                 self.num_samples += 1
