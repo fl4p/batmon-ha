@@ -51,7 +51,7 @@ displayed in the discovery list.
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
 
-If the device requires a PIN when pairing add `pin: <device pin>`
+If the device requires a PIN when pairing add `pin: 123456` (and replace 123456 with device's PIN)
 
 For verbose logs of particular BMS add `debug: true`.
 
