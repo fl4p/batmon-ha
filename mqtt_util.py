@@ -260,7 +260,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             discovery_msg[f"homeassistant/binary_sensor/{device_topic}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name} switch",
-                "device_class": 'outlet',
+                "device_class": 'power',
                 "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
