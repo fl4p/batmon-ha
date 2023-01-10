@@ -309,8 +309,24 @@ def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     else:
         logger.warning("No callback for topic %s (payload %s)", message.topic, payload)
 
+
+def paho_monkey_patch():
+    def _handle_pingresp(self):
+        if self._in_packet['remaining_length'] != 0:
+            return paho.MQTT_ERR_PROTOCOL
+
+        # No longer waiting for a PINGRESP.
+        # self._ping_t = 0
+        self._easy_log(paho.MQTT_LOG_DEBUG, "Received PINGRESP (patched)")
+        return paho.MQTT_ERR_SUCCESS
+
+    paho.Client._handle_pingresp = _handle_pingresp
+
+    logger.debug("applied paho monkey patch _handle_pingresp")
+
     """
     
+
 
 mqtt: homeassistant/sensor/daly_bms/_status_temperature_sensors/config {"unique_id": "daly_bms__status_temperature_sensors", "name": "Daly BMS  status temperature_sensors", "json_attributes_topic": "daly_bms/status/temperature_sensors", "state_topic": "daly_bms/status/temperature_sensors", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
 mqtt: daly_bms/status/temperature_sensors 1

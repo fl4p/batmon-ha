@@ -19,7 +19,8 @@ import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
+from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue, \
+    paho_monkey_patch
 
 
 def load_user_config():
@@ -176,6 +177,7 @@ async def main():
         bms.set_keep_alive(user_config.get('keep_alive', False))
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
+    paho_monkey_patch()
     mqtt_client = paho.Client()
     mqtt_client.enable_logger(logger)
     if user_config.get('mqtt_user', None):
