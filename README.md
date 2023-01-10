@@ -63,6 +63,7 @@ For verbose logs of particular BMS add `debug: true`.
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
+* `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
 

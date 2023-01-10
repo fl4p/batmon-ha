@@ -190,10 +190,11 @@ async def main():
         logger.error('mqtt connection error %s', ex)
 
     sample_period = float(user_config.get('sample_period', 1.0))
+    expire_values_after = float(user_config.get('expire_values_after', MIN_VALUE_EXPIRY))
     ic = user_config.get('invert_current', False)
     sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client,
                                dt_max=4,
-                               expire_after_seconds=max(MIN_VALUE_EXPIRY, int(sample_period * 2 + .5)),
+                               expire_after_seconds=max(expire_values_after, int(sample_period * 2 + .5)),
                                invert_current=ic) for bms in bms_list]
 
     parallel_fetch = user_config.get('concurrent_sampling', False)

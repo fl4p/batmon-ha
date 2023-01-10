@@ -42,3 +42,4 @@ schema:
   sample_period: "float"
   invert_current: "bool"
   watchdog: "bool"
+  expire_values_after: "float"
