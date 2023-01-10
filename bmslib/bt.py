@@ -1,5 +1,4 @@
 import asyncio
-from typing import Dict
 
 from bleak import BleakClient
 
@@ -19,9 +18,22 @@ class BtBms():
             self.logger.warning('BMS %s disconnected!', self.__str__())
 
     async def connect(self, timeout=20):
+        """
+        Establish a BLE connection
+        :param timeout:
+        :return:
+        """
         await self.client.connect(timeout=timeout)
 
+
     async def _connect_with_scanner(self, timeout=20):
+        """
+        Starts a bluetooth discovery and tries to establish a BLE connection with back off.
+         This fixes connection errors for some BMS (jikong). Use instead of connect().
+
+        :param timeout:
+        :return:
+        """
         import bleak
         scanner = bleak.BleakScanner()
         self.logger.debug("starting scan")
@@ -53,19 +65,42 @@ class BtBms():
         await self.client.disconnect()
 
     async def fetch_device_info(self) -> DeviceInfo:
+        """
+        Retrieve static BMS device info (HW, SW version, serial number, etc)
+        :return: DeviceInfo
+        """
         raise NotImplementedError()
 
     async def fetch(self) -> BmsSample:
+        """
+        Retrieve a BMS sample
+        :return:
+        """
         raise NotImplementedError()
 
     async def fetch_voltages(self):
+        """
+        Get cell voltages in mV. The implementation can require a prior fetch(), depending on BMS BLE data frame design.
+        So the caller must call fetch() prior to fetch_voltages()
+        :return: List[int]
+        """
         raise NotImplementedError()
 
     async def fetch_temperatures(self):
+        """
+        Get temperature readings in °C. The implementation can require a prior fetch(), depending on BMS BLE data frame design.
+        So the caller must call fetch() prior to fetch_temperatures()
+        :return:
+        """
         raise NotImplementedError()
 
-
     async def set_switch(self, switch: str, state: bool):
+        """
+        Send a switch command to the BMS to control a physical switch, usually a MOSFET or relay.
+        :param switch:
+        :param state:
+        :return:
+        """
         raise NotImplementedError()
 
     def __str__(self):
