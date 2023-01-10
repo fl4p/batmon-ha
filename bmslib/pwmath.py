@@ -23,6 +23,7 @@ class Integrator():
 
     def add_linear(self, x, y):
         # assert timestamp, ""
+        # trapezoidal sum
 
         if self._last_x is not None:
             dx = (x - self._last_x)

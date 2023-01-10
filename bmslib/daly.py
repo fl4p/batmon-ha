@@ -119,7 +119,7 @@ class DalyBt(BtBms):
         await self.client.write_gatt_char(self.UUID_TX, msg)
 
     async def fetch(self) -> BmsSample:
-        status = await self.fetch_status()
+        status = await self._fetch_status()
         sample = await self.fetch_soc(sample_kwargs=dict(
             charge=status['capacity_ah'],
             switches=dict(
@@ -144,7 +144,7 @@ class DalyBt(BtBms):
         )
         return sample
 
-    async def fetch_status(self):
+    async def _fetch_status(self):
         response_data = await self._q(0x93)
 
         parts = struct.unpack('>b ? ? B l', response_data)
