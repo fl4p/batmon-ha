@@ -49,9 +49,9 @@ class BmsSample:
         self.balance_current = balance_current
 
         if math.isnan(soc):
-            soc = round(charge / capacity * 100, 2)
-        else:
-            if math.isnan(capacity) and soc > .2:
+            if capacity > 0:
+                soc = round(charge / capacity * 100, 2)
+        elif math.isnan(capacity) and soc > .2:
                 capacity = round(charge / soc * 100)
 
         assert math.isfinite(soc)
