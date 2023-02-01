@@ -32,6 +32,7 @@ class JbdBt(BtBms):
         self._buffer = bytearray()
         self._fetch_futures = FuturesPool()
         self._switches = None
+        self._last_response = None
 
     def _notification_handler(self, sender, data):
 
@@ -44,6 +45,7 @@ class JbdBt(BtBms):
             self._buffer.clear()
 
             # print(command, 'buffer endswith w', self._buffer)
+            self._last_response = buf
             self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
@@ -148,6 +150,9 @@ class JbdBt(BtBms):
         data = jbd_message(status_bit=0x5A, cmd=0xE1, data=bytes([0x00, tc]))  # all off
         self.logger.info("send switch msg: %s", data)
         await self.client.write_gatt_char(self.UUID_TX, data=data)
+
+    def debug_data(self):
+        return self._last_response
 
 
 async def main():

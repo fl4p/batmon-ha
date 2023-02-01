@@ -29,7 +29,13 @@ class BmsSampler():
         self.num_samples = 0
 
     async def __call__(self):
-        return await self.sample()
+        try:
+            return await self.sample()
+        except:
+            dd = self.bms.debug_data()
+            if dd:
+                logger.info("bms debug data: %s", )
+            raise
 
     async def sample(self):
         bms = self.bms

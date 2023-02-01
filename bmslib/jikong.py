@@ -216,6 +216,9 @@ class JKBt(BtBms):
         )
         await self._write(addresses[switch], [0x1 if state else 0x0])
 
+    def debug_data(self):
+        return self._resp_table
+
 
 async def main():
     mac_address = 'C8:47:8C:F7:AD:B4'

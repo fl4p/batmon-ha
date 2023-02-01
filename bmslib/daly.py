@@ -28,6 +28,7 @@ class DalyBt(BtBms):
         self._fetch_nr: Dict[int, list] = {}
         # self._num_cells = 0
         self._states = None
+        self._last_response = None
 
     async def get_states_cached(self, key):
         if not self._states:
@@ -61,6 +62,7 @@ class DalyBt(BtBms):
                     # this happens if buf is already full and still receiving messages
                     continue
 
+            self._last_response = response_bytes
             self._fetch_futures.set_result(command, response_bytes)
 
     async def connect(self, **kwargs):
@@ -236,6 +238,9 @@ class DalyBt(BtBms):
         message_bytes += calc_crc(message_bytes)
 
         return message_bytes
+
+    def debug_data(self):
+        return self._last_response
 
 
 async def main():
