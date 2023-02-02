@@ -4,6 +4,8 @@ This is code for a dummy BMS wich doesn't physically exist.
 """
 import time
 
+import math
+
 from .bms import BmsSample
 from .bt import BtBms
 
@@ -22,8 +24,8 @@ class DummyBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         sample = BmsSample(
-            voltage=12,
-            current=0,
+            voltage=12 - math.sin(time.time() / 4) * .5,
+            current=math.sin(time.time() / 4),
             charge=50,
             capacity=100,
             num_cycles=3,
