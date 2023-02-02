@@ -53,18 +53,18 @@ class BmsSampler():
                     logger.info('connected bms %s!', bms)
                 t_fetch = time.time()
                 sample = await bms.fetch()
-                t_sample = time.time()
+                t_hour = time.time() * (1/3600)
 
                 if self.invert_current:
                     sample = sample.invert_current()
 
-                self.current_integrator += (t_sample, sample.current)
-                self.power_integrator += (t_sample, sample.power)
+                self.current_integrator += (t_hour, sample.current)
+                self.power_integrator += (t_hour, sample.power)
 
                 if sample.power < 0:
-                    self.power_integrator_neg += (t_sample, sample.power)
+                    self.power_integrator_neg += (t_hour, sample.power)
                 else:
-                    self.power_integrator_pos += (t_sample, sample.power)
+                    self.power_integrator_pos += (t_hour, sample.power)
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
