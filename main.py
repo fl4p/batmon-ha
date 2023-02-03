@@ -90,10 +90,17 @@ async def fetch_loop(fn, period, max_errors):
         await asyncio.sleep(period)
 
 
-async def background_loop(timeout: float):
+def store_states(samplers: List[BmsSampler]):
+    meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
+    from bmslib.store import store_meter_states
+    store_meter_states(meter_states)
+
+
+async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
     global shutdown
 
     t_start = time.time()
+    t_last_store = t_start
 
     if timeout:
         logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
@@ -101,10 +108,11 @@ async def background_loop(timeout: float):
     while not shutdown:
 
         await mqtt_process_action_queue()
+        now = time.time()
 
         if timeout:
             # compute time since last successful publish
-            pdt = time.time() - (mqqt_last_publish_time() or t_start)
+            pdt = now - (mqqt_last_publish_time() or t_start)
             if pdt > timeout:
                 if mqqt_last_publish_time():
                     logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
@@ -112,13 +120,15 @@ async def background_loop(timeout: float):
                     logger.error("MQTT never published a message after %.0fs, exit", timeout)
                 shutdown = True
                 break
+
+        if now - t_last_store > 10:
+            t_last_store = now
+            try:
+                store_states(sampler_list)
+            except Exception as e:
+                logger.error('Error starting states: %s', e)
+
         await asyncio.sleep(.1)
-
-
-def store_states(samplers: List[BmsSampler]):
-    meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
-    from bmslib.store import store_meter_states
-    store_meter_states(meter_states)
 
 
 async def main():
@@ -126,7 +136,7 @@ async def main():
     extra_tasks = []
 
     try:
-        raise Exception()
+        # raise Exception()
         devices = await bt_discovery()
     except Exception as e:
         devices = []
@@ -225,7 +235,10 @@ async def main():
     watchdog_en = user_config.get('watchdog', False)
     max_errors = 200 if watchdog_en else 0
 
-    asyncio.create_task(background_loop(timeout=max(120., sample_period * 3) if watchdog_en else 0))
+    asyncio.create_task(background_loop(
+        timeout=max(120., sample_period * 3) if watchdog_en else 0,
+        sampler_list=sampler_list
+    ))
 
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
