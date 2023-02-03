@@ -13,6 +13,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
+* Energy consumption meters (using trapezoidal power integrators)
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
 
@@ -62,6 +63,8 @@ For verbose logs of particular BMS add `debug: true`.
 * `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
+* Set `publish_period` to a higher value than `sample_period` to throttle MQTT data, while sampling BMS for accurate
+  energy meters.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
