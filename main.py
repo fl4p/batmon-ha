@@ -193,7 +193,7 @@ async def main():
         bms.set_keep_alive(user_config.get('keep_alive', False))
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
-    paho_monkey_patch()
+    # paho_monkey_patch()
     mqtt_client = paho.Client()
     mqtt_client.enable_logger(logger)
     if user_config.get('mqtt_user', None):
