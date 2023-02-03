@@ -27,7 +27,9 @@ class Integrator():
 
         if not math.isnan(self._last_x):
             dx = (x - self._last_x)
-            if dx < self.dx_max:
+            if dx < 0:
+                raise ValueError("x must be monotonic increasing (given %s, last %s)" % (x, self._last_x))
+            if dx <= self.dx_max:
                 y_hat = (self._last_y + y) / 2
                 self._integrator += dx * y_hat
 
@@ -39,3 +41,22 @@ class Integrator():
 
     def restore(self, value):
         self._integrator = value
+
+
+def test_integrator():
+    i = Integrator("test", 1)
+    i += (0, 1)
+    assert i.get() == 0
+    i += (1, 1)
+    assert i.get() == 1
+    i += (1, 2)
+    assert i.get() == 1
+    i += (2, 2)
+    assert i.get() == 3
+    i += (3, 3) # test trapezoid
+    assert i.get() == (3 + 2.5)
+    i += (5, 3) # skip (>dt_max)
+    assert i.get() == (3 + 2.5)
+
+if __name__ == "__main__":
+    test_integrator()
