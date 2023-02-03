@@ -1,4 +1,3 @@
-import asyncio
 import atexit
 import json
 import random
@@ -8,19 +7,19 @@ import traceback
 from functools import partial
 from typing import List
 
+import asyncio
 import paho.mqtt.client as paho
 from bleak import BleakScanner
 
 import bmslib.bt
 import bmslib.daly
+import bmslib.dummy
 import bmslib.jbd
 import bmslib.jikong
-import bmslib.dummy
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue, \
-    paho_monkey_patch
+from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 
 def load_user_config():
@@ -113,7 +112,13 @@ async def background_loop(timeout: float):
                     logger.error("MQTT never published a message after %.0fs, exit", timeout)
                 shutdown = True
                 break
-            await asyncio.sleep(.1)
+        await asyncio.sleep(.1)
+
+
+def store_states(samplers: List[BmsSampler]):
+    meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
+    from bmslib.store import store_meter_states
+    store_meter_states(meter_states)
 
 
 async def main():
@@ -121,6 +126,7 @@ async def main():
     extra_tasks = []
 
     try:
+        raise Exception()
         devices = await bt_discovery()
     except Exception as e:
         devices = []
@@ -191,13 +197,25 @@ async def main():
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
 
+    from bmslib.store import load_meter_states
+    try:
+        meter_states = load_meter_states()
+    except Exception as e:
+        logger.warning('Failed to load meter states: %s', e)
+        meter_states = {}
+
     sample_period = float(user_config.get('sample_period', 1.0))
+    publish_period = float(user_config.get('publish_period', sample_period))
     expire_values_after = float(user_config.get('expire_values_after', MIN_VALUE_EXPIRY))
     ic = user_config.get('invert_current', False)
-    sampler_list = [BmsSampler(bms, mqtt_client=mqtt_client,
-                               dt_max=4,
-                               expire_after_seconds=max(expire_values_after, int(sample_period * 2 + .5)),
-                               invert_current=ic) for bms in bms_list]
+    sampler_list = [BmsSampler(
+        bms, mqtt_client=mqtt_client,
+        dt_max=4,
+        expire_after_seconds=max(expire_values_after, int(sample_period * 2 + .5), int(publish_period * 2 + .5)),
+        invert_current=ic,
+        meter_state=meter_states.get(bms.name),
+        publish_period=publish_period,
+    ) for bms in bms_list]
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
@@ -245,12 +263,13 @@ async def main():
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
-
     global shutdown
     shutdown = True
 
     logger.info('Shutting down ...')
     # await asyncio.sleep(4)
+
+    store_states(sampler_list)
 
     for bms in bms_list:
         try:

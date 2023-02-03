@@ -9,24 +9,38 @@ from bmslib.bms import DeviceInfo
 from bmslib.pwmath import Integrator
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches
+    subscribe_switches, mqtt_single_out, round_to_n
 
 logger = get_logger(verbose=False)
 
 
 class BmsSampler():
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max, expire_after_seconds, invert_current=False):
+    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max, expire_after_seconds,
+                 invert_current=False, meter_state=None, publish_period=None):
         self.bms = bms
-        self.current_integrator = Integrator(dx_max=dt_max)
-        self.power_integrator = Integrator(dx_max=dt_max)
-        self.power_integrator_pos = Integrator(dx_max=dt_max, reset=True)
-        self.power_integrator_neg = Integrator(dx_max=dt_max, reset=True)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
         self.expire_after_seconds = expire_after_seconds
         self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
+        self.publish_period = publish_period
+        self._t_pub = 0
+
+        self.current_integrator = Integrator(name="total_charge", dx_max=dt_max)
+        self.power_integrator = Integrator(name="total_energy", dx_max=dt_max)
+        self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max)
+        self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max)
+
+        self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
+                       self.power_integrator_charge]
+
+        for meter in self.meters:
+            if meter_state and meter.name in meter_state:
+                meter.restore(meter_state[meter.name]['reading'])
+
+    def get_meter_state(self):
+        return {meter.name: dict(reading=meter.get()) for meter in self.meters}
 
     async def __call__(self):
         try:
@@ -53,35 +67,43 @@ class BmsSampler():
                     logger.info('connected bms %s!', bms)
                 t_fetch = time.time()
                 sample = await bms.fetch()
-                t_hour = time.time() * (1/3600)
+                t_now = time.time()
+                t_hour = t_now * (1 / 3600)
 
                 if self.invert_current:
                     sample = sample.invert_current()
 
                 self.current_integrator += (t_hour, sample.current)
-                self.power_integrator += (t_hour, sample.power)
+                self.power_integrator += (t_hour * 1e-3, sample.power)
 
-                if sample.power < 0:
-                    self.power_integrator_neg += (t_hour, sample.power)
+                if sample.power < 0 == self.invert_current:
+                    self.power_integrator_charge += (t_hour * 1e-3, abs(sample.power))
                 else:
-                    self.power_integrator_pos += (t_hour, sample.power)
+                    self.power_integrator_discharge += (t_hour * 1e-3, abs(sample.power))
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
                     subscribe_switches(mqtt_client, device_topic=bms.name, bms=bms, switches=sample.switches.keys())
 
-                publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
-                logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
+                publish_discovery = (self.num_samples % 60) == 0
 
-                voltages = await bms.fetch_voltages()
-                publish_cell_voltages(mqtt_client, device_topic=bms.name, voltages=voltages)
+                if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
+                    self._t_pub = t_now
 
-                temperatures = sample.temperatures or await bms.fetch_temperatures()
-                publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
-                logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+                    publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
+                    logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
+
+                    self.publish_meters()
+
+                    voltages = await bms.fetch_voltages()
+                    publish_cell_voltages(mqtt_client, device_topic=bms.name, voltages=voltages)
+
+                    temperatures = sample.temperatures or await bms.fetch_temperatures()
+                    publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
+                    logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
                 # publish home assistant discovery every 60 samples
-                if (self.num_samples % 60) == 0:
+                if publish_discovery:
                     if self.device_info is None:
                         try:
                             self.device_info = await bms.fetch_device_info()
@@ -90,7 +112,7 @@ class BmsSampler():
                         except Exception as e:
                             logger.warning('%s error fetching device info: %s', bms.name, e)
                     publish_hass_discovery(
-                        mqtt_client, device_topic=bms.name,  expire_after_seconds=self.expire_after_seconds,
+                        mqtt_client, device_topic=bms.name, expire_after_seconds=self.expire_after_seconds,
                         sample=sample,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
                         device_info=self.device_info,
@@ -104,3 +126,12 @@ class BmsSampler():
             raise
 
         logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, t_fetch - t_conn, t_disc - t_fetch)
+
+    def publish_meters(self):
+        device_topic = self.bms.name
+        meters = [self.power_integrator, self.power_integrator_discharge, self.power_integrator_charge,
+                  self.current_integrator]
+        for meter in meters:
+            topic = f"{device_topic}/meter/{meter.name}"
+            s = round_to_n(meter.get(), 4)
+            mqtt_single_out(self.mqtt_client, topic, s)

@@ -24,8 +24,10 @@ options:
   keep_alive: true
   verbose_log: false
   sample_period: 1.0
+  publish_period: 2.0
   invert_current: true
   watchdog: true
+  expire_values_after: 20
 schema:
   devices:
     - address: str
@@ -40,6 +42,7 @@ schema:
   keep_alive: "bool"
   verbose_log: "bool"
   sample_period: "float"
+  publish_period: "float?"
   invert_current: "bool"
   watchdog: "bool"
   expire_values_after: "float"

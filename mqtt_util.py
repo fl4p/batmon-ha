@@ -1,9 +1,9 @@
 import json
-import math
 import queue
 import time
 import traceback
 
+import math
 import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
@@ -242,6 +242,13 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, num_temp_sensors):
         k = 'temperatures/%d' % (i + 1)
         _hass_discovery(k, "temperature", unit="°C")
+
+    meters = {'total_energy': dict(device_class="energy", unit="kWh", icon="meter-electric"),
+              'total_energy_charge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
+              'total_energy_discharge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
+              'total_charge': dict(device_class=None, unit="Ah")}
+    for name, m in meters.items():
+        _hass_discovery('meter/%s' % name, **m)
 
     switches = (sample.switches and sample.switches.keys())
     if switches:
