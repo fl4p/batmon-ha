@@ -6,7 +6,9 @@ NameType = Union[str, int, Tuple[Union[str, int]]]
 
 
 class FuturesPool:
-
+    """
+    Manage a collection of named futures.
+    """
     def __init__(self):
         self._futures: Dict[str, asyncio.Future] = {}
 
