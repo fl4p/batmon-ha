@@ -143,7 +143,7 @@ async def main():
         logger.error('Error discovering devices: %s', e)
 
     def name2addr(name: str):
-        return next((d.address for d in devices if d.name.strip() == name.strip()), name)
+        return next((d.address for d in devices if (d.name or "").strip() == name.strip()), name)
 
     def dev_by_addr(address: str):
         return next((d for d in devices if d.address == address), None)
