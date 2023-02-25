@@ -70,6 +70,13 @@ For verbose logs of particular BMS add `debug: true`.
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
 
+## Troubleshooting
+* When experiencing connection issues enable `keep_alive`
+* Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described above
+* Power cycle the BMS Bluetooth dongle (or BMS)
+* Try another Bluetooth hardware
+
+
 ## Known Issues
 
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new

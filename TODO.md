@@ -1,4 +1,5 @@
-* 
+* MicroPython port 
+
 * smooth current (10s)
 * allow to put device name which translates to address using discovery
 * only mqqt publish differences
