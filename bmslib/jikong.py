@@ -110,8 +110,8 @@ class JKBt(BtBms):
 
         try:
             await super().connect(timeout=4)
-        except:
-            self.logger.info("normal connect failed, connecting with scanner")
+        except Exception as e:
+            self.logger.info("normal connect failed (%s), connecting with scanner", e)
             await self._connect_with_scanner(timeout=timeout)
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
@@ -172,12 +172,12 @@ class JKBt(BtBms):
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
-
         return BmsSample(
             voltage=f32u(118),
             current=-f32s(126),
+            soc=buf[141],
 
-            cycle_capacity=f32u(154),
+            cycle_capacity=f32u(154),  # TODO what is this?
             capacity=f32u(146),  # computed capacity (starts at self.capacity, which is user-defined),
             charge=f32u(142),  # "remaining capacity"
 
@@ -191,10 +191,8 @@ class JKBt(BtBms):
                 charge=bool(buf[166]),
                 discharge=bool(buf[167]),
             ),
-            uptime=float(u32(162)), # seconds
+            uptime=float(u32(162)),  # seconds
         )
-
-        # TODO  154   4   0x3D 0x04 0x00 0x00    Cycle_Capacity       1.0
 
     async def fetch_voltages(self):
         """
