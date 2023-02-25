@@ -1,4 +1,7 @@
 import asyncio
+from threading import Thread
+from time import sleep
+from typing import Callable, Union
 
 from bleak import BleakClient
 
@@ -6,9 +9,14 @@ from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
 
+
+
 class BtBms():
-    def __init__(self, address, name, keep_alive=False, verbose_log=False):
-        self.client = BleakClient(address, disconnected_callback=self._on_disconnect)
+    def __init__(self, address: str, name, keep_alive=False, verbose_log=False):
+        if address.startswith('test_'):
+            self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
+        else:
+            self.client = BleakClient(address, disconnected_callback=self._on_disconnect)
         self.name = name
         self.keep_alive = keep_alive
         self.logger = get_logger(verbose_log)
@@ -24,7 +32,6 @@ class BtBms():
         :return:
         """
         await self.client.connect(timeout=timeout)
-
 
     async def _connect_with_scanner(self, timeout=20):
         """
