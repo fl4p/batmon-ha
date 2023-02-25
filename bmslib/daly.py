@@ -2,6 +2,7 @@
 
 References
 https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py
+https://github.com/esphome/esphome/tree/dev/esphome/components/daly_bms
 
 """
 import asyncio
@@ -127,7 +128,7 @@ class DalyBt(BtBms):
             switches=dict(
                 charge=bool(status['charging_mosfet']),
                 discharge=bool(status['discharging_mosfet'])
-            )
+            ),
         ))
         return sample
 
@@ -142,6 +143,7 @@ class DalyBt(BtBms):
             voltage=parts[0] / 10,
             current=(parts[2] - 30000) / 10,  # negative=charging, positive=discharging
             soc=parts[3] / 10,
+            num_cycles=self.get_states_cached('num_cycles'),
             **sample_kwargs,
         )
         return sample
