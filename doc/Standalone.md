@@ -74,3 +74,7 @@ Place this file to `/etc/systemd/system/batmon.service` and enable to start on b
 systemctl enable batmon.service
 systemctl start batmon.service 
 ```
+
+
+# Docker
+Small modifications are needed to run this inside Docker, see https://github.com/fl4p/batmon-ha/issues/25#issuecomment-1400900525

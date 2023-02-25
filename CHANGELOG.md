@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.51] - 2023-02-25
+
+### Added
+
+- Add dummy JK device for testing
+- Add Daly num_cycles
+
+### Changed
+
+- Fix debug log on error
+- Fix BLE discovery with empty device names
+- Fix JK soc issue (now using SoC the BMS provides instead of computing it)
+
+
 ## [0.0.50] - 2023-02-03
 
 ### Added
