@@ -45,7 +45,7 @@ class BmsSample:
         :param uptime BMS uptime in seconds
         """
         self.voltage: float = voltage
-        self.current: float = current
+        self.current: float = current or 0 # -0 -> +0
         self.balance_current = balance_current
 
         if math.isnan(soc):
