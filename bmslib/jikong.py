@@ -167,31 +167,38 @@ class JKBt(BtBms):
                 await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
         buf = self._resp_table[0x02]
+
+        is_new_11fw = buf[189] == 0x00 and buf[189 + 32] > 0
+        offset = 0
+        if is_new_11fw:
+            offset = 32
+            self.logger.debug('New 11.x firmware, offset=%s', offset)
+
         i16 = lambda i: int.from_bytes(buf[i:(i + 2)], byteorder='little', signed=True)
         u32 = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=False)
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
         return BmsSample(
-            voltage=f32u(118),
-            current=-f32s(126),
-            soc=buf[141],
+            voltage=f32u(118 + offset),
+            current=-f32s(126 + offset),
+            soc=buf[141 + offset],
 
-            cycle_capacity=f32u(154),  # TODO what is this?
-            capacity=f32u(146),  # computed capacity (starts at self.capacity, which is user-defined),
-            charge=f32u(142),  # "remaining capacity"
+            cycle_capacity=f32u(154 + offset),  # total charge TODO rename cycle charge
+            capacity=f32u(146 + offset),  # computed capacity (starts at self.capacity, which is user-defined),
+            charge=f32u(142 + offset),  # "remaining capacity"
 
-            temperatures=[i16(130) / 10, i16(132) / 10],
-            mos_temperature=i16(134) / 10,
-            balance_current=i16(138) / 1000,
+            temperatures=[i16(130 + offset) / 10, i16(132 + offset) / 10],
+            mos_temperature=i16(134 + offset) / 10,
+            balance_current=i16(138 + offset) / 1000,
 
             # 146 charge_full (see above)
-            num_cycles=u32(150),
+            num_cycles=u32(150 + offset),
             switches=dict(
-                charge=bool(buf[166]),
-                discharge=bool(buf[167]),
+                charge=bool(buf[166 + offset]),
+                discharge=bool(buf[167 + offset]),
             ),
-            uptime=float(u32(162)),  # seconds
+            uptime=float(u32(162 + offset)),  # seconds
         )
 
     async def fetch_voltages(self):
