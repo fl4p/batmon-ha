@@ -48,9 +48,9 @@ class BmsSample:
         self.current: float = current or 0 # -0 -> +0
         self.balance_current = balance_current
 
-        if math.isnan(soc):
-            if capacity > 0:
-                soc = round(charge / capacity * 100, 2)
+        # infer soc from capacity if soc is nan or type(soc)==int (for higher precision)
+        if capacity > 0 and (math.isnan(soc) or (isinstance(soc, int) and charge > 0)):
+            soc = round(charge / capacity * 100, 2)
         elif math.isnan(capacity) and soc > .2:
                 capacity = round(charge / soc * 100)
 
