@@ -14,6 +14,7 @@ from .util import get_logger
 class BtBms():
     def __init__(self, address: str, name, keep_alive=False, verbose_log=False):
         if address.startswith('test_'):
+            from bmslib.dummy import BleakDummyClient
             self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
         else:
             self.client = BleakClient(address, disconnected_callback=self._on_disconnect)
