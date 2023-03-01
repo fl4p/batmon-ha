@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.52] - 2023-03-01
+
+### Added
+
+- Add support for JK 11.x firmware
+- Add dummy JBD device for testing
+
+### Changed
+
+- Fix JBD unsigned values (negative capacity)
+
 ## [0.0.51] - 2023-02-25
 
 ### Added
