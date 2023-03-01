@@ -81,13 +81,14 @@ class JbdBt(BtBms):
         mos_byte = int.from_bytes(buf[20:21], 'big')
 
         sample = BmsSample(
-            voltage=int.from_bytes(buf[0:2], byteorder='big', signed=True) / 100,
+            voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
             current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100,
 
-            charge=int.from_bytes(buf[4:6], byteorder='big', signed=True) / 100,
-            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
+            charge=int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100,
+            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=False) / 100,
+            soc=buf[19],
 
-            num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=True),
+            num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=False),
 
             temperatures=[(int.from_bytes(buf[23 + i * 2:i * 2 + 25], 'big') - 2731) / 10 for i in range(num_temp)],
 
