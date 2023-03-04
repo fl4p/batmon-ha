@@ -22,7 +22,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * JK BMS (jikong) (JK02 protocol)
 * Daly BMS
 * JBD / Xiaoxiang BMS
-* Victron SmartShunt
+* Victron SmartShunt (make sure to update to latest firmware and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html) in the VictronConnect app)
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
@@ -85,7 +85,6 @@ For verbose logs of particular BMS add `debug: true`.
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
 * Raspberry PI's bluetooth can be buggy. If you experience errors and timeouts try to install an external Bluetooth
   dongle.
-* Pairing a Victron using a PIN doesn't work properly
 
 ## TODO
 
