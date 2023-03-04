@@ -1,38 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="homassistant.local caravan" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
-    <option name="confirmBeforeUploading" value="false" />
+  <component name="PublishConfigData" autoUpload="Always" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="homassistant.local caravan">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath path="/venv" />
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
       <paths name="homeassistant.local">
         <serverdata>
           <mappings>
             <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
           </mappings>
-          <excludedPaths>
-            <excludedPath path="/venv" />
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
-      <paths name="raspberrypi.local">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/home/pi/batmon-ha" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
         </serverdata>
       </paths>
       <paths name="raspberrypi.local (project level)">
