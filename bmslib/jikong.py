@@ -179,6 +179,8 @@ class JKBt(BtBms):
         f32u = lambda i: u32(i) * 1e-3
         f32s = lambda i: int.from_bytes(buf[i:(i + 4)], byteorder='little', signed=True) * 1e-3
 
+        temp = lambda x: float('nan') if x == -2000 else (x / 10)
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
@@ -188,7 +190,7 @@ class JKBt(BtBms):
             capacity=f32u(146 + offset),  # computed capacity (starts at self.capacity, which is user-defined),
             charge=f32u(142 + offset),  # "remaining capacity"
 
-            temperatures=[i16(130 + offset) / 10, i16(132 + offset) / 10],
+            temperatures=[temp(i16(130 + offset)), temp(i16(132 + offset))],
             mos_temperature=i16(134 + offset) / 10,
             balance_current=i16(138 + offset) / 1000,
 
