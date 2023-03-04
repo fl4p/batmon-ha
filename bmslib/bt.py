@@ -152,7 +152,7 @@ class BtBms():
 
     async def __aenter__(self):
         # print("enter")
-        if self.keep_alive and self.client.is_connected:
+        if self.keep_alive and self.is_connected:
             return
         await self.connect()
 

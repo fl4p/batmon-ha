@@ -27,12 +27,13 @@ class BmsSampler():
         self.publish_period = publish_period
         self._t_pub = 0
 
-        self.current_integrator = Integrator(name="total_charge", dx_max=dt_max_seconds / 3600)
-        self.power_integrator = Integrator(name="total_energy", dx_max=dt_max_seconds / 3600)
-        self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max_seconds / 3600)
-        self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max_seconds / 3600)
-        self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dt_max, dy_max=0.1)
-        self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dt_max, dy_max=0.5) # TODO normalize dy_max to capacity
+        dx_max = dt_max_seconds / 3600
+        self.current_integrator = Integrator(name="total_charge", dx_max=dx_max)
+        self.power_integrator = Integrator(name="total_energy", dx_max=dx_max)
+        self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dx_max)
+        self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dx_max)
+        self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dx_max, dy_max=0.1)
+        self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dx_max, dy_max=0.5) # TODO normalize dy_max to capacity
 
         self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
                        self.power_integrator_charge, self.cycle_integrator, self.charge_integrator]
