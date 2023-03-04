@@ -13,7 +13,8 @@ class dotdict(dict):
     # __hasattr__ = dict.__contains__
 
 def get_logger(verbose=False):
-    log_format = '%(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
+    #log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
+    log_format = '%(asctime)s %(levelname)s [%(module)s] %(message)s'
     if verbose:
         level = logging.DEBUG
     else:
