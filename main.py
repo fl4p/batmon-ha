@@ -16,6 +16,7 @@ import bmslib.daly
 import bmslib.dummy
 import bmslib.jbd
 import bmslib.jikong
+import bmslib.victron
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
@@ -156,6 +157,7 @@ async def main():
         daly=bmslib.daly.DalyBt,
         jbd=bmslib.jbd.JbdBt,
         jk=bmslib.jikong.JKBt,
+        victron=bmslib.victron.SmartShuntBt,
         dummy=bmslib.dummy.DummyBt,
     )
 
