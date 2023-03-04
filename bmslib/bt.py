@@ -1,30 +1,60 @@
 import asyncio
-from threading import Thread
-from time import sleep
-from typing import Callable, Union
 
 from bleak import BleakClient
 
+from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
 
-
-
 class BtBms():
-    def __init__(self, address: str, name, keep_alive=False, verbose_log=False):
+    def __init__(self, address: str, name, keep_alive=False, psk=None, verbose_log=False):
+        self.name = name
+        self.keep_alive = keep_alive
+        self.verbose_log = verbose_log
+        self.logger = get_logger(verbose_log)
+        self._fetch_futures = FuturesPool()
+        self._psk = psk
+
         if address.startswith('test_'):
             from bmslib.dummy import BleakDummyClient
             self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
         else:
-            self.client = BleakClient(address, disconnected_callback=self._on_disconnect)
-        self.name = name
-        self.keep_alive = keep_alive
-        self.logger = get_logger(verbose_log)
+            if psk:
+                try:
+                    import bleak.backends.bluezdbus.agent
+                except ImportError:
+                    self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
+            self.client = BleakClient(address, handle_pairing=bool(psk), disconnected_callback=self._on_disconnect)
+
 
     def _on_disconnect(self, client):
         if self.keep_alive:
             self.logger.warning('BMS %s disconnected!', self.__str__())
+        try:
+            self._fetch_futures.clear()
+        except Exception as e:
+            self.logger.warning('error clearing futures pool: %s', str(e) or type(e))
+
+    async def _connect_client(self, timeout):
+        await self.client.connect(timeout=timeout)
+        if self._psk:
+            def get_passkey(device: str, pin, passkey):
+                if pin:
+                    self.logger.info(f"Device {device} is displaying pin '{pin}'")
+                    return True
+
+                if passkey:
+                    self.logger.info(f"Device {device} is displaying passkey '{passkey:06d}'")
+                    return True
+
+                self.logger.info(f"Device {device} asking for psk, giving '{self._psk}'")
+                return str(self._psk) or None
+
+            self.logger.debug("Pairing %s using psk '%s'...", self._psk)
+            res = await self.client.pair(callback=get_passkey)
+            if not res:
+                self.logger.error("Pairing failed!")
 
     async def connect(self, timeout=20):
         """
@@ -32,7 +62,8 @@ class BtBms():
         :param timeout:
         :return:
         """
-        await self.client.connect(timeout=timeout)
+        await self._connect_client(timeout=timeout)
+
 
     async def _connect_with_scanner(self, timeout=20):
         """
@@ -55,12 +86,12 @@ class BtBms():
                     raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
-                await self.connect(timeout=timeout)
+                await self._connect_client(timeout=timeout)
                 break
             except Exception as e:
                 await self.client.disconnect()
                 if attempt < 8:
-                    self.logger.debug('retry after error %s', e)
+                    self.logger.debug('retry %d after error %s', attempt, e)
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
@@ -71,6 +102,7 @@ class BtBms():
 
     async def disconnect(self):
         await self.client.disconnect()
+        self._fetch_futures.clear()
 
     async def fetch_device_info(self) -> DeviceInfo:
         """
