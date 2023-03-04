@@ -2,10 +2,10 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="2e6738ab-b115-4932-af2d-27b993019d0c" name="raspberrypi.local (project level)">
-        <fileTransfer accessType="SFTP" host="raspberrypi.local" port="22" sshConfigId="e1423d50-a821-49ea-91d4-cdb2c5cece76" sshConfig="pi@raspberrypi.local:22 key" keyPair="true">
+      <webServer id="b365bf8e-7432-456b-aa67-da88a65eb6d1" name="homeassistant.local" url="http://homeassistant.local">
+        <fileTransfer rootFolder="/addons" host="homeassistant.local" port="21">
           <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
         </fileTransfer>
       </webServer>
