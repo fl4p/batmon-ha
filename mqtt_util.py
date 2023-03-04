@@ -247,7 +247,9 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     meters = {'total_energy': dict(device_class="energy", unit="kWh", icon="meter-electric"),
               'total_energy_charge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
               'total_energy_discharge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
-              'total_charge': dict(device_class=None, unit="Ah")}
+              'total_charge': dict(device_class=None, unit="Ah"),
+              'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
+              }
     for name, m in meters.items():
         _hass_discovery('meter/%s' % name, **m)
 
