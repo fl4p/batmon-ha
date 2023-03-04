@@ -186,8 +186,9 @@ def publish_cell_voltages(client, device_topic, voltages):
     # "lowest_cell": parts[3],
 
     x = range(len(voltages))
-    high_i = max(x, key=lambda i: voltages[i])
-    low_i = min(x, key=lambda i: voltages[i])
+    if x:
+        high_i = max(x, key=lambda i: voltages[i])
+        low_i = min(x, key=lambda i: voltages[i])
 
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
@@ -208,7 +209,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     device_json = {
         "identifiers": [(device_info and device_info.sn) or device_topic],
         # "manufacturer": device_topic,  # Daly
-        "name": (device_info and device_info.name) or device_topic,
+        "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
         "model": (device_info and device_info.model) or None,
         "sw_version": (device_info and device_info.sw_version) or None,
         "hw_version": (device_info and device_info.hw_version) or None,
