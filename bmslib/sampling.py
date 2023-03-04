@@ -107,7 +107,8 @@ class BmsSampler():
 
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
                     publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
-                    logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+                    if voltages or temperatures:
+                        logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
@@ -132,7 +133,10 @@ class BmsSampler():
             logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
             raise
 
-        logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, t_fetch - t_conn, t_disc - t_fetch)
+        dt_conn = t_fetch - t_conn
+        dt_fetch = t_disc - t_fetch
+        if self.bms.verbose_log or max(dt_conn, dt_fetch) > 1:
+            logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
         device_topic = self.bms.name

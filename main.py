@@ -277,10 +277,8 @@ async def main():
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
     global shutdown
+    logger.info('All fetch loops ended. shutdown is already %s', shutdown)
     shutdown = True
-
-    logger.info('Shutting down ...')
-    # await asyncio.sleep(4)
 
     store_states(sampler_list)
 
@@ -295,7 +293,7 @@ async def main():
 
 def on_exit(*args, **kwargs):
     global shutdown
-    logger.info('exit signal handler...')
+    logger.info('exit signal handler... %s, %s, shutdown already %s', args, kwargs, shutdown)
     shutdown = True
 
 
