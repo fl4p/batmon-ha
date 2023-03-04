@@ -209,7 +209,7 @@ async def main():
     ic = user_config.get('invert_current', False)
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
-        dt_max_seconds=4,
+        dt_max_seconds=max(4, sample_period * 2),
         expire_after_seconds=max(expire_values_after, int(sample_period * 2 + .5), int(publish_period * 2 + .5)),
         invert_current=ic,
         meter_state=meter_states.get(bms.name),

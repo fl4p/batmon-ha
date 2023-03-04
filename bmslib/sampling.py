@@ -74,17 +74,17 @@ class BmsSampler():
                 t_hour = t_now * (1 / 3600)
 
                 # discharging P>0
-                self.power_integrator_charge += (t_hour, abs(min(0, sample.power))  * 1e-3)
-                self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)
+                self.power_integrator_charge += (t_hour, abs(min(0, sample.power))  * 1e-3) # kWh
+                self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3) # kWh
 
                 if self.invert_current:
                     sample = sample.invert_current()
 
-                self.current_integrator += (t_hour, sample.current)
-                self.power_integrator += (t_hour, sample.power * 1e-3)
+                self.current_integrator += (t_hour, sample.current) # Ah
+                self.power_integrator += (t_hour, sample.power * 1e-3) # kWh
 
                 self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
-                self.charge_integrator += (t_hour, sample.charge)
+                self.charge_integrator += (t_hour, sample.charge) # Ah
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
