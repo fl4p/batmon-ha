@@ -71,7 +71,7 @@ class BmsSample:
 
     @property
     def power(self):
-        return round(self.voltage * self.current, 2)
+        return self.voltage * self.current
 
     def __str__(self):
         # noinspection PyStringFormat
