@@ -2,6 +2,9 @@ import math
 
 
 class Integrator():
+    """
+    Implement a trapezoidal integration, discarding samples with dx > dx_max.
+    """
 
     def __init__(self, name, dx_max, value=0.):
         self.name = name
@@ -36,12 +39,34 @@ class Integrator():
         self._last_x = x
         self._last_y = y
 
+
+
     def get(self):
         return self._integrator
 
     def restore(self, value):
         self._integrator = value
 
+class DiffAbsSum(Integrator):
+    """
+    Implement a differential absolute sum, discarding samples with dx > dx_max.
+    """
+    def __init__(self, name, dx_max, dy_max, value=0.):
+        super(Integrator).__init__(name, dx_max=dx_max, value=value)
+        self.dy_max = dy_max
+
+    def add_diff(self, x, y):
+        if not math.isnan(self._last_x):
+            dx = (x - self._last_x)
+            if dx < 0:
+                raise ValueError("x must be monotonic increasing (given %s, last %s)" % (x, self._last_x))
+            if dx <= self.dx_max:
+                dy_abs = abs(y - self._last_y)
+                if dy_abs <= self.dy_max:
+                    self._integrator += dy_abs
+
+        self._last_x = x
+        self._last_y = y
 
 def test_integrator():
     i = Integrator("test", 1)

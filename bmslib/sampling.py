@@ -6,7 +6,7 @@ import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.bms import DeviceInfo
-from bmslib.pwmath import Integrator
+from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, mqtt_single_out, round_to_n
@@ -28,12 +28,14 @@ class BmsSampler():
         self._t_pub = 0
 
         self.current_integrator = Integrator(name="total_charge", dx_max=dt_max)
+
         self.power_integrator = Integrator(name="total_energy", dx_max=dt_max)
         self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max)
         self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max)
+        self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dt_max, dy_max=0.1)
 
         self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
-                       self.power_integrator_charge]
+                       self.power_integrator_charge, self.cycle_integrator]
 
         for meter in self.meters:
             if meter_state and meter.name in meter_state:
@@ -70,16 +72,16 @@ class BmsSampler():
                 t_now = time.time()
                 t_hour = t_now * (1 / 3600)
 
+                # discharging P>0
+                self.power_integrator_charge += (t_hour * 1e-3, abs(min(0, sample.power)))
+                self.power_integrator_discharge += (t_hour * 1e-3, abs(max(0, sample.power)))
+
                 if self.invert_current:
                     sample = sample.invert_current()
 
                 self.current_integrator += (t_hour, sample.current)
                 self.power_integrator += (t_hour * 1e-3, sample.power)
-
-                if sample.power < 0 == self.invert_current:
-                    self.power_integrator_charge += (t_hour * 1e-3, abs(sample.power))
-                else:
-                    self.power_integrator_discharge += (t_hour * 1e-3, abs(sample.power))
+                self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
