@@ -76,14 +76,15 @@ class BmsSampler():
                 t_hour = t_now * (1 / 3600)
 
                 # discharging P>0
-                self.power_integrator_charge += (t_hour * 1e-3, abs(min(0, sample.power)))
-                self.power_integrator_discharge += (t_hour * 1e-3, abs(max(0, sample.power)))
+                self.power_integrator_charge += (t_hour, abs(min(0, sample.power))  * 1e-3)
+                self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)
 
                 if self.invert_current:
                     sample = sample.invert_current()
 
                 self.current_integrator += (t_hour, sample.current)
-                self.power_integrator += (t_hour * 1e-3, sample.power)
+                self.power_integrator += (t_hour, sample.power * 1e-3)
+
                 self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
                 self.charge_integrator += (t_hour, sample.charge)
 
@@ -135,9 +136,7 @@ class BmsSampler():
 
     def publish_meters(self):
         device_topic = self.bms.name
-        meters = [self.power_integrator, self.power_integrator_discharge, self.power_integrator_charge,
-                  self.current_integrator]
-        for meter in meters:
+        for meter in self.meters:
             topic = f"{device_topic}/meter/{meter.name}"
             s = round_to_n(meter.get(), 4)
             mqtt_single_out(self.mqtt_client, topic, s)
