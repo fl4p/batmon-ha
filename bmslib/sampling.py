@@ -33,9 +33,12 @@ class BmsSampler():
         self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max)
         self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max)
         self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dt_max, dy_max=0.1)
+        self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dt_max, dy_max=0.5) # TODO normalize dy_max to capacity
+        # current_integral
+        # abs_diff_charge_integral
 
         self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
-                       self.power_integrator_charge, self.cycle_integrator]
+                       self.power_integrator_charge, self.cycle_integrator, self.charge_integrator]
 
         for meter in self.meters:
             if meter_state and meter.name in meter_state:
@@ -82,6 +85,7 @@ class BmsSampler():
                 self.current_integrator += (t_hour, sample.current)
                 self.power_integrator += (t_hour * 1e-3, sample.power)
                 self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
+                self.charge_integrator += (t_hour, sample.charge)
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
