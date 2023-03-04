@@ -54,7 +54,6 @@ class JKBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
-        self._fetch_futures = FuturesPool()
         self._resp_table = {}
         self.num_cells = None
 
@@ -111,7 +110,7 @@ class JKBt(BtBms):
         try:
             await super().connect(timeout=4)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", e)
+            self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
@@ -127,7 +126,6 @@ class JKBt(BtBms):
 
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
-        self._fetch_futures.clear()
         await super().disconnect()
 
     async def _q(self, cmd, resp):

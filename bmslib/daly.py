@@ -25,7 +25,6 @@ class DalyBt(BtBms):
         super().__init__(address, **kwargs)
         self.UUID_RX = None
         self.UUID_TX = None
-        self._fetch_futures = FuturesPool()
         self._fetch_nr: Dict[int, list] = {}
         # self._num_cells = 0
         self._states = None
@@ -93,7 +92,6 @@ class DalyBt(BtBms):
     async def disconnect(self):
         if self.UUID_RX:
             await self.client.stop_notify(self.UUID_RX)
-        self._fetch_futures.clear()
         await super().disconnect()
 
     async def _q(self, command: int, num_responses: int = 1):

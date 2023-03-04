@@ -30,7 +30,6 @@ class JbdBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
-        self._fetch_futures = FuturesPool()
         self._switches = None
         self._last_response = None
 
@@ -60,7 +59,6 @@ class JbdBt(BtBms):
 
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
-        self._fetch_futures.clear()
         await super().disconnect()
 
     async def _q(self, cmd):
