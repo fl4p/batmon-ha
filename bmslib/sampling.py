@@ -16,7 +16,7 @@ logger = get_logger(verbose=False)
 
 class BmsSampler():
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max, expire_after_seconds,
+    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None):
         self.bms = bms
         self.mqtt_client = mqtt_client
@@ -27,15 +27,12 @@ class BmsSampler():
         self.publish_period = publish_period
         self._t_pub = 0
 
-        self.current_integrator = Integrator(name="total_charge", dx_max=dt_max)
-
-        self.power_integrator = Integrator(name="total_energy", dx_max=dt_max)
-        self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max)
-        self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max)
+        self.current_integrator = Integrator(name="total_charge", dx_max=dt_max_seconds / 3600)
+        self.power_integrator = Integrator(name="total_energy", dx_max=dt_max_seconds / 3600)
+        self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dt_max_seconds / 3600)
+        self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dt_max_seconds / 3600)
         self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dt_max, dy_max=0.1)
         self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dt_max, dy_max=0.5) # TODO normalize dy_max to capacity
-        # current_integral
-        # abs_diff_charge_integral
 
         self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
                        self.power_integrator_charge, self.cycle_integrator, self.charge_integrator]
@@ -60,7 +57,7 @@ class BmsSampler():
         bms = self.bms
         mqtt_client = self.mqtt_client
 
-        was_connected = bms.client.is_connected
+        was_connected = bms.is_connected
 
         if not was_connected:
             logger.info('connecting bms %s', bms)

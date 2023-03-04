@@ -56,6 +56,10 @@ class BtBms():
             if not res:
                 self.logger.error("Pairing failed!")
 
+    @property
+    def is_connected(self):
+        return self.client.is_connected
+
     async def connect(self, timeout=20):
         """
         Establish a BLE connection

@@ -86,9 +86,9 @@ def test_integrator():
     assert i.get() == 1
     i += (2, 2)
     assert i.get() == 3
-    i += (3, 3) # test trapezoid
+    i += (3, 3)  # test trapezoid
     assert i.get() == (3 + 2.5)
-    i += (5, 3) # skip (>dt_max)
+    i += (5, 3)  # skip (>dt_max)
     assert i.get() == (3 + 2.5)
 
 def test_diff_abs_sum():

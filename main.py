@@ -161,10 +161,6 @@ async def main():
         dummy=bmslib.dummy.DummyBt,
     )
 
-    async def _fetch_victron(dev):
-        result = await victron.fetch_device(dev['address'], psk=dev.get('pin'))
-        mqtt_iterator_victron(mqtt_client, result=result, topic=dev['alias'], hass=True)
-
     names = set()
 
     for dev in user_config.get('devices', []):
@@ -179,17 +175,8 @@ async def main():
                 assert name not in names, "duplicate name %s" % name
                 bms_list.append(bms_class(addr, name=name, verbose_log=verbose_log or dev.get('debug')))
                 names.add(name)
-            elif dev['type'] == 'victron':
-                import victron
-                if dev.get('pin'):
-                    try:
-                        r = await victron.fetch_device(user_config.get('victron_address'), psk=dev.get('pin'))
-                        logger.info("Victron: %s", r)
-                        r = await victron.fetch_device(user_config.get('victron_address'))
-                        logger.info("Victron2: %s", r)
-                    except Exception as e:
-                        logger.error('Error pairing victron device: %s', e)
-                extra_tasks.append(partial(_fetch_victron, dev))
+            else:
+                logger.warning('Unknown device type %s', dev)
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))

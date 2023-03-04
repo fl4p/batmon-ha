@@ -4,6 +4,7 @@
 * Balancing during charger OR discharge (setting) but not both?!
 * No calibrated Nominal Capacity
 * Slow response time (2s)
+* No custom hysteresis (release threshold) for protection settings
 
 
 ## JBD BMS
@@ -20,3 +21,4 @@
 * Insecure! built-in Bluetooth, PIN is validated client-side (is publicly readable in device info) 
 * https://github.com/NEEY-electronic/JK/tree/JK-BMS
 * 750 mW stand-by consumption
+* Current Threshold: charge: 0.4A

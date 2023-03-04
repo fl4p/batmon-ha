@@ -18,17 +18,22 @@ class DummyBt(BtBms):
         super().__init__(address, **kwargs)
         self._switches = dict(charge=True, discharge=True)
         self._t0 = time.time()
+        self._connected = False
+
+    @property
+    def is_connected(self):
+        return self._connected
 
     async def connect(self, **kwargs):
-        pass
+        self._connected = True
 
     async def disconnect(self):
-        pass
+        self._connected = False
 
     async def fetch(self) -> BmsSample:
         sample = BmsSample(
-            voltage=12 - math.sin(time.time() / 4) * .5,
-            current=math.sin(time.time() / 4),
+            voltage=12 - math.sin(time.time() / 16) * .5,
+            current=math.sin(time.time() / 16),
             charge=50,
             capacity=100,
             num_cycles=3,

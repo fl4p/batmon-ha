@@ -1,5 +1,6 @@
 import json
 import queue
+import string
 import time
 import traceback
 
@@ -215,10 +216,10 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
-    def _hass_discovery(k, device_class, unit, icon=None):
+    def _hass_discovery(k, device_class, unit, icon=None, name=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
-            "name": f"{device_topic} {k.replace('/', ' ')}",
+            "name": f"{device_topic} {name or k.replace('/', ' ')}",
             "device_class": device_class or None,
             "unit_of_measurement": unit,
             "json_attributes_topic": f"{device_topic}/{k}",
@@ -234,7 +235,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
-            _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None))
+            _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None), name=d["field"])
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
@@ -251,7 +252,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
               'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
               }
     for name, m in meters.items():
-        _hass_discovery('meter/%s' % name, **m)
+        _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter")
 
     switches = (sample.switches and sample.switches.keys())
     if switches:
