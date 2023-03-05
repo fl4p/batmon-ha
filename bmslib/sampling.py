@@ -96,7 +96,7 @@ class BmsSampler():
                     self._t_pub = t_now
 
                     publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
-                    logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
+                    logger.info('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
