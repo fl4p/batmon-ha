@@ -9,7 +9,6 @@ import asyncio
 import struct
 from typing import Dict
 
-from bmslib import FuturesPool
 from .bms import BmsSample
 from .bt import BtBms
 
