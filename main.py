@@ -17,6 +17,7 @@ import bmslib.dummy
 import bmslib.jbd
 import bmslib.jikong
 import bmslib.victron
+import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
 from bmslib.util import dotdict, get_logger
@@ -195,6 +196,9 @@ async def main():
         mqtt_client.loop_start()
     except Exception as ex:
         logger.error('mqtt connection error %s', ex)
+
+    if not user_config.mqtt_broker:
+        mqtt_util.disable_warnings()
 
     from bmslib.store import load_meter_states
     try:
