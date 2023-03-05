@@ -140,7 +140,7 @@ class DalyBt(BtBms):
             voltage=parts[0] / 10,
             current=(parts[2] - 30000) / 10,  # negative=charging, positive=discharging
             soc=parts[3] / 10,
-            num_cycles=self.get_states_cached('num_cycles'),
+            num_cycles=await self.get_states_cached('num_cycles'),
             **sample_kwargs,
         )
         return sample
