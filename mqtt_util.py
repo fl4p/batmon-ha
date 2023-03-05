@@ -13,6 +13,7 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+no_publish_fail_warn = False
 
 def round_to_n(x, n):
     if isinstance(x, str) or not math.isfinite(x) or not x:
@@ -26,6 +27,10 @@ def round_to_n(x, n):
     except ValueError as e:
         print('error', x, n, e)
         raise e
+
+def disable_warnings():
+    global no_publish_fail_warn
+    no_publish_fail_warn = True
 
 
 def remove_none_values(fields: dict):
@@ -105,7 +110,8 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
 
     mqi: paho.MQTTMessageInfo = client.publish(topic, data, retain=retain)
     if mqi.rc != paho.MQTT_ERR_SUCCESS:
-        logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
+        if not no_publish_fail_warn:
+            logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
         return False
 
     now = time.time()

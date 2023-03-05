@@ -37,7 +37,7 @@ Create `options.json` within the `batmon-ha` directory. Use this as an example a
   "mqtt_user": "pv",
   "mqtt_password": "Offgrid",
   "concurrent_sampling": false,
-  "keep_alive": false,
+  "keep_alive": true,
   "sample_period": 1.0,
   "publish_period": 1.0,
   "invert_current": false
