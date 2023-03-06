@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.0.53] - 2023-03-06
+
+### Added
+
+- Victron SmartShunt GATT notify 
+- Add dummy JBD device for testing
+- Timestamps in logs
+- Total cycle meter
+
+### Changed
+
+- Fix Daly bug
+- Fix Victron SmartShunt pairing
+- Fix meters
+- Fix JK connection bug
+- Device name now includes alias
+
 ## [0.0.52] - 2023-03-01
 
 ### Added
