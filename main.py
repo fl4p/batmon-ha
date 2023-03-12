@@ -174,7 +174,12 @@ async def main():
                 addr = name2addr(addr)
                 name: str = dev.get('alias') or dev_by_addr(addr).name
                 assert name not in names, "duplicate name %s" % name
-                bms_list.append(bms_class(addr, name=name, verbose_log=verbose_log or dev.get('debug')))
+                bms_list.append(bms_class(addr,
+                                          name=name,
+                                          verbose_log=verbose_log or dev.get('debug'),
+                                          # psk=dev.get('pin'),
+                                          adapter=dev.get('adapter'),
+                                          ))
                 names.add(name)
             else:
                 logger.warning('Unknown device type %s', dev)

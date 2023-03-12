@@ -8,7 +8,7 @@ from .util import get_logger
 
 
 class BtBms():
-    def __init__(self, address: str, name, keep_alive=False, psk=None, verbose_log=False):
+    def __init__(self, address: str, name, keep_alive=False, psk=None, adapter=None, verbose_log=False):
         self.name = name
         self.keep_alive = keep_alive
         self.verbose_log = verbose_log
@@ -20,12 +20,19 @@ class BtBms():
             from bmslib.dummy import BleakDummyClient
             self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
         else:
+            kwargs = {}
             if psk:
                 try:
                     import bleak.backends.bluezdbus.agent
                 except ImportError:
                     self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
-            self.client = BleakClient(address, handle_pairing=bool(psk), disconnected_callback=self._on_disconnect)
+            if adapter: # hci0, hci1 (BT adapter hardware)
+                kwargs['adapter'] = adapter
+            self.client = BleakClient(address,
+                                      handle_pairing=bool(psk),
+                                      disconnected_callback=self._on_disconnect,
+                                      **kwargs
+                                      )
 
 
     def _on_disconnect(self, client):
