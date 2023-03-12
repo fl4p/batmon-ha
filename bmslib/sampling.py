@@ -51,7 +51,7 @@ class BmsSampler():
         except:
             dd = self.bms.debug_data()
             if dd:
-                logger.info("bms debug data: %s", dd)
+                logger.info("%s bms debug data: %s", dd, self.bms.name)
             raise
 
     async def sample(self):
@@ -96,7 +96,7 @@ class BmsSampler():
                     self._t_pub = t_now
 
                     publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
-                    logger.info('%s result@%s %s', bms.name, datetime.datetime.now().isoformat(), sample)
+                    logger.info('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
