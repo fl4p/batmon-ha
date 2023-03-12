@@ -14,6 +14,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)
+* Integrates with Home Assistant Energy dashboard
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
 
@@ -21,15 +22,17 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 * JK BMS (jikong) (JK02 protocol)
 * Daly BMS
-* JBD / Xiaoxiang BMS
-* Victron SmartShunt (make sure to update to latest firmware and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html) in the VictronConnect app)
+* JBD / Xiaoxiang / Overkill Solar BMS
+* Victron SmartShunt (make sure to update to latest firmware
+  and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
+  in the VictronConnect app)
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 ## Installation
 
-* Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons` 
-[![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=2af0a32d_batmon&repository_url=https%3A%2F%2Fgithub.com%2Ffl4p%2Fhome-assistant-addons)
+* Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons`
+  [![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=2af0a32d_batmon&repository_url=https%3A%2F%2Fgithub.com%2Ffl4p%2Fhome-assistant-addons)
 * Install Batmon add-on
 * Install, configure and start Mosquito MQTT broker (don't forget to configure the MQTT integration)
 
@@ -53,7 +56,8 @@ displayed in the discovery list.
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
 
-If the device requires a PIN when pairing add `pin: 123456` (and replace 123456 with device's PIN)
+If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with device's PIN)
+Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 
 For verbose logs of particular BMS add `debug: true`.
 
@@ -71,13 +75,28 @@ For verbose logs of particular BMS add `debug: true`.
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
 
+## Energy Meters
+
+Batmon implements energy metering using the power values the BMS provides. You can add theses meters to your Home
+Assistant Energy Dashboard. The accuracy depends on the accuracy of the voltage and current readings from the BMS.
+Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
+peaks, leading to even greater error.
+
+* `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
+* `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)
+* `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
+  This equals to `(Total Energy Charge) - (Total Energy Discharge)`.
+* `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
+  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC. 
+
 ## Troubleshooting
+
 * When experiencing connection issues enable `keep_alive`
-* Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described above
+* Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
+  above
 * Power cycle the BMS Bluetooth dongle (or BMS)
 * Try another Bluetooth hardware
 * Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
-
 
 ## Known Issues
 

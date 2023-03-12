@@ -14,6 +14,9 @@
 * Balancing during charger OR discharge (setting) but not both?!
 * Sometimes detect false short circuits
 * Insecure, no proper bluetooth authentication
+* Resistance of wires included (red): ~45mOhm
+* Balance Current Positive: SuperCap->Cell_LO (charging the lowest cell from super cap)
+* Balance Current Negative: Cell_HI->SuperCap (discharging the highest cell to super cap)
 
 ## JK BMS
 * When UVP is reached the BMS shutsdown overnight and needs an activation (i.e. the epever mppt will not start)
