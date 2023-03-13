@@ -88,4 +88,6 @@ class BmsSample:
         res = copy(self)
         if res.current != 0:  # prevent -0 values
             res.current *= -1
+        if not math.isnan(res._power) and res._power != 0:
+            res._power *= -1
         return res

@@ -21,7 +21,7 @@ VICTRON_CHARACTERISTICS = {
     "power": dict(
         uuid="6597ed8e-4bda-4c1e-af4b-551c4cf74769",
         unit='W',
-        func=lambda b: int.from_bytes(b, 'little', signed=True)
+        func=lambda b: -int.from_bytes(b, 'little', signed=True)
     ),
     "voltage": dict(
         uuid="6597ed8d-4bda-4c1e-af4b-551c4cf74769",

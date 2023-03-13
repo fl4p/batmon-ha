@@ -1,4 +1,5 @@
-* MicroPython port 
+* MicroPython port
+** https://docs.micropython.org/en/latest/reference/packages.html 
 
 * smooth current (10s)
 * allow to put device name which translates to address using discovery

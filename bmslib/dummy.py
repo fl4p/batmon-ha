@@ -68,7 +68,7 @@ class BleakDummyClient():
     def is_connected(self):
         return self._connected
 
-    async def connect(self, timeout):
+    async def connect(self, timeout=20):
         assert not self._connected
         self._connected = True
 
@@ -82,11 +82,20 @@ class BleakDummyClient():
         raise NotImplementedError()
 
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
-        return self._bms.start_notify(char_specifier, callback)
+        return await self._bms.start_notify(char_specifier, callback)
 
     async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview],
                               response: bool = False, ):
-        return self._bms.write_gatt_char(char_specifier, data, response)
+        return await self._bms.write_gatt_char(char_specifier, data, response)
+
+    async def __aenter__(self):
+        await self.connect()
+
+    async def __aexit__(self, *args):
+        await self.disconnect()
+
+    def __await__(self):
+        return self.__aexit__().__await__()
 
 
 class JKDummy():
@@ -102,10 +111,10 @@ class JKDummy():
             b"U\xaa\xeb\x90\x02S\x07\r\x07\r\x07\r\x08\r\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0f\x00\x00\x00\x07\r\x01\x00\x00\x02'\x00'\x00&\x00&\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe8\x00\x00\x00\x00\x00\x1c4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc7\x00\xc5\x00\x00\x00\x00\x00\x00\x00\x00a\x02%\x04\x00\xc0E\x04\x00\x05\x00\x00\x00J\x04\x18\x00d\x00\x00\x00K\x8c'\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\x00\x01\x00\x00\x00\x9d\x03\x00\x00\x00\x00:\xccA@\x00\x00\x00\x006\x05\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00Z\x03\n\x00\x00\x00\x00\x00\xe8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xfe\xff\x7f\xdc/\x01\x01\x01\x00\x00\x00\x00J"
         ]
 
-    def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
+    async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
         crc = data[-1]
         data = bytes(data[:-1])
         from bmslib.jikong import calc_crc
@@ -133,10 +142,10 @@ class JBDDummy():
     def __init__(self):
         self._callbacks = {}
 
-    def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
+    async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
         if data == b'\xdd\xa5\x03\x00\xff\xfdw':
             msg = bytearray.fromhex('dd03001b0a50fda4b717dac000002cf300000000000016540308020b7d0b77f8e277')
             self._callbacks['0000ff01-0000-1000-8000-00805f9b34fb'](self, bytes(msg))

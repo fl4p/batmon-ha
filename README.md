@@ -4,13 +4,13 @@
 
 Monitor and control various Battery management systems (BMS) over Bluetooth. This add-on reads the BMS and sends sensor
 data through MQTT to Home Assistant. Using bluetooth on the Home Assistant host system, it does not need any additional
-hardware.
+hardware (no USB/Serial/RS485).
 
 I created this to compare BMS readings for a detailed evaluation of BMS reliability and accuracy.
 
 ## Features
 
-* Uses Bluetooth Low-Energy (BLE) for wireless communication
+* Uses Bluetooth Low-Energy (BLE) for wireless communication through [bleak](https://pypi.org/project/bleak/)
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)

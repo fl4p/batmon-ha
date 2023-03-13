@@ -1,10 +1,9 @@
 import json
+import math
 import queue
-import string
 import time
 import traceback
 
-import math
 import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
@@ -14,6 +13,7 @@ from bmslib.util import get_logger
 logger = get_logger()
 
 no_publish_fail_warn = False
+
 
 def round_to_n(x, n):
     if isinstance(x, str) or not math.isfinite(x) or not x:
@@ -27,6 +27,7 @@ def round_to_n(x, n):
     except ValueError as e:
         print('error', x, n, e)
         raise e
+
 
 def disable_warnings():
     global no_publish_fail_warn
@@ -154,23 +155,69 @@ def mqtt_iterator_victron(client, result, topic, base='', hass=True):
 
 # units: https://github.com/home-assistant/core/blob/d7ac4bd65379e11461c7ce0893d3533d8d8b8cbf/homeassistant/const.py#L384
 sample_desc = {
-    "soc/total_voltage": {"field": "voltage", "class": "voltage", "unit_of_measurement": "V", "precision": 4,
-                          "icon": "meter-electric"},
-    "soc/current": {"field": "current", "class": "current", "unit_of_measurement": "A", "precision": 4},
-    "soc/balance_current": {"field": "balance_current", "class": "current", "unit_of_measurement": "A", "precision": 4,
-                            "icon": "scale-unbalanced"},
-    "soc/soc_percent": {"field": "soc", "class": "battery", "unit_of_measurement": "%", "precision": 4,
-                        "icon": "battery"},
-    "soc/power": {"field": "power", "class": "power", "unit_of_measurement": "W", "precision": 4, "icon": "flash"},
-    "soc/capacity": {"field": "capacity", "class": None, "unit_of_measurement": "Ah"},
-    "soc/cycle_capacity": {"field": "cycle_capacity", "class": None, "unit_of_measurement": "Ah"},
-    "mosfet_status/capacity_ah": {"field": "charge", "class": None, "unit_of_measurement": "Ah"},
-    "mosfet_status/temperature": {"field": "mos_temperature", "class": "temperature", "unit_of_measurement": "°C",
-                                  "icon": "thermometer"},
-
-    "bms/uptime": {"field": "uptime", "class": "duration", "unit_of_measurement": "s", "precision": 0,
-                   "icon": "sort-time-descending"},
-    # "switch/charge": # binary sensor
+    "soc/total_voltage": {
+        "field": "voltage",
+        "device_class": "voltage",
+        "state_class": "measurement",
+        "unit_of_measurement": "V",
+        "precision": 4,
+        "icon": "meter-electric"},
+    "soc/current": {
+        "field": "current",
+        "device_class": "current",
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "precision": 4},
+    "soc/balance_current": {
+        "field": "balance_current",
+        "device_class": "current",
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "precision": 4,
+        "icon": "scale-unbalanced"},
+    "soc/soc_percent": {
+        "field": "soc",
+        "device_class": "battery",
+        "state_class": None,
+        "unit_of_measurement": "%",
+        "precision": 4,
+        "icon": "battery"},
+    "soc/power": {
+        "field": "power",
+        "device_class": "power",
+        "state_class": "measurement",
+        "unit_of_measurement": "W",
+        "precision": 4,
+        "icon": "flash"},
+    "soc/capacity": {
+        "field": "capacity",
+        "device_class": None,
+        "state_class": None,
+        "unit_of_measurement": "Ah"
+    },
+    "soc/cycle_capacity": {
+        "field": "cycle_capacity",
+        "device_class": None,
+        "state_class": None,
+        "unit_of_measurement": "Ah"},
+    "mosfet_status/capacity_ah": {
+        "field": "charge",
+        "device_class": None,
+        "state_class": None,
+        "unit_of_measurement": "Ah"},
+    "mosfet_status/temperature": {
+        "field": "mos_temperature",
+        "device_class": "temperature",
+        "state_class": "measurement",
+        "unit_of_measurement": "°C",
+        "icon": "thermometer"},
+    "bms/uptime": {
+        "field": "uptime",
+        "device_class": "duration",
+        "state_class": "measurement",
+        "unit_of_measurement": "s",
+        "precision": 0,
+        "icon": "sort-time-descending"},
 }
 
 
@@ -222,11 +269,12 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
-    def _hass_discovery(k, device_class, unit, icon=None, name=None):
+    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": f"{device_topic} {name or k.replace('/', ' ')}",
             "device_class": device_class or None,
+            "state_class": state_class or None,
             "unit_of_measurement": unit,
             "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
@@ -241,7 +289,8 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
-            _hass_discovery(k, d["class"], unit=d["unit_of_measurement"], icon=d.get('icon', None), name=d["field"])
+            _hass_discovery(k, d["device_class"], state_class=d["state_class"], unit=d["unit_of_measurement"],
+                            icon=d.get('icon', None), name=d["field"])
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
@@ -251,12 +300,17 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         k = 'temperatures/%d' % (i + 1)
         _hass_discovery(k, "temperature", unit="°C")
 
-    meters = {'total_energy': dict(device_class="energy", unit="kWh", icon="meter-electric"),
-              'total_energy_charge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
-              'total_energy_discharge': dict(device_class="energy", unit="kWh", icon="meter-electric"),
-              'total_charge': dict(device_class=None, unit="Ah"),
-              'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
-              }
+    meters = {
+        # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics
+        # this enables the meters to appear in HA Energy Grid
+        'total_energy': dict(device_class="energy", unit="kWh", icon="meter-electric"),  # state_class="total",
+        'total_energy_charge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
+                                    icon="meter-electric"),
+        'total_energy_discharge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
+                                       icon="meter-electric"),
+        'total_charge': dict(device_class=None, unit="Ah"),
+        'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
+    }
     for name, m in meters.items():
         _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter")
 
