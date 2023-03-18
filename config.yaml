@@ -10,6 +10,7 @@ arch:
   - armv7
   - i386
 host_dbus: true
+apparmor: true
 services:
   - mqtt:need
 options:
