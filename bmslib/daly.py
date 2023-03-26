@@ -64,8 +64,12 @@ class DalyBt(BtBms):
             self._last_response = response_bytes
             self._fetch_futures.set_result(command, response_bytes)
 
-    async def connect(self, **kwargs):
-        await super().connect(**kwargs)
+    async def connect(self, timeout=10, **kwargs):
+        try:
+            await super().connect(timeout=timeout)
+        except Exception as e:
+            self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
+            await self._connect_with_scanner(timeout=timeout)
 
         CHARACTERISTIC_UUIDS = [
             (17, 15, 48),  # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
