@@ -10,7 +10,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 ## Features
 
-* Uses Bluetooth Low-Energy (BLE) for wireless communication through [bleak](https://pypi.org/project/bleak/)
+* Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)
@@ -105,11 +105,13 @@ peaks, leading to even greater error.
 
 ## TODO
 
+* Port to MicroPython for MUC (ESP32 etc.)
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
 
 ## Stand-alone
 
 You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
+All you need is an operating system supported by [bleak](https://pypi.org/project/bleak/).
 See [doc/Standalone.md](doc/Standalone.md)
 
 ## References
