@@ -2,6 +2,7 @@ import atexit
 import json
 import random
 import signal
+import sys
 import time
 import traceback
 from functools import partial
@@ -301,5 +302,10 @@ signal.signal(signal.SIGTERM, on_exit)
 # noinspection PyTypeChecker
 signal.signal(signal.SIGINT, on_exit)
 
-asyncio.run(main())
-exit(1)
+try:
+    asyncio.run(main())
+except Exception as e:
+    logger.error("Main loop exception: %s", e)
+    logger.error("Stack: %s", traceback.format_exc())
+
+sys.exit(1)

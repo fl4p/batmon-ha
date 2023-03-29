@@ -10,7 +10,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 ## Features
 
-* Uses Bluetooth Low-Energy (BLE) for wireless communication through [bleak](https://pypi.org/project/bleak/)
+* Uses Bluetooth Low-Energy (BLE) for wireless communication
 * Records SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)
@@ -77,7 +77,7 @@ For verbose logs of particular BMS add `debug: true`.
 
 ## Energy Meters
 
-Batmon implements energy metering using the power values the BMS provides. You can add theses meters to your Home
+Batmon implements energy metering by integrating the power values from the BMS with the trapezoidal rule. You can add theses meters to your Home
 Assistant Energy Dashboard. The accuracy depends on the accuracy of the voltage and current readings from the BMS.
 Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
 peaks, leading to even greater error.
@@ -87,7 +87,7 @@ peaks, leading to even greater error.
 * `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
   This equals to `(Total Energy Charge) - (Total Energy Discharge)`.
 * `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
-  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC. 
+  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC (e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
 
 ## Troubleshooting
 
@@ -102,21 +102,21 @@ peaks, leading to even greater error.
 
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
-* Raspberry PI's bluetooth can be buggy. If you experience errors and timeouts try to install an external Bluetooth
-  dongle.
 
 ## TODO
 
+* Port to MicroPython for MUC (ESP32 etc.)
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
 
 ## Stand-alone
 
 You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
+All you need is an operating system supported by [bleak](https://pypi.org/project/bleak/).
 See [doc/Standalone.md](doc/Standalone.md)
 
 ## References
 
-* [dalybms: similar add-on](https://github.com/MindFreeze/dalybms)
+* [daly bms: similar add-on](https://github.com/MindFreeze/dalybms)
 * [JK-BMS: similar add-on using ESP-Home](https://github.com/syssi/esphome-jk-bms) (needs extra hardware)
 * [Daly_RS485_UART_Protocol.pdf](https://github.com/jblance/mpp-solar/blob/master/docs/protocols/DALY-Daly_RS485_UART_Protocol.pdf)
 * [JK-bms esphome](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336)
