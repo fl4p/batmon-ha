@@ -1,14 +1,12 @@
+import asyncio
 import atexit
-import json
 import random
 import signal
 import sys
 import time
 import traceback
-from functools import partial
 from typing import List
 
-import asyncio
 import paho.mqtt.client as paho
 from bleak import BleakScanner
 
@@ -21,46 +19,9 @@ import bmslib.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.sampling import BmsSampler
-from bmslib.util import dotdict, get_logger
-from mqtt_util import mqtt_iterator_victron, mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
-
-
-def load_user_config():
-    try:
-        with open('/data/options.json') as f:
-            conf = dotdict(json.load(f))
-            _user_config_migrate_addresses(conf)
-    except Exception as e:
-        print('error reading /data/options.json, trying options.json', e)
-        with open('options.json') as f:
-            conf = dotdict(json.load(f))
-    return conf
-
-
-def _user_config_migrate_addresses(conf):
-    changed = False
-    slugs = ["daly", "jbd", "jk", "victron"]
-    conf["devices"] = conf.get('devices') or []
-    devices_by_address = {d['address']: d for d in conf["devices"]}
-    for slug in slugs:
-        addr = conf.get(f'{slug}_address')
-        if addr and not devices_by_address.get(addr):
-            device = dict(
-                address=addr.strip('?'),
-                type=slug,
-                alias=slug + '_bms',
-            )
-            if addr.endswith('?'):
-                device["debug"] = True
-            if conf.get(f'{slug}_pin'):
-                device['pin'] = conf.get(f'{slug}_pin')
-            conf["devices"].append(device)
-            del conf[f'{slug}_address']
-            logger.info('Migrated %s_address to device %s', slug, device)
-            changed = True
-    if changed:
-        logger.info('Please update add-on configuration manually.')
-
+from bmslib.store import load_user_config
+from bmslib.util import get_logger
+from mqtt_util import mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
 user_config = load_user_config()
@@ -139,7 +100,6 @@ async def main():
     extra_tasks = []
 
     try:
-        # raise Exception()
         devices = await bt_discovery()
     except Exception as e:
         devices = []
