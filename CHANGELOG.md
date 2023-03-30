@@ -1,11 +1,15 @@
 # Changelog
 
+## [0.0.55] - 2023-03-06
+- Fix pin pairing (Victron SmartShunt)
+- Add apparmor.txt @MariusHerget
+
 ## [0.0.54] - 2023-03-06
 - Fix main loop exception handling and possible watchdog issue
 - Change Daly connecting code to use BT scanner
 - Add HA Energy Dashboard support
 - Add `adapter` option to choose the BT hardware adapter
-- Add apparmor.txt (@MariusHerget)
+
 
 ## [0.0.53] - 2023-03-06
 
