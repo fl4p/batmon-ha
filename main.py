@@ -138,7 +138,7 @@ async def main():
                 bms_list.append(bms_class(addr,
                                           name=name,
                                           verbose_log=verbose_log or dev.get('debug'),
-                                          # psk=dev.get('pin'),
+                                          psk=dev.get('pin'),
                                           adapter=dev.get('adapter'),
                                           ))
                 names.add(name)
