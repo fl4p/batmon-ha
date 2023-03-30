@@ -5,7 +5,7 @@
 - Change Daly connecting code to use BT scanner
 - Add HA Energy Dashboard support
 - Add `adapter` option to choose the BT hardware adapter
- 
+- Add apparmor.txt (@MariusHerget)
 
 ## [0.0.53] - 2023-03-06
 
