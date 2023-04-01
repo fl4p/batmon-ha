@@ -1,8 +1,9 @@
 # Changelog
 
-## [0.0.55] - 2023-03-06
-- Fix pin pairing (Victron SmartShunt)
+## [0.0.56] - 2023-04-01
 - Add apparmor.txt @MariusHerget
+- Fix pin pairing (Victron SmartShunt)
+- Fix circular import
 
 ## [0.0.54] - 2023-03-06
 - Fix main loop exception handling and possible watchdog issue
