@@ -3,8 +3,9 @@ from os import access, R_OK
 from os.path import isfile, join
 from threading import Lock
 
-from bmslib.util import dotdict
-from main import logger
+from bmslib.util import dotdict, get_logger
+
+logger = get_logger()
 
 
 def is_readable(file):
