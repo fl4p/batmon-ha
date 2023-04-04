@@ -107,12 +107,20 @@ peaks, leading to even greater error.
 
 * Port to MicroPython for MUC (ESP32 etc.)
 * use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
+* Implement BMS data push (JK)
+* Implement old JK04?
+* Implement ANT Bms https://github.com/fl4p/batmon-ha/issues/13
+* Implement RS485 https://github.com/fl4p/batmon-ha/issues/22
+* Implement daly2 https://github.com/fl4p/batmon-ha/issues/33
 
 ## Stand-alone
 
 You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
 All you need is an operating system supported by [bleak](https://pypi.org/project/bleak/).
 See [doc/Standalone.md](doc/Standalone.md)
+
+# Donate
+* [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)
 
 ## References
 

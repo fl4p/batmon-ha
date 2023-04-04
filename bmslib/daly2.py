@@ -4,6 +4,8 @@ Other Daly protocol
 References
 - https://github.com/roccotsi2/esp32-smart-bms-simulation
 
+-  https://github.com/tomatensaus/python-daly-bms
+
 """
 import asyncio
 

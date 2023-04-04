@@ -62,6 +62,7 @@ class BmsSampler():
 
         if not was_connected:
             logger.info('connecting bms %s', bms)
+
         t_conn = time.time()
 
         try:
