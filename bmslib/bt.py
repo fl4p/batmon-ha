@@ -1,4 +1,5 @@
 import asyncio
+from typing import Callable, List
 
 from bleak import BleakClient
 
@@ -94,7 +95,8 @@ class BtBms():
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
                 if self.client.address not in discovered:
-                    raise Exception('Device %s not discovered (%s)' % (self.client.address, discovered))
+                    raise Exception('Device %s not discovered. Make sure it in range and is not being controled by '
+                                    'another application. (%s)' % (self.client.address, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout)
@@ -129,7 +131,7 @@ class BtBms():
         """
         raise NotImplementedError()
 
-    async def fetch_voltages(self):
+    async def fetch_voltages(self) -> List[int]:
         """
         Get cell voltages in mV. The implementation can require a prior fetch(), depending on BMS BLE data frame design.
         So the caller must call fetch() prior to fetch_voltages()

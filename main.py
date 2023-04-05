@@ -109,7 +109,10 @@ async def main():
         return next((d.address for d in devices if (d.name or "").strip() == name.strip()), name)
 
     def dev_by_addr(address: str):
-        return next((d for d in devices if d.address == address), None)
+        dev =  next((d for d in devices if d.address == address), None)
+        if not dev:
+            raise Exception("Can't resolve device name %s, not discovered" % address)
+        return dev
 
     verbose_log = user_config.get('verbose_log', False)
     if verbose_log:
