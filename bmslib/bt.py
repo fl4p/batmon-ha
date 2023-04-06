@@ -139,13 +139,19 @@ class BtBms():
         """
         raise NotImplementedError()
 
-    async def fetch_temperatures(self):
+    async def fetch_temperatures(self) -> List[float]:
         """
         Get temperature readings in °C. The implementation can require a prior fetch(), depending on BMS BLE data frame design.
         So the caller must call fetch() prior to fetch_temperatures()
         :return:
         """
         raise NotImplementedError()
+
+    async def subscribe(self, callback: Callable[[BmsSample], None]):
+        raise NotImplemented()
+
+    async def subscribe_voltages(self, callback: Callable[[List[int]], None]):
+        raise NotImplemented()
 
     async def set_switch(self, switch: str, state: bool):
         """
