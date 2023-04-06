@@ -13,8 +13,9 @@ fix connection abort:
 
 """
 import asyncio
+from collections import defaultdict
+from typing import List, Callable, Dict
 
-from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .bt import BtBms
 
@@ -56,6 +57,7 @@ class JKBt(BtBms):
         self._buffer = bytearray()
         self._resp_table = {}
         self.num_cells = None
+        self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
 
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -98,6 +100,10 @@ class JKBt(BtBms):
         self.logger.debug('got response %d (len%d)', resp_type, len(buf))
         self._resp_table[resp_type] = buf
         self._fetch_futures.set_result(resp_type, self._buffer[:])
+        callbacks = self._callbacks.get(resp_type, None)
+        if callbacks:
+            for cb in callbacks:
+                cb(buf)
 
     async def connect(self, timeout=20):
         """
@@ -151,21 +157,7 @@ class JKBt(BtBms):
             sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
         )
 
-    async def fetch(self, wait=True) -> BmsSample:
-
-        """
-        Decode JK02
-        references
-        * https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L360
-        * https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
-        """
-
-        if wait:
-            with self._fetch_futures.acquire(0x02):
-                await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
-
-        buf = self._resp_table[0x02]
-
+    def _decode_sample(self, buf) -> BmsSample:
         is_new_11fw = buf[189] == 0x00 and buf[189 + 32] > 0
         offset = 0
         if is_new_11fw:
@@ -200,6 +192,25 @@ class JKBt(BtBms):
             ),
             uptime=float(u32(162 + offset)),  # seconds
         )
+
+    async def fetch(self, wait=True) -> BmsSample:
+
+        """
+        Decode JK02
+        references
+        * https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L360
+        * https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
+        """
+
+        if wait:
+            with self._fetch_futures.acquire(0x02):
+                await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
+
+        buf = self._resp_table[0x02]
+        return self._decode_sample(buf)
+
+    async def subscribe(self, callback: Callable[[BmsSample], None]):
+        self._callbacks[0x02].append(lambda buf: callback(self._decode_sample(buf)))
 
     async def fetch_voltages(self):
         """
