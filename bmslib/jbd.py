@@ -141,7 +141,7 @@ class JbdBt(BtBms):
             tc = 0x00  # all on
         elif switches_sum == 0:
             tc = 0x03  # all off
-        elif switch == "charge" and not state:
+        elif (switch == "charge" and not state) or (switch == "discharge" and state):
             tc = 0x01  # charge off
         else:
             tc = 0x02  # charge on, discharge off
