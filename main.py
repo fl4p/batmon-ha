@@ -172,6 +172,8 @@ async def main():
     from bmslib.store import load_meter_states
     try:
         meter_states = load_meter_states()
+    except FileNotFoundError:
+        logger.info("Initialize meter states file")
     except Exception as e:
         logger.warning('Failed to load meter states: %s', e)
         meter_states = {}
