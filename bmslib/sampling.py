@@ -1,4 +1,5 @@
 import datetime
+import random
 import time
 from typing import Optional
 
@@ -134,7 +135,7 @@ class BmsSampler():
 
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
-        if self.bms.verbose_log or max(dt_conn, dt_fetch) > 1:
+        if self.bms.verbose_log or max(dt_conn, dt_fetch) > 1 or random.random() < 0.05:
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
