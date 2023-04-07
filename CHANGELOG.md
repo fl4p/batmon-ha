@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.57] - 2023-04-07
+* Fix JBD charge/discharge switch
+* Change warning if meter states file not found
+
 ## [0.0.56] - 2023-04-01
 - Add apparmor.txt @MariusHerget
 - Fix pin pairing (Victron SmartShunt)
