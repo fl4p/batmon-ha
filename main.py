@@ -176,6 +176,7 @@ async def main():
         meter_states = load_meter_states()
     except FileNotFoundError:
         logger.info("Initialize meter states file")
+        meter_states = {}
     except Exception as e:
         logger.warning('Failed to load meter states: %s', e)
         meter_states = {}
@@ -186,7 +187,7 @@ async def main():
     ic = user_config.get('invert_current', False)
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
-        dt_max_seconds=max(4, sample_period * 2),
+        dt_max_seconds=max(4., sample_period * 2),
         expire_after_seconds=max(expire_values_after, int(sample_period * 2 + .5), int(publish_period * 2 + .5)),
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
