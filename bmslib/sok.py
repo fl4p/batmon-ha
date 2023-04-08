@@ -15,10 +15,10 @@ cmd_detail     = [ 0xee, 0xc2, 0x00, 0x00, 0x00 ]
 cmd_setting    = [ 0xee, 0xc3, 0x00, 0x00, 0x00 ]
 cmd_protection = [ 0xee, 0xc4, 0x00, 0x00, 0x00 ]
 cmd_break      = [ 0xdd, 0xc0, 0x00, 0x00, 0x00 ]
-
 """
 import asyncio
 import logging
+import platform
 import struct
 import statistics
 
@@ -75,7 +75,7 @@ def minicrc(data):
 def _sok_command(command: int):
     data = [0xee, command, 0x00, 0x00, 0x00]
     data2 = data + [minicrc(data)]
-    logging.debug(f'SOK: Sending [{bytes(data2).hex().upper()}]')
+    logging.debug(f'SOK: Formatting command [{data2}]')
     return bytes([0xEE, command, 0x00, 0x00, 0x00])
 
 
@@ -169,7 +169,11 @@ class SokBt(BtBms):
 
 
 async def main():
-    mac_address = '00:00:01:AA:EE:DD'
+    mac_address = (
+        "D6:6C:0A:61:14:30"
+        if platform.system() != "Darwin"
+        else "521087E3-F05D-BB20-5E63-CA46F91205FE"
+    )
     bms = SokBt(mac_address, name='sok')
     await bms.connect()
     sample = await bms.fetch()
