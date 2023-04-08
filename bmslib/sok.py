@@ -54,7 +54,7 @@ def getLeUShort(data, offset):
     return unpack('<H',bytes(data[offset:offset+2]))
 
 def _sok_command(command: int):
-	return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
+	return bytes([0xEE, command, 0x00, 0x00, 0x00])
 	
 
 class SokBt(BtBms):
