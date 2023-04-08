@@ -5,7 +5,7 @@ import signal
 import sys
 import time
 import traceback
-from typing import List
+from typing import List, Dict
 
 import paho.mqtt.client as paho
 from bleak import BleakScanner
@@ -109,7 +109,7 @@ async def main():
         return next((d.address for d in devices if (d.name or "").strip() == name.strip()), name)
 
     def dev_by_addr(address: str):
-        dev =  next((d for d in devices if d.address == address), None)
+        dev = next((d for d in devices if d.address == address), None)
         if not dev:
             raise Exception("Can't resolve device name %s, not discovered" % address)
         return dev
@@ -127,6 +127,7 @@ async def main():
     )
 
     names = set()
+    algorithms: Dict[str, str] = {}
 
     for dev in user_config.get('devices', []):
         addr: str = dev['address']
@@ -145,6 +146,7 @@ async def main():
                                           adapter=dev.get('adapter'),
                                           ))
                 names.add(name)
+                algorithms[name] = dev.get('algorithm')
             else:
                 logger.warning('Unknown device type %s', dev)
 
@@ -190,6 +192,7 @@ async def main():
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
+        algorithm=algorithms.get(bms.name),
     ) for bms in bms_list]
 
     parallel_fetch = user_config.get('concurrent_sampling', False)

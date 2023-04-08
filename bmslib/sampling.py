@@ -6,6 +6,7 @@ from typing import Optional
 import paho.mqtt.client
 
 import bmslib.bt
+from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo
 from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
@@ -18,7 +19,7 @@ logger = get_logger(verbose=False)
 class BmsSampler():
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
-                 invert_current=False, meter_state=None, publish_period=None):
+                 invert_current=False, meter_state=None, publish_period=None, algorithm:Optional[str] = None):
         self.bms = bms
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
@@ -27,6 +28,8 @@ class BmsSampler():
         self.num_samples = 0
         self.publish_period = publish_period
         self._t_pub = 0
+
+        self.algorithm = create_algorithm(algorithm) if algorithm else None
 
         dx_max = dt_max_seconds / 3600
         self.current_integrator = Integrator(name="total_charge", dx_max=dx_max)
@@ -87,6 +90,16 @@ class BmsSampler():
 
                 self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
                 self.charge_integrator += (t_hour, sample.charge) # Ah
+
+                if self.algorithm:
+                    res = self.algorithm.update(sample)
+                    if res or self.bms.verbose_log:
+                        logger.info('Algo State=%s (bms=%s) -> %s ', self.algorithm.state, res, BatterySwitches(**sample.switches))
+                    if res and res.switches:
+                        for swk in sample.switches.keys():
+                            if res.switches[swk] is not None:
+                                logger.info('%s algo set %s switch -> %s', bms.name, swk, res.switches[swk])
+                                await self.bms.set_switch('charge', res.switches[swk])
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)

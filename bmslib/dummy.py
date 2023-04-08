@@ -34,7 +34,7 @@ class DummyBt(BtBms):
         sample = BmsSample(
             voltage=12 - math.sin(time.time() / 16) * .5,
             current=math.sin(time.time() / 16),
-            charge=50,
+            charge=(.5 + math.sin(time.time() / 32) * .5) * 100,
             capacity=100,
             num_cycles=3,
             temperatures=[21],
