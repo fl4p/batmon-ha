@@ -59,7 +59,7 @@ class SokBt(BtBms):
 	UUID_TX = '0000ffe2-0000-1000-8000-00805f9b34fb'
 	TIMEOUT = 8
 
-  def __init__(self, address, **kwargs):
+    def __init__(self, address, **kwargs):
 		super().__init__(address, **kwargs)
 		self._buffer = bytearray()
 		self._fetch_futures = FuturesPool()
