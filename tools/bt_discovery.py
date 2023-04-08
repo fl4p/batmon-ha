@@ -13,5 +13,7 @@ async def bt_discovery():
     for d in devices:
         logger.info("BT Device   %s   address=%s", d.name, d.address)
     return devices
-
-asyncio.run(bt_discovery())
+    
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(bt_discovery())   
