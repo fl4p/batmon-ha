@@ -100,6 +100,8 @@ async def main():
     extra_tasks = []
 
     try:
+        if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
+            raise Exception("skip-discovery")
         devices = await bt_discovery()
     except Exception as e:
         devices = []
