@@ -6,7 +6,7 @@ References
 - https://github.com/Louisvdw/dbus-serialbattery/issues/350#issuecomment-1500658941
 """
 import asyncio
-# From Tony Zuccaro's script
+import logging
 import struct
 import statistics
 
@@ -96,7 +96,8 @@ class SokBt(BtBms):
 
     async def fetch(self) -> BmsSample:
 
-        buf = await self._q(cmd=0xCCF0) # status
+        buf = await self._q(cmd=0xC1) # info
+        logging.debug(bytes(buf).hex())
         #this is not accurate, find out why
         # self.volts = (getLeInt3(value, 2) * 4) / 1000**2
         ma = getLeInt3(buf, 5) / 1000**2
@@ -105,18 +106,22 @@ class SokBt(BtBms):
         ema = getLeInt3(buf, 8) / 1000 # not sure what this is
         current = getLeInt3(buf, 11) / 1000
 
-        buf = await self._q(cmd=0xCCF1) # name
+        buf = await self._q(cmd=0xC0) # name
+        logging.debug(bytes(buf).hex())
         name = bytes(buf[2:10]).decode('utf-8').rstrip()
 
-        buf = await self._q(cmd=0xCCF2) # temps
-        temp = getLeShort(buf, 5)
+        #buf = await self._q(cmd=0xCCF2) # temps
+        #logging.debug(bytes(buf).hex())
+        #temp = getLeShort(buf, 5)
 
-        buf = await self._q(cmd=0xCCF3) # year, mv, hot
+        buf = await self._q(cmd=0xC2) # year, mv, hot
+        logging.debug(bytes(buf).hex())
         year = 2000 + buf[2]
         rated = getBeUint3(buf, 5) / 128
         heater_on = getLeUShort(buf,8)
 
-        buf = await self._q(cmd=0xCCF4) # cell level voltages
+        buf = await self._q(cmd=0xC2) # detail
+        logging.debug(bytes(buf).hex())
         cells = [0,0,0,0]
         for x in range(0,4):
             cell = buf[2+(x*4)]
@@ -127,8 +132,7 @@ class SokBt(BtBms):
             voltage=voltage,
             current=current,
             soc=soc,
-            capacity=rated,
-            temperatures=[temp]
+            capacity=rated
         )
 
         return sample
