@@ -1,4 +1,5 @@
 import math
+import time
 from copy import copy
 from typing import List, Dict, Optional
 
@@ -30,7 +31,7 @@ class BmsSample:
                  temperatures: List[float] = None,
                  mos_temperature=math.nan,
                  switches: Optional[Dict[str, bool]] = None,
-                 uptime=math.nan):
+                 uptime=math.nan, timestamp=None):
         """
 
         :param voltage:
@@ -66,6 +67,7 @@ class BmsSample:
         self.mos_temperature = mos_temperature
         self.switches = switches
         self.uptime = uptime
+        self.timestamp = timestamp or time.time()
 
         if switches:
             assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
