@@ -53,6 +53,9 @@ def getLeUShort(data, offset):
     """ reads little-endian unsigned short """
     return unpack('<H',bytes(data[offset:offset+2]))
 
+def _sok_command(command: int):
+	return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
+	
 
 class SokBt(BtBms):
     UUID_RX = '0000ffe1-0000-1000-8000-00805f9b34fb'
@@ -88,7 +91,7 @@ class SokBt(BtBms):
 
     async def _q(self, cmd):
         with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
+            await self.client.write_gatt_char(self.UUID_TX, data=_sok_command(cmd))
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
