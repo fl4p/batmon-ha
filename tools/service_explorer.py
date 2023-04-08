@@ -19,9 +19,9 @@ from bleak import BleakClient
 logger = logging.getLogger(__name__)
 
 ADDRESS = (
-    "24:71:89:cc:09:05"
+    "D6:6C:0A:61:14:30"
     if platform.system() != "Darwin"
-    else "95E605C8-E9DC-DD43-E368-D9B1DA8301B7"
+    else "521087E3-F05D-BB20-5E63-CA46F91205FE"
 )
 
 

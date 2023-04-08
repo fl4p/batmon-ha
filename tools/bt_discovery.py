@@ -1,11 +1,9 @@
 import asyncio
+import logging
 
 from bleak import BleakScanner
 
-from bmslib.util import get_logger
-
-
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 async def bt_discovery():
     logger.info('BT Discovery:')
