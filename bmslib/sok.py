@@ -4,15 +4,6 @@ from ABC BMS Android app (com.sjty.sbs_bms).
 
 References
 - https://github.com/Louisvdw/dbus-serialbattery/issues/350#issuecomment-1500658941
-"""
-import asyncio
-import logging
-import struct
-import statistics
-
-from bmslib import FuturesPool
-from .bms import BmsSample
-from .bt import BtBms
 
 svc_id    = '0000ffe0-0000-1000-8000-00805f9b34fb'
 notify_id = '0000ffe1-0000-1000-8000-00805f9b34fb'
@@ -25,42 +16,73 @@ cmd_setting    = [ 0xee, 0xc3, 0x00, 0x00, 0x00 ]
 cmd_protection = [ 0xee, 0xc4, 0x00, 0x00, 0x00 ]
 cmd_break      = [ 0xdd, 0xc0, 0x00, 0x00, 0x00 ]
 
+"""
+import asyncio
+import logging
+import struct
+import statistics
+
+from bmslib import FuturesPool
+from .bms import BmsSample
+from .bt import BtBms
+
+
 def get_str(ubit, uuid):
     """ reads utf8 string from specified bluetooth uuid """
     return ''.join(bytes(ubit.char_read(uuid)).decode('UTF-8'))
 
-def unpack(pattern,data):
-    """ slightly simpler unpack call """ 
+
+def unpack(pattern, data):
+    """ slightly simpler unpack call """
     return struct.unpack(pattern, data)[0]
+
 
 def getBeUint4(data, offset):
     """ gets big-endian unsigned integer """
-    return unpack('>I',bytes(data[offset:offset+4]))
+    return unpack('>I', bytes(data[offset:offset+4]))
+
 
 def getBeUint3(data, offset):
     """ reads 3b big-endian unsigned int  """
-    return unpack('>I',bytes( [0]+data[offset:offset+3]))
+    return unpack('>I', bytes([0]+data[offset:offset+3]))
+
 
 def getLeInt3(data, offset):
     """ reads 3b little-endian signed int """
-    return unpack('<i',bytes( [0] + data[offset:offset+3]))
+    return unpack('<i', bytes([0] + data[offset:offset+3]))
+
 
 def getLeShort(data, offset):
     """ reads little-endian signed short """
-    return unpack('<h',bytes(data[offset:offset+2]))
+    return unpack('<h', bytes(data[offset:offset+2]))
+
 
 def getLeUShort(data, offset):
     """ reads little-endian unsigned short """
-    return unpack('<H',bytes(data[offset:offset+2]))
+    return unpack('<H', bytes(data[offset:offset+2]))
+
+
+def minicrc(data):
+    """ computes crc8 of specified data"""
+    i = 0
+    for b in data:
+        i ^= b & 255
+        for i2 in range(0, 8):
+            i = (i >> 1) ^ 140 if (i & 1) != 0 else i >> 1
+    return i
+
 
 def _sok_command(command: int):
-	return bytes([0xEE, command, 0x00, 0x00, 0x00])
-	
+    data = [0xee, command, 0x00, 0x00, 0x00]
+    data2 = data + [minicrc(data)]
+    logging.debug(f'SOK: Sending [{bytes(data2).hex().upper()}]')
+    return bytes([0xEE, command, 0x00, 0x00, 0x00])
+
 
 class SokBt(BtBms):
     UUID_RX = '0000ffe1-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000ffe2-0000-1000-8000-00805f9b34fb'
-    TIMEOUT = 30
+    TIMEOUT = 10
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
@@ -96,34 +118,34 @@ class SokBt(BtBms):
 
     async def fetch(self) -> BmsSample:
 
-        buf = await self._q(cmd=0xC1) # info
-        logging.debug(bytes(buf).hex())
-        #this is not accurate, find out why
+        buf = await self._q(cmd=0xC1)  # info
+        logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
+        # this is not accurate, find out why
         # self.volts = (getLeInt3(value, 2) * 4) / 1000**2
-        ma = getLeInt3(buf, 5) / 1000**2
-        num_cycles = (struct.unpack('<H',bytes(buf[14:16]))[0])
-        soc = struct.unpack('<H',bytes(buf[16:18]))[0]
-        ema = getLeInt3(buf, 8) / 1000 # not sure what this is
+        # ma = getLeInt3(buf, 5) / 1000**2
+        # num_cycles = (struct.unpack('<H',bytes(buf[14:16]))[0])
+        soc = struct.unpack('<H', bytes(buf[16:18]))[0]
+        # ema = getLeInt3(buf, 8) / 1000 # not sure what this is
         current = getLeInt3(buf, 11) / 1000
 
-        buf = await self._q(cmd=0xC0) # name
-        logging.debug(bytes(buf).hex())
-        name = bytes(buf[2:10]).decode('utf-8').rstrip()
+        buf = await self._q(cmd=0xC0)  # name
+        logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
+        # name = bytes(buf[2:10]).decode('utf-8').rstrip()
 
-        #buf = await self._q(cmd=0xCCF2) # temps
-        #logging.debug(bytes(buf).hex())
-        #temp = getLeShort(buf, 5)
+        # buf = await self._q(cmd=0xCCF2)  # temps
+        # logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
+        # temp = getLeShort(buf, 5)
 
-        buf = await self._q(cmd=0xC2) # year, mv, hot
-        logging.debug(bytes(buf).hex())
-        year = 2000 + buf[2]
+        buf = await self._q(cmd=0xC2)  # year, mv, hot
+        logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
+        # year = 2000 + buf[2]
         rated = getBeUint3(buf, 5) / 128
-        heater_on = getLeUShort(buf,8)
+        # heater_on = getLeUShort(buf,8)
 
-        buf = await self._q(cmd=0xC2) # detail
-        logging.debug(bytes(buf).hex())
-        cells = [0,0,0,0]
-        for x in range(0,4):
+        buf = await self._q(cmd=0xC2)  # detail
+        logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
+        cells = [0, 0, 0, 0]
+        for x in range(0, 4):
             cell = buf[2+(x*4)]
             cells[cell - 1] = getLeUShort(buf, 3+(x*4))
         voltage = (statistics.mean(cells)*4)/1000
@@ -138,12 +160,13 @@ class SokBt(BtBms):
         return sample
 
     async def fetch_voltages(self):
-        buf = await self._q(cmd=0xCCF4) # cell level voltages
-        cells = [0,0,0,0]
-        for x in range(0,4):
+        buf = await self._q(cmd=0xCCF4)  # cell level voltages
+        cells = [0, 0, 0, 0]
+        for x in range(0, 4):
             cell = buf[2+(x*4)]
             cells[cell - 1] = getLeUShort(buf, 3+(x*4))
         return cells
+
 
 async def main():
     mac_address = '00:00:01:AA:EE:DD'
