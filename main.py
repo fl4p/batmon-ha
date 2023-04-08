@@ -15,6 +15,7 @@ import bmslib.daly
 import bmslib.dummy
 import bmslib.jbd
 import bmslib.jikong
+import bmslib.sok
 import bmslib.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
@@ -122,6 +123,7 @@ async def main():
         daly=bmslib.daly.DalyBt,
         jbd=bmslib.jbd.JbdBt,
         jk=bmslib.jikong.JKBt,
+        sok=bmslib.sok.SokBt,
         victron=bmslib.victron.SmartShuntBt,
         dummy=bmslib.dummy.DummyBt,
     )
