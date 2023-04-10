@@ -5,10 +5,12 @@
 * No calibrated Nominal Capacity
 * Slow response time (2s)
 * No custom hysteresis (release threshold) for protection settings
-
+* Sleep Mode and BT not available (https://github.com/fl4p/batmon-ha/issues/42)
++ Has Cycle counter
 
 ## JBD BMS
 * Doesn't keep SoC on power loss
+* No cycle counter
 * Buggy SoC?
 * Small balancing current
 * Balancing during charger OR discharge (setting) but not both?!
