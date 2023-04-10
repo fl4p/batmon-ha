@@ -1,5 +1,6 @@
 import datetime
 import random
+import re
 import time
 from typing import Optional
 
@@ -19,8 +20,9 @@ logger = get_logger(verbose=False)
 class BmsSampler():
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
-                 invert_current=False, meter_state=None, publish_period=None, algorithm:Optional[str] = None):
+                 invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None):
         self.bms = bms
+        self.mqtt_topic_prefix = re.sub(r'[^\w_. -]', '_', bms.name)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
         self.expire_after_seconds = expire_after_seconds
@@ -116,23 +118,23 @@ class BmsSampler():
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
-                    subscribe_switches(mqtt_client, device_topic=bms.name, bms=bms, switches=sample.switches.keys())
+                    subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms, switches=sample.switches.keys())
 
                 publish_discovery = (self.num_samples % 60) == 0
 
                 if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
                     self._t_pub = t_now
 
-                    publish_sample(mqtt_client, device_topic=bms.name, sample=sample)
+                    publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
                     logger.info('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
                     voltages = await bms.fetch_voltages()
-                    publish_cell_voltages(mqtt_client, device_topic=bms.name, voltages=voltages)
+                    publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
-                    publish_temperatures(mqtt_client, device_topic=bms.name, temperatures=temperatures)
+                    publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
                         logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
@@ -146,7 +148,7 @@ class BmsSampler():
                         except Exception as e:
                             logger.warning('%s error fetching device info: %s', bms.name, e)
                     publish_hass_discovery(
-                        mqtt_client, device_topic=bms.name, expire_after_seconds=self.expire_after_seconds,
+                        mqtt_client, device_topic=self.mqtt_topic_prefix, expire_after_seconds=self.expire_after_seconds,
                         sample=sample,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
                         device_info=self.device_info,
@@ -165,7 +167,7 @@ class BmsSampler():
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
-        device_topic = self.bms.name
+        device_topic = self.mqtt_topic_prefix
         for meter in self.meters:
             topic = f"{device_topic}/meter/{meter.name}"
             s = round_to_n(meter.get(), 4)
