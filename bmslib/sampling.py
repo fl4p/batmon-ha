@@ -29,15 +29,22 @@ class BmsSampler():
         self.publish_period = publish_period
         self._t_pub = 0
 
-        self.algorithm = create_algorithm(algorithm) if algorithm else None
+        self.algorithm = None
+        if algorithms:
+            assert len(algorithms) == 1, "currently only 1 algo supported"
+            algorithm = algorithms[0]
+            self.algorithm = create_algorithm(algorithm, bms_name=bms.name)
 
         dx_max = dt_max_seconds / 3600
         self.current_integrator = Integrator(name="total_charge", dx_max=dx_max)
         self.power_integrator = Integrator(name="total_energy", dx_max=dx_max)
         self.power_integrator_discharge = Integrator(name="total_energy_discharge", dx_max=dx_max)
         self.power_integrator_charge = Integrator(name="total_energy_charge", dx_max=dx_max)
-        self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dx_max, dy_max=0.1)
-        self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dx_max, dy_max=0.5) # TODO normalize dy_max to capacity
+
+        dx_max_diff = 3600 / 3600  # allow larger gabs for already integrated value
+        self.cycle_integrator = DiffAbsSum(name="total_cycles", dx_max=dx_max_diff, dy_max=0.1)
+        self.charge_integrator = DiffAbsSum(name="total_abs_diff_charge", dx_max=dx_max_diff, dy_max=0.5)
+        # TODO normalize dy_max to capacity                                                         ^^^
 
         self.meters = [self.current_integrator, self.power_integrator, self.power_integrator_discharge,
                        self.power_integrator_charge, self.cycle_integrator, self.charge_integrator]
@@ -79,22 +86,28 @@ class BmsSampler():
                 t_hour = t_now * (1 / 3600)
 
                 # discharging P>0
-                self.power_integrator_charge += (t_hour, abs(min(0, sample.power))  * 1e-3) # kWh
-                self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3) # kWh
+                self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
+                self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)  # kWh
 
                 if self.invert_current:
                     sample = sample.invert_current()
 
-                self.current_integrator += (t_hour, sample.current) # Ah
-                self.power_integrator += (t_hour, sample.power * 1e-3) # kWh
+                self.current_integrator += (t_hour, sample.current)  # Ah
+                self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
 
-                self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2)) # SoC 100->0 is a half cycle
-                self.charge_integrator += (t_hour, sample.charge) # Ah
+                self.cycle_integrator += (t_hour, sample.soc * (0.01 / 2))  # SoC 100->0 is a half cycle
+                self.charge_integrator += (t_hour, sample.charge)  # Ah
 
                 if self.algorithm:
                     res = self.algorithm.update(sample)
                     if res or self.bms.verbose_log:
-                        logger.info('Algo State=%s (bms=%s) -> %s ', self.algorithm.state, res, BatterySwitches(**sample.switches))
+                        logger.info('Algo State=%s (bms=%s) -> %s ', self.algorithm.state, res,
+                                    BatterySwitches(**sample.switches))
+                    if res:
+                        from bmslib.store import store_algorithm_state
+                        state = self.algorithm.state
+                        if state:
+                            store_algorithm_state(bms.name, algorithm_name=self.algorithm.name, state=state.__dict__)
                     if res and res.switches:
                         for swk in sample.switches.keys():
                             if res.switches[swk] is not None:
