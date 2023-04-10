@@ -129,7 +129,7 @@ async def main():
     )
 
     names = set()
-    algorithms: Dict[str, str] = {}
+    algorithms: Dict[str, List[dict]] = {}
 
     for dev in user_config.get('devices', []):
         addr: str = dev['address']
@@ -194,7 +194,7 @@ async def main():
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
-        algorithm=algorithms.get(bms.name),
+        algorithms=algorithms.get(bms.name, "").split(";"),
     ) for bms in bms_list]
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
