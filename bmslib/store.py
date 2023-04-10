@@ -1,4 +1,5 @@
 import json
+import re
 from os import access, R_OK
 from os.path import isfile, join
 from threading import Lock
@@ -25,6 +26,24 @@ def store_meter_states(meter_states):
     with lock:
         with open(bms_meter_states, 'w') as f:
             json.dump(meter_states, f)
+
+def store_algorithm_state(bms_name, algorithm_name, state=None):
+    fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
+    with lock:
+        with open(fn, 'a+') as f:
+            try:
+                f.seek(0)
+                bms_state = json.load(f)
+            except:
+                logger.info('init %s bms state storage', bms_name)
+                bms_state = dict(algorithm_state=dict())
+
+            if state is not None:
+                bms_state['algorithm_state'][algorithm_name] = state
+                f.seek(0), f.truncate()
+                json.dump(bms_state, f)
+
+            return bms_state['algorithm_state'].get(algorithm_name, None)
 
 
 def load_user_config():

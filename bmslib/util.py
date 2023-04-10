@@ -25,3 +25,7 @@ def get_logger(verbose=False):
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
     return logger
+
+
+def dict_to_short_string(d:dict):
+    return '(' + ','.join( f'{k}={v}' for k,v in d.items() if v is not None) + ')'

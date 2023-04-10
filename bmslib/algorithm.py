@@ -2,7 +2,7 @@ import time
 from typing import Optional, Union
 
 from bmslib.bms import BmsSample
-from bmslib.util import get_logger
+from bmslib.util import get_logger, dict_to_short_string
 
 logger = get_logger()
 
@@ -35,21 +35,28 @@ class UpdateResult:
 class BaseAlgorithm:
     state = None
 
+    def __init__(self, name:str):
+        self.name = name
+
     def update(self, sample: BmsSample) -> UpdateResult:
         raise NotImplementedError()
 
 
 
 class SocArgs:
-    def __init__(self, charge_stop, charge_start, discharge_stop=None, discharge_start=None, calibration_interval=None):
+    def __init__(self, charge_stop, charge_start='0%', discharge_stop=None, discharge_start=None, calibration_interval=None):
         charge_stop = float(charge_stop.strip('%'))
         charge_start = float(charge_start.strip('%'))
         assert charge_stop >= charge_start
+
         self.charge_stop = charge_stop
         self.charge_start = charge_start
         self.discharge_stop = discharge_stop
         self.discharge_start = discharge_start
         self.calibration_interval = calibration_interval
+
+    def __str__(self):
+        return dict_to_short_string(self.__dict__)
 
 
 class SocState:
@@ -63,7 +70,8 @@ class SocState:
 
 class Soc(BaseAlgorithm):
 
-    def __init__(self, args: SocArgs, state: SocState):
+    def __init__(self, name, args: SocArgs, state: SocState):
+        super().__init__(name=name)
         self.args = args
         self.state: SocState = state
         # self._debug_state = {}
@@ -97,14 +105,28 @@ class Soc(BaseAlgorithm):
             #    if sample.switches['charge']:
 
 
-def create_algorithm(repr: Union[dict, str]) -> BaseAlgorithm:
+def create_algorithm(repr: Union[dict, str], bms_name=None) -> BaseAlgorithm:
     classes = dict(soc=Soc)
+    args, kwargs = [], {}
     if isinstance(repr, dict):
         repr = dict(repr)
         name = repr.pop('name')
-        return classes[name](
-            args=SocArgs(**repr),
-            state=SocState(charging=True, last_calibration_time=time.time())
-        )
+        kwargs = repr
     else:
-        raise NotImplementedError()
+        repr = repr.strip().split(' ')
+        name = repr.pop(0)
+        args = repr
+
+    from bmslib.store import store_algorithm_state
+    state = store_algorithm_state(bms_name, algorithm_name=name)
+    algo = classes[name](
+        name=name,
+        args=SocArgs(*args, **kwargs),
+        state=SocState(**state) if state else SocState(charging=True, last_calibration_time=time.time())
+    )
+    if state:
+        logger.info('Restored %s algo [args=%s] state %s', name, algo.args, dict_to_short_string(state))
+    else:
+        logger.info('Initialized %s algo [args=%s]', name, algo.args)
+
+    return algo
