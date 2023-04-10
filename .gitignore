@@ -4,3 +4,5 @@ __pycache__
 options.json
 
 bms_meter_states.json
+
+/bat_*.json

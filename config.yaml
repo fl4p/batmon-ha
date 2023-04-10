@@ -36,6 +36,7 @@ schema:
       alias: "str?"
       debug: "bool?"
       pin: "str?"
+      algorithm: "str?"
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
