@@ -158,6 +158,8 @@ class JKBt(BtBms):
         )
 
     def _decode_sample(self, buf) -> BmsSample:
+        buf_set = self._resp_table[0x01]
+
         is_new_11fw = buf[189] == 0x00 and buf[189 + 32] > 0
         offset = 0
         if is_new_11fw:
@@ -187,9 +189,11 @@ class JKBt(BtBms):
             # 146 charge_full (see above)
             num_cycles=u32(150 + offset),
             switches=dict(
-                charge=bool(buf[166 + offset]),
-                discharge=bool(buf[167 + offset]),
+                charge=bool(buf_set[118]),
+                discharge=bool(buf_set[122]),
             ),
+            #  #buf[166 + offset]),  charge FET state
+            # buf[167 + offset]), discharge FET state
             uptime=float(u32(162 + offset)),  # seconds
         )
 
@@ -230,19 +234,28 @@ class JKBt(BtBms):
             discharge=0x1E,
             balance=0x1F
         )
-        await self._write(addresses[switch], [0x1 if state else 0x0])
+        await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
+        await asyncio.sleep(0.1)
+        await self._q(cmd=0x96, resp=(0x02, 0x01)) # query settings
 
     def debug_data(self):
         return self._resp_table
 
 
 async def main():
-    mac_address = 'C8:47:8C:F7:AD:B4'
+    mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'
     bms = JKBt(mac_address, name='jk')
     async with bms:
         while True:
             s = await bms.fetch(wait=True)
             print(s, 'I_bal=', s.balance_current, await bms.fetch_voltages())
+            new_state = not s.switches['charge']
+            await bms.set_switch('charge', new_state)
+            # await bms._q(cmd=0x96, resp= 0x01)
+            print('set charge', new_state)
+            await asyncio.sleep(4)
+            s = await bms.fetch(wait=True)
+            print(s)
 
 
 if __name__ == '__main__':
