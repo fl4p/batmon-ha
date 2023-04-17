@@ -53,6 +53,8 @@ class JKBt(BtBms):
     TIMEOUT = 8
 
     def __init__(self, address, **kwargs):
+        if kwargs.get('psk'):
+            self.logger.warning('JK usually does not use a pairing PIN')
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._resp_table = {}

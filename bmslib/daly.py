@@ -21,6 +21,8 @@ class DalyBt(BtBms):
     TIMEOUT = 8
 
     def __init__(self, address, **kwargs):
+        if kwargs.get('psk'):
+            self.logger.warning('JBD usually does not use a pairing PIN')
         super().__init__(address, **kwargs)
         self.UUID_RX = None
         self.UUID_TX = None
