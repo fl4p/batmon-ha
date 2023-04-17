@@ -16,8 +16,8 @@ import asyncio
 from collections import defaultdict
 from typing import List, Callable, Dict
 
-from .bms import BmsSample, DeviceInfo
-from .bt import BtBms
+from bmslib.bms import BmsSample, DeviceInfo
+from bmslib.bt import BtBms
 
 
 def calc_crc(message_bytes):

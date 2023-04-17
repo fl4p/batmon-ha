@@ -56,7 +56,8 @@ displayed in the discovery list.
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
 
-If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with device's PIN)
+If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with device's PIN).
+
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 
 For verbose logs of particular BMS add `debug: true`.
@@ -77,7 +78,8 @@ For verbose logs of particular BMS add `debug: true`.
 
 ## Energy Meters
 
-Batmon implements energy metering by integrating the power values from the BMS with the trapezoidal rule. You can add theses meters to your Home
+Batmon implements energy metering by integrating the power values from the BMS with the trapezoidal rule. You can add
+theses meters to your Home
 Assistant Energy Dashboard. The accuracy depends on the accuracy of the voltage and current readings from the BMS.
 Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
 peaks, leading to even greater error.
@@ -87,7 +89,8 @@ peaks, leading to even greater error.
 * `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
   This equals to `(Total Energy Charge) - (Total Energy Discharge)`.
 * `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
-  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC (e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
+  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC (
+  e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
 
 ## Troubleshooting
 
@@ -95,13 +98,14 @@ peaks, leading to even greater error.
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Power cycle the BMS Bluetooth dongle (or BMS)
-* Try another Bluetooth hardware
 * Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
-
-## Known Issues
-
+* Try another Bluetooth hardware
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
+* Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
+  appears that disabling WiFi helps.
+* Inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
+  hardware
 
 ## TODO
 
@@ -120,6 +124,7 @@ All you need is an operating system supported by [bleak](https://pypi.org/projec
 See [doc/Standalone.md](doc/Standalone.md)
 
 # Donate
+
 * [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)
 
 ## References

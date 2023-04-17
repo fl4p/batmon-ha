@@ -1,3 +1,5 @@
+* Current calibration factor
+* For large publish periods, publish mean values
 * MicroPython port
 ** https://docs.micropython.org/en/latest/reference/packages.html 
 

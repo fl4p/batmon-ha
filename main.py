@@ -52,6 +52,7 @@ async def fetch_loop(fn, period, max_errors):
                 logger.warning('too many errors, abort')
                 break
         await asyncio.sleep(period)
+    logger.info("fetch_loop %s ends", fn)
 
 
 def store_states(samplers: List[BmsSampler]):
@@ -148,7 +149,8 @@ async def main():
                                           adapter=dev.get('adapter'),
                                           ))
                 names.add(name)
-                algorithms[name] = dev.get('algorithm')
+                if dev.get('algorithm'):
+                    algorithms[name] = dev.get('algorithm')
             else:
                 logger.warning('Unknown device type %s', dev)
 
@@ -194,7 +196,7 @@ async def main():
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
-        algorithms=algorithms.get(bms.name, "").split(";"),
+        algorithms=algorithms.get(bms.name).split(";") if algorithms.get(bms.name) else None,
     ) for bms in bms_list]
 
     parallel_fetch = user_config.get('concurrent_sampling', False)

@@ -359,6 +359,7 @@ async def mqtt_process_action_queue():
 
 def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switches):
     async def set_switch(switch_name, state):
+        logger.info('Set %s %s switch %s', bms.name, switch_name, state)
         await bms.set_switch(switch_name, state)
         topic = f"{device_topic}/switch/{switch_name}"
         mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
@@ -373,7 +374,7 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     payload = message.payload.decode("utf-8")
-    logger.info("new message %s: %s", message.topic, payload)
+    logger.info("received msg %s: %s", message.topic, payload)
     callback = _switch_callbacks.get(message.topic, None)
     if callback:
         _message_queue.put((callback, payload))
