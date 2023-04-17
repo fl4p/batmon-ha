@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Callable, List
 
 from bleak import BleakClient
@@ -16,6 +17,7 @@ class BtBms():
         self.logger = get_logger(verbose_log)
         self._fetch_futures = FuturesPool()
         self._psk = psk
+        self._connect_time = 0
 
         if address.startswith('test_'):
             from bmslib.dummy import BleakDummyClient
@@ -37,8 +39,9 @@ class BtBms():
 
 
     def _on_disconnect(self, client):
-        if self.keep_alive:
-            self.logger.warning('BMS %s disconnected!', self.__str__())
+        if self.keep_alive and self._connect_time:
+            self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
+
         try:
             self._fetch_futures.clear()
         except Exception as e:
@@ -46,6 +49,7 @@ class BtBms():
 
     async def _connect_client(self, timeout):
         await self.client.connect(timeout=timeout)
+        self._connect_time = time.time()
         if self._psk:
             def get_passkey(device: str, pin, passkey):
                 if pin:
@@ -99,7 +103,7 @@ class BtBms():
                                     'another application. (%s)' % (self.client.address, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
-                await self._connect_client(timeout=timeout)
+                await self._connect_client(timeout=timeout/4)
                 break
             except Exception as e:
                 await self.client.disconnect()
