@@ -25,7 +25,7 @@ def _jbd_command(command: int):
 class JbdBt(BtBms):
     UUID_RX = '0000ff01-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
-    TIMEOUT = 8
+    TIMEOUT = 16
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
