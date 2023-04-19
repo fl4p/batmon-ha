@@ -29,7 +29,7 @@ class BtBms():
                     import bleak.backends.bluezdbus.agent
                 except ImportError:
                     self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
-            if adapter: # hci0, hci1 (BT adapter hardware)
+            if adapter:  # hci0, hci1 (BT adapter hardware)
                 kwargs['adapter'] = adapter
             self.client = BleakClient(address,
                                       handle_pairing=bool(psk),
@@ -37,6 +37,18 @@ class BtBms():
                                       **kwargs
                                       )
 
+    async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None], **kwargs):
+        if not isinstance(char_specifier, list):
+            char_specifier = [char_specifier]
+        exception = None
+        for cs in char_specifier:
+            try:
+                await self.client.start_notify(cs, callback, **kwargs)
+                return cs
+            except Exception as e:
+                exception = e
+        await enumerate_services(self.client, self.logger)
+        raise exception
 
     def _on_disconnect(self, client):
         if self.keep_alive and self._connect_time:
@@ -49,6 +61,8 @@ class BtBms():
 
     async def _connect_client(self, timeout):
         await self.client.connect(timeout=timeout)
+        if self.verbose_log:
+            await enumerate_services(self.client, logger=self.logger)
         self._connect_time = time.time()
         if self._psk:
             def get_passkey(device: str, pin, passkey):
@@ -80,7 +94,6 @@ class BtBms():
         """
         await self._connect_client(timeout=timeout)
 
-
     async def _connect_with_scanner(self, timeout=20):
         """
         Starts a bluetooth discovery and tries to establish a BLE connection with back off.
@@ -103,7 +116,7 @@ class BtBms():
                                     'another application. (%s)' % (self.client.address, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
-                await self._connect_client(timeout=timeout/4)
+                await self._connect_client(timeout=timeout / 4)
                 break
             except Exception as e:
                 await self.client.disconnect()
@@ -191,3 +204,34 @@ class BtBms():
 
     def debug_data(self):
         return None
+
+
+async def enumerate_services(client: BleakClient, logger):
+    for service in client.services:
+        logger.info(f"[Service] {service}")
+        for char in service.characteristics:
+            if "read" in char.properties:
+                try:
+                    value = bytes(await client.read_gatt_char(char.uuid))
+                    logger.info(
+                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
+                    )
+
+            else:
+                value = None
+                logger.info(
+                    f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                )
+
+            for descriptor in char.descriptors:
+                try:
+                    value = bytes(
+                        await client.read_gatt_descriptor(descriptor.handle)
+                    )
+                    logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
+                except Exception as e:
+                    logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")

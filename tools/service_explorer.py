@@ -21,42 +21,44 @@ logger = logging.getLogger(__name__)
 ADDRESS = (
     "24:71:89:cc:09:05"
     if platform.system() != "Darwin"
-    else "95E605C8-E9DC-DD43-E368-D9B1DA8301B7"
+    else "F21958DF-E949-4D43-B12B-0020365C428A"
 )
 
+async def enumerate_services(client: BleakClient):
+    for service in client.services:
+        logger.info(f"[Service] {service}")
+        for char in service.characteristics:
+            if "read" in char.properties:
+                try:
+                    value = bytes(await client.read_gatt_char(char.uuid))
+                    logger.info(
+                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
+                    )
+
+            else:
+                value = None
+                logger.info(
+                    f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                )
+
+            for descriptor in char.descriptors:
+                try:
+                    value = bytes(
+                        await client.read_gatt_descriptor(descriptor.handle)
+                    )
+                    logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
+                except Exception as e:
+                    logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
 
 async def main(address):
     async with BleakClient(address) as client:
         logger.info(f"Connected: {client.is_connected}")
+        await enumerate_services(client)
 
-        for service in client.services:
-            logger.info(f"[Service] {service}")
-            for char in service.characteristics:
-                if "read" in char.properties:
-                    try:
-                        value = bytes(await client.read_gatt_char(char.uuid))
-                        logger.info(
-                            f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
-                        )
-
-                else:
-                    value = None
-                    logger.info(
-                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
-                    )
-
-                for descriptor in char.descriptors:
-                    try:
-                        value = bytes(
-                            await client.read_gatt_descriptor(descriptor.handle)
-                        )
-                        logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
-                    except Exception as e:
-                        logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
 
 
 if __name__ == "__main__":
