@@ -56,7 +56,7 @@ displayed in the discovery list.
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
 
-If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with device's PIN).
+If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456 with device's PIN).
 
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 
