@@ -47,8 +47,7 @@ MAX_RESPONSE_SIZE = 320
 
 
 class JKBt(BtBms):
-    UUID_RX = "0000ffe1-0000-1000-8000-00805f9b34fb"
-    UUID_TX = UUID_RX
+    UUID_RX = "0000ffe1-0000-1000-8000-00805f9b34fc"
 
     TIMEOUT = 8
 
@@ -60,6 +59,7 @@ class JKBt(BtBms):
         self._resp_table = {}
         self.num_cells = None
         self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
+        self.UUID_TX = self.UUID_RX
 
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -121,7 +121,9 @@ class JKBt(BtBms):
             self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
-        await self.client.start_notify(self.UUID_RX, self._notification_handler)
+        # try UUID and handle (=17). use working specifier for TX too:
+        # https://github.com/fl4p/batmon-ha/issues/83
+        self.UUID_TX = await self.start_notify([self.UUID_RX, 17], self._notification_handler)
 
         await self._q(cmd=0x97, resp=0x03)  # device info
         await self._q(cmd=0x96, resp=(0x02, 0x01))  # device state (resp 0x01 & 0x02)
@@ -246,18 +248,18 @@ class JKBt(BtBms):
 
 async def main():
     mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'
-    bms = JKBt(mac_address, name='jk')
+    bms = JKBt(mac_address, name='jk', verbose_log=False)
     async with bms:
         while True:
             s = await bms.fetch(wait=True)
             print(s, 'I_bal=', s.balance_current, await bms.fetch_voltages())
-            new_state = not s.switches['charge']
-            await bms.set_switch('charge', new_state)
+            #new_state = not s.switches['charge']
+            #await bms.set_switch('charge', new_state)
             # await bms._q(cmd=0x96, resp= 0x01)
-            print('set charge', new_state)
-            await asyncio.sleep(4)
-            s = await bms.fetch(wait=True)
-            print(s)
+            #print('set charge', new_state)
+            #await asyncio.sleep(4)
+            #s = await bms.fetch(wait=True)
+            #print(s)
 
 
 if __name__ == '__main__':
