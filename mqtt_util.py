@@ -1,6 +1,7 @@
 import json
 import math
 import queue
+import statistics
 import time
 import traceback
 
@@ -239,14 +240,23 @@ def publish_cell_voltages(client, device_topic, voltages):
     # "lowest_voltage": parts[2] / 1000,
     # "lowest_cell": parts[3],
 
+    if not voltages:
+        return
+
     x = range(len(voltages))
-    if x:
-        high_i = max(x, key=lambda i: voltages[i])
-        low_i = min(x, key=lambda i: voltages[i])
+    high_i = max(x, key=lambda i: voltages[i])
+    low_i = min(x, key=lambda i: voltages[i])
 
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
         mqtt_single_out(client, topic, voltages[i] / 1000)
+
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/average", sum(voltages) / len(voltages) / 1000)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -295,6 +305,15 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
         _hass_discovery(k, "voltage", unit="V")
+
+    statistic_fields = ["min", "max", "average", "median"]
+    for f in statistic_fields:
+        k = 'cell_voltages/%s' % f
+        _hass_discovery(k, device_class="voltage", unit="V")
+
+    for f in ["min_index", "max_index"]:
+        k = 'cell_voltages/%s' % f
+        _hass_discovery(k, device_class=None, unit="")
 
     for i in range(0, num_temp_sensors):
         k = 'temperatures/%d' % (i + 1)
