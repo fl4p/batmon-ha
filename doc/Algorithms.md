@@ -1,0 +1,63 @@
+*This is feature is experimental.*
+
+# Algorithms
+
+Batmon implements charge rules (algorithms) which try to keep the SoC in a "healthy" range to reduce battery
+degradation.
+You can specify the algorithm for each BMS and the algorithm takes control over the charging switch.
+The algorithm sets switches at trigger points only, so you can still use the BMS switches to manually override
+the algorithm logic.
+
+To enable an algorithm, add its signature to the BMS device entry in the add-on options:
+
+```
+    - address: "xx:yy:zz:00:11"
+      type: "jk"
+      alias: "jk_bms"
+      algorithm: "..."
+```
+
+There is currently only one simple algorithm, see below.
+
+# SoC Charge Algorithm
+
+Controls the `charge` switch to limit max SoC and/or adds a charge start hysteresis.
+If you know the alDente macOS App, you can compare this
+to [Sailing Mode](https://apphousekitchen.com/feature-explanation-sailing-mode/)
+
+Here are 3 scenarios you might use the algorithm for:
+
+1. Limit the max SoC to e.g. 90%
+
+2. "Holiday Mode": Imagine an off-grid system and you are away for a couple of weeks.
+   During night only 2 % SoC is used from the battery and solar power will charge the battery to 100% each day.
+   The battery is cycled at 100%-98%-100%.
+   With the SoC Algorithm you for example implement 80%-70%-80% cycling, which might prolong battery lifetime.
+
+3. Another scenario is "dumb" charger cut-off, where the BMS over-voltage protection kicks in.
+   It might soon release as battery open circuit voltage falls over time, causing trickle charge.
+   With the algorithm charge turn-on is controlled by battery SoC rather than battery voltage.
+
+## Signature
+
+```
+algorithm: "soc CHARGE_STOP% [CHARGE_START%]"
+```
+
+## Arguments
+
+- `charge_stop`: at this SoC% the algorithm turns off the charger to avoid charging beyond
+- `charge_start`: at this SoC% the algorithm turns the charger on (optional)
+
+Even though the SoC% is below `charge_stop`, charging
+is paused until `charge_start` is reached. This can avoid trickle charge by adding a hysteresis.
+
+If `charge_start` is greater than `charge_stop` it is set to `charge_stop` and the hysteresis is disabled.
+
+## Examples
+
+- `algorithm: soc 90%` limits max SoC to 90% without hysteresis. (note that this is equal
+  to `algorithm: soc 90% 90%` and `algorithm: soc 90% 100%`)
+- `algorithm: soc 100% 95%` avoid trickle charge
+- `algorithm: soc 80% 70%` "Holiday Mode" as described above, trying to keep SoC between 80 and 70 % (10% DoD)
+- `algorithm: soc 75% 25%` targets a 50% DoD (Depth-of-Discharge)
