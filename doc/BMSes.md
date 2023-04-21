@@ -31,3 +31,4 @@
 * https://github.com/NEEY-electronic/JK/tree/JK-BMS
 * 750 mW stand-by consumption
 * Current Threshold: charge: 0.4A
+* Low BT range  (especially with EMI from cheap inverters?)

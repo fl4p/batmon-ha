@@ -53,6 +53,7 @@ class VirtualGroupBms():
         return "missing %s" % (self.group.bms_names - set(self.group.samples.keys()))
 
     async def fetch(self) -> BmsSample:
+        # TODO wait for update with timeout
         return self.group.fetch()
 
     async def fetch_voltages(self):
@@ -94,6 +95,9 @@ class VirtualGroupBms():
                 await bms.set_switch(switch, state)
             except Exception as ex:
                 self.logger.error("Group %s failed to set %s switch for %s: %s", self.name, switch, bms.name, ex)
+
+    async def fetch_device_info(self):
+        raise NotImplementedError()
 
 def add_parallel(samples: Iterable[BmsSample]):
     return BmsSample(

@@ -81,7 +81,7 @@ class BmsSample:
 
     def __str__(self):
         # noinspection PyStringFormat
-        return 'BmsSampl(%(soc).0f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,q=%(charge).1fAh/%(capacity).0f,mos=%(mos_temperature).1f°C)' % {
+        return 'BmsSampl(%(soc).1f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,q=%(charge).1fAh/%(capacity).0f,mos=%(mos_temperature).1f°C)' % {
             **self.__dict__,
             "power": self.power
         }

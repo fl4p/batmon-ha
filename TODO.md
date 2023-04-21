@@ -1,3 +1,7 @@
+* Pin bleak version
+* Pin bluez version
+* Try latest bleak version with victron smart shunt (on HA OS and macOS)
+* 
 * Current calibration factor
 * For large publish periods, publish mean values
 * MicroPython port
