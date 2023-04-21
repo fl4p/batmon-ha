@@ -42,6 +42,9 @@ class VirtualGroupBms():
         self.members :List[BtBms]= []
         self.logger = get_logger(verbose_log)
 
+    def __str__(self):
+        return 'VirtualGroupBms(%s,[%s])' % (self.name, self.address)
+
     @property
     def is_connected(self):
         return set(self.group.samples.keys()) == set(self.group.bms_names)
