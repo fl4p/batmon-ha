@@ -261,7 +261,8 @@ def publish_cell_voltages(client, device_topic, voltages):
     mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i)
     mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
     mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/average", sum(voltages) / len(voltages) / 1000)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
+    mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
     mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
 
 
@@ -312,7 +313,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         k = 'cell_voltages/%d' % (i + 1)
         _hass_discovery(k, "voltage", unit="V")
 
-    statistic_fields = ["min", "max", "average", "median"]
+    statistic_fields = ["min", "max", "average", "median", "delta"]
     for f in statistic_fields:
         k = 'cell_voltages/%s' % f
         _hass_discovery(k, device_class="voltage", unit="V")
