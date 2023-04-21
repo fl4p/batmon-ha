@@ -39,8 +39,8 @@ Here are 3 scenarios you might use the algorithm for:
    With the SoC Algorithm you for example implement 80%-70%-80% cycling, which might prolong battery lifetime.
 
 3. Another scenario is "dumb" charger cut-off, where the BMS over-voltage protection kicks in.
-   It might soon release as battery open circuit voltage falls over time, causing trickle charge.
-   The algorithm will control charging by battery SoC rather than battery voltage.
+   It might release after a couple of minutes as battery open circuit voltage falls over time, causing trickle charge.
+   The algorithm will control charging by battery SoC rather than battery voltage, to avoid trickle charge.
 
 ## Signature
 
@@ -64,4 +64,4 @@ If `charge_start` is greater than `charge_stop` it is set to `charge_stop` and t
   to `algorithm: soc 90% 90%` and `algorithm: soc 90% 100%`)
 - `algorithm: soc 100% 95%` avoid trickle charge
 - `algorithm: soc 80% 70%` "Holiday Mode" as described above, trying to keep SoC between 80 and 70 % (10% DoD)
-- `algorithm: soc 75% 25%` targets a 50% DoD (Depth-of-Discharge)
+- `algorithm: soc 75% 25%` targets a 50% DoD (Depth-of-Discharge).
