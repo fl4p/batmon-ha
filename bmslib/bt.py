@@ -201,7 +201,8 @@ class BtBms():
         # print("exit")
         if self.keep_alive:
             return
-        await self.disconnect()
+        if self.client.is_connected:
+            await self.disconnect()
 
     def __await__(self):
         return self.__aexit__().__await__()
