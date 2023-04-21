@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.60] - 2023-04-21
+* Add `num_cycles`
+* Add cell voltage statistics `min`, `max`, `delta`, `average`, `median`, `min_i`, `max_i`
+* Add Algorithms feature (experimental) [doc](https://github.com/fl4p/batmon-ha/blob/master/doc/Algorithms.md)
+* Add BMS Groups (experimental) [doc](https://github.com/fl4p/batmon-ha/blob/master/doc/Groups.md)
+
+* Increase JBD timeout
+* Fix mqtt topic names (remove whitespaces)
+* Fix initializing meter states
+* Fix JK charge/discharge switches
+* Fix JK `Multiple Characteristics with this UUID` error [#83](https://github.com/fl4p/batmon-ha/issues/83)
+* Fix `bleak.exc.BleakError: Not connected` [#85](https://github.com/fl4p/batmon-ha/issues/85)
+
+
 ## [0.0.57] - 2023-04-07
 * Fix JBD charge/discharge switch
 * Change warning if meter states file not found
