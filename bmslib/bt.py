@@ -59,6 +59,12 @@ class BtBms():
         await enumerate_services(self.client, self.logger)
         raise exception
 
+    def characteristic_uuid_to_handle(self, uuid:str, property:str):
+        for service in self.client.services:
+            for char in service.characteristics:
+                if char.uuid == uuid and property in char.properties:
+                    return char.handle
+
     def _on_disconnect(self, client):
         if self.keep_alive and self._connect_time:
             self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
