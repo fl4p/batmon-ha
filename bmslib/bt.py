@@ -18,7 +18,7 @@ async def bt_discovery(logger):
     return devices
 
 class BtBms():
-    def __init__(self, address: str, name, keep_alive=False, psk=None, adapter=None, verbose_log=False):
+    def __init__(self, address: str, name:str, keep_alive=False, psk=None, adapter=None, verbose_log=False):
         self.address = address
         self.name = name
         self.keep_alive = keep_alive

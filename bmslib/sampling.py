@@ -9,6 +9,7 @@ import paho.mqtt.client
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo
+from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
@@ -20,7 +21,8 @@ logger = get_logger(verbose=False)
 class BmsSampler():
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
-                 invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None):
+                 invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
+                 bms_group: Optional[BmsGroup] = None):
         self.bms = bms
         self.mqtt_topic_prefix = re.sub(r'[^\w_. -]', '_', bms.name)
         self.mqtt_client = mqtt_client
@@ -29,6 +31,8 @@ class BmsSampler():
         self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
         self.publish_period = publish_period
+        self.bms_group = bms_group  # group, virtual, parent
+
         self._t_pub = 0
 
         self.algorithm = None
@@ -82,10 +86,20 @@ class BmsSampler():
             async with bms:
                 if not was_connected:
                     logger.info('connected bms %s!', bms)
+
                 t_fetch = time.time()
+
                 sample = await bms.fetch()
+
                 t_now = time.time()
                 t_hour = t_now * (1 / 3600)
+
+                if sample.timestamp < t_now - self.expire_after_seconds:
+                    logger.warning('%s expired sample', bms.name)
+                    return
+
+                if self.bms_group:
+                    self.bms_group.update(bms, sample)
 
                 # discharging P>0
                 self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
@@ -159,6 +173,9 @@ class BmsSampler():
                 self.num_samples += 1
                 t_disc = time.time()
 
+        except GroupNotReady as ex:
+            logger.error('%s group not ready: %s', bms.name, ex)
+            return
         except Exception as ex:
             logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
             raise

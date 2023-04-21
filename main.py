@@ -18,6 +18,7 @@ import bmslib.jikong
 import bmslib.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
+from bmslib.group import VirtualGroupBms, BmsGroup
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger
@@ -116,6 +117,8 @@ async def main():
         jbd=bmslib.jbd.JbdBt,
         jk=bmslib.jikong.JKBt,
         victron=bmslib.victron.SmartShuntBt,
+        group_parallel=bmslib.group.VirtualGroupBms,
+        # group_serial=bmslib.group.VirtualGroupBms, # TODO
         dummy=bmslib.dummy.DummyBt,
     )
 
@@ -144,8 +147,23 @@ async def main():
             else:
                 logger.warning('Unknown device type %s', dev)
 
+    bms_by_name: Dict[str, bmslib.bt.BtBms] = {**{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
+                                               **{bms.name: bms for bms in bms_list} }
+    groups_by_bms: Dict[str, BmsGroup] = {}
+
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
+
+        if isinstance(bms, VirtualGroupBms):
+            group_bms = bms
+            for member_ref in bms.get_member_refs():
+                if member_ref not in bms_by_name:
+                    raise Exception("unknown bms %s in group %s", member_ref, group_bms)
+                member_name = bms_by_name[member_ref].name
+                if member_name in groups_by_bms:
+                    raise Exception("can't add bms %s to multiple groups %s %s", member_name, groups_by_bms[member_name], group_bms)
+                groups_by_bms[member_name] = group_bms.group
+                bms.add_member(bms_by_name[member_ref])
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
     # paho_monkey_patch()
@@ -187,7 +205,11 @@ async def main():
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
         algorithms=algorithms.get(bms.name).split(";") if algorithms.get(bms.name) else None,
+        bms_group=groups_by_bms.get(bms.name),
     ) for bms in bms_list]
+
+    # move groups to the end
+    sampler_list = sorted(sampler_list, key=lambda s: isinstance(s.bms, VirtualGroupBms))
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 

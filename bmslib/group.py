@@ -1,0 +1,108 @@
+import asyncio
+import statistics
+import time
+from copy import copy
+from typing import Dict, Iterable, List
+
+from bmslib.bms import BmsSample
+from bmslib.bt import BtBms
+from bmslib.util import get_logger
+
+
+class BmsGroup:
+
+    def __init__(self, name):
+        self.name = name
+        self.bms_names = set()
+        self.samples: Dict[str, BmsSample] = {}
+        self.max_sample_age = 0
+
+    def update(self, bms: BtBms, sample: BmsSample):
+        assert bms.name in self.bms_names, "called update with bms %s not in group %s" % (bms.name, self.bms_names)
+        self.samples[bms.name] = copy(sample)
+
+    def fetch(self) -> BmsSample:
+        ts_expire = time.time() - self.max_sample_age
+        expired = set(k for k,s in self.samples.items() if s.timestamp < ts_expire)
+        return add_parallel(self.samples.values())
+
+    def fetch_voltages(self):
+        return []
+
+class GroupNotReady(Exception):
+    pass
+
+class VirtualGroupBms():
+    # TODO inherit from bms base class
+    def __init__(self, address: str, name=None, verbose_log=False, **kwargs):
+        self.address = address
+        self.name = name
+        self.group = BmsGroup(name)
+        self.verbose_log = verbose_log
+        self.members :List[BtBms]= []
+        self.logger = get_logger(verbose_log)
+
+    @property
+    def is_connected(self):
+        return set(self.group.samples.keys()) == set(self.group.bms_names)
+
+    def debug_data(self):
+        return "missing %s" % (self.group.bms_names - set(self.group.samples.keys()))
+
+    async def fetch(self) -> BmsSample:
+        return self.group.fetch()
+
+    async def fetch_voltages(self):
+        return []
+
+    def set_keep_alive(self, keep):
+        pass
+
+    def add_member(self, bms:BtBms):
+        self.group.bms_names.add(bms.name)
+        self.members.append(bms)
+
+    def get_member_refs(self):
+        return set(filter(bool, self.address.split(',')))
+
+    def get_member_names(self):
+        return self.group.bms_names
+
+    async def connect(self):
+        for i in range(10):
+            if self.is_connected:
+                return
+            await asyncio.sleep(0.2)
+
+        raise GroupNotReady("group %s waiting for member data %s" % (self.name, self.debug_data()))
+
+    async def __aenter__(self):
+        await self.connect()
+
+    async def __aexit__(self, *args):
+        pass
+
+    def __await__(self):
+        pass
+
+    async def set_switch(self, switch: str, state: bool):
+        for bms in self.members:
+            try:
+                await bms.set_switch(switch, state)
+            except Exception as ex:
+                self.logger.error("Group %s failed to set %s switch for %s: %s", self.name, switch, bms.name, ex)
+
+def add_parallel(samples: Iterable[BmsSample]):
+    return BmsSample(
+        voltage=statistics.mean(s.voltage for s in samples),
+        current=sum(s.current for s in samples),
+        power=sum(s.power for s in samples),
+        charge=sum(s.charge for s in samples),
+        capacity=sum(s.capacity for s in samples),
+        cycle_capacity=sum(s.cycle_capacity for s in samples),
+        num_cycles=statistics.mean(s.num_cycles for s in samples),
+        soc=statistics.mean(s.soc for s in samples),
+        temperatures=sum((s.temperatures for s in samples), []),
+        switches={k: v for s in samples for k, v in s.switches.items()},
+        timestamp=min(s.timestamp for s in samples),
+    )
