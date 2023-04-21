@@ -35,19 +35,19 @@ class UpdateResult:
 class BaseAlgorithm:
     state = None
 
-    def __init__(self, name:str):
+    def __init__(self, name: str):
         self.name = name
 
     def update(self, sample: BmsSample) -> UpdateResult:
         raise NotImplementedError()
 
 
-
 class SocArgs:
-    def __init__(self, charge_stop, charge_start='0%', discharge_stop=None, discharge_start=None, calibration_interval=None):
+    def __init__(self, charge_stop, charge_start='100%', discharge_stop=None, discharge_start=None,
+                 calibration_interval=None):
         charge_stop = float(charge_stop.strip('%'))
         charge_start = float(charge_start.strip('%'))
-        assert charge_stop >= charge_start
+        # assert charge_stop >= charge_start
 
         self.charge_stop = charge_stop
         self.charge_start = charge_start
@@ -93,12 +93,11 @@ class Soc(BaseAlgorithm):
                     logger.info('Max Soc reached, stop charging')
                     return UpdateResult(switches=BatterySwitches(charge=False))
         else:
-            if sample.soc <= self.args.charge_start:
+            if sample.soc <= min(self.args.charge_start, self.args.charge_stop - 0.2):
                 self.state.charging = True
                 if not sample.switches['charge']:
                     logger.info('Min Soc reached, start charging')
                     return UpdateResult(switches=BatterySwitches(charge=True))
-
 
             # span = self.args.charge_stop - self.args.charge_start
             # if self.args.charge_stop - max(span*SOC_SPAN_MARGIN, 1) < sample.soc < self.args.charge_stop:
