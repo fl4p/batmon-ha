@@ -201,6 +201,12 @@ sample_desc = {
         "device_class": None,
         "state_class": None,
         "unit_of_measurement": "Ah"},
+    "soc/num_cycles": {
+        "field": "num_cycles",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit_of_measurement": "N",
+        "icon": "battery-sync"},
     "mosfet_status/capacity_ah": {
         "field": "charge",
         "device_class": None,
