@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.60] - 2023-04-21
+## [0.0.61] - 2023-04-21
 * Add `num_cycles`
 * Add cell voltage statistics `min`, `max`, `delta`, `average`, `median`, `min_i`, `max_i`
 * Add Algorithms feature (experimental) [doc](https://github.com/fl4p/batmon-ha/blob/master/doc/Algorithms.md)
