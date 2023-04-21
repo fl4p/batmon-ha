@@ -127,28 +127,33 @@ async def main():
 
     for dev in user_config.get('devices', []):
         addr: str = dev['address']
-        if addr and not addr.startswith('#'):
-            if dev['type'] in bms_registry:
-                bms_class = bms_registry[dev['type']]
-                if dev.get('debug'):
-                    logger.info('Verbose log for %s enabled', addr)
-                addr = name2addr(addr)
-                name: str = dev.get('alias') or dev_by_addr(addr).name
-                assert name not in names, "duplicate name %s" % name
-                bms_list.append(bms_class(addr,
-                                          name=name,
-                                          verbose_log=verbose_log or dev.get('debug'),
-                                          psk=dev.get('pin'),
-                                          adapter=dev.get('adapter'),
-                                          ))
-                names.add(name)
-                if dev.get('algorithm'):
-                    algorithms[name] = dev.get('algorithm')
-            else:
-                logger.warning('Unknown device type %s', dev)
 
-    bms_by_name: Dict[str, bmslib.bt.BtBms] = {**{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
-                                               **{bms.name: bms for bms in bms_list} }
+        if not addr or addr.startswith('#'):
+            continue
+
+        if dev['type'] not in bms_registry:
+            logger.warning('Unknown device type %s', dev)
+            continue
+
+        bms_class = bms_registry[dev['type']]
+        if dev.get('debug'):
+            logger.info('Verbose log for %s enabled', addr)
+        addr = name2addr(addr)
+        name: str = dev.get('alias') or dev_by_addr(addr).name
+        assert name not in names, "duplicate name %s" % name
+        bms_list.append(bms_class(addr,
+                                  name=name,
+                                  verbose_log=verbose_log or dev.get('debug'),
+                                  psk=dev.get('pin'),
+                                  adapter=dev.get('adapter'),
+                                  ))
+        names.add(name)
+        if dev.get('algorithm'):
+            algorithms[name] = dev.get('algorithm')
+
+    bms_by_name: Dict[str, bmslib.bt.BtBms] = {
+        **{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
+        **{bms.name: bms for bms in bms_list}}
     groups_by_bms: Dict[str, BmsGroup] = {}
 
     for bms in bms_list:
@@ -161,7 +166,8 @@ async def main():
                     raise Exception("unknown bms %s in group %s", member_ref, group_bms)
                 member_name = bms_by_name[member_ref].name
                 if member_name in groups_by_bms:
-                    raise Exception("can't add bms %s to multiple groups %s %s", member_name, groups_by_bms[member_name], group_bms)
+                    raise Exception("can't add bms %s to multiple groups %s %s", member_name,
+                                    groups_by_bms[member_name], group_bms)
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
 
@@ -220,38 +226,37 @@ async def main():
     max_errors = 200 if watchdog_en else 0
 
     asyncio.create_task(background_loop(
-        timeout=max(120., sample_period * 3) if watchdog_en else 0,
+        timeout=max(15 * 60., sample_period * 4) if watchdog_en else 0,
         sampler_list=sampler_list
     ))
 
+    tasks = sampler_list + extra_tasks
+
+    # before we start the loops connect to each bms
+    for t in tasks:
+        try:
+            await t()
+        except:
+            pass
+
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS so they don't delay each other
-        tasks = sampler_list + extra_tasks
-
-        # before we start the loops connect to each bms
-        for t in tasks:
-            try:
-                await t()
-            except:
-                pass
 
         loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
         await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
     else:
         async def fn():
-            tasks = ([smp() for smp in sampler_list] + [t() for t in extra_tasks])
-
             if parallel_fetch:
                 # concurrent synchronised fetch
                 # this branch is currently not reachable!
-                await asyncio.gather(*tasks, return_exceptions=False)
+                await asyncio.gather(*[t() for t in tasks], return_exceptions=False)
             else:
                 random.shuffle(tasks)
                 exceptions = []
                 for t in tasks:
                     try:
-                        await t
+                        await t()
                     except Exception as ex:
                         exceptions.append(ex)
                 if exceptions:

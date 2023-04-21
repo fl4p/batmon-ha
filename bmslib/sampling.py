@@ -119,11 +119,13 @@ class BmsSampler():
                     if res or self.bms.verbose_log:
                         logger.info('Algo State=%s (bms=%s) -> %s ', self.algorithm.state, res,
                                     BatterySwitches(**sample.switches))
+
                     if res:
                         from bmslib.store import store_algorithm_state
                         state = self.algorithm.state
                         if state:
                             store_algorithm_state(bms.name, algorithm_name=self.algorithm.name, state=state.__dict__)
+
                     if res and res.switches:
                         for swk in sample.switches.keys():
                             if res.switches[swk] is not None:
