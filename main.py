@@ -28,16 +28,6 @@ user_config = load_user_config()
 shutdown = False
 
 
-async def bt_discovery():
-    logger.info('BT Discovery:')
-    devices = await BleakScanner.discover()
-    if not devices:
-        logger.info(' - no devices found - ')
-    for d in devices:
-        logger.info("BT Device   %s   address=%s", d.name, d.address)
-    return devices
-
-
 async def fetch_loop(fn, period, max_errors):
     num_errors_row = 0
     while not shutdown:
@@ -103,7 +93,7 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        devices = await bt_discovery()
+        devices = await bmslib.bt.bt_discovery(logger)
     except Exception as e:
         devices = []
         logger.error('Error discovering devices: %s', e)

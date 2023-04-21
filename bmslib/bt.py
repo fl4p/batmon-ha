@@ -2,15 +2,24 @@ import asyncio
 import time
 from typing import Callable, List
 
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
+async def bt_discovery(logger):
+    logger.info('BT Discovery:')
+    devices = await BleakScanner.discover()
+    if not devices:
+        logger.info(' - no devices found - ')
+    for d in devices:
+        logger.info("BT Device   %s   address=%s", d.name, d.address)
+    return devices
 
 class BtBms():
     def __init__(self, address: str, name, keep_alive=False, psk=None, adapter=None, verbose_log=False):
+        self.address = address
         self.name = name
         self.keep_alive = keep_alive
         self.verbose_log = verbose_log

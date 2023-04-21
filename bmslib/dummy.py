@@ -3,6 +3,7 @@ This is code for a dummy BMS wich doesn't physically exist.
 
 """
 import math
+import random
 import time
 from functools import partial
 from threading import Thread
@@ -19,6 +20,7 @@ class DummyBt(BtBms):
         self._switches = dict(charge=True, discharge=True)
         self._t0 = time.time()
         self._connected = False
+        self._seed = random.random() * 2 * math.pi
 
     @property
     def is_connected(self):
@@ -32,9 +34,9 @@ class DummyBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         sample = BmsSample(
-            voltage=12 - math.sin(time.time() / 16) * .5,
-            current=math.sin(time.time() / 16),
-            charge=(.5 + math.sin(time.time() / 32) * .5) * 100,
+            voltage=12 - math.sin(time.time() / 16 + self._seed) * .5,
+            current=math.sin(time.time() / 16 + self._seed),
+            charge=(.5 + math.sin(time.time() / 32 + self._seed) * .5) * 100,
             capacity=100,
             num_cycles=3,
             temperatures=[21],
@@ -53,7 +55,7 @@ class DummyBt(BtBms):
 
 
 class BleakDummyClient():
-    def __init__(self, address:str, disconnected_callback):
+    def __init__(self, address: str, disconnected_callback):
         self.address = address
         self._connected = False
         self._disconnected_callback = disconnected_callback
@@ -114,7 +116,8 @@ class JKDummy():
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview],
+                              response: bool = False, ):
         crc = data[-1]
         data = bytes(data[:-1])
         from bmslib.jikong import calc_crc
@@ -145,7 +148,8 @@ class JBDDummy():
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview],
+                              response: bool = False, ):
         if data == b'\xdd\xa5\x03\x00\xff\xfdw':
             msg = bytearray.fromhex('dd03001b0a50fda4b717dac000002cf300000000000016540308020b7d0b77f8e277')
             self._callbacks['0000ff01-0000-1000-8000-00805f9b34fb'](self, bytes(msg))

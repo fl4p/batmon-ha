@@ -118,7 +118,8 @@ class BmsSampler():
 
                 if self.num_samples == 0 and sample.switches:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
-                    subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms, switches=sample.switches.keys())
+                    subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
+                                       switches=sample.switches.keys())
 
                 publish_discovery = (self.num_samples % 60) == 0
 
@@ -148,7 +149,8 @@ class BmsSampler():
                         except Exception as e:
                             logger.warning('%s error fetching device info: %s', bms.name, e)
                     publish_hass_discovery(
-                        mqtt_client, device_topic=self.mqtt_topic_prefix, expire_after_seconds=self.expire_after_seconds,
+                        mqtt_client, device_topic=self.mqtt_topic_prefix,
+                        expire_after_seconds=self.expire_after_seconds,
                         sample=sample,
                         num_cells=len(voltages), num_temp_sensors=len(temperatures),
                         device_info=self.device_info,

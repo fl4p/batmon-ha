@@ -34,3 +34,13 @@ Explore BLE Device Services:
 bleak/examples/service_explorer.py
 ```
 
+
+# Mqtt
+
+* SoC
+* Current
+* Charge
+* Capacity
+* Device info
+* Switches
+* Voltages
