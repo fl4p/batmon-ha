@@ -1,12 +1,13 @@
 import asyncio
 import time
-from typing import Callable, List
+from typing import Callable, List, Union
 
 from bleak import BleakClient, BleakScanner
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
+
 
 async def bt_discovery(logger):
     logger.info('BT Discovery:')
@@ -17,8 +18,9 @@ async def bt_discovery(logger):
         logger.info("BT Device   %s   address=%s", d.name, d.address)
     return devices
 
+
 class BtBms():
-    def __init__(self, address: str, name:str, keep_alive=False, psk=None, adapter=None, verbose_log=False):
+    def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False):
         self.address = address
         self.name = name
         self.keep_alive = keep_alive
@@ -58,6 +60,13 @@ class BtBms():
                 exception = e
         await enumerate_services(self.client, self.logger)
         raise exception
+
+    def characteristic_uuid_to_handle(self, uuid: str, property: str) -> Union[str, int]:
+        for service in self.client.services:
+            for char in service.characteristics:
+                if char.uuid == uuid and property in char.properties:
+                    return char.handle
+        return uuid
 
     def _on_disconnect(self, client):
         if self.keep_alive and self._connect_time:

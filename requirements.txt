@@ -1,6 +1,8 @@
 #bleak
 #git+https://github.com/hbldh/bleak@ed0b1c1cddf3a2f01882512745199e0f8f4dfa68 #https://github.com/hbldh/bleak/pull/640
 #git+https://github.com/jpeters-ml/bleak@ed0b1c1
-git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
+#git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
+
+bleak==0.20.2
 
 paho-mqtt
