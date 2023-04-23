@@ -40,7 +40,7 @@ Create `options.json` within the `batmon-ha` directory. Use this as an example a
   "keep_alive": true,
   "sample_period": 1.0,
   "publish_period": 1.0,
-  "invert_current": false
+  "invert_current": false,
   "expire_values_after": 20,
   "verbose_log": false,
   "watchdog": false
