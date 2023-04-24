@@ -17,6 +17,8 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Integrates with Home Assistant Energy dashboard
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
+* Battery Groups, see [doc/Groups.md](doc/Groups.md)
+* Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 
 ### Supported Devices (bluetooth)
 
@@ -56,7 +58,8 @@ displayed in the discovery list.
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
 
-If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456 with device's PIN).
+If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456
+with device's PIN).
 
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 
@@ -75,6 +78,8 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
+* Enable `install_latest_bleak` to install bleak 0.20.2, which is more stable than the default version. The default version
+  is known to be working with Victron SmartShunt.
 
 ## Energy Meters
 
