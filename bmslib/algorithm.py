@@ -123,6 +123,7 @@ def create_algorithm(repr: Union[dict, str], bms_name=None) -> BaseAlgorithm:
         args=SocArgs(*args, **kwargs),
         state=SocState(**state) if state else SocState(charging=True, last_calibration_time=time.time())
     )
+
     if state:
         logger.info('Restored %s algo [args=%s] state %s', name, algo.args, dict_to_short_string(state))
     else:

@@ -78,7 +78,7 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
-* Enable `install_latest_bleak` to install bleak 0.20.2, which is more stable than the default version. The default version
+* Enable `install_newer_bleak` to install bleak 0.20.2, which is more stable than the default version. The default version
   is known to be working with Victron SmartShunt.
 
 ## Energy Meters

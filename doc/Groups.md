@@ -2,7 +2,8 @@
 
 # Groups
 
-With groups, you can merge readings and switches of multiple BMS.
+With battery groups, you can tell batmon that multiple BMSs are connected together. 
+Batmon will merge readings and switches of the BMSs.
 
 To create a group, add another device entry in the options.
 
@@ -12,7 +13,7 @@ To create a group, add another device entry in the options.
   alias: battery_group1
 ```
 
-Refer to the member BMSs in the `address` property, name/alias separated by ",".
+Refer to the member BMSs in the `address` property, name/alias separated by `,`.
 
 Set `type` to `group_parallel`. Serial battery strings are not implemented yet.
 
@@ -46,4 +47,4 @@ You can create a group with a single BMS to ease the process of BMS swapping.
 Imagine you have all your Battery Dashboards and automations set up.
 At some point in the future you might want to replace the BMS with a different one, with a different name/alias.
 The work of changing all the entity names in Home Assistant can be tedious.
-Use a group as a "virtual proxy BMS" to map entities to another physical BMS. 
+Use a group as a *virtual proxy* BMS to map entities to another *physical* BMS. 

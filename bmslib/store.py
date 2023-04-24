@@ -16,6 +16,9 @@ root_dir = '/data/' if is_readable('/data/options.json') else ''
 bms_meter_states = root_dir + 'bms_meter_states.json'
 lock = Lock()
 
+def store_file(fn):
+    return root_dir + fn
+
 def load_meter_states():
     with lock:
         with open(bms_meter_states) as f:

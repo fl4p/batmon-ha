@@ -15,16 +15,16 @@ class BmsGroup:
         self.name = name
         self.bms_names = set()
         self.samples: Dict[str, BmsSample] = {}
-        self.max_sample_age = 0
+        # self.max_sample_age = 0
 
     def update(self, bms: BtBms, sample: BmsSample):
-        assert bms.name in self.bms_names, "called update with bms %s not in group %s" % (bms.name, self.bms_names)
+        assert bms.name in self.bms_names, "bms %s not in group %s" % (bms.name, self.bms_names)
         self.samples[bms.name] = copy(sample)
 
     def fetch(self) -> BmsSample:
-        ts_expire = time.time() - self.max_sample_age
-        expired = set(k for k,s in self.samples.items() if s.timestamp < ts_expire)
-        return add_parallel(self.samples.values())
+        #ts_expire = time.time() - self.max_sample_age
+        # expired = set(k for k,s in self.samples.items() if s.timestamp < ts_expire)
+        return sum_parallel(self.samples.values())
 
     def fetch_voltages(self):
         return []
@@ -99,7 +99,7 @@ class VirtualGroupBms():
     async def fetch_device_info(self):
         raise NotImplementedError()
 
-def add_parallel(samples: Iterable[BmsSample]) -> BmsSample:
+def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(
         voltage=statistics.mean(s.voltage for s in samples),
         current=sum(s.current for s in samples),
