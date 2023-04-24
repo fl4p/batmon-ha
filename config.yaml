@@ -30,6 +30,7 @@ options:
   invert_current: true
   watchdog: true
   expire_values_after: 20
+  install_newer_bleak: false
 schema:
   devices:
     - address: str
@@ -49,3 +50,4 @@ schema:
   invert_current: "bool"
   watchdog: "bool"
   expire_values_after: "float"
+  install_newer_bleak: "bool?"

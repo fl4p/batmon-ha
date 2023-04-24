@@ -21,6 +21,15 @@ async def bt_discovery(logger):
     return devices
 
 
+def bleak_version():
+    try:
+        import bleak
+        return bleak.__version__
+    except:
+        from importlib.metadata import version
+        return version('bleak')
+
+
 def bt_stack_version():
     try:
         # get BlueZ version

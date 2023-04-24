@@ -8,7 +8,6 @@ import traceback
 from typing import List, Dict
 
 import paho.mqtt.client as paho
-from bleak import BleakScanner
 
 import bmslib.bt
 import bmslib.daly
@@ -112,8 +111,7 @@ async def main():
     if verbose_log:
         logger.info('Verbose logging enabled')
 
-    import bleak
-    logger.info('Bleak version %s, BtBackend version %s', bleak.__version__, bmslib.bt.bt_stack_version())
+    logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
     bms_registry = dict(
         daly=bmslib.daly.DalyBt,
