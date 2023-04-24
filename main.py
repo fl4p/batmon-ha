@@ -112,6 +112,9 @@ async def main():
     if verbose_log:
         logger.info('Verbose logging enabled')
 
+    import bleak
+    logger.info('Bleak version %s, BtBackend version %s', bleak.__version__, bmslib.bt.bt_stack_version())
+
     bms_registry = dict(
         daly=bmslib.daly.DalyBt,
         jbd=bmslib.jbd.JbdBt,

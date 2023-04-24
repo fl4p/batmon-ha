@@ -1,4 +1,6 @@
 import asyncio
+import re
+import subprocess
 import time
 from typing import Callable, List, Union
 
@@ -17,6 +19,18 @@ async def bt_discovery(logger):
     for d in devices:
         logger.info("BT Device   %s   address=%s", d.name, d.address)
     return devices
+
+
+def bt_stack_version():
+    try:
+        # get BlueZ version
+        p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
+        out, _ = p.communicate()
+        s = re.search(b"(\\d+).(\\d+)", out.strip(b"'"))
+        bluez_version = tuple(map(int, s.groups()))
+        return 'bluez-v%i.%i' % bluez_version
+    except:
+        return '?'
 
 
 class BtBms():
