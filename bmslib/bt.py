@@ -39,7 +39,7 @@ def bt_stack_version():
         bluez_version = tuple(map(int, s.groups()))
         return 'bluez-v%i.%i' % bluez_version
     except:
-        return '?'
+        return '? (%s)' % BleakClient.__name__
 
 
 class BtBms():
@@ -63,8 +63,12 @@ class BtBms():
                     import bleak.backends.bluezdbus.agent
                 except ImportError:
                     self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
+
+
+            self._adapter = adapter
             if adapter:  # hci0, hci1 (BT adapter hardware)
                 kwargs['adapter'] = adapter
+
             self.client = BleakClient(address,
                                       handle_pairing=bool(psk),
                                       disconnected_callback=self._on_disconnect,
@@ -144,7 +148,10 @@ class BtBms():
         :return:
         """
         import bleak
-        scanner = bleak.BleakScanner()
+        scanner_kw = {}
+        if self._adapter:
+            scanner_kw['adapter'] = self._adapter
+        scanner = bleak.BleakScanner(**scanner_kw)
         self.logger.debug("starting scan")
         await scanner.start()
 
