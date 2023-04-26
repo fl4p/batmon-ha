@@ -148,6 +148,8 @@ class BmsSampler():
                     self.publish_meters()
 
                     voltages = await bms.fetch_voltages()
+                    if self.bms_group:
+                        self.bms_group.update_voltages(bms, voltages)
                     publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
                     temperatures = sample.temperatures or await bms.fetch_temperatures()

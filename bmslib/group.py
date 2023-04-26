@@ -13,13 +13,18 @@ class BmsGroup:
 
     def __init__(self, name):
         self.name = name
-        self.bms_names = set()
+        self.bms_names = list()
         self.samples: Dict[str, BmsSample] = {}
+        self.voltages: Dict[str, List[int]] = {}
         # self.max_sample_age = 0
 
     def update(self, bms: BtBms, sample: BmsSample):
         assert bms.name in self.bms_names, "bms %s not in group %s" % (bms.name, self.bms_names)
         self.samples[bms.name] = copy(sample)
+
+    def update_voltages(self, bms:BtBms, voltages:List[int]):
+        assert bms.name in self.bms_names, "bms %s not in group %s" % (bms.name, self.bms_names)
+        self.voltages[bms.name] = copy(voltages)
 
     def fetch(self) -> BmsSample:
         #ts_expire = time.time() - self.max_sample_age
@@ -27,7 +32,7 @@ class BmsGroup:
         return sum_parallel(self.samples.values())
 
     def fetch_voltages(self):
-        return []
+        return sum((self.voltages[name] for name in self.bms_names), [])
 
 class GroupNotReady(Exception):
     pass
@@ -50,20 +55,20 @@ class VirtualGroupBms():
         return set(self.group.samples.keys()) == set(self.group.bms_names)
 
     def debug_data(self):
-        return "missing %s" % (self.group.bms_names - set(self.group.samples.keys()))
+        return "missing %s" % (set(self.group.bms_names) - set(self.group.samples.keys()))
 
     async def fetch(self) -> BmsSample:
         # TODO wait for update with timeout
         return self.group.fetch()
 
     async def fetch_voltages(self):
-        return []
+        return self.group.fetch_voltages()
 
     def set_keep_alive(self, keep):
         pass
 
     def add_member(self, bms:BtBms):
-        self.group.bms_names.add(bms.name)
+        self.group.bms_names.append(bms.name)
         self.members.append(bms)
 
     def get_member_refs(self):
