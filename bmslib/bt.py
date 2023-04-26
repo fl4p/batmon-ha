@@ -164,7 +164,7 @@ class BtBms():
                                     'another application. (%s)' % (self.client.address, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
-                await self._connect_client(timeout=timeout / 4)
+                await self._connect_client(timeout=timeout / 2)
                 break
             except Exception as e:
                 await self.client.disconnect()
