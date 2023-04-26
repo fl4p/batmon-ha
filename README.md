@@ -102,6 +102,7 @@ peaks, leading to even greater error.
 * When experiencing connection issues enable `keep_alive`
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
+* Toggle `install_newer_bleak` option
 * Power cycle the BMS Bluetooth dongle (or BMS)
 * Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
 * Try another Bluetooth hardware

@@ -9,7 +9,7 @@ To create a group, add another device entry in the options.
 
 ```
 - address: "jk_bms1,jk_bms2"
-  type: group_parallel,
+  type: group_parallel
   alias: battery_group1
 ```
 
@@ -32,7 +32,7 @@ Example:
   type: jk
   alias: jk_bms2
 - address: "jk_bms1,jk_bms2"
-  type: group_parallel,
+  type: group_parallel
   alias: battery_group1
 ```
 
