@@ -4,13 +4,13 @@
 
 Batmon implements charge rules (algorithms) which try to keep the SoC in a "healthy" range to reduce battery
 degradation.
-You can specify the algorithm for each BMS and the algorithm takes control over the charging switch.
+You can set the algorithm for each BMS and it takes control over the charging switch.
 
 The algorithm sets switches at trigger points only, so you can still use the BMS switches to manually override
 the algorithm logic.
 Note that when adding a new algorithm it doesn't do anything until a trigger point is reached, please wait patiently.
 
-To ensure proper SoC levels, algorithms might frequently calibrate. The calibration is done once 100% SoC is reached.
+To ensure proper SoC levels, algorithms might frequently calibrate. The calibration finishes once 100% SoC is reached.
 
 To enable an algorithm, add its signature to the BMS device entry in the add-on options:
 
