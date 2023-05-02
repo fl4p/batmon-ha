@@ -7,7 +7,8 @@ assignees: ''
 
 ---
 
+Describe the issue here.
 
 ```
-paste log output here
+Paste log output here.
 ```
