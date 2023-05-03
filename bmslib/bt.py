@@ -39,7 +39,13 @@ def bt_stack_version():
         bluez_version = tuple(map(int, s.groups()))
         return 'bluez-v%i.%i' % bluez_version
     except:
+        # get_platform_client_backend_type
         return '? (%s)' % BleakClient.__name__
+
+
+def bt_power(on):
+    p = subprocess.Popen(["bluetoothctl", "power", "on" if on else "off"], stdout=subprocess.PIPE)
+    out, _ = p.communicate()
 
 
 class BtBms():
@@ -63,7 +69,6 @@ class BtBms():
                     import bleak.backends.bluezdbus.agent
                 except ImportError:
                     self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
-
 
             self._adapter = adapter
             if adapter:  # hci0, hci1 (BT adapter hardware)

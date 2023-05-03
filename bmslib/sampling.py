@@ -65,7 +65,7 @@ class BmsSampler():
     async def __call__(self):
         try:
             return await self.sample()
-        except:
+        except Exception:
             dd = self.bms.debug_data()
             if dd:
                 logger.info("%s bms debug data: %s", self.bms.name, dd)

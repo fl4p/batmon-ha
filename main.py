@@ -90,6 +90,12 @@ async def main():
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
 
+    if user_config.get('bt_power_cycle'):
+        logger.info('Power cycle bluetooth hardware')
+        bmslib.bt.bt_power(False)
+        bmslib.bt.bt_power(True)
+
+
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
