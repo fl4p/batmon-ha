@@ -24,7 +24,7 @@ class BmsSampler():
                  invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
                  bms_group: Optional[BmsGroup] = None):
         self.bms = bms
-        self.mqtt_topic_prefix = re.sub(r'[^\w_. -]', '_', bms.name)
+        self.mqtt_topic_prefix = re.sub(r'[^\w_.-]', '_', bms.name)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
         self.expire_after_seconds = expire_after_seconds
