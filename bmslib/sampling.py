@@ -69,6 +69,8 @@ class BmsSampler():
             dd = self.bms.debug_data()
             if dd:
                 logger.info("%s bms debug data: %s", self.bms.name, dd)
+            if self.device_info:
+                logger.info('%s device info: %s', self.device_info)
             raise
 
     async def sample(self):
