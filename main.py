@@ -91,10 +91,14 @@ async def main():
     extra_tasks = []
 
     if user_config.get('bt_power_cycle'):
-        logger.info('Power cycle bluetooth hardware')
-        bmslib.bt.bt_power(False)
-        bmslib.bt.bt_power(True)
-
+        try:
+            logger.info('Power cycle bluetooth hardware')
+            bmslib.bt.bt_power(False)
+            await asyncio.sleep(1)
+            bmslib.bt.bt_power(True)
+            await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning("Error power cycling BT: %s", e)
 
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
@@ -170,7 +174,7 @@ async def main():
             group_bms = bms
             for member_ref in bms.get_member_refs():
                 if member_ref not in bms_by_name:
-                    raise Exception("unknown bms %s in group %s" % ( member_ref, group_bms))
+                    raise Exception("unknown bms %s in group %s" % (member_ref, group_bms))
                 member_name = bms_by_name[member_ref].name
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,
