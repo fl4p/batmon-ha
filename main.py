@@ -182,6 +182,11 @@ async def main():
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
 
+    port_idx = user_config.mqtt_broker.rfind(':')
+    if port_idx > 0:
+        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx+1):]))
+        user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
+
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
     # paho_monkey_patch()
     mqtt_client = paho.Client()
