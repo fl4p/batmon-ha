@@ -69,6 +69,7 @@ class BmsSampler():
             dd = self.bms.debug_data()
             if dd:
                 logger.info("%s bms debug data: %s", self.bms.name, dd)
+            logger.info('Bleak version %s', bmslib.bt.bleak_version())
             raise
 
     async def sample(self):
