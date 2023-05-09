@@ -9,8 +9,10 @@ from bleak import BleakClient, BleakScanner
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
+import backoff
 
 
+@backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
 async def bt_discovery(logger):
     logger.info('BT Discovery:')
     devices = await BleakScanner.discover()
@@ -39,7 +41,16 @@ def bt_stack_version():
         bluez_version = tuple(map(int, s.groups()))
         return 'bluez-v%i.%i' % bluez_version
     except:
+        # get_platform_client_backend_type
         return '? (%s)' % BleakClient.__name__
+
+
+def bt_power(on):
+    cmd = ["bluetoothctl", "power", "on" if on else "off"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    out, err = p.communicate()
+    if p.returncode != 0:
+        raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err, 'utf-8')))
 
 
 class BtBms():

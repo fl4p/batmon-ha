@@ -6,3 +6,5 @@ git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
 # bleak==0.20.2
 
 paho-mqtt
+
+backoff

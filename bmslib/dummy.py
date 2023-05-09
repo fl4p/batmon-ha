@@ -54,17 +54,17 @@ class DummyBt(BtBms):
         self._switches[switch] = state
 
 
-class BleakDummyClient():
+class BleakDummyClient:
     def __init__(self, address: str, disconnected_callback):
         self.address = address
         self._connected = False
         self._disconnected_callback = disconnected_callback
-        DUMMY_CLASSES = dict(
+        dummy_classes = dict(
             jk=JKDummy,
             jk11=partial(JKDummy, is_new_11x=True),
             jbd=JBDDummy,
         )
-        self._bms = DUMMY_CLASSES[address[5:]]()
+        self._bms = dummy_classes[address[5:]]()
 
     @property
     def is_connected(self):
@@ -79,6 +79,10 @@ class BleakDummyClient():
         self._connected = False
         cb = self._disconnected_callback
         cb and cb(self)
+
+    @property
+    def services(self):
+        return []
 
     async def _connect_with_scanner(self):
         raise NotImplementedError()

@@ -7,7 +7,13 @@ assignees: ''
 
 ---
 
+Describe the issue here.
+If you experience bluetooth connection problems, follow these steps before opening an issue:
+https://github.com/fl4p/batmon-ha#troubleshooting
 
 ```
-paste log output here
+Paste log output between BEGIN and END:
+BEGIN 
+
+END
 ```

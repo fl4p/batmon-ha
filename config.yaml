@@ -31,6 +31,7 @@ options:
   watchdog: true
   expire_values_after: 20
   install_newer_bleak: false
+  bt_power_cycle: false
 schema:
   devices:
     - address: str
@@ -51,3 +52,4 @@ schema:
   watchdog: "bool"
   expire_values_after: "float"
   install_newer_bleak: "bool?"
+  bt_power_cycle: "bool?"

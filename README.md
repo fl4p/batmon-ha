@@ -99,11 +99,13 @@ peaks, leading to even greater error.
 
 ## Troubleshooting
 
-* When experiencing connection issues enable `keep_alive`
+* Power cycle the BMS Bluetooth dongle (or BMS)
+* Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
+* Disable WiFi if possible 
+* When experiencing unstable connection enable `keep_alive`
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Toggle `install_newer_bleak` option
-* Power cycle the BMS Bluetooth dongle (or BMS)
 * Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
 * Try another Bluetooth hardware
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
