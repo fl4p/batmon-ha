@@ -1,14 +1,19 @@
 *This is feature is experimental.*
 
+Using a BMS without "talking" to the solar charger (via RS434, CAN bus, etc.) usually causes "unhealthy" charge cycles.
+JK, JBD and Daly BMS, they cut off the charger if a certain voltage or cell-voltage level is reached. This is not ideal,
+because voltage does hardly represent SoC and it can quickly fall after charging stops. It ends up in repeating 
+charge on/off loop, which is believed to be bad for the battery.
+
 # Algorithms
 
-Batmon implements charge rules (algorithms) which try to keep the SoC in a "healthy" range to reduce battery
+Batmon implements charge rules (algorithms) which try to optimize cycling at "healthier" SoC levels to reduce battery
 degradation.
-You can set the algorithm for each BMS and it takes control over the charging switch.
+You can enable an algorithm for each BMS, and it takes control over the charging switch.
 
-The algorithm sets switches at trigger points only, so you can still use the BMS switches to manually override
+The algorithm toggles switches at trigger points only, so you can still use the BMS switches manually overriding
 the algorithm logic.
-Note that when adding a new algorithm it doesn't do anything until a trigger point is reached, please wait patiently.
+Note that a newly added algorithm doesn't do anything until a trigger point is reached, so please wait patiently.
 
 To ensure proper SoC levels, algorithms might frequently calibrate. The calibration finishes once 100% SoC is reached.
 
@@ -60,7 +65,7 @@ If `charge_start` is greater than `charge_stop` it is set to `charge_stop` and t
 
 ## Examples
 
-- `algorithm: soc 90%` limits max SoC to 90% without hysteresis. (note that this is equal
+- `algorithm: soc 90%` limits max SoC to 90% without hysteresis. (notice that this is equal
   to `algorithm: soc 90% 90%` and `algorithm: soc 90% 100%`)
 - `algorithm: soc 100% 95%` avoid trickle charge
 - `algorithm: soc 80% 70%` "Holiday Mode" as described above, trying to keep SoC between 80 and 70 % (10% DoD)
