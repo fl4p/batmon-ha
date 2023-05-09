@@ -73,7 +73,10 @@ class BtBms():
                 try:
                     import bleak.backends.bluezdbus.agent
                 except ImportError:
-                    self.logger.warn("this bleak version has no pairing agent, pairing with a pin will likely fail!")
+                    self.logger.warn(
+                        "Installed bleak version %s has no pairing agent, pairing with a pin will likely fail! "
+                        "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`",
+                        bleak_version())
 
             self._adapter = adapter
             if adapter:  # hci0, hci1 (BT adapter hardware)
