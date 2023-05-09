@@ -26,6 +26,7 @@ class FuturesPool:
         fut = self._futures.get(name, None)
         if fut:
             if fut.done():
+                # silently remove done future 
                 self.remove(name)
             else:
                 fut.set_result(value)
