@@ -11,7 +11,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 ## Features
 
 * Uses Bluetooth Low-Energy (BLE) for wireless communication
-* Records SoC, Current, Power, individual cell voltages and temperatures
+* Captures SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)
 * Integrates with Home Assistant Energy dashboard
@@ -78,7 +78,8 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
-* Enable `install_newer_bleak` to install bleak 0.20.2, which is more stable than the default version. The default version
+* Enable `install_newer_bleak` to install bleak 0.20.2, which is more stable than the default version. The default
+  version
   is known to be working with Victron SmartShunt.
 
 ## Energy Meters
@@ -94,14 +95,15 @@ peaks, leading to even greater error.
 * `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
   This equals to `(Total Energy Charge) - (Total Energy Discharge)`.
 * `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
-  This is not a value provided by the BMS, but Batmon computes this by differentiating the SoC (
+  This is not a value provided by the BMS, Batmon computes this by differentiating the SoC (
   e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
 
 ## Troubleshooting
 
-* Power cycle the BMS Bluetooth dongle (or BMS)
-* Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
-* Disable WiFi if possible 
+* Power cycle (turn off and on) the BMS Bluetooth hardware/dongle (or BMS)
+* Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon
+  on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
+* Disable WiFi if possible
 * When experiencing unstable connection enable `keep_alive`
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
@@ -117,13 +119,13 @@ peaks, leading to even greater error.
 
 ## TODO
 
-* Port to MicroPython for MUC (ESP32 etc.)
-* use the new Bluetooth integration since HA 2022.8 https://www.home-assistant.io/integrations/bluetooth/
+* Port to MicroPython for MCU (ESP32 etc.)
+* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/)
 * Implement BMS data push (JK)
 * Implement old JK04?
-* Implement ANT Bms https://github.com/fl4p/batmon-ha/issues/13
-* Implement RS485 https://github.com/fl4p/batmon-ha/issues/22
-* Implement daly2 https://github.com/fl4p/batmon-ha/issues/33
+* Implement ANT Bms [#13](https://github.com/fl4p/batmon-ha/issues/13)
+* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
+* Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
 
 ## Stand-alone
 

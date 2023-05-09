@@ -1,5 +1,6 @@
 *This is feature is experimental.*
 
+
 Using a BMS without "talking" to the solar charger (via RS434, CAN bus, etc.) usually causes "unhealthy" charge cycles.
 JK, JBD and Daly BMS, they cut off the charger if a certain voltage or cell-voltage level is reached. This is not ideal,
 because voltage does hardly represent SoC and it can quickly fall after charging stops. It ends up in repeating 
