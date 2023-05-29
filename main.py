@@ -15,6 +15,7 @@ import bmslib.dummy
 import bmslib.jbd
 import bmslib.jikong
 import bmslib.victron
+import bmslib.supervolt
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -131,6 +132,7 @@ async def main():
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         dummy=bmslib.dummy.DummyBt,
+        supervolt=bmslib.supervolt.SuperVoltBt
     )
 
     names = set()
