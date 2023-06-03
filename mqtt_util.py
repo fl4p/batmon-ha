@@ -81,7 +81,7 @@ def build_mqtt_hass_config_discovery(base, topic):
     else:
         pass
 
-    hass_config_data["json_attributes_topic"] = f'{topic}{base}'
+#    hass_config_data["json_attributes_topic"] = f'{topic}{base}'
     hass_config_data["state_topic"] = f'{topic}{base}'
 
     hass_device = {
@@ -293,7 +293,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
-            "json_attributes_topic": f"{device_topic}/{k}",
+            #"json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after_seconds,
             "device": device_json,
@@ -347,7 +347,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name}",
                 "device_class": 'outlet',
-                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                #"json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
@@ -358,7 +358,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name} switch",
                 "device_class": 'power',
-                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                #"json_attributes_topic": f"{device_topic}/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
                 "state_topic": f"{device_topic}/switch/{switch_name}",
