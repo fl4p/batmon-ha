@@ -134,7 +134,7 @@ async def main():
     )
 
     names = set()
-    algorithms: Dict[str, List[dict]] = {}
+    dev_args: Dict[str, dict] = {}
 
     for dev in user_config.get('devices', []):
         addr: str = dev['address']
@@ -159,8 +159,7 @@ async def main():
                                   adapter=dev.get('adapter'),
                                   ))
         names.add(name)
-        if dev.get('algorithm'):
-            algorithms[name] = dev.get('algorithm')
+        dev_args[name] = dev
 
     bms_by_name: Dict[str, bmslib.bt.BtBms] = {
         **{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
@@ -226,7 +225,8 @@ async def main():
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
-        algorithms=algorithms.get(bms.name).split(";") if algorithms.get(bms.name) else None,
+        algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
+        current_correction_factor=dev_args[bms.name].get('current_correction_factor', 1.0),
         bms_group=groups_by_bms.get(bms.name),
     ) for bms in bms_list]
 

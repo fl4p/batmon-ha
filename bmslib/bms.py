@@ -87,9 +87,12 @@ class BmsSample:
         }
 
     def invert_current(self):
+        return self.multiply_current(-1)
+
+    def multiply_current(self, x):
         res = copy(self)
-        if res.current != 0:  # prevent -0 values
-            res.current *= -1
+        if res.current != 0: # prevent -0 values
+            res.current *= x
         if not math.isnan(res._power) and res._power != 0:
-            res._power *= -1
+            res._power *= x
         return res

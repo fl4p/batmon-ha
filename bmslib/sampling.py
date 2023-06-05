@@ -22,6 +22,7 @@ class BmsSampler():
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
+                 current_correction_factor = 1.0,
                  bms_group: Optional[BmsGroup] = None):
         self.bms = bms
         self.mqtt_topic_prefix = re.sub(r'[^\w_.-]', '_', bms.name)
@@ -32,6 +33,7 @@ class BmsSampler():
         self.num_samples = 0
         self.publish_period = publish_period
         self.bms_group = bms_group  # group, virtual, parent
+        self.current_correction_factor = current_correction_factor
 
         self._t_pub = 0
 
@@ -110,6 +112,9 @@ class BmsSampler():
 
                 if self.invert_current:
                     sample = sample.invert_current()
+
+                if self.current_correction_factor and self.current_correction_factor != 1:
+                    sample = sample.multiply_current(self.current_correction_factor)
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
