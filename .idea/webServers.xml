@@ -5,9 +5,10 @@
       <webServer id="b365bf8e-7432-456b-aa67-da88a65eb6d1" name="homeassistant.local (project level)" url="http://homeassistant.local">
         <fileTransfer rootFolder="/addons" host="homeassistant.local" port="21">
           <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+            <advancedOptions dataProtectionLevel="Private" connections="2" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
         </fileTransfer>
+        <option name="numberOfConnections" value="2" />
       </webServer>
     </option>
   </component>

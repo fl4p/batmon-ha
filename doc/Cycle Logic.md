@@ -1,3 +1,4 @@
+*these are my personal notes, maybe you'll find something useful*
 
 # SoC range
 Avoid high SoC cycling, e.g. when only using little energy overnight, the battery would cycle between 100%-95%.

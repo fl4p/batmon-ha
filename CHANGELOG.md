@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.63] - 2023-05-09
+* Add option `bt_power_cycle` to power cycle the Bluetooth hardware on start-up
+* Add info about bleak version and BMS device info on failures
+* Fix `InvalidStateError`
+* Fix `adapter` setting being ignored
+* Strip spaces from BMS name for MQTT topics
+* Parse port number from MQTT host
+
 ## [0.0.62] - 2023-04-22
 
 Due to a mistake with git branching, I pushed this update multiple times (v0.0.60, v0.0.61).

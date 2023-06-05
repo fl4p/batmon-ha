@@ -1,3 +1,4 @@
+* Calibrated SoC
 * Pin bleak version
 * Pin bluez version
 * Try latest bleak version with victron smart shunt (on HA OS and macOS)

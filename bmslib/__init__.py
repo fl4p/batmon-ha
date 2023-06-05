@@ -25,9 +25,11 @@ class FuturesPool:
     def set_result(self, name, value):
         fut = self._futures.get(name, None)
         if fut:
-            #if fut.done():
-            #    print('future %s already done' % name)
-            fut.set_result(value)
+            if fut.done():
+                # silently remove done future 
+                self.remove(name)
+            else:
+                fut.set_result(value)
 
     def clear(self):
         for fut in self._futures.values():
