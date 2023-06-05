@@ -52,9 +52,9 @@ class JKBt(BtBms):
     TIMEOUT = 8
 
     def __init__(self, address, **kwargs):
+        super().__init__(address, **kwargs)
         if kwargs.get('psk'):
             self.logger.warning('JK usually does not use a pairing PIN')
-        super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._resp_table = {}
         self.num_cells = None
@@ -254,7 +254,10 @@ class JKBt(BtBms):
 
 
 async def main():
-    mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'
+    # await bmslib.bt.bt_discovery(logger=get_logger())
+    #mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A' # caravan
+    mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2' # bat100ah
+
     bms = JKBt(mac_address, name='jk', verbose_log=False)
     async with bms:
         while True:
