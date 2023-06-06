@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM alpine
 
 WORKDIR /app
 
@@ -25,6 +24,6 @@ COPY requirements.txt requirements.txt
 COPY . .
 
 RUN pip3 install -r requirements.txt
-RUN chmod a+x run.sh
+# RUN chmod a+x run.sh
 
-CMD [ "./run.sh" ]
+CMD [ "sh", "run.sh" ]
