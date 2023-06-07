@@ -151,7 +151,7 @@ class BmsSampler():
                     self._t_pub = t_now
 
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
-                    logger.info('%s: %s', bms.name, sample)
+                    logger.debug('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
@@ -163,7 +163,7 @@ class BmsSampler():
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
-                        logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+                        logger.debug('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
