@@ -189,8 +189,8 @@ class DalyBt(BtBms):
         data = {
             "num_cells": parts[0],
             "num_temps": parts[1],
-            "charging": parts[2],
-            "discharging": parts[3],
+            "discharging": parts[2],
+            "charging": parts[3],
             "states": states,
             "num_cycles": parts[5],
         }
