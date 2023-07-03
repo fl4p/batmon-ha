@@ -40,6 +40,7 @@ schema:
       debug: "bool?"
       pin: "str?"
       algorithm: "str?"
+      current_calibration_factor: "float?"
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
