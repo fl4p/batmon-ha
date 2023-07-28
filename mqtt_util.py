@@ -122,7 +122,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     _last_publish_time = now
 
 
-def mqqt_last_publish_time():
+def mqtt_last_publish_time():
     global _last_publish_time
     return _last_publish_time
 
@@ -133,25 +133,6 @@ def is_none_or_nan(val):
     if isinstance(val, float) and (math.isnan(val) or not math.isfinite(val)):
         return True
     return False
-
-
-def mqtt_iterator_victron(client, result, topic, base='', hass=True):
-    for key in result.keys():
-        if type(result[key]) == dict:
-            mqtt_iterator_victron(client, result[key], topic, f'{base}/{key}', hass)
-        else:
-
-            if type(result[key]) == list:
-                val = json.dumps(result[key])
-            else:
-                val = result[key]
-
-            if hass:  # and not is_none_or_nan(val):
-                # logger.debug('Sending out hass discovery message')
-                topic_, output = build_mqtt_hass_config_discovery(f'{base}/{key}', topic=topic)
-                mqtt_single_out(client, topic_, output, retain=True)
-
-            mqtt_single_out(client, f'{topic}{base}/{key}', val)
 
 
 # units: https://github.com/home-assistant/core/blob/d7ac4bd65379e11461c7ce0893d3533d8d8b8cbf/homeassistant/const.py#L384
@@ -232,7 +213,8 @@ def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
         s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
-        mqtt_single_out(client, topic, s)
+        if not is_none_or_nan(s):
+            mqtt_single_out(client, topic, s)
 
     if sample.switches:
         for switch_name, switch_state in sample.switches.items():
@@ -249,21 +231,21 @@ def publish_cell_voltages(client, device_topic, voltages):
     if not voltages:
         return
 
-    x = range(len(voltages))
-    high_i = max(x, key=lambda i: voltages[i])
-    low_i = min(x, key=lambda i: voltages[i])
-
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
         mqtt_single_out(client, topic, voltages[i] / 1000)
 
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
-    mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
+    if len(voltages) > 1:
+        x = range(len(voltages))
+        high_i = max(x, key=lambda i: voltages[i])
+        low_i = min(x, key=lambda i: voltages[i])
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -313,14 +295,15 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         k = 'cell_voltages/%d' % (i + 1)
         _hass_discovery(k, "voltage", unit="V")
 
-    statistic_fields = ["min", "max", "average", "median", "delta"]
-    for f in statistic_fields:
-        k = 'cell_voltages/%s' % f
-        _hass_discovery(k, device_class="voltage", unit="V")
+    if num_cells > 1:
+        statistic_fields = ["min", "max", "average", "median", "delta"]
+        for f in statistic_fields:
+            k = 'cell_voltages/%s' % f
+            _hass_discovery(k, device_class="voltage", unit="V")
 
-    for f in ["min_index", "max_index"]:
-        k = 'cell_voltages/%s' % f
-        _hass_discovery(k, device_class=None, unit="")
+        for f in ["min_index", "max_index"]:
+            k = 'cell_voltages/%s' % f
+            _hass_discovery(k, device_class=None, unit="")
 
     for i in range(0, num_temp_sensors):
         k = 'temperatures/%d' % (i + 1)
