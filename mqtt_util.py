@@ -240,9 +240,9 @@ def publish_cell_voltages(client, device_topic, voltages):
         high_i = max(x, key=lambda i: voltages[i])
         low_i = min(x, key=lambda i: voltages[i])
         mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i + 1)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i + 1)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
@@ -275,7 +275,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
-            #"json_attributes_topic": f"{device_topic}/{k}",
+            # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after_seconds,
             "device": device_json,
@@ -330,7 +330,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name}",
                 "device_class": 'outlet',
-                #"json_attributes_topic": f"{device_topic}/{switch_name}",
+                # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
@@ -341,7 +341,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name} switch",
                 "device_class": 'power',
-                #"json_attributes_topic": f"{device_topic}/{switch_name}",
+                # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
                 "state_topic": f"{device_topic}/switch/{switch_name}",
