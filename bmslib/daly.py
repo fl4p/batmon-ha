@@ -18,7 +18,7 @@ def calc_crc(message_bytes):
 
 
 class DalyBt(BtBms):
-    TIMEOUT = 8
+    TIMEOUT = 12
 
     def __init__(self, address, **kwargs):
         if kwargs.get('psk'):
