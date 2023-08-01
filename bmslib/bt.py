@@ -135,7 +135,7 @@ class BtBms():
                 self.logger.info(f"Device {device} asking for psk, giving '{self._psk}'")
                 return str(self._psk) or None
 
-            self.logger.debug("Pairing %s using psk '%s'...", self._psk)
+            self.logger.debug("Pairing %s using psk '%s'...", self.name, self._psk)
             res = await self.client.pair(callback=get_passkey)
             if not res:
                 self.logger.error("Pairing failed!")

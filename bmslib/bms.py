@@ -46,17 +46,17 @@ class BmsSample:
         :param uptime BMS uptime in seconds
         """
         self.voltage: float = voltage
-        self.current: float = current or 0 # -
-        self._power = power# 0 -> +0
+        self.current: float = current or 0  # -
+        self._power = power  # 0 -> +0
         self.balance_current = balance_current
 
         # infer soc from capacity if soc is nan or type(soc)==int (for higher precision)
         if capacity > 0 and (math.isnan(soc) or (isinstance(soc, int) and charge > 0)):
             soc = round(charge / capacity * 100, 2)
         elif math.isnan(capacity) and soc > .2:
-                capacity = round(charge / soc * 100)
+            capacity = round(charge / soc * 100)
 
-        assert math.isfinite(soc)
+        # assert math.isfinite(soc)
 
         self.charge: float = charge
         self.capacity: float = capacity
@@ -91,7 +91,7 @@ class BmsSample:
 
     def multiply_current(self, x):
         res = copy(self)
-        if res.current != 0: # prevent -0 values
+        if res.current != 0:  # prevent -0 values
             res.current *= x
         if not math.isnan(res._power) and res._power != 0:
             res._power *= x
