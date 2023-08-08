@@ -47,6 +47,10 @@ Add an entry for each device, such as:
 - address: CC:44:8C:F7:AD:BB
   type: jk
   alias: battery1
+  pin: "12345"               # victron only (optional)
+  adapter: "hci0"            # switch the bluetooth hw adapter (optional)
+  debug: true                # verbose log for this device only (optional)
+  current_calibration: 1.0   # current [I] correction factor (optional)
 ```
 
 `address` is the MAC address of the Bluetooth device. If you don't know the MAC address start the add-on, and you'll
@@ -62,6 +66,9 @@ If the device requires a PIN when pairing (currently Victron SmartShunt only) ad
 with device's PIN).
 
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
+
+With `current_calibration` you can calibrate the current sensor. The current reading is multiplied by this factor. Set
+it to `-1` to flip the sign if you experience wrong charge/discharge meters.
 
 For verbose logs of particular BMS add `debug: true`.
 
@@ -79,8 +86,7 @@ For verbose logs of particular BMS add `debug: true`.
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
 * Enable `install_newer_bleak` to install bleak 0.20.2, which is more stable than the default version. The default
-  version
-  is known to be working with Victron SmartShunt.
+  version is known to be working with Victron SmartShunt.
 
 ## Energy Meters
 

@@ -21,7 +21,7 @@ from bmslib.group import VirtualGroupBms, BmsGroup
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger
-from mqtt_util import mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
+from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
 user_config = load_user_config()
@@ -67,9 +67,9 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
         if timeout:
             # compute time since last successful publish
-            pdt = now - (mqqt_last_publish_time() or t_start)
+            pdt = now - (mqtt_last_publish_time() or t_start)
             if pdt > timeout:
-                if mqqt_last_publish_time():
+                if mqtt_last_publish_time():
                     logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
                 else:
                     logger.error("MQTT never published a message after %.0fs, exit", timeout)
@@ -226,7 +226,7 @@ async def main():
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
         algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
-        current_correction_factor=dev_args[bms.name].get('current_correction_factor', 1.0),
+        current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
         bms_group=groups_by_bms.get(bms.name),
     ) for bms in bms_list]
 

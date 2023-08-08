@@ -18,7 +18,7 @@ def calc_crc(message_bytes):
 
 
 class DalyBt(BtBms):
-    TIMEOUT = 8
+    TIMEOUT = 12
 
     def __init__(self, address, **kwargs):
         if kwargs.get('psk'):
@@ -113,7 +113,7 @@ class DalyBt(BtBms):
             try:
                 sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
             except TimeoutError:
-                n_recv = num_responses - self._fetch_nr[command].count(None)
+                n_recv = num_responses - self._fetch_nr.get(command, [None]).count(None)
                 raise TimeoutError(
                     "timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
 

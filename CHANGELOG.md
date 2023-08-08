@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.64] - 2023-07-24
+* fix `JSON result was not a dictionary` (remove `json_attributes_topic`)
+* Add `current_calibration`
+* Daly BMS: Fix bug on timeout 
+
 ## [0.0.63] - 2023-05-09
 * Add option `bt_power_cycle` to power cycle the Bluetooth hardware on start-up
 * Add info about bleak version and BMS device info on failures
