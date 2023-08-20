@@ -1,7 +1,7 @@
 import json
 import re
 from os import access, R_OK
-from os.path import isfile, join
+from os.path import isfile
 from threading import Lock
 
 from bmslib.util import dotdict, get_logger

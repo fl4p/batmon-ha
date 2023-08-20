@@ -6,8 +6,8 @@ from typing import List, Dict, Optional
 MIN_VALUE_EXPIRY = 20
 
 
-class DeviceInfo():
-    def __init__(self, model, hw_version, sw_version, name, sn):
+class DeviceInfo:
+    def __init__(self, model: str, hw_version: str, sw_version: str, name: Optional[str], sn: Optional[str] = None):
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version

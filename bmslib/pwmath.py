@@ -1,7 +1,7 @@
 import math
 
 
-class Integrator():
+class Integrator:
     """
     Implement a trapezoidal integration, discarding samples with dx > dx_max.
     """

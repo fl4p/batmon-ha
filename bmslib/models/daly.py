@@ -17,6 +17,26 @@ def calc_crc(message_bytes):
     return bytes([sum(message_bytes) & 0xFF])
 
 
+def daly_command_message(command: int, extra=""):
+    """
+    Takes the command ID and formats a request message
+
+    :param command: Command ID ("90" - "98")
+    :param extra:
+    :return: Request message as bytes
+    """
+    # 95 -> a58095080000000000000000c2
+
+    address = 8  # 4 = USB, 8 = Bluetooth
+
+    message = "a5%i0%02x08%s" % (address, command, extra)
+    message = message.ljust(24, "0")
+    message_bytes = bytearray.fromhex(message)
+    message_bytes += calc_crc(message_bytes)
+
+    return message_bytes
+
+
 class DalyBt(BtBms):
     TIMEOUT = 12
 
@@ -37,7 +57,7 @@ class DalyBt(BtBms):
             self.logger.info('got daly states: %s', self._states)
         return self._states.get(key)
 
-    def _notification_callback(self, sender, data):
+    def _notification_callback(self, _sender, data):
         RESP_LEN = 13
 
         # split responses into chunks with length RESP_LEN
@@ -100,7 +120,7 @@ class DalyBt(BtBms):
         await super().disconnect()
 
     async def _q(self, command: int, num_responses: int = 1):
-        msg = self.daly_command_message(command)
+        msg = daly_command_message(command)
         if num_responses > 1:
             self._fetch_nr[command] = [None] * num_responses
         else:
@@ -121,7 +141,7 @@ class DalyBt(BtBms):
 
     async def set_switch(self, switch: str, state: bool):
         fet_addr = dict(discharge=0xD9, charge=0xDA)
-        msg = self.daly_command_message(fet_addr[switch], extra="01" if state else "00")
+        msg = daly_command_message(fet_addr[switch], extra="01" if state else "00")
         await self.client.write_gatt_char(self.UUID_TX, msg)
 
     async def fetch(self) -> BmsSample:
@@ -226,24 +246,6 @@ class DalyBt(BtBms):
             temperatures += v[1:]
         return [t - 40 for t in temperatures[:num_sensors]]
 
-    def daly_command_message(self, command: int, extra=""):
-        """
-        Takes the command ID and formats a request message
-
-        :param command: Command ID ("90" - "98")
-        :return: Request message as bytes
-        """
-        # 95 -> a58095080000000000000000c2
-
-        address = 8  # 4 = USB, 8 = Bluetooth
-
-        message = "a5%i0%02x08%s" % (address, command, extra)
-        message = message.ljust(24, "0")
-        message_bytes = bytearray.fromhex(message)
-        message_bytes += calc_crc(message_bytes)
-
-        return message_bytes
-
     def debug_data(self):
         return self._last_response
 
@@ -254,7 +256,7 @@ async def main():
 
     bms = DalyBt(mac_address)
     await bms.connect()
-    sample = await bms.get_voltages(num_cells=8)
+    sample = await bms.fetch_voltages(num_cells=8)
     print(sample)
     await bms.disconnect()
 

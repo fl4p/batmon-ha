@@ -13,7 +13,6 @@ https://github.com/tgalarneau/bms
 """
 import asyncio
 
-from bmslib import FuturesPool
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 

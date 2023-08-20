@@ -1,6 +1,5 @@
 import asyncio
 import statistics
-import time
 from copy import copy
 from typing import Dict, Iterable, List
 
@@ -22,29 +21,31 @@ class BmsGroup:
         assert bms.name in self.bms_names, "bms %s not in group %s" % (bms.name, self.bms_names)
         self.samples[bms.name] = copy(sample)
 
-    def update_voltages(self, bms:BtBms, voltages:List[int]):
+    def update_voltages(self, bms: BtBms, voltages: List[int]):
         assert bms.name in self.bms_names, "bms %s not in group %s" % (bms.name, self.bms_names)
         self.voltages[bms.name] = copy(voltages)
 
     def fetch(self) -> BmsSample:
-        #ts_expire = time.time() - self.max_sample_age
+        # ts_expire = time.time() - self.max_sample_age
         # expired = set(k for k,s in self.samples.items() if s.timestamp < ts_expire)
         return sum_parallel(self.samples.values())
 
     def fetch_voltages(self):
         return sum((self.voltages[name] for name in self.bms_names), [])
 
+
 class GroupNotReady(Exception):
     pass
 
-class VirtualGroupBms():
+
+class VirtualGroupBms:
     # TODO inherit from bms base class
     def __init__(self, address: str, name=None, verbose_log=False, **kwargs):
         self.address = address
         self.name = name
         self.group = BmsGroup(name)
         self.verbose_log = verbose_log
-        self.members :List[BtBms]= []
+        self.members: List[BtBms] = []
         self.logger = get_logger(verbose_log)
 
     def __str__(self):
@@ -67,7 +68,7 @@ class VirtualGroupBms():
     def set_keep_alive(self, keep):
         pass
 
-    def add_member(self, bms:BtBms):
+    def add_member(self, bms: BtBms):
         self.group.bms_names.append(bms.name)
         self.members.append(bms)
 
@@ -103,6 +104,7 @@ class VirtualGroupBms():
 
     async def fetch_device_info(self):
         raise NotImplementedError()
+
 
 def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(

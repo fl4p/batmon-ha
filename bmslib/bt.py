@@ -4,12 +4,12 @@ import subprocess
 import time
 from typing import Callable, List, Union
 
+import backoff
 from bleak import BleakClient, BleakScanner
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
-import backoff
 
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
@@ -27,12 +27,13 @@ def bleak_version():
     try:
         import bleak
         return bleak.__version__
-    except:
+    except AttributeError:
         from importlib.metadata import version
         return version('bleak')
 
 
 def bt_stack_version():
+    # noinspection PyPep8
     try:
         # get BlueZ version
         p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
@@ -53,8 +54,9 @@ def bt_power(on):
         raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err, 'utf-8')))
 
 
-class BtBms():
-    def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False):
+class BtBms:
+    def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False,
+                 _uses_pin=False):
         self.address = address
         self.name = name
         self.keep_alive = keep_alive
@@ -64,8 +66,11 @@ class BtBms():
         self._psk = psk
         self._connect_time = 0
 
+        if not _uses_pin and psk:
+            self.logger.warning('%s usually does not use a pairing PIN', type(self).__name__)
+
         if address.startswith('test_'):
-            from bmslib.dummy import BleakDummyClient
+            from bmslib.models.dummy import BleakDummyClient
             self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
         else:
             kwargs = {}
@@ -101,14 +106,14 @@ class BtBms():
         await enumerate_services(self.client, self.logger)
         raise exception
 
-    def characteristic_uuid_to_handle(self, uuid: str, property: str) -> Union[str, int]:
+    def characteristic_uuid_to_handle(self, uuid: str, property_name: str) -> Union[str, int]:
         for service in self.client.services:
             for char in service.characteristics:
-                if char.uuid == uuid and property in char.properties:
+                if char.uuid == uuid and property_name in char.properties:
                     return char.handle
         return uuid
 
-    def _on_disconnect(self, client):
+    def _on_disconnect(self, _client):
         if self.keep_alive and self._connect_time:
             self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
 
@@ -268,6 +273,7 @@ class BtBms():
         return None
 
 
+# noinspection DuplicatedCode
 async def enumerate_services(client: BleakClient, logger):
     for service in client.services:
         logger.info(f"[Service] {service}")

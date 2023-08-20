@@ -1,4 +1,3 @@
-import datetime
 import random
 import re
 import time
@@ -18,7 +17,7 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 logger = get_logger(verbose=False)
 
 
-class BmsSampler():
+class BmsSampler:
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
