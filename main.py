@@ -14,7 +14,7 @@ import bmslib.models.daly
 import bmslib.models.dummy
 import bmslib.models.jbd
 import bmslib.models.jikong
-import bmslib.victron
+import bmslib.models.ant
 import bmslib.models.victron
 
 import mqtt_util
@@ -129,7 +129,7 @@ async def main():
         daly=bmslib.models.daly.DalyBt,
         jbd=bmslib.models.jbd.JbdBt,
         jk=bmslib.models.jikong.JKBt,
-        victron=bmslib.victron.SmartShuntBt,
+        ant=bmslib.models.ant.AntBt,
         victron=bmslib.models.victron.SmartShuntBt,
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
