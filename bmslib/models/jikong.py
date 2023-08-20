@@ -20,6 +20,7 @@ from typing import List, Callable, Dict
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
+from bmslib.util import to_hex_str
 
 
 def calc_crc(message_bytes):
@@ -28,10 +29,6 @@ def calc_crc(message_bytes):
 
 def read_str(buf, offset, encoding='utf-8'):
     return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
-
-
-def to_hex_str(data):
-    return " ".join(map(lambda b: hex(b)[2:], data))
 
 
 def _jk_command(address, value: list):

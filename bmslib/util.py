@@ -29,3 +29,7 @@ def get_logger(verbose=False):
 
 def dict_to_short_string(d:dict):
     return '(' + ','.join( f'{k}={v}' for k,v in d.items() if v is not None) + ')'
+
+
+def to_hex_str(data):
+    return " ".join(map(lambda b: hex(b)[2:], data))
