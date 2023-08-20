@@ -25,6 +25,8 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * JK BMS (jikong) (JK02 protocol)
 * Daly BMS
 * JBD / Xiaoxiang / Overkill Solar BMS
+* ANT BMS
+* Supervolt BMS
 * Victron SmartShunt (make sure to update to latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app)
@@ -57,7 +59,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jbd`, `daly`, `victron` or `dummy`.
+`type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `victron` or `dummy`.
 
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
@@ -129,9 +131,9 @@ peaks, leading to even greater error.
 * use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/)
 * Implement BMS data push (JK)
 * Implement old JK04?
-* Implement ANT Bms [#13](https://github.com/fl4p/batmon-ha/issues/13)
 * Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
 * Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
+* Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
 
 ## Stand-alone
 
