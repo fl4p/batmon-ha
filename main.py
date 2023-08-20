@@ -16,6 +16,7 @@ import bmslib.models.jbd
 import bmslib.models.jikong
 import bmslib.models.ant
 import bmslib.models.victron
+import bmslib.supervolt
 
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
@@ -133,6 +134,7 @@ async def main():
         victron=bmslib.models.victron.SmartShuntBt,
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
+        supervolt=bmslib.supervolt.SuperVoltBt
         dummy=bmslib.models.dummy.DummyBt,
     )
 
