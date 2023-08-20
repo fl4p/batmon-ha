@@ -1,36 +1,43 @@
 """
-Other Daly protocol
+JBD protocol references
+https://github.com/syssi/esphome-jbd-bms
+https://github.com/syssi/esphome-jbd-bms/blob/main/docs/Jiabaida.communication.protocol.pdf
+https://github.com/sshoecraft/jbdtool/blob/1168edac728d1e0bdea6cd4fa142548c445f80ec/main.c
+https://github.com/Bangybug/esp32xiaoxiangble/blob/master/src/main.cpp
 
-References
-- https://github.com/roccotsi2/esp32-smart-bms-simulation
 
--  https://github.com/tomatensaus/python-daly-bms
+https://blog.ja-ke.tech/2020/02/07/ltt-power-bms-chinese-protocol.html # checksum
+Unseen:
+https://github.com/tgalarneau/bms
 
 """
 import asyncio
 
 from bmslib import FuturesPool
-from .bms import BmsSample
-from .bt import BtBms
+from bmslib.bms import BmsSample
+from bmslib.bt import BtBms
 
 
-def _daly_command(command: int):
+def _jbd_command(command: int):
     return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
 
 
 class JbdBt(BtBms):
-    UUID_RX = '0000fff1-0000-1000-8000-00805f9b34fb'
-    UUID_TX = '0000fff2-0000-1000-8000-00805f9b34fb'
-    TIMEOUT = 8
+    UUID_RX = '0000ff01-0000-1000-8000-00805f9b34fb'
+    UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
+    TIMEOUT = 16
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
+        if kwargs.get('psk'):
+            self.logger.warning('JBD usually does not use a pairing PIN')
         self._buffer = bytearray()
-        self._fetch_futures = FuturesPool()
         self._switches = None
+        self._last_response = None
 
     def _notification_handler(self, sender, data):
-        self.logger.debug("ble data frame %s", data)
+
+        # print("bms msg {0}: {1}".format(sender, data))
         self._buffer += data
 
         if self._buffer.endswith(b'w'):
@@ -39,15 +46,21 @@ class JbdBt(BtBms):
             self._buffer.clear()
 
             # print(command, 'buffer endswith w', self._buffer)
+            self._last_response = buf
             self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
+        #try:
+        #    await super().connect(**kwargs)
+        #except Exception as e:
+        #    self.logger.info("normal connect failed (%s), connecting with scanner", e)
+        #    await self._connect_with_scanner(**kwargs)
+
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
         await self.client.stop_notify(self.UUID_RX)
-        self._fetch_futures.clear()
         await super().disconnect()
 
     async def _q(self, cmd):
@@ -57,9 +70,9 @@ class JbdBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         # binary reading
-        #  https://github.com/roccotsi2/esp32-smart-bms-simulation
+        #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
 
-        buf = await self._q(cmd=bytes.fromhex("D2 03 00 00 00 3E D7 B9"))
+        buf = await self._q(cmd=0x03)
         buf = buf[4:]
 
         num_cell = int.from_bytes(buf[21:22], 'big')
@@ -68,14 +81,14 @@ class JbdBt(BtBms):
         mos_byte = int.from_bytes(buf[20:21], 'big')
 
         sample = BmsSample(
-            voltage=int.from_bytes(buf[80:82], byteorder='big') / 10,
-            current=(int.from_bytes(buf[82:84], byteorder='big', signed=True) - 30000) / 10,
-            soc=int.from_bytes(buf[84:86], byteorder='big') / 10,
+            voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
+            current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100,
 
-            charge=int.from_bytes(buf[4:6], byteorder='big', signed=True) / 100,
-            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
+            charge=int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100,
+            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=False) / 100,
+            soc=buf[19],
 
-            num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=True),
+            num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=False),
 
             temperatures=[(int.from_bytes(buf[23 + i * 2:i * 2 + 25], 'big') - 2731) / 10 for i in range(num_temp)],
 
@@ -130,7 +143,7 @@ class JbdBt(BtBms):
             tc = 0x00  # all on
         elif switches_sum == 0:
             tc = 0x03  # all off
-        elif switch == "charge" and not state:
+        elif (switch == "charge" and not state) or (switch == "discharge" and state):
             tc = 0x01  # charge off
         else:
             tc = 0x02  # charge on, discharge off
@@ -138,6 +151,9 @@ class JbdBt(BtBms):
         data = jbd_message(status_bit=0x5A, cmd=0xE1, data=bytes([0x00, tc]))  # all off
         self.logger.info("send switch msg: %s", data)
         await self.client.write_gatt_char(self.UUID_TX, data=data)
+
+    def debug_data(self):
+        return self._last_response
 
 
 async def main():

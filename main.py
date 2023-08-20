@@ -10,11 +10,13 @@ from typing import List, Dict
 import paho.mqtt.client as paho
 
 import bmslib.bt
-import bmslib.daly
-import bmslib.dummy
-import bmslib.jbd
-import bmslib.jikong
+import bmslib.models.daly
+import bmslib.models.dummy
+import bmslib.models.jbd
+import bmslib.models.jikong
 import bmslib.victron
+import bmslib.models.victron
+
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -124,13 +126,14 @@ async def main():
     logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
     bms_registry = dict(
-        daly=bmslib.daly.DalyBt,
-        jbd=bmslib.jbd.JbdBt,
-        jk=bmslib.jikong.JKBt,
+        daly=bmslib.models.daly.DalyBt,
+        jbd=bmslib.models.jbd.JbdBt,
+        jk=bmslib.models.jikong.JKBt,
         victron=bmslib.victron.SmartShuntBt,
+        victron=bmslib.models.victron.SmartShuntBt,
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
-        dummy=bmslib.dummy.DummyBt,
+        dummy=bmslib.models.dummy.DummyBt,
     )
 
     names = set()

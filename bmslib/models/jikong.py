@@ -1,4 +1,6 @@
 """
+ JK, jikong
+
 
 https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 https://github.com/jblance/jkbms
