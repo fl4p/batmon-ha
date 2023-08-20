@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "0.0.64"
+version: "0.0.65"
 slug: "batmon"
 init: false
 arch:
@@ -44,6 +44,7 @@ schema:
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
+  mqtt_port: "int(1,65535)"
   concurrent_sampling: "bool"
   keep_alive: "bool"
   verbose_log: "bool"

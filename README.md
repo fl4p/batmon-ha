@@ -24,7 +24,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 * JK BMS (jikong) (JK02 protocol)
 * Daly BMS
-* JBD / Xiaoxiang / Overkill Solar BMS
+* JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
 * ANT BMS
 * Supervolt BMS
 * Victron SmartShunt (make sure to update to latest firmware
@@ -124,16 +124,18 @@ peaks, leading to even greater error.
   appears that disabling WiFi helps.
 * Inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
   hardware
+* Either bleak or bluetooth support in HA docker seems unstable. see related issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
 
 ## TODO
 
-* Port to MicroPython for MCU (ESP32 etc.)
-* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/)
-* Implement BMS data push (JK)
-* Implement old JK04?
-* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
 * Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
+* Port to MicroPython for MCU (ESP32 etc.)
+* make this a custom integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
+* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
+* Implement BMS data push (JK)
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
+* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
+* Implement old JK04?
 
 ## Stand-alone
 

@@ -93,12 +93,24 @@ class BtBms:
                                       **kwargs
                                       )
 
+            self._in_disconnect = False
+
+            """
+            When the bluetooth connection is closed externally we still need to call disconnect() function to stop_notify,
+            otherwise start_notify will fail on re-connect
+            """
+            self._pending_disconnect_call = False
+
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None], **kwargs):
         if not isinstance(char_specifier, list):
             char_specifier = [char_specifier]
         exception = None
         for cs in char_specifier:
             try:
+                try:
+                    await self.client.stop_notify(cs) # stop any orphan notifies
+                except:
+                    pass
                 await self.client.start_notify(cs, callback, **kwargs)
                 return cs
             except Exception as e:
@@ -117,13 +129,19 @@ class BtBms:
         if self.keep_alive and self._connect_time:
             self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
 
+        #if not self._in_disconnect:
+        #    self._pending_disconnect_call = True
+
         try:
             self._fetch_futures.clear()
         except Exception as e:
             self.logger.warning('error clearing futures pool: %s', str(e) or type(e))
 
     async def _connect_client(self, timeout):
-        await self.client.connect(timeout=timeout)
+        if self.verbose_log:
+            self.logger.info('connecting %s (%s) adapter=%s', self.name, self.address, self._adapter)
+        # bleak`s connect timeout is buggy (on macos)
+        await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
         if self.verbose_log:
             await enumerate_services(self.client, logger=self.logger)
         self._connect_time = time.time()
@@ -155,6 +173,10 @@ class BtBms:
         :param timeout:
         :return:
         """
+        if self._pending_disconnect_call:
+            self._pending_disconnect_call = False
+            await self.disconnect()
+
         await self._connect_client(timeout=timeout)
 
     async def _connect_with_scanner(self, timeout=20):
@@ -165,6 +187,11 @@ class BtBms:
         :param timeout:
         :return:
         """
+
+        if self._pending_disconnect_call:
+            self._pending_disconnect_call = False
+            await self.disconnect()
+
         import bleak
         scanner_kw = {}
         if self._adapter:
@@ -197,7 +224,9 @@ class BtBms:
         await scanner.stop()
 
     async def disconnect(self):
+        self._in_disconnect = True
         await self.client.disconnect()
+        self._in_disconnect = False
         self._fetch_futures.clear()
 
     async def fetch_device_info(self) -> DeviceInfo:

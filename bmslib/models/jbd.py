@@ -2,6 +2,7 @@
 JBD protocol references
 https://github.com/syssi/esphome-jbd-bms
 https://github.com/syssi/esphome-jbd-bms/blob/main/docs/Jiabaida.communication.protocol.pdf
+https://gitlab.com/bms-tools/bms-tools/-/tree/master/bmstools?ref_type=heads
 https://github.com/sshoecraft/jbdtool/blob/1168edac728d1e0bdea6cd4fa142548c445f80ec/main.c
 https://github.com/Bangybug/esp32xiaoxiangble/blob/master/src/main.cpp
 

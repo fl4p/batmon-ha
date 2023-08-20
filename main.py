@@ -10,14 +10,13 @@ from typing import List, Dict
 import paho.mqtt.client as paho
 
 import bmslib.bt
+import bmslib.models.ant
 import bmslib.models.daly
 import bmslib.models.dummy
 import bmslib.models.jbd
 import bmslib.models.jikong
-import bmslib.models.ant
-import bmslib.models.victron
 import bmslib.models.supervolt
-
+import bmslib.models.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -188,7 +187,7 @@ async def main():
 
     port_idx = user_config.mqtt_broker.rfind(':')
     if port_idx > 0:
-        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx+1):]))
+        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
         user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
@@ -265,6 +264,8 @@ async def main():
 
         loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
         await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+        for task in loops:
+            task.done() or task.cancel()
 
     else:
         async def fn():

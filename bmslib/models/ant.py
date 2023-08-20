@@ -16,6 +16,7 @@ INFO:__main__:	[Characteristic] 0000ffe2-0000-1000-8000-00805f9b34fb (Handle: 18
 """
 import asyncio
 import enum
+import math
 
 import crcmod as crcmod
 
@@ -65,7 +66,7 @@ class AntBt(BtBms):
 
         # MAX_RESPONSE_SIZE = 152
 
-        print("bms msg {0}: {1} {2}".format(sender, to_hex_str(data), data))
+        # print("bms msg {0}: {1} {2}".format(sender, to_hex_str(data), data))
 
         if data.startswith(b'\x7E\xA1'):
             self._buffer.clear()
@@ -102,7 +103,7 @@ class AntBt(BtBms):
             self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
-        await self.client.start_notify(self.CHAR_UUID, self._notification_handler)
+        await self.start_notify(self.CHAR_UUID, self._notification_handler)
 
     async def disconnect(self):
         await self.client.stop_notify(self.CHAR_UUID)
@@ -141,6 +142,7 @@ class AntBt(BtBms):
         offset += num_cell * 2
 
         temperatures = [u16(i * 2 + offset) for i in range(num_temp)]
+        temperatures = [t if t != 65496 else math.nan for t in temperatures]
         offset += num_temp * 2
 
         mos_temp = u16(offset)

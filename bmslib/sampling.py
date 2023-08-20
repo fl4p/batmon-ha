@@ -71,7 +71,7 @@ class BmsSampler:
             if dd:
                 logger.info("%s bms debug data: %s", self.bms.name, dd)
             if self.device_info:
-                logger.info('%s device info: %s', self.device_info)
+                logger.info('%s device info: %s', self.bms.name, self.device_info)
             logger.info('Bleak version %s', bmslib.bt.bleak_version())
             raise
 
@@ -163,6 +163,7 @@ class BmsSampler:
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
                         logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
