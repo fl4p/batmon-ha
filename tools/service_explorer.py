@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ADDRESS = (
     "24:71:89:cc:09:05"
     if platform.system() != "Darwin"
-    else "F21958DF-E949-4D43-B12B-0020365C428A"
+    else '9AA68C04-9C48-4FAD-7798-13ABB4878996'
 )
 
 async def enumerate_services(client: BleakClient):
@@ -55,6 +55,7 @@ async def enumerate_services(client: BleakClient):
                     logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
 
 async def main(address):
+    logger.info('Connecting %s', address)
     async with BleakClient(address) as client:
         logger.info(f"Connected: {client.is_connected}")
         await enumerate_services(client)
