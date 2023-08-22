@@ -102,6 +102,9 @@ class BmsSampler:
                     logger.warning('%s expired sample', bms.name)
                     return
 
+                if self.current_calibration_factor and self.current_calibration_factor != 1:
+                    sample = sample.multiply_current(self.current_calibration_factor)
+
                 if self.bms_group:
                     self.bms_group.update(bms, sample)
 
@@ -112,8 +115,7 @@ class BmsSampler:
                 if self.invert_current:
                     sample = sample.invert_current()
 
-                if self.current_calibration_factor and self.current_calibration_factor != 1:
-                    sample = sample.multiply_current(self.current_calibration_factor)
+
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
