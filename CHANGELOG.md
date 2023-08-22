@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.66] - 2023-08-21
+## [0.0.67] - 2023-08-22
 * Add ANT BMS
 * Add Supervolt BMS
 * offset cell min_index max_index by +1
