@@ -271,7 +271,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
-            "name": f"{device_topic} {name or k.replace('/', ' ')}",
+            "name": f"{name or k.replace('/', ' ')}",
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
