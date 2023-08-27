@@ -275,7 +275,7 @@ class BtBms:
         raise NotImplementedError()
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self.client.address})'
+        return f'{self.__class__.__name__}({self.client.address},{self.name})'
 
     async def __aenter__(self):
         # print("enter")
