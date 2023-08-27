@@ -20,14 +20,14 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Battery Groups, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 
-### Supported Devices (bluetooth)
+### Supported Devices (bluetooth low energy)
 
-* JK BMS (jikong) (JK02 protocol)
+* JK BMS / jikong (JK02 protocol)
 * Daly BMS
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
 * ANT BMS
 * Supervolt BMS
-* Victron SmartShunt (make sure to update to latest firmware
+* Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app)
 
@@ -125,6 +125,8 @@ peaks, leading to even greater error.
 * Inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
+
 
 ## TODO
 
