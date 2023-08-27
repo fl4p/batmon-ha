@@ -35,6 +35,7 @@ def calc_crc16(data: bytes):
 class AntCommandFuncs(enum.Enum):
     Status = 0x01
     DeviceInfo = 0x02
+    WriteRegister = 0x51
 
 
 def _ant_command(func: AntCommandFuncs, addr, value):
@@ -54,6 +55,7 @@ def _ant_command(func: AntCommandFuncs, addr, value):
 class AntBt(BtBms):
     CHAR_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'  # Handle 0x10
     TIMEOUT = 16
+    WRITE_REGISTER = 0x51
 
     def __init__(self, address, **kwargs):
         super().__init__(address, _uses_pin=False, **kwargs)
@@ -148,7 +150,7 @@ class AntBt(BtBms):
         mos_temp = u16(offset)
         offset += 2
 
-        #balancer_temp = u16(offset)
+        # balancer_temp = u16(offset)
         offset += 2
 
         voltage = u16(offset) * 0.01
@@ -160,13 +162,15 @@ class AntBt(BtBms):
         soc = u16(offset)
         offset += 2
 
-        #soh = u16(offset)  # state of health
+        # soh = u16(offset)  # state of health
         offset += 2
 
         # charge mos state
+        switch_chg = data[offset]
         offset += 1
 
         # dsg mos state
+        switch_dsg = data[offset]
         offset += 1
 
         # bal state
@@ -184,7 +188,7 @@ class AntBt(BtBms):
         cycle_charge = u32(offset) * 0.001
         offset += 4
 
-        #power = i32(offset)
+        # power = i32(offset)
         offset += 4
 
         sample = BmsSample(
@@ -200,10 +204,10 @@ class AntBt(BtBms):
             temperatures=temperatures,
             mos_temperature=mos_temp,
 
-            # switches=dict(
-            #    discharge=mos_byte == 2 or mos_byte == 3,
-            #    charge=mos_byte == 1 or mos_byte == 3,
-            # ),
+            switches=dict(
+                discharge=switch_dsg,
+                charge=switch_chg,
+            ),
 
             # charge_enabled
             # discharge_enabled
@@ -214,6 +218,12 @@ class AntBt(BtBms):
 
     async def fetch_voltages(self):
         return self._voltages
+
+    async def set_switch(self, switch: str, state: bool):
+        register_onoff = dict(charge=[0x0006, 0x0004], discharge=[0x0003, 0x0001], balance=[0x000D, 0x000E],
+                              buzzer=[0x001E, 0x001F])
+        addr = register_onoff[switch][0 if state else 1]
+        await self.client.write_gatt_char(self.CHAR_UUID, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0))
 
     def debug_data(self):
         return self._last_response
