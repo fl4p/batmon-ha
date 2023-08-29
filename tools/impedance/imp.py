@@ -1,4 +1,5 @@
 import datetime
+import math
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -39,6 +40,35 @@ class BatteryResistanceTrackerParams():
         self.transient_time = 10  # 500
         self.chg_current_threshold = 5
 
+class EWMA:
+    def __init__(self, span):
+        self.alpha = math.nan
+        self.y = math.nan
+        self.update_span(span)
+
+    def update_span(self, span):
+        self.alpha = (2 / (span + 1))
+
+    def add(self, x):
+        if not math.isfinite(x):
+            return
+        if not math.isfinite( self.y):
+            self.y = x
+        self.y = (1 - self.alpha) * self.y + self.alpha * x
+
+class EWM:
+    def __init__(self, span):
+        self.avg = EWMA(span)
+        self.std = EWMA(span)
+        self.last_x = math.nan
+
+    def add(self,x):
+        self.avg.add(x)
+        if math.isfinite(self.last_x):
+            pct = (x - self.last_x) / self.last_x
+            self.std.add(pct)
+        self.last_x = x
+
 
 class BatteryResistanceTracker():
     params: BatteryResistanceTrackerParams
@@ -46,9 +76,15 @@ class BatteryResistanceTracker():
     def __init__(self, params: BatteryResistanceTrackerParams):
         self.params = params
 
+        self.stats_short = EWM(20)
+        self.stats_long = EWM(400)
+
         self.charging_for_sec = 0
 
     def update(self, dt:float, u:float, i:float):
+
+        self.stats_short.add(i)
+        self.stats_long.add(i)
 
         if i > self.params.chg_current_threshold:
             self.charging_for_sec += dt
