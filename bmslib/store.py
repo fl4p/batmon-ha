@@ -28,7 +28,7 @@ def load_meter_states():
 def store_meter_states(meter_states):
     with lock:
         with open(bms_meter_states, 'w') as f:
-            json.dump(meter_states, f)
+            json.dump(meter_states, f, indent=2)
 
 def store_algorithm_state(bms_name, algorithm_name, state=None):
     fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
@@ -44,7 +44,7 @@ def store_algorithm_state(bms_name, algorithm_name, state=None):
             if state is not None:
                 bms_state['algorithm_state'][algorithm_name] = state
                 f.seek(0), f.truncate()
-                json.dump(bms_state, f)
+                json.dump(bms_state, f, indent=2)
 
             return bms_state['algorithm_state'].get(algorithm_name, None)
 

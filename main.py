@@ -262,11 +262,14 @@ async def main():
             pass
 
     if parallel_fetch:
-        # parallel_fetch now uses a loop for each BMS so they don't delay each other
+        # parallel_fetch now uses a loop for each BMS, so they don't delay each other
 
         loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
-        await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+        done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+
+        logger.warning('Done= %s, Pending=%s', done, pending)
         for task in loops:
+            logger.warning('Task %s is done=%s', task, task.done())
             task.done() or task.cancel()
 
     else:
