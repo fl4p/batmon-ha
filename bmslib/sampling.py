@@ -1,4 +1,3 @@
-import datetime
 import random
 import re
 import time
@@ -18,7 +17,7 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 logger = get_logger(verbose=False)
 
 
-class BmsSampler():
+class BmsSampler:
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
@@ -72,7 +71,7 @@ class BmsSampler():
             if dd:
                 logger.info("%s bms debug data: %s", self.bms.name, dd)
             if self.device_info:
-                logger.info('%s device info: %s', self.device_info)
+                logger.info('%s device info: %s', self.bms.name, self.device_info)
             logger.info('Bleak version %s', bmslib.bt.bleak_version())
             raise
 
@@ -103,6 +102,9 @@ class BmsSampler():
                     logger.warning('%s expired sample', bms.name)
                     return
 
+                if self.current_calibration_factor and self.current_calibration_factor != 1:
+                    sample = sample.multiply_current(self.current_calibration_factor)
+
                 if self.bms_group:
                     self.bms_group.update(bms, sample)
 
@@ -113,8 +115,7 @@ class BmsSampler():
                 if self.invert_current:
                     sample = sample.invert_current()
 
-                if self.current_calibration_factor and self.current_calibration_factor != 1:
-                    sample = sample.multiply_current(self.current_calibration_factor)
+
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
@@ -164,6 +165,7 @@ class BmsSampler():
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
                         logger.debug('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:

@@ -10,11 +10,13 @@ from typing import List, Dict
 import paho.mqtt.client as paho
 
 import bmslib.bt
-import bmslib.daly
-import bmslib.dummy
-import bmslib.jbd
-import bmslib.jikong
-import bmslib.victron
+import bmslib.models.ant
+import bmslib.models.daly
+import bmslib.models.dummy
+import bmslib.models.jbd
+import bmslib.models.jikong
+import bmslib.models.supervolt
+import bmslib.models.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -124,13 +126,15 @@ async def main():
     logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
     bms_registry = dict(
-        daly=bmslib.daly.DalyBt,
-        jbd=bmslib.jbd.JbdBt,
-        jk=bmslib.jikong.JKBt,
-        victron=bmslib.victron.SmartShuntBt,
+        daly=bmslib.models.daly.DalyBt,
+        jbd=bmslib.models.jbd.JbdBt,
+        jk=bmslib.models.jikong.JKBt,
+        ant=bmslib.models.ant.AntBt,
+        victron=bmslib.models.victron.SmartShuntBt,
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
-        dummy=bmslib.dummy.DummyBt,
+        supervolt=bmslib.models.supervolt.SuperVoltBt,
+        dummy=bmslib.models.dummy.DummyBt,
     )
 
     names = set()
@@ -173,7 +177,9 @@ async def main():
             group_bms = bms
             for member_ref in bms.get_member_refs():
                 if member_ref not in bms_by_name:
-                    raise Exception("unknown bms %s in group %s" % (member_ref, group_bms))
+                    logger.warning('BMS names: %s', set(bms_by_name.keys()))
+                    logger.warning('Please choose one of these names')
+                    raise Exception("unknown bms '%s' in group %s" % (member_ref, group_bms))
                 member_name = bms_by_name[member_ref].name
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,
@@ -183,7 +189,7 @@ async def main():
 
     port_idx = user_config.mqtt_broker.rfind(':')
     if port_idx > 0:
-        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx+1):]))
+        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
         user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
@@ -256,10 +262,15 @@ async def main():
             pass
 
     if parallel_fetch:
-        # parallel_fetch now uses a loop for each BMS so they don't delay each other
+        # parallel_fetch now uses a loop for each BMS, so they don't delay each other
 
         loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
-        await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+        done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+
+        logger.warning('Done= %s, Pending=%s', done, pending)
+        for task in loops:
+            logger.warning('Task %s is done=%s', task, task.done())
+            task.done() or task.cancel()
 
     else:
         async def fn():

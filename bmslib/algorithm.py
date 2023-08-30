@@ -79,7 +79,7 @@ class Soc(BaseAlgorithm):
     # def restore(self, charging, last_calibration_time):
 
     def update(self, sample: BmsSample) -> UpdateResult:
-        SOC_SPAN_MARGIN = 1 / 5
+        # SOC_SPAN_MARGIN = 1 / 5
 
         if self.args.calibration_interval:
             need_calibration = sample.timestamp - self.state.last_calibration_time > self.args.calibration_interval
@@ -104,6 +104,7 @@ class Soc(BaseAlgorithm):
             #    if sample.switches['charge']:
 
 
+# noinspection PyShadowingBuiltins
 def create_algorithm(repr: Union[dict, str], bms_name=None) -> BaseAlgorithm:
     classes = dict(soc=Soc)
     args, kwargs = [], {}

@@ -6,8 +6,8 @@ from typing import List, Dict, Optional
 MIN_VALUE_EXPIRY = 20
 
 
-class DeviceInfo():
-    def __init__(self, model, hw_version, sw_version, name, sn):
+class DeviceInfo:
+    def __init__(self, model: str, hw_version: str, sw_version: str, name: Optional[str], sn: Optional[str] = None):
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version
@@ -36,8 +36,9 @@ class BmsSample:
 
         :param voltage:
         :param current: Current out of the battery (negative=charging, positive=discharging)
-        :param charge:
-        :param capacity:
+        :param charge: The charge available in Ah, aka remaining capacity, between 0 and `capacity`
+        :param capacity: The capacity of the battery in Ah
+        :param cycle_capacity: Total absolute charge meter (coulomb counter). Increases during charge and discharge. Can tell you the battery cycles (num_cycles = cycle_capacity/2/capacity). A better name would be cycle_charge. This is not well defined.
         :param num_cycles:
         :param soc: in % (0-100)
         :param balance_current:

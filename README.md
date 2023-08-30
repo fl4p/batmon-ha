@@ -20,12 +20,14 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Battery Groups, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 
-### Supported Devices (bluetooth)
+### Supported Devices (bluetooth low energy)
 
-* JK BMS (jikong) (JK02 protocol)
+* JK BMS / jikong (JK02 protocol)
 * Daly BMS
-* JBD / Xiaoxiang / Overkill Solar BMS
-* Victron SmartShunt (make sure to update to latest firmware
+* JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
+* ANT BMS
+* Supervolt BMS
+* Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app)
 
@@ -33,7 +35,7 @@ I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 ## Installation
 
-* Go to your Home Assistant Add-on store and add this repository: `https://github.com/fl4p/home-assistant-addons`
+* Go to your Home Assistant Add-on store and add this repository: [`https://github.com/fl4p/home-assistant-addons`](https://github.com/fl4p/home-assistant-addons)
   [![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=2af0a32d_batmon&repository_url=https%3A%2F%2Fgithub.com%2Ffl4p%2Fhome-assistant-addons)
 * Install Batmon add-on
 * Install, configure and start Mosquito MQTT broker (don't forget to configure the MQTT integration)
@@ -57,7 +59,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jbd`, `daly`, `victron` or `dummy`.
+`type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `victron` or `dummy`.
 
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
@@ -122,16 +124,20 @@ peaks, leading to even greater error.
   appears that disabling WiFi helps.
 * Inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
   hardware
+* Either bleak or bluetooth support in HA docker seems unstable. see related issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
+
 
 ## TODO
 
-* Port to MicroPython for MCU (ESP32 etc.)
-* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/)
-* Implement BMS data push (JK)
-* Implement old JK04?
-* Implement ANT Bms [#13](https://github.com/fl4p/batmon-ha/issues/13)
-* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
 * Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
+* Port to MicroPython for MCU (ESP32 etc.)
+* make this a custom integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
+* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
+* Implement BMS data push (JK)
+* Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
+* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
+* Implement old JK04?
 
 ## Stand-alone
 

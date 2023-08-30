@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.68] - 2023-08-22
+* Add ANT BMS switches (untested)
+* Fix `current_calibration_factor` and energy dashboard meters
+* Fix mqtt names (#126)
+
+## [0.0.67] - 2023-08-22
+* Add ANT BMS
+* Add Supervolt BMS
+* offset cell min_index max_index by +1
+* MQTT: Hide empty / nan fields
+* Allow nan SoC
+* Minor fixes
+
 ## [0.0.64] - 2023-07-24
 * fix `JSON result was not a dictionary` (remove `json_attributes_topic`)
 * Add `current_calibration`

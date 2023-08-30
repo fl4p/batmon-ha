@@ -1,4 +1,6 @@
 """
+ JK, jikong
+
 
 https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 https://github.com/jblance/jkbms
@@ -18,6 +20,7 @@ from typing import List, Callable, Dict
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
+from bmslib.util import to_hex_str
 
 
 def calc_crc(message_bytes):
@@ -26,10 +29,6 @@ def calc_crc(message_bytes):
 
 def read_str(buf, offset, encoding='utf-8'):
     return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
-
-
-def to_hex_str(data):
-    return " ".join(map(lambda b: hex(b)[2:], data))
 
 
 def _jk_command(address, value: list):
@@ -69,7 +68,7 @@ class JKBt(BtBms):
             self.logger.debug("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
         return crc_comp == crc_expected
 
-    def _notification_handler(self, sender, data):
+    def _notification_handler(self, _sender, data):
         HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
 
         if data[0:4] == HEADER:  # and len(self._buffer)
@@ -139,7 +138,7 @@ class JKBt(BtBms):
         buf = self._resp_table[0x01]
         self.num_cells = buf[114]
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
-        self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
+        # self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
     async def disconnect(self):
         await self.client.stop_notify(self.char_handle_notify)
