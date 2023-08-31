@@ -49,7 +49,7 @@ Add an entry for each device, such as:
 - address: CC:44:8C:F7:AD:BB
   type: jk
   alias: battery1
-  pin: "12345"               # victron only (optional)
+  pin: "12345"               # pairing PSK, victron only (optional)
   adapter: "hci0"            # switch the bluetooth hw adapter (optional)
   debug: true                # verbose log for this device only (optional)
   current_calibration: 1.0   # current [I] correction factor (optional)
