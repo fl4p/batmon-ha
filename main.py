@@ -317,7 +317,9 @@ async def main():
 def on_exit(*args, **kwargs):
     global shutdown
     logger.info('exit signal handler... %s, %s, shutdown already %s', args, kwargs, shutdown)
-    shutdown = True
+    shutdown += 1
+    if shutdown == 5:
+        sys.exit(1)
 
 
 atexit.register(on_exit)
