@@ -105,7 +105,7 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        devices = await bmslib.bt.bt_discovery(logger)
+        devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger), 30)
     except Exception as e:
         devices = []
         logger.error('Error discovering devices: %s', e)
