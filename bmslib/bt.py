@@ -101,6 +101,10 @@ class BtBms:
             """
             self._pending_disconnect_call = False
 
+    @property
+    def connect_time(self):
+        return self._connect_time
+
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None], **kwargs):
         if not isinstance(char_specifier, list):
             char_specifier = [char_specifier]

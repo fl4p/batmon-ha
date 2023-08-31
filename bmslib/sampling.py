@@ -35,6 +35,7 @@ class BmsSampler:
         self.current_calibration_factor = current_calibration_factor
 
         self._t_pub = 0
+        self._t_wd_reset = time.time() # watchdog
 
         self.algorithm = None
         if algorithms:
@@ -186,12 +187,19 @@ class BmsSampler:
 
                 self.num_samples += 1
                 t_disc = time.time()
+                self._t_wd_reset = t_disc
 
         except GroupNotReady as ex:
             logger.error('%s group not ready: %s', bms.name, ex)
             return
         except Exception as ex:
             logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
+
+            t_interact = max(self._t_wd_reset, self.bms.connect_time)
+            if bms.is_connected and time.time() - t_interact > 2 * self.expire_after_seconds:
+                logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
+                await bms.disconnect()
+
             raise
 
         dt_conn = t_fetch - t_conn
