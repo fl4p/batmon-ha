@@ -116,7 +116,7 @@ def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
         cycle_capacity=sum(s.cycle_capacity for s in samples),
         num_cycles=statistics.mean(s.num_cycles for s in samples),
         soc=statistics.mean(s.soc for s in samples),
-        temperatures=sum((s.temperatures for s in samples), []),
+        temperatures=sum(((s.temperatures or []) for s in samples), []),
         mos_temperature=max(s.mos_temperature for s in samples),
         switches={k: v for s in samples for k, v in s.switches.items()},
         timestamp=min(s.timestamp for s in samples),
