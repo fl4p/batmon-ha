@@ -26,7 +26,7 @@ from bmslib.util import get_logger
 from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
-user_config = load_user_config()
+user_config: Dict[str, any] = load_user_config()
 shutdown = False
 
 
@@ -224,6 +224,12 @@ async def main():
     publish_period = float(user_config.get('publish_period', sample_period))
     expire_values_after = float(user_config.get('expire_values_after', MIN_VALUE_EXPIRY))
     ic = user_config.get('invert_current', False)
+
+    sinks = []
+    if user_config.get('influxdb_host', None):
+        from bmslib.sinks import InfluxDBSink
+        sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(4., sample_period * 2),
@@ -234,6 +240,7 @@ async def main():
         algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
         current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
         bms_group=groups_by_bms.get(bms.name),
+        sinks=sinks,
     ) for bms in bms_list]
 
     # move groups to the end

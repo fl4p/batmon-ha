@@ -1,13 +1,13 @@
 import random
 import re
 import time
-from typing import Optional
+from typing import Optional, List
 
 import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
-from bmslib.bms import DeviceInfo
+from bmslib.bms import DeviceInfo, BmsSample
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
@@ -16,12 +16,20 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 
 logger = get_logger(verbose=False)
 
+class BmsSampleSink:
+    def publish_sample(self, bms_name:str, sample: BmsSample):
+        raise NotImplementedError()
+
+    def publish_voltages(self, bms_name:str,  voltages:List[int]):
+        raise NotImplementedError()
 
 class BmsSampler:
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
-                 invert_current=False, meter_state=None, publish_period=None, algorithms: Optional[list] = None,
-                 current_calibration_factor = 1.0,
+                 invert_current=False, meter_state=None, publish_period=None,
+                 sinks:Optional[List[BmsSampleSink]] = None,
+                 algorithms: Optional[list] = None,
+                 current_calibration_factor=1.0,
                  bms_group: Optional[BmsGroup] = None):
         self.bms = bms
         self.mqtt_topic_prefix = re.sub(r'[^\w_.-]', '_', bms.name)
@@ -33,6 +41,9 @@ class BmsSampler:
         self.publish_period = publish_period
         self.bms_group = bms_group  # group, virtual, parent
         self.current_calibration_factor = current_calibration_factor
+
+        self.sinks = sinks or []
+
 
         self._t_pub = 0
         self._t_wd_reset = time.time() # watchdog
@@ -116,8 +127,6 @@ class BmsSampler:
                 if self.invert_current:
                     sample = sample.invert_current()
 
-
-
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
 
@@ -147,6 +156,9 @@ class BmsSampler:
                     subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                        switches=sample.switches.keys())
 
+                for sink in self.sinks:
+                    sink.publish_sample(bms.name, sample)
+
                 publish_discovery = (self.num_samples % 60) == 0
 
                 if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
@@ -160,13 +172,15 @@ class BmsSampler:
                     voltages = await bms.fetch_voltages()
                     if self.bms_group:
                         self.bms_group.update_voltages(bms, voltages)
+
+                    for sink in self.sinks:
+                        sink.publish_voltages(bms.name, voltages)
                     publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
                         logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
-
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
