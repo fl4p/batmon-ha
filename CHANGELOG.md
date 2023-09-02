@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.69] - 2023-09-02
+* Add restart loop to prevent batmon from stopping (#127)
+* Fix ANT BMS cell voltages
+* Add watchdog timer
+* Add InfluxDB sink (undocumented)
+* Fix `add_parallel` with empty temperatures
+
 ## [0.0.68] - 2023-08-22
 * Add ANT BMS switches (untested)
 * Fix `current_calibration_factor` and energy dashboard meters
