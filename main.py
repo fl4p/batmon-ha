@@ -89,6 +89,8 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
 
 async def main():
+    global shutdown
+
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
 
@@ -271,13 +273,15 @@ async def main():
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS, so they don't delay each other
 
-        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
-        done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+        # this outer while loop recovers from a cancelled task. this happens when a device disconnects (bleak bug?)
+        while not shutdown:
+            loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
+            done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
-        logger.warning('Done= %s, Pending=%s', done, pending)
-        for task in loops:
-            logger.warning('Task %s is done=%s', task, task.done())
-            task.done() or task.cancel()
+            logger.warning('Done= %s, Pending=%s', done, pending)
+            for task in loops:
+                logger.warning('Task %s is done=%s', task, task.done())
+                task.done() or task.cancel()
 
     else:
         async def fn():
@@ -299,7 +303,6 @@ async def main():
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
-    global shutdown
     logger.info('All fetch loops ended. shutdown is already %s', shutdown)
     shutdown = True
 
