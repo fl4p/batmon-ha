@@ -47,11 +47,16 @@ def bt_stack_version():
 
 
 def bt_power(on):
+    # sudo rfkill block bluetooth
+
+    # sudo rfkill unblock bluetooth
+    # sudo systemctl start bluetooth
     cmd = ["bluetoothctl", "power", "on" if on else "off"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out, err = p.communicate()
     if p.returncode != 0:
-        raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err, 'utf-8')))
+        print(p, out, err)
+        raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err or out, 'utf-8')))
 
 
 class BtBms:
