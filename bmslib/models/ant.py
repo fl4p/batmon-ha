@@ -140,7 +140,7 @@ class AntBt(BtBms):
         num_cell = data[9]
         offset = 34
 
-        self._voltages = [u16(i * 2 + offset) * 0.001 for i in range(num_cell)]
+        self._voltages = [u16(i * 2 + offset) for i in range(num_cell)]
         offset += num_cell * 2
 
         temperatures = [u16(i * 2 + offset) for i in range(num_temp)]
@@ -205,8 +205,8 @@ class AntBt(BtBms):
             mos_temperature=mos_temp,
 
             switches=dict(
-                discharge=switch_dsg,
-                charge=switch_chg,
+                discharge=switch_dsg == 1,
+                charge=switch_chg == 1,
             ),
 
             # charge_enabled

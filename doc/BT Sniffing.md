@@ -1,4 +1,6 @@
 
+Capturing & Understanding
+
 # how to add a new bms model or a read-out/function to an existing device
 - google for existing code working with the bms
 - Sniff communication while using an existing BMS app. this gives us the query commands sent to the bms and its binary response
@@ -18,3 +20,7 @@ Chose File -> "New iOS Trace"
 
 # Windows & Linux
 Use [WireShark](https://www.wireshark.org/)
+
+# Decompiling
+To reverse engineer the communication protocol between the BMS and its app you can decompile the app.
+https://www.decompiler.com/

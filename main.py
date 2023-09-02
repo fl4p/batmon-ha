@@ -26,7 +26,7 @@ from bmslib.util import get_logger
 from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
-user_config = load_user_config()
+user_config: Dict[str, any] = load_user_config()
 shutdown = False
 
 
@@ -89,6 +89,8 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
 
 async def main():
+    global shutdown
+
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
 
@@ -105,7 +107,7 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        devices = await bmslib.bt.bt_discovery(logger)
+        devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger), 30)
     except Exception as e:
         devices = []
         logger.error('Error discovering devices: %s', e)
@@ -224,6 +226,12 @@ async def main():
     publish_period = float(user_config.get('publish_period', sample_period))
     expire_values_after = float(user_config.get('expire_values_after', MIN_VALUE_EXPIRY))
     ic = user_config.get('invert_current', False)
+
+    sinks = []
+    if user_config.get('influxdb_host', None):
+        from bmslib.sinks import InfluxDBSink
+        sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(4., sample_period * 2),
@@ -234,6 +242,7 @@ async def main():
         algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
         current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
         bms_group=groups_by_bms.get(bms.name),
+        sinks=sinks,
     ) for bms in bms_list]
 
     # move groups to the end
@@ -264,13 +273,15 @@ async def main():
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS, so they don't delay each other
 
-        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
-        done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+        # this outer while loop recovers from a cancelled task. this happens when a device disconnects (bleak bug?)
+        while not shutdown:
+            loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
+            done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
-        logger.warning('Done= %s, Pending=%s', done, pending)
-        for task in loops:
-            logger.warning('Task %s is done=%s', task, task.done())
-            task.done() or task.cancel()
+            logger.warning('Done= %s, Pending=%s', done, pending)
+            for task in loops:
+                logger.warning('Task %s is done=%s', task, task.done())
+                task.done() or task.cancel()
 
     else:
         async def fn():
@@ -292,7 +303,6 @@ async def main():
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
-    global shutdown
     logger.info('All fetch loops ended. shutdown is already %s', shutdown)
     shutdown = True
 
@@ -310,7 +320,9 @@ async def main():
 def on_exit(*args, **kwargs):
     global shutdown
     logger.info('exit signal handler... %s, %s, shutdown already %s', args, kwargs, shutdown)
-    shutdown = True
+    shutdown += 1
+    if shutdown == 5:
+        sys.exit(1)
 
 
 atexit.register(on_exit)

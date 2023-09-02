@@ -8,3 +8,5 @@ git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
 paho-mqtt
 backoff
 crcmod
+
+# influxdb

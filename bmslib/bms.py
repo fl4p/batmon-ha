@@ -80,12 +80,12 @@ class BmsSample:
         """
         return (self.voltage * self.current) if math.isnan(self._power) else self._power
 
+    def values(self):
+        return {**self.__dict__, "power": self.power}
+
     def __str__(self):
         # noinspection PyStringFormat
-        return 'BmsSampl(%(soc).1f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,q=%(charge).1fAh/%(capacity).0f,mos=%(mos_temperature).1f°C)' % {
-            **self.__dict__,
-            "power": self.power
-        }
+        return 'BmsSampl(%(soc).1f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,q=%(charge).1fAh/%(capacity).0f,mos=%(mos_temperature).1f°C)' % self.values()
 
     def invert_current(self):
         return self.multiply_current(-1)

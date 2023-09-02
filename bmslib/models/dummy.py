@@ -22,6 +22,9 @@ class DummyBt(BtBms):
         self._connected = False
         self._seed = random.random() * 2 * math.pi
 
+        self._cell_r = 5e-3
+        self.I = 0
+
     @property
     def is_connected(self):
         return self._connected
@@ -33,9 +36,10 @@ class DummyBt(BtBms):
         self._connected = False
 
     async def fetch(self) -> BmsSample:
+        self.I = math.sin(time.time() / 16 + self._seed)
         sample = BmsSample(
             voltage=12 - math.sin(time.time() / 16 + self._seed) * .5,
-            current=math.sin(time.time() / 16 + self._seed),
+            current=self.I,
             charge=(.5 + math.sin(time.time() / 32 + self._seed) * .5) * 100,
             capacity=100,
             num_cycles=3,
@@ -46,7 +50,9 @@ class DummyBt(BtBms):
         return sample
 
     async def fetch_voltages(self):
-        return [3000, 3001, 3002, 3003]
+        #  I>0 -> dsg
+        o = int(self.I * self._cell_r * -1000)
+        return [3000+o, 3010+o, 3020+o, 3030+o]
 
     async def set_switch(self, switch: str, state: bool):
         self.logger.info('set_switch %s %s', switch, state)
