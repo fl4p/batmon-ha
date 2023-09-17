@@ -47,13 +47,27 @@ class SuperVoltBt(BtBms):
         self.chargeNumber = None
 
     def _notification_handler(self, sender, data):
+        """
+        Notification handler for the battery
+        It has special handling for the data received from the battery
+        Some SuperVolt batteries send the data in multiple chunks, so we need to combine them
+        """
         if self.verbose_log:
             self.logger.info("notification: {} {}".format(data.hex(), sender))
         if data is not None:
-            self.data = data
-            self.parseData(data)
-            self.lastUpdatetime = time.time()
-        self.notificationReceived = True
+            # ':' is the start of a new data set
+            if data[0] == ord(':'):
+                self.data = data
+            else:
+                self.data += data
+            # Check if self.data is complete, it should start with ':' and end with '~'
+            if self.data[0] == ord(':') and data[-1] == ord('~'):
+                self.parseData(self.data)
+                self.lastUpdatetime = time.time()
+                self.notificationReceived = True
+        else:
+            self.data = None
+            self.notificationReceived = True
 
     async def waitForNotification(self, timeS: float) -> bool:
         start = time.time()
