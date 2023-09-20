@@ -169,8 +169,8 @@ class SuperVoltBt(BtBms):
                         self.totalV = 0
                         for i in range(0, 11):
                             bvolt = data[(start + i * 4): (start + i * 4 + 4)]
-                            self.cellV[i] = int(bvolt.decode(), 16) / 1000.0
-                            self.totalV += self.cellV[i]
+                            self.cellV[i] = int(bvolt.decode(), 16)
+                            self.totalV += self.cellV[i] * 1e-3
                             if self.verbose_log:
                                 self.logger.debug("volt" + str(i) + ": " + str(bvolt) + " / " + str(self.cellV[i]) + "V")
                         
