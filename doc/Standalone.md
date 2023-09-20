@@ -1,5 +1,7 @@
 # Stand-alone setup
-You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
+You can run the add-on without Home Assistant and without Docker.
+Imagine a remote RPI sending MQTT data over WiFi. It is also useful for developing.
+You need to have python3 installed.
 
 ```
 git clone https://github.com/fl4p/batmon-ha

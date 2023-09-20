@@ -111,20 +111,19 @@ peaks, leading to even greater error.
 * Power cycle (turn off and on) the BMS Bluetooth hardware/dongle (or BMS)
 * Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon
   on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
-* Disable WiFi if possible
 * When experiencing unstable connection enable `keep_alive`
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Toggle `install_newer_bleak` option
 * Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
-* Try another Bluetooth hardware
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
 * Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
-  appears that disabling WiFi helps.
-* Inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
+  appears that disabling WiFi helps. ([#42](https://github.com/fl4p/batmon-ha/issues/42))
+* Cheap inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
 
 
