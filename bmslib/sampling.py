@@ -16,18 +16,20 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 
 logger = get_logger(verbose=False)
 
+
 class BmsSampleSink:
-    def publish_sample(self, bms_name:str, sample: BmsSample):
+    def publish_sample(self, bms_name: str, sample: BmsSample):
         raise NotImplementedError()
 
-    def publish_voltages(self, bms_name:str,  voltages:List[int]):
+    def publish_voltages(self, bms_name: str, voltages: List[int]):
         raise NotImplementedError()
+
 
 class BmsSampler:
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None,
-                 sinks:Optional[List[BmsSampleSink]] = None,
+                 sinks: Optional[List[BmsSampleSink]] = None,
                  algorithms: Optional[list] = None,
                  current_calibration_factor=1.0,
                  bms_group: Optional[BmsGroup] = None):
@@ -44,9 +46,8 @@ class BmsSampler:
 
         self.sinks = sinks or []
 
-
         self._t_pub = 0
-        self._t_wd_reset = time.time() # watchdog
+        self._t_wd_reset = time.time()  # watchdog
 
         self.algorithm = None
         if algorithms:
@@ -102,6 +103,10 @@ class BmsSampler:
             async with bms:
                 if not was_connected:
                     logger.info('connected bms %s!', bms)
+
+                if self.device_info is None and self.num_samples == 0:
+                    # try to fetch device info first. if bms.fetch() fails we might have at least some details
+                    await self._try_fetch_device_info()
 
                 t_fetch = time.time()
 
@@ -185,12 +190,7 @@ class BmsSampler:
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
                     if self.device_info is None:
-                        try:
-                            self.device_info = await bms.fetch_device_info()
-                        except NotImplementedError:
-                            pass
-                        except Exception as e:
-                            logger.warning('%s error fetching device info: %s', bms.name, e)
+                        await self._try_fetch_device_info()
                     publish_hass_discovery(
                         mqtt_client, device_topic=self.mqtt_topic_prefix,
                         expire_after_seconds=self.expire_after_seconds,
@@ -227,3 +227,11 @@ class BmsSampler:
             topic = f"{device_topic}/meter/{meter.name}"
             s = round_to_n(meter.get(), 4)
             mqtt_single_out(self.mqtt_client, topic, s)
+
+    async def _try_fetch_device_info(self):
+        try:
+            self.device_info = await self.bms.fetch_device_info()
+        except NotImplementedError:
+            pass
+        except Exception as e:
+            logger.warning('%s error fetching device info: %s', self.bms.name, e)
