@@ -3,6 +3,16 @@
   <component name="PublishConfigData" serverName="homassistant.local caravan" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="alarmpi">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
       <paths name="homassistant.local caravan">
         <serverdata>
           <mappings>
