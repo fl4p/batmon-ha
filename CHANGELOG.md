@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.70] - 2023-09-20
+* Fix Supvervolt voltages
+* Add suppport for Supervolt BMS sending chunked strings
+* Try to fetch BMS device info first (for debugging)
+
 ## [0.0.69] - 2023-09-02
 * Add restart loop to prevent batmon from stopping (#127)
 * Fix ANT BMS cell voltages
