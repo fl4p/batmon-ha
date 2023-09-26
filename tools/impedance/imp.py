@@ -1,4 +1,5 @@
 import datetime
+import json
 import math
 
 import matplotlib
@@ -6,16 +7,46 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-df = pd.read_csv('mppt_scan_I.csv')
-I = pd.Series(df.A.values, index=pd.DatetimeIndex(df.time.values))
+if False:
+    df = pd.read_csv('mppt_scan_I.csv')
+    I = pd.Series(df.A.values, index=pd.DatetimeIndex(df.time.values))
 
-df = pd.read_csv('mppt_scan_V.csv')
-U = df.pivot_table(values='V', index=pd.DatetimeIndex(df.time.values), columns='entity_id')
-U = U['bat_caravan_cell_voltages_1'].ffill(limit=20)
+    df = pd.read_csv('mppt_scan_V.csv')
+    U = df.pivot_table(values='V', index=pd.DatetimeIndex(df.time.values), columns='entity_id')
+    U = U['bat_caravan_cell_voltages_1'].ffill(limit=20)
+
+else:
+    import influxdb
+
+    with open('influxdb_server.json') as fp:
+        influxdb_client = influxdb.InfluxDBClient(**{k[9:]: v for k, v in json.load(fp).items()})
+
+        #r = influxdb_client.query("""
+        #SELECT mean("voltage") as u, mean(current) as i FROM "autogen"."cells"
+        #WHERE cell_index = '2' and time >= 1694703222983ms and time <= 1694708766302ms
+        #GROUP BY time(3s), "device"::tag, "cell_index"::tag fill(null)
+        #""")
+        #   WHERE time >= 1694703222983ms and time <= 1694708766302ms
+
+        r = influxdb_client.query("""
+        SELECT mean(voltage_cell002) as u, mean(current) as i FROM "autogen"."batmon"      
+        WHERE time >= 1694703222983ms and time <= 1694708766302ms
+        GROUP BY time(1s), "device"::tag, "cell_index"::tag fill(null)
+        """)
+
+
+        # &from=1693810297203&to=1693852625487
+        # https://h.fabi.me/grafana/d/f3466d95-2c89-43ee-b9dd-3e722d26fcbd/batmon?orgId=1&from=1693810297203&to=1693852625487
+
+
+        points = r.get_points(tags=dict(device='ant24'))
+        points = pd.DataFrame(points)
+        U = pd.Series(points.u.values, index=pd.DatetimeIndex(points.time)).ffill(limit=20) * 1e-3
+        I = pd.Series(points.i.values, index=pd.DatetimeIndex(points.time)).ffill(limit=200)
+        print(U)
+        # from=1694703222983 & to = 1694708766302
 
 matplotlib.use('MacOSX')
-
-
 
 # noise filter
 U = U.rolling(20).median()
@@ -24,32 +55,41 @@ U = U.rolling('20s').mean()
 I = I.rolling('8s').mean()
 
 
+u_mask = (((U.ewm(span=60*5).mean().pct_change() * 1e4) ** 2).ewm(span=40).mean() < 0.2) \
+         & (((U.pct_change()  * 1e4) ** 2).ewm(span=40).mean() < 0.2)
+
+i_mask = ((((I+0.01).ewm(span=60*5).mean().pct_change() * 1e2) ** 2).ewm(span=40).mean() < 0.02) \
+         & ((((I+0.01).pct_change()  * 1e2) ** 2).ewm(span=40).mean() < 0.02)
+
+
 def normalize_std(s):
     return (s - s.mean()) / s.std()
 
-
-fig, ax = plt.subplots(3, 1)
+fig, ax = plt.subplots(2, 1)
 
 ax[0].plot(normalize_std(I), label='I')
 ax[0].plot(normalize_std(U), label='U')
+ax[0].plot(normalize_std(U)[u_mask & i_mask], label='U_masked',linewidth=0,marker='.' )
 
 di = I - I.mean()
-ax[0].plot(normalize_std(I)[abs(di.rolling('10s').max() - di.rolling('10s').min()) < 4])
+#ax[0].plot(normalize_std(I)[abs(di.rolling('10s').max() - di.rolling('10s').min()) < 4])
 
 # ax[0].plot(normalize_std(I), label='U')
 
 ax[0].legend()
 # ax[0].title('normalized')
 
-ax[1].plot(I, label='I')
-ax[1].plot(I.rolling(20).mean(), label='sma20')
-ax[1].plot(abs(di.rolling('10s').max() - di.rolling('10s').min()))
+#ax[1].plot(I, label='I')
+#ax[1].plot(I.rolling(20).mean(), label='sma20')
+#ax[1].plot(abs(di.rolling('5min').max() - di.rolling('5min').min()), label='mask')
+#ax[1].legend()
 
 # ax[2].plot(U, label='U')
 
 df = pd.concat(dict(u=U - U.mean(), i=I - I.mean()), axis=1).ffill(limit=20).dropna(how='any')
 # relaxation: exclude areas where recent current range is above threshold
-df = df[abs(df.i.rolling('10s').max() - df.i.rolling('10s').min()) < 4]
+# df = df[abs(df.i.rolling('10s').max() - df.i.rolling('10s').min()) < 4]
+df = df[i_mask & u_mask]
 
 # relaxation: exclude areas where recent current is near total average
 # df = df[abs(df.i) > 2]
@@ -59,31 +99,36 @@ if U has still noise after filtering, the resistance estimate is too high
 need to do some sort of clustering
 """
 
+x = df.i.values
+y = df.u.values * 1000
 
-x=df.i.values
-y=df.u.values
-
-ax[2].scatter(x=x, y=y, marker='x')
-ax[2].scatter(x=[x.mean()], y=[y.mean()], marker='x')
+try:
+    ax[1].scatter(x=x, y=y, marker='x')
+    ax[1].scatter(x=[x.mean()], y=[y.mean()], marker='x')
+except Exception as e:
+    print(e)
 # plt.scatter(x=, y=)
 
 
 A = np.vstack([x, np.ones(len(x))]).T
 m, c = np.linalg.lstsq(A, y, rcond=None)[0]
-plt.plot(x, m*x + c, 'r', label='ols %.2f mOhm (std %.2f minmax %.2f)' % (m*1000, np.std(y)/np.std(x)*1000, (U.max() - U.min())/(I.max() - I.min())*1e3))
-plt.plot(x, np.std(y)/np.std(x)*x + c, 'b', label='std %.2f' % (np.std(y)/np.std(x)*1000))
+r2 = 1 - c / (y.size * y.var())
+plt.plot(x, m * x + c, 'r', label='ols %.2f mOhm (r2 %.5f minmax %.2f)' % (
+    m , r2, (U.max() - U.min()) / (I.max() - I.min()) * 1e3))
+plt.plot(x, np.std(y) / np.std(x) * x + c, 'b', label='std %.2f' % (np.std(y) / np.std(x) ))
 plt.legend()
 
 plt.show()
 
-#plt.figure()
-#df = df[abs(df.i) > 2]
-#x=df.i
-#y=df.u
-#plt.plot(df.u)
-#plt.plot(y/x)
+
+# plt.figure()
+# df = df[abs(df.i) > 2]
+# x=df.i
+# y=df.u
+# plt.plot(df.u)
+# plt.plot(y/x)
 # (y/x).plot()
-#plt.show()
+# plt.show()
 
 
 # m, c = np.linalg.lstsq(A, y, rcond=None)[0]
