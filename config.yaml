@@ -16,8 +16,8 @@ services:
   - mqtt:need
 options:
   devices:
-    - address: CC:44:88:FF:AA:BB
-      type: jk
+    - address: D6:6C:0A:61:14:30
+      type: sok
       alias: battery1
   mqtt_user: ""
   mqtt_password: ""

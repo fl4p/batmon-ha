@@ -63,7 +63,7 @@ def load_user_config():
 
 def _user_config_migrate_addresses(conf):
     changed = False
-    slugs = ["daly", "jbd", "jk", "victron"]
+    slugs = ["daly", "jbd", "jk", "sok", "victron"]
     conf["devices"] = conf.get('devices') or []
     devices_by_address = {d['address']: d for d in conf["devices"]}
     for slug in slugs:
