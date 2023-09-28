@@ -2,6 +2,7 @@
 JBD protocol references
 https://github.com/syssi/esphome-jbd-bms
 https://github.com/syssi/esphome-jbd-bms/blob/main/docs/Jiabaida.communication.protocol.pdf
+https://gitlab.com/bms-tools/bms-tools/-/tree/master/bmstools?ref_type=heads
 https://github.com/sshoecraft/jbdtool/blob/1168edac728d1e0bdea6cd4fa142548c445f80ec/main.c
 https://github.com/Bangybug/esp32xiaoxiangble/blob/master/src/main.cpp
 
@@ -13,9 +14,8 @@ https://github.com/tgalarneau/bms
 """
 import asyncio
 
-from bmslib import FuturesPool
-from .bms import BmsSample
-from .bt import BtBms
+from bmslib.bms import BmsSample
+from bmslib.bt import BtBms
 
 
 def _jbd_command(command: int):
@@ -25,10 +25,12 @@ def _jbd_command(command: int):
 class JbdBt(BtBms):
     UUID_RX = '0000ff01-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
-    TIMEOUT = 8
+    TIMEOUT = 16
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
+        if kwargs.get('psk'):
+            self.logger.warning('JBD usually does not use a pairing PIN')
         self._buffer = bytearray()
         self._switches = None
         self._last_response = None

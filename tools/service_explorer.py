@@ -21,42 +21,45 @@ logger = logging.getLogger(__name__)
 ADDRESS = (
     "D6:6C:0A:61:14:30"
     if platform.system() != "Darwin"
-    else "521087E3-F05D-BB20-5E63-CA46F91205FE"
+    else '9AA68C04-9C48-4FAD-7798-13ABB4878996'
 )
 
-
-async def main(address):
-    async with BleakClient(address) as client:
-        logger.info(f"Connected: {client.is_connected}")
-
-        for service in client.services:
-            logger.info(f"[Service] {service}")
-            for char in service.characteristics:
-                if "read" in char.properties:
-                    try:
-                        value = bytes(await client.read_gatt_char(char.uuid))
-                        logger.info(
-                            f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
-                        )
-
-                else:
-                    value = None
+async def enumerate_services(client: BleakClient):
+    for service in client.services:
+        logger.info(f"[Service] {service}")
+        for char in service.characteristics:
+            if "read" in char.properties:
+                try:
+                    value = bytes(await client.read_gatt_char(char.uuid))
                     logger.info(
                         f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
                     )
+                except Exception as e:
+                    logger.error(
+                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
+                    )
 
-                for descriptor in char.descriptors:
-                    try:
-                        value = bytes(
-                            await client.read_gatt_descriptor(descriptor.handle)
-                        )
-                        logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
-                    except Exception as e:
-                        logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
+            else:
+                value = None
+                logger.info(
+                    f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                )
+
+            for descriptor in char.descriptors:
+                try:
+                    value = bytes(
+                        await client.read_gatt_descriptor(descriptor.handle)
+                    )
+                    logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
+                except Exception as e:
+                    logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
+
+async def main(address):
+    logger.info('Connecting %s', address)
+    async with BleakClient(address) as client:
+        logger.info(f"Connected: {client.is_connected}")
+        await enumerate_services(client)
+
 
 
 if __name__ == "__main__":

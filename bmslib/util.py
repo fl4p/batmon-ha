@@ -13,7 +13,7 @@ class dotdict(dict):
     # __hasattr__ = dict.__contains__
 
 def get_logger(verbose=False):
-    #log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
+    # log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
     log_format = '%(asctime)s %(levelname)s [%(module)s] %(message)s'
     if verbose:
         level = logging.DEBUG
@@ -25,3 +25,11 @@ def get_logger(verbose=False):
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
     return logger
+
+
+def dict_to_short_string(d:dict):
+    return '(' + ','.join( f'{k}={v}' for k,v in d.items() if v is not None) + ')'
+
+
+def to_hex_str(data):
+    return " ".join(map(lambda b: hex(b)[2:], data))

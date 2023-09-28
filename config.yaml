@@ -1,6 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
-version: "0.0.57"
+url: https://github.com/fl4p/batmon-ha
+version: "0.0.70"
 slug: "batmon"
 init: false
 arch:
@@ -29,6 +30,9 @@ options:
   invert_current: true
   watchdog: true
   expire_values_after: 20
+  install_newer_bleak: false
+  bt_power_cycle: false
+
 schema:
   devices:
     - address: str
@@ -36,14 +40,30 @@ schema:
       alias: "str?"
       debug: "bool?"
       pin: "str?"
+      algorithm: "str?"
+      current_calibration: "float?"
+
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str"
+  mqtt_port: "int(1,65535)?"
+
   concurrent_sampling: "bool"
+  invert_current: "bool"
   keep_alive: "bool"
-  verbose_log: "bool"
+  watchdog: "bool"
+
   sample_period: "float"
   publish_period: "float?"
-  invert_current: "bool"
-  watchdog: "bool"
   expire_values_after: "float"
+
+  verbose_log: "bool"
+
+  bt_power_cycle: "bool?"
+  install_newer_bleak: "bool?"
+
+  influxdb_host: "str?"
+  influxdb_username: "str?"
+  influxdb_password: "str?"
+  influxdb_ssl: "bool?"
+  influxdb_database: "str?"

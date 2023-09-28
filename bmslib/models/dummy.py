@@ -3,14 +3,15 @@ This is code for a dummy BMS wich doesn't physically exist.
 
 """
 import math
+import random
 import time
 from functools import partial
 from threading import Thread
 from typing import Callable, Union
 
-from .bms import BmsSample
-from .bt import BtBms
-from .util import get_logger
+from bmslib.bms import BmsSample
+from bmslib.bt import BtBms
+from bmslib.util import get_logger
 
 
 class DummyBt(BtBms):
@@ -19,6 +20,10 @@ class DummyBt(BtBms):
         self._switches = dict(charge=True, discharge=True)
         self._t0 = time.time()
         self._connected = False
+        self._seed = random.random() * 2 * math.pi
+
+        self._cell_r = 5e-3
+        self.I = 0
 
     @property
     def is_connected(self):
@@ -31,10 +36,11 @@ class DummyBt(BtBms):
         self._connected = False
 
     async def fetch(self) -> BmsSample:
+        self.I = math.sin(time.time() / 16 + self._seed)
         sample = BmsSample(
-            voltage=12 - math.sin(time.time() / 16) * .5,
-            current=math.sin(time.time() / 16),
-            charge=50,
+            voltage=12 - math.sin(time.time() / 16 + self._seed) * .5,
+            current=self.I,
+            charge=(.5 + math.sin(time.time() / 32 + self._seed) * .5) * 100,
             capacity=100,
             num_cycles=3,
             temperatures=[21],
@@ -44,7 +50,9 @@ class DummyBt(BtBms):
         return sample
 
     async def fetch_voltages(self):
-        return [3000, 3001, 3002, 3003]
+        #  I>0 -> dsg
+        o = int(self.I * self._cell_r * -1000)
+        return [3000+o, 3010+o, 3020+o, 3030+o]
 
     async def set_switch(self, switch: str, state: bool):
         self.logger.info('set_switch %s %s', switch, state)
@@ -52,17 +60,17 @@ class DummyBt(BtBms):
         self._switches[switch] = state
 
 
-class BleakDummyClient():
-    def __init__(self, address:str, disconnected_callback):
+class BleakDummyClient:
+    def __init__(self, address: str, disconnected_callback):
         self.address = address
         self._connected = False
         self._disconnected_callback = disconnected_callback
-        DUMMY_CLASSES = dict(
+        dummy_classes = dict(
             jk=JKDummy,
             jk11=partial(JKDummy, is_new_11x=True),
             jbd=JBDDummy,
         )
-        self._bms = DUMMY_CLASSES[address[5:]]()
+        self._bms = dummy_classes[address[5:]]()
 
     @property
     def is_connected(self):
@@ -77,6 +85,10 @@ class BleakDummyClient():
         self._connected = False
         cb = self._disconnected_callback
         cb and cb(self)
+
+    @property
+    def services(self):
+        return []
 
     async def _connect_with_scanner(self):
         raise NotImplementedError()
@@ -98,7 +110,7 @@ class BleakDummyClient():
         return self.__aexit__().__await__()
 
 
-class JKDummy():
+class JKDummy:
     DEVICE_INFO = b'U\xaa\xeb\x90\x03\x15JK-B2A24S20P\x00\x00\x00\x0010.X-W\x00\x0010.02\x00\x00\x00\xdc\xc6/\x00\x06\x00\x00\x00JK pw123456\x00\x00\x00\x00\x001234\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00220606\x00\x001120303218\x000000\x00Input Userdata\x00\x00123456\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc5\xaaU\x90\xeb\xc8\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00D'
 
     def __init__(self, is_new_11x=False):
@@ -114,10 +126,11 @@ class JKDummy():
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview],
+                              response: bool = False, ):
         crc = data[-1]
         data = bytes(data[:-1])
-        from bmslib.jikong import calc_crc
+        from bmslib.models.jikong import calc_crc
         assert calc_crc(data) == crc
 
         if data.startswith(b'\xaaU\x90\xeb\x97'):
@@ -138,14 +151,15 @@ class JKDummy():
             raise Exception("JK dummy received unrecognized msg %s" % data)
 
 
-class JBDDummy():
+class JBDDummy:
     def __init__(self):
         self._callbacks = {}
 
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
-    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview], response: bool = False, ):
+    async def write_gatt_char(self, char_specifier, data: Union[bytes, bytearray, memoryview],
+                              response: bool = False, ):
         if data == b'\xdd\xa5\x03\x00\xff\xfdw':
             msg = bytearray.fromhex('dd03001b0a50fda4b717dac000002cf300000000000016540308020b7d0b77f8e277')
             self._callbacks['0000ff01-0000-1000-8000-00805f9b34fb'](self, bytes(msg))

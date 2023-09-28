@@ -1,6 +1,7 @@
 import json
 import math
 import queue
+import statistics
 import time
 import traceback
 
@@ -80,7 +81,7 @@ def build_mqtt_hass_config_discovery(base, topic):
     else:
         pass
 
-    hass_config_data["json_attributes_topic"] = f'{topic}{base}'
+    # hass_config_data["json_attributes_topic"] = f'{topic}{base}'
     hass_config_data["state_topic"] = f'{topic}{base}'
 
     hass_device = {
@@ -121,7 +122,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     _last_publish_time = now
 
 
-def mqqt_last_publish_time():
+def mqtt_last_publish_time():
     global _last_publish_time
     return _last_publish_time
 
@@ -132,25 +133,6 @@ def is_none_or_nan(val):
     if isinstance(val, float) and (math.isnan(val) or not math.isfinite(val)):
         return True
     return False
-
-
-def mqtt_iterator_victron(client, result, topic, base='', hass=True):
-    for key in result.keys():
-        if type(result[key]) == dict:
-            mqtt_iterator_victron(client, result[key], topic, f'{base}/{key}', hass)
-        else:
-
-            if type(result[key]) == list:
-                val = json.dumps(result[key])
-            else:
-                val = result[key]
-
-            if hass:  # and not is_none_or_nan(val):
-                # logger.debug('Sending out hass discovery message')
-                topic_, output = build_mqtt_hass_config_discovery(f'{base}/{key}', topic=topic)
-                mqtt_single_out(client, topic_, output, retain=True)
-
-            mqtt_single_out(client, f'{topic}{base}/{key}', val)
 
 
 # units: https://github.com/home-assistant/core/blob/d7ac4bd65379e11461c7ce0893d3533d8d8b8cbf/homeassistant/const.py#L384
@@ -200,6 +182,12 @@ sample_desc = {
         "device_class": None,
         "state_class": None,
         "unit_of_measurement": "Ah"},
+    "soc/num_cycles": {
+        "field": "num_cycles",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit_of_measurement": "N",
+        "icon": "battery-sync"},
     "mosfet_status/capacity_ah": {
         "field": "charge",
         "device_class": None,
@@ -225,7 +213,8 @@ def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
         s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
-        mqtt_single_out(client, topic, s)
+        if not is_none_or_nan(s):
+            mqtt_single_out(client, topic, s)
 
     if sample.switches:
         for switch_name, switch_state in sample.switches.items():
@@ -239,14 +228,24 @@ def publish_cell_voltages(client, device_topic, voltages):
     # "lowest_voltage": parts[2] / 1000,
     # "lowest_cell": parts[3],
 
-    x = range(len(voltages))
-    if x:
-        high_i = max(x, key=lambda i: voltages[i])
-        low_i = min(x, key=lambda i: voltages[i])
+    if not voltages:
+        return
 
     for i in range(0, len(voltages)):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
         mqtt_single_out(client, topic, voltages[i] / 1000)
+
+    if len(voltages) > 1:
+        x = range(len(voltages))
+        high_i = max(x, key=lambda i: voltages[i])
+        low_i = min(x, key=lambda i: voltages[i])
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i + 1)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i + 1)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -272,11 +271,11 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
-            "name": f"{device_topic} {name or k.replace('/', ' ')}",
+            "name": f"{name or k.replace('/', ' ')}",
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
-            "json_attributes_topic": f"{device_topic}/{k}",
+            # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after_seconds,
             "device": device_json,
@@ -295,6 +294,16 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
         _hass_discovery(k, "voltage", unit="V")
+
+    if num_cells > 1:
+        statistic_fields = ["min", "max", "average", "median", "delta"]
+        for f in statistic_fields:
+            k = 'cell_voltages/%s' % f
+            _hass_discovery(k, device_class="voltage", unit="V")
+
+        for f in ["min_index", "max_index"]:
+            k = 'cell_voltages/%s' % f
+            _hass_discovery(k, device_class=None, unit="")
 
     for i in range(0, num_temp_sensors):
         k = 'temperatures/%d' % (i + 1)
@@ -321,7 +330,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name}",
                 "device_class": 'outlet',
-                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
@@ -332,7 +341,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{device_topic} {switch_name} switch",
                 "device_class": 'power',
-                "json_attributes_topic": f"{device_topic}/{switch_name}",
+                # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
                 "state_topic": f"{device_topic}/switch/{switch_name}",
@@ -359,6 +368,7 @@ async def mqtt_process_action_queue():
 
 def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switches):
     async def set_switch(switch_name, state):
+        logger.info('Set %s %s switch %s', bms.name, switch_name, state)
         await bms.set_switch(switch_name, state)
         topic = f"{device_topic}/switch/{switch_name}"
         mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
@@ -373,7 +383,7 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     payload = message.payload.decode("utf-8")
-    logger.info("new message %s: %s", message.topic, payload)
+    logger.info("received msg %s: %s", message.topic, payload)
     callback = _switch_callbacks.get(message.topic, None)
     if callback:
         _message_queue.put((callback, payload))

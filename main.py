@@ -5,38 +5,30 @@ import signal
 import sys
 import time
 import traceback
-from typing import List
+from typing import List, Dict
 
 import paho.mqtt.client as paho
-from bleak import BleakScanner
 
 import bmslib.bt
-import bmslib.daly
-import bmslib.dummy
-import bmslib.jbd
-import bmslib.jikong
+import bmslib.models.ant
+import bmslib.models.daly
+import bmslib.models.dummy
+import bmslib.models.jbd
+import bmslib.models.jikong
+import bmslib.models.supervolt
 import bmslib.sok
-import bmslib.victron
+import bmslib.models.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
+from bmslib.group import VirtualGroupBms, BmsGroup
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger
-from mqtt_util import mqqt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
+from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
-user_config = load_user_config()
+user_config: Dict[str, any] = load_user_config()
 shutdown = False
-
-
-async def bt_discovery():
-    logger.info('BT Discovery:')
-    devices = await BleakScanner.discover()
-    if not devices:
-        logger.info(' - no devices found - ')
-    for d in devices:
-        logger.info("BT Device   %s   address=%s", d.name, d.address)
-    return devices
 
 
 async def fetch_loop(fn, period, max_errors):
@@ -53,6 +45,7 @@ async def fetch_loop(fn, period, max_errors):
                 logger.warning('too many errors, abort')
                 break
         await asyncio.sleep(period)
+    logger.info("fetch_loop %s ends", fn)
 
 
 def store_states(samplers: List[BmsSampler]):
@@ -77,9 +70,9 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
         if timeout:
             # compute time since last successful publish
-            pdt = now - (mqqt_last_publish_time() or t_start)
+            pdt = now - (mqtt_last_publish_time() or t_start)
             if pdt > timeout:
-                if mqqt_last_publish_time():
+                if mqtt_last_publish_time():
                     logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
                 else:
                     logger.error("MQTT never published a message after %.0fs, exit", timeout)
@@ -97,11 +90,25 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
 
 async def main():
+    global shutdown
+
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []
 
+    if user_config.get('bt_power_cycle'):
+        try:
+            logger.info('Power cycle bluetooth hardware')
+            bmslib.bt.bt_power(False)
+            await asyncio.sleep(1)
+            bmslib.bt.bt_power(True)
+            await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning("Error power cycling BT: %s", e)
+
     try:
-        devices = await bt_discovery()
+        if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
+            raise Exception("skip-discovery")
+        devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger), 30)
     except Exception as e:
         devices = []
         logger.error('Error discovering devices: %s', e)
@@ -110,7 +117,7 @@ async def main():
         return next((d.address for d in devices if (d.name or "").strip() == name.strip()), name)
 
     def dev_by_addr(address: str):
-        dev =  next((d for d in devices if d.address == address), None)
+        dev = next((d for d in devices if d.address == address), None)
         if not dev:
             raise Exception("Can't resolve device name %s, not discovered" % address)
         return dev
@@ -119,39 +126,75 @@ async def main():
     if verbose_log:
         logger.info('Verbose logging enabled')
 
+    logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
+
     bms_registry = dict(
-        daly=bmslib.daly.DalyBt,
-        jbd=bmslib.jbd.JbdBt,
-        jk=bmslib.jikong.JKBt,
+        daly=bmslib.models.daly.DalyBt,
+        jbd=bmslib.models.jbd.JbdBt,
+        jk=bmslib.models.jikong.JKBt,
+        ant=bmslib.models.ant.AntBt,
+        victron=bmslib.models.victron.SmartShuntBt,
+        group_parallel=bmslib.group.VirtualGroupBms,
+        # group_serial=bmslib.group.VirtualGroupBms, # TODO
+        supervolt=bmslib.models.supervolt.SuperVoltBt,
         sok=bmslib.sok.SokBt,
-        victron=bmslib.victron.SmartShuntBt,
-        dummy=bmslib.dummy.DummyBt,
+        dummy=bmslib.models.dummy.DummyBt,
     )
 
     names = set()
+    dev_args: Dict[str, dict] = {}
 
     for dev in user_config.get('devices', []):
         addr: str = dev['address']
-        if addr and not addr.startswith('#'):
-            if dev['type'] in bms_registry:
-                bms_class = bms_registry[dev['type']]
-                if dev.get('debug'):
-                    logger.info('Verbose log for %s enabled', addr)
-                addr = name2addr(addr)
-                name: str = dev.get('alias') or dev_by_addr(addr).name
-                assert name not in names, "duplicate name %s" % name
-                bms_list.append(bms_class(addr,
-                                          name=name,
-                                          verbose_log=verbose_log or dev.get('debug'),
-                                          psk=dev.get('pin'),
-                                          adapter=dev.get('adapter'),
-                                          ))
-                names.add(name)
-            else:
-                logger.warning('Unknown device type %s', dev)
+
+        if not addr or addr.startswith('#'):
+            continue
+
+        if dev['type'] not in bms_registry:
+            logger.warning('Unknown device type %s', dev)
+            continue
+
+        bms_class = bms_registry[dev['type']]
+        if dev.get('debug'):
+            logger.info('Verbose log for %s enabled', addr)
+        addr = name2addr(addr)
+        name: str = dev.get('alias') or dev_by_addr(addr).name
+        assert name not in names, "duplicate name %s" % name
+        bms_list.append(bms_class(addr,
+                                  name=name,
+                                  verbose_log=verbose_log or dev.get('debug'),
+                                  psk=dev.get('pin'),
+                                  adapter=dev.get('adapter'),
+                                  ))
+        names.add(name)
+        dev_args[name] = dev
+
+    bms_by_name: Dict[str, bmslib.bt.BtBms] = {
+        **{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
+        **{bms.name: bms for bms in bms_list}}
+    groups_by_bms: Dict[str, BmsGroup] = {}
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
+
+        if isinstance(bms, VirtualGroupBms):
+            group_bms = bms
+            for member_ref in bms.get_member_refs():
+                if member_ref not in bms_by_name:
+                    logger.warning('BMS names: %s', set(bms_by_name.keys()))
+                    logger.warning('Please choose one of these names')
+                    raise Exception("unknown bms '%s' in group %s" % (member_ref, group_bms))
+                member_name = bms_by_name[member_ref].name
+                if member_name in groups_by_bms:
+                    raise Exception("can't add bms %s to multiple groups %s %s", member_name,
+                                    groups_by_bms[member_name], group_bms)
+                groups_by_bms[member_name] = group_bms.group
+                bms.add_member(bms_by_name[member_ref])
+
+    port_idx = user_config.mqtt_broker.rfind(':')
+    if port_idx > 0:
+        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
+        user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
 
     logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
     # paho_monkey_patch()
@@ -185,6 +228,12 @@ async def main():
     publish_period = float(user_config.get('publish_period', sample_period))
     expire_values_after = float(user_config.get('expire_values_after', MIN_VALUE_EXPIRY))
     ic = user_config.get('invert_current', False)
+
+    sinks = []
+    if user_config.get('influxdb_host', None):
+        from bmslib.sinks import InfluxDBSink
+        sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(4., sample_period * 2),
@@ -192,7 +241,14 @@ async def main():
         invert_current=ic,
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
+        algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
+        current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
+        bms_group=groups_by_bms.get(bms.name),
+        sinks=sinks,
     ) for bms in bms_list]
+
+    # move groups to the end
+    sampler_list = sorted(sampler_list, key=lambda s: isinstance(s.bms, VirtualGroupBms))
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
@@ -203,38 +259,44 @@ async def main():
     max_errors = 200 if watchdog_en else 0
 
     asyncio.create_task(background_loop(
-        timeout=max(120., sample_period * 3) if watchdog_en else 0,
+        timeout=max(15 * 60., sample_period * 4) if watchdog_en else 0,
         sampler_list=sampler_list
     ))
 
+    tasks = sampler_list + extra_tasks
+
+    # before we start the loops connect to each bms
+    for t in tasks:
+        try:
+            await t()
+        except:
+            pass
+
     if parallel_fetch:
-        # parallel_fetch now uses a loop for each BMS so they don't delay each other
-        tasks = sampler_list + extra_tasks
+        # parallel_fetch now uses a loop for each BMS, so they don't delay each other
 
-        # before we start the loops connect to each bms
-        for t in tasks:
-            try:
-                await t()
-            except:
-                pass
+        # this outer while loop recovers from a cancelled task. this happens when a device disconnects (bleak bug?)
+        while not shutdown:
+            loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
+            done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
-        loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
-        await asyncio.wait(loops, return_when='FIRST_COMPLETED')
+            logger.warning('Done= %s, Pending=%s', done, pending)
+            for task in loops:
+                logger.warning('Task %s is done=%s', task, task.done())
+                task.done() or task.cancel()
 
     else:
         async def fn():
-            tasks = ([smp() for smp in sampler_list] + [t() for t in extra_tasks])
-
             if parallel_fetch:
                 # concurrent synchronised fetch
                 # this branch is currently not reachable!
-                await asyncio.gather(*tasks, return_exceptions=False)
+                await asyncio.gather(*[t() for t in tasks], return_exceptions=False)
             else:
                 random.shuffle(tasks)
                 exceptions = []
                 for t in tasks:
                     try:
-                        await t
+                        await t()
                     except Exception as ex:
                         exceptions.append(ex)
                 if exceptions:
@@ -243,7 +305,6 @@ async def main():
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
 
-    global shutdown
     logger.info('All fetch loops ended. shutdown is already %s', shutdown)
     shutdown = True
 
@@ -261,7 +322,9 @@ async def main():
 def on_exit(*args, **kwargs):
     global shutdown
     logger.info('exit signal handler... %s, %s, shutdown already %s', args, kwargs, shutdown)
-    shutdown = True
+    shutdown += 1
+    if shutdown == 5:
+        sys.exit(1)
 
 
 atexit.register(on_exit)

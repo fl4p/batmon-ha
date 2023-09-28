@@ -1,6 +1,7 @@
 import json
+import re
 from os import access, R_OK
-from os.path import isfile, join
+from os.path import isfile
 from threading import Lock
 
 from bmslib.util import dotdict, get_logger
@@ -15,6 +16,9 @@ root_dir = '/data/' if is_readable('/data/options.json') else ''
 bms_meter_states = root_dir + 'bms_meter_states.json'
 lock = Lock()
 
+def store_file(fn):
+    return root_dir + fn
+
 def load_meter_states():
     with lock:
         with open(bms_meter_states) as f:
@@ -24,7 +28,25 @@ def load_meter_states():
 def store_meter_states(meter_states):
     with lock:
         with open(bms_meter_states, 'w') as f:
-            json.dump(meter_states, f)
+            json.dump(meter_states, f, indent=2)
+
+def store_algorithm_state(bms_name, algorithm_name, state=None):
+    fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
+    with lock:
+        with open(fn, 'a+') as f:
+            try:
+                f.seek(0)
+                bms_state = json.load(f)
+            except:
+                logger.info('init %s bms state storage', bms_name)
+                bms_state = dict(algorithm_state=dict())
+
+            if state is not None:
+                bms_state['algorithm_state'][algorithm_name] = state
+                f.seek(0), f.truncate()
+                json.dump(bms_state, f, indent=2)
+
+            return bms_state['algorithm_state'].get(algorithm_name, None)
 
 
 def load_user_config():

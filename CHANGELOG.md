@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.0.70] - 2023-09-20
+* Fix Supvervolt voltages
+* Add suppport for Supervolt BMS sending chunked strings
+* Try to fetch BMS device info first (for debugging)
+
+## [0.0.69] - 2023-09-02
+* Add restart loop to prevent batmon from stopping (#127)
+* Fix ANT BMS cell voltages
+* Add watchdog timer
+* Add InfluxDB sink (undocumented)
+* Fix `add_parallel` with empty temperatures
+
+## [0.0.68] - 2023-08-22
+* Add ANT BMS switches (untested)
+* Fix `current_calibration_factor` and energy dashboard meters
+* Fix mqtt names (#126)
+
+## [0.0.67] - 2023-08-22
+* Add ANT BMS
+* Add Supervolt BMS
+* offset cell min_index max_index by +1
+* MQTT: Hide empty / nan fields
+* Allow nan SoC
+* Minor fixes
+
+## [0.0.64] - 2023-07-24
+* fix `JSON result was not a dictionary` (remove `json_attributes_topic`)
+* Add `current_calibration`
+* Daly BMS: Fix bug on timeout 
+
+## [0.0.63] - 2023-05-09
+* Add option `bt_power_cycle` to power cycle the Bluetooth hardware on start-up
+* Add info about bleak version and BMS device info on failures
+* Fix `InvalidStateError`
+* Fix `adapter` setting being ignored
+* Strip spaces from BMS name for MQTT topics
+* Parse port number from MQTT host
+
+## [0.0.62] - 2023-04-22
+
+Due to a mistake with git branching, I pushed this update multiple times (v0.0.60, v0.0.61).
+
+* Add `num_cycles`
+* Add cell voltage statistics `min`, `max`, `delta`, `average`, `median`, `min_i`, `max_i`
+* Add Algorithms feature (experimental) [doc](https://github.com/fl4p/batmon-ha/blob/master/doc/Algorithms.md)
+* Add BMS Groups (experimental) [doc](https://github.com/fl4p/batmon-ha/blob/master/doc/Groups.md)
+
+* Increase JBD timeout
+* Fix mqtt topic names (remove whitespaces)
+* Fix initializing meter states
+* Fix JK charge/discharge switches
+* Fix JK `Multiple Characteristics with this UUID` error [#83](https://github.com/fl4p/batmon-ha/issues/83)
+* Fix `bleak.exc.BleakError: Not connected` [#85](https://github.com/fl4p/batmon-ha/issues/85)
+
+
 ## [0.0.57] - 2023-04-07
 * Fix JBD charge/discharge switch
 * Change warning if meter states file not found
