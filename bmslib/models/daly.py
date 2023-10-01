@@ -4,13 +4,19 @@ References
 https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py
 https://github.com/esphome/esphome/tree/dev/esphome/components/daly_bms
 
+mac-addresses / pattern
+B4:E8:42:C2:84:13
+96:69:08:01:06:A7
+76:67:02:03:02:3E
+3D7394B1-BCFD-4CDC-A10D-3D113E2317A6 # darwin
+
 """
 import asyncio
 import struct
 from typing import Dict
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.bt import BtBms, enumerate_services
 
 
 def calc_crc(message_bytes):
@@ -112,6 +118,7 @@ class DalyBt(BtBms):
                 continue
 
         if not self.UUID_RX:
+            await enumerate_services(self.client, self.logger)
             raise Exception("Notify characteristic (rx) not found")
 
     async def disconnect(self):
