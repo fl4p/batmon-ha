@@ -27,6 +27,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
 * ANT BMS
 * Supervolt BMS
+* SOK BMS
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app)
@@ -59,7 +60,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `victron` or `dummy`.
+`type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `sok`, `victron` or `dummy`.
 
 With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
 discovery is used.
