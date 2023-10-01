@@ -122,12 +122,12 @@ class BmsSampler:
                 if self.current_calibration_factor and self.current_calibration_factor != 1:
                     sample = sample.multiply_current(self.current_calibration_factor)
 
-                if self.bms_group:
-                    self.bms_group.update(bms, sample)
-
                 # discharging P>0
                 self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
                 self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)  # kWh
+
+                if self.bms_group:
+                    self.bms_group.update(bms, sample)
 
                 if self.invert_current:
                     sample = sample.invert_current()
@@ -164,11 +164,15 @@ class BmsSampler:
                 for sink in self.sinks:
                     sink.publish_sample(bms.name, sample)
 
+                # sample_acc += sample
+
                 publish_discovery = (self.num_samples % 60) == 0
 
                 if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
                     self._t_pub = t_now
 
+                    # TODO should publish an averaged sample
+                    # sample = sample_acc.pop()
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
                     logger.info('%s: %s', bms.name, sample)
 
