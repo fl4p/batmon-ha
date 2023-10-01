@@ -9,4 +9,4 @@ paho-mqtt
 backoff
 crcmod
 
-# influxdb
+influxdb
