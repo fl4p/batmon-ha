@@ -27,10 +27,13 @@ else:
         #GROUP BY time(3s), "device"::tag, "cell_index"::tag fill(null)
         #""")
         #   WHERE time >= 1694703222983ms and time <= 1694708766302ms
+        #WHERE time >= 1694527270071ms and time <= 1694551907278ms
+# WHERE time >= 1694703222983ms and time <= 1694708766302ms
+
 
         r = influxdb_client.query("""
         SELECT mean(voltage_cell002) as u, mean(current) as i FROM "autogen"."batmon"      
-        WHERE time >= 1694703222983ms and time <= 1694708766302ms
+       WHERE time >= 1694527270071ms and time <= 1694551907278ms
         GROUP BY time(1s), "device"::tag, "cell_index"::tag fill(null)
         """)
 

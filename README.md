@@ -137,6 +137,7 @@ peaks, leading to even greater error.
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
 * Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
 * Implement old JK04?
+* web interface (export, import bms meter data)
 
 ## Stand-alone
 

@@ -8,7 +8,10 @@
 * Slow response time (2s)
 * No custom hysteresis (release threshold) for protection settings
 * Sleep Mode and BT not available (https://github.com/fl4p/batmon-ha/issues/42)
+* Poor accuracy with low currents
+
 + Has Cycle counter
++ Good current sensor & SoC estimating (ignoring low currents)
 
 ## JBD BMS
 
@@ -24,6 +27,7 @@
   override the protection using the switches in the app
 * Over-charge in some rare conditions
 * Problems
+* Would not recommend
 
 ## JK BMS
 
@@ -41,3 +45,21 @@
 * Balance Current Positive: SuperCap->Cell_LO (charging the lowest cell from super cap)
 * Balance Current Negative: Cell_HI->SuperCap (discharging the highest cell to super cap)
 * Value of balance current is inflated
+
+# ANT BMS
+
+* Weird SoC computation at certain voltage levels (which doesn't really work)
+* Buggy android app
+
+# My Recommandation
+
+I currently recommend Daly BMS. It has a good current sensor and a cycle counter.
+
+JK has active balancer, but apart from having a higher balance efficiency, is not very strong. It only balances between
+2 cells at a time, at its duty cycle is about 65%. So a 2A BMS will actually balance with 1.3A, and only between 2
+cells. The capacitive balancer works at 60 khZ and produces some EMI. The built-in Bluetooth adapter is insecure (
+everyone can write protection params).
+
+With JBD I had some serious over-charge issues and it doesn't keep SoC on power-loss.
+
+ANT BmS SoC is buggy.
