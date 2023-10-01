@@ -29,7 +29,7 @@ class BmsSample:
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature=math.nan,
+                 mos_temperature:float=math.nan,
                  switches: Optional[Dict[str, bool]] = None,
                  uptime=math.nan, timestamp=None):
         """

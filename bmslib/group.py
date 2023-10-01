@@ -1,4 +1,5 @@
 import asyncio
+import math
 import statistics
 from copy import copy
 from typing import Dict, Iterable, List
@@ -35,6 +36,7 @@ class BmsGroup:
 
 
 class GroupNotReady(Exception):
+    # TODO rename GroupMissingData ?
     pass
 
 
@@ -105,6 +107,11 @@ class VirtualGroupBms:
     async def fetch_device_info(self):
         raise NotImplementedError()
 
+def is_finite(x):
+    return x is not None and math.isfinite(x)
+
+def finite_or_fallback(x, fallback):
+    return x if is_finite(x) else fallback
 
 def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(
@@ -117,7 +124,7 @@ def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
         num_cycles=statistics.mean(s.num_cycles for s in samples),
         soc=statistics.mean(s.soc for s in samples),
         temperatures=sum(((s.temperatures or []) for s in samples), []),
-        mos_temperature=max(s.mos_temperature for s in samples),
+        mos_temperature=max((s.mos_temperature for s in samples if is_finite(s.mos_temperature)), default=math.nan),
         switches={k: v for s in samples for k, v in s.switches.items()},
         timestamp=min(s.timestamp for s in samples),
     )
