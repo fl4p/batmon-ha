@@ -330,7 +330,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         for switch_name in switches:
             discovery_msg[f"homeassistant/switch/{device_topic}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
-                "name": f"{device_topic} {switch_name}",
+                "name": f"{switch_name}",
                 "device_class": 'outlet',
                 # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "state_topic": f"{device_topic}/switch/{switch_name}",
@@ -341,7 +341,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
             discovery_msg[f"homeassistant/binary_sensor/{device_topic}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
-                "name": f"{device_topic} {switch_name} switch",
+                "name": f"{switch_name} switch",
                 "device_class": 'power',
                 # "json_attributes_topic": f"{device_topic}/{switch_name}",
                 "expire_after": expire_after_seconds,
@@ -407,53 +407,3 @@ def paho_monkey_patch():
 
     logger.debug("applied paho monkey patch _handle_pingresp")
 
-    """
-    
-
-
-mqtt: homeassistant/sensor/daly_bms/_status_temperature_sensors/config {"unique_id": "daly_bms__status_temperature_sensors", "name": "Daly BMS  status temperature_sensors", "json_attributes_topic": "daly_bms/status/temperature_sensors", "state_topic": "daly_bms/status/temperature_sensors", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/temperature_sensors 1
-mqtt: homeassistant/sensor/daly_bms/_status_charger_running/config {"unique_id": "daly_bms__status_charger_running", "name": "Daly BMS  status charger_running", "json_attributes_topic": "daly_bms/status/charger_running", "state_topic": "daly_bms/status/charger_running", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/charger_running False
-mqtt: homeassistant/sensor/daly_bms/_status_load_running/config {"unique_id": "daly_bms__status_load_running", "name": "Daly BMS  status load_running", "json_attributes_topic": "daly_bms/status/load_running", "state_topic": "daly_bms/status/load_running", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/load_running False
-mqtt: homeassistant/sensor/daly_bms/_status_states_DI1/config {"unique_id": "daly_bms__status_states_DI1", "name": "Daly BMS  status states DI1", "json_attributes_topic": "daly_bms/status/states/DI1", "state_topic": "daly_bms/status/states/DI1", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/states/DI1 False
-mqtt: homeassistant/sensor/daly_bms/_status_states_DI2/config {"unique_id": "daly_bms__status_states_DI2", "name": "Daly BMS  status states DI2", "json_attributes_topic": "daly_bms/status/states/DI2", "state_topic": "daly_bms/status/states/DI2", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/states/DI2 True
-mqtt: homeassistant/sensor/daly_bms/_status_cycles/config {"unique_id": "daly_bms__status_cycles", "name": "Daly BMS  status cycles", "json_attributes_topic": "daly_bms/status/cycles", "state_topic": "daly_bms/status/cycles", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/status/cycles 5
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_1/config {"unique_id": "daly_bms__cell_voltages_1", "name": "Daly BMS  cell_voltages 1", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/1", "state_topic": "daly_bms/cell_voltages/1", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/1 3.325
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_2/config {"unique_id": "daly_bms__cell_voltages_2", "name": "Daly BMS  cell_voltages 2", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/2", "state_topic": "daly_bms/cell_voltages/2", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/2 3.331
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_3/config {"unique_id": "daly_bms__cell_voltages_3", "name": "Daly BMS  cell_voltages 3", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/3", "state_topic": "daly_bms/cell_voltages/3", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/3 3.301
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_4/config {"unique_id": "daly_bms__cell_voltages_4", "name": "Daly BMS  cell_voltages 4", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/4", "state_topic": "daly_bms/cell_voltages/4", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/4 3.331
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_5/config {"unique_id": "daly_bms__cell_voltages_5", "name": "Daly BMS  cell_voltages 5", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/5", "state_topic": "daly_bms/cell_voltages/5", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/5 3.331
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_6/config {"unique_id": "daly_bms__cell_voltages_6", "name": "Daly BMS  cell_voltages 6", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/6", "state_topic": "daly_bms/cell_voltages/6", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/6 3.324
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_7/config {"unique_id": "daly_bms__cell_voltages_7", "name": "Daly BMS  cell_voltages 7", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/7", "state_topic": "daly_bms/cell_voltages/7", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/7 3.328
-mqtt: homeassistant/sensor/daly_bms/_cell_voltages_8/config {"unique_id": "daly_bms__cell_voltages_8", "name": "Daly BMS  cell_voltages 8", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/cell_voltages/8", "state_topic": "daly_bms/cell_voltages/8", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/cell_voltages/8 3.323
-mqtt: homeassistant/sensor/daly_bms/_balancing_status_error/config {"unique_id": "daly_bms__balancing_status_error", "name": "Daly BMS  balancing_status error", "json_attributes_topic": "daly_bms/balancing_status/error", "state_topic": "daly_bms/balancing_status/error", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/balancing_status/error not implemented
-mqtt: homeassistant/sensor/daly_bms/_errors/config {"unique_id": "daly_bms__errors", "name": "Daly BMS  errors", "json_attributes_topic": "daly_bms/errors", "state_topic": "daly_bms/errors", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/errors []
-    
-    mqtt: homeassistant/sensor/daly_bms/_soc_total_voltage/config {"unique_id": "daly_bms__homeassistant/sensor/daly_bms/_soc_total_voltage/config {"unique_id": "daly_bms__soc_total_voltagesoc_total_voltage", "name": "Daly BMS  soc total_voltage", "device_class": "voltage", "unit_of_measurement": "V", "json_attributes_topic": "daly_bms/soc/total_voltage", "state_topic": "daly_bms/soc/total_voltage", "device": {"identifiers": ["daly_bms"], "manufacturer": "Daly", "model": "Currently not available", "name": "Daly BMS", "sw_version": "Currently not available"}}
-mqtt: daly_bms/soc/total_voltage 26.5
-
-    
-    :return: 
-    """
-
-
-"""
-homeassistant/sensor/jbd_bms/_soc_current/config
-{"unique_id": "jbd_bms__soc_current", "name": "jbd current", "device_class": "current", "unit_of_measurement": "A", "json_attributes_topic": "jbd_bms/soc/current", "state_topic": "jbd_bms/soc/current", "device": {"identifiers": ["jbd_bms"], "manufacturer": "JBD", "model": "Currently not available", "name": "JBD BMS", "sw_version": "Currently not available"}}
-mqtt: daly
-"""
