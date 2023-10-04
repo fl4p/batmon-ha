@@ -189,7 +189,7 @@ class BmsSampler:
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
                     if voltages or temperatures:
-                        logger.info('%s volt=%s temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+                        logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
@@ -222,7 +222,8 @@ class BmsSampler:
 
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
-        if self.bms.verbose_log or max(dt_conn, dt_fetch) > 1 or random.random() < 0.05:
+        dt_max = max(dt_conn, dt_fetch)
+        if self.bms.verbose_log or dt_max > 1 or (dt_max > 0.01 and random.random() < 0.05):
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
