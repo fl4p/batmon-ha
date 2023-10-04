@@ -1,10 +1,9 @@
 *This is feature is experimental.*
 
-
 Using a BMS without "talking" to the solar charger (via RS434, CAN bus, etc.) usually causes "unhealthy" charge cycles.
 JK, JBD and Daly BMS, they cut off the charger if a certain voltage or cell-voltage level is reached. This is not ideal,
-because voltage does hardly represent SoC and it can quickly fall after charging stops. It ends up in repeating 
-charge on/off loop, which is believed to be bad for the battery.
+because voltage does hardly represent SoC and it can quickly fall after charging stops (especially with LiFePo4). It
+ends up in repeating charge on/off loop, which is believed to be bad for the battery.
 
 # Algorithms
 
@@ -63,6 +62,15 @@ Even though the SoC% is below `charge_stop`, charging
 is paused until `charge_start` is reached. This can avoid trickle charge by adding a hysteresis.
 
 If `charge_start` is greater than `charge_stop` it is set to `charge_stop` and the hysteresis is disabled.
+
+## Pseudo-Code
+
+```
+if soc% >= charge_stop:
+   set_charge_switch(off)
+else if soc% <= charge_start:
+   set_charge_switch(on)
+```
 
 ## Examples
 

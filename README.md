@@ -17,6 +17,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Integrates with Home Assistant Energy dashboard
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
+* Can write data to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 
