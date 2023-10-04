@@ -16,6 +16,7 @@ the algorithm logic.
 Note that a newly added algorithm doesn't do anything until a trigger point is reached, so please wait patiently.
 
 To ensure proper SoC levels, algorithms might frequently calibrate. The calibration finishes once 100% SoC is reached.
+Calibration interval is currently fixed to 14 days.
 
 To enable an algorithm, add its signature to the BMS device entry in the add-on options:
 

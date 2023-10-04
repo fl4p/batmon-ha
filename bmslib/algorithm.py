@@ -44,7 +44,7 @@ class BaseAlgorithm:
 
 class SocArgs:
     def __init__(self, charge_stop, charge_start='100%', discharge_stop=None, discharge_start=None,
-                 calibration_interval=None):
+                 calibration_interval_h=24 * 14):
         charge_stop = float(charge_stop.strip('%'))
         charge_start = float(charge_start.strip('%'))
         # assert charge_stop >= charge_start
@@ -61,7 +61,7 @@ class SocArgs:
 
 class SocState:
     def __init__(self, charging: bool, last_calibration_time: float):
-        self.charging = charging # this is not currently used (write only)
+        self.charging = charging  # this is not currently used (write only)
         self.last_calibration_time = last_calibration_time
 
     def __str__(self):
@@ -92,11 +92,11 @@ class SocAlgorithm(BaseAlgorithm):
 
                 if not sample.switches['charge']:
                     logger.info('Need calibration, charge to 100% soc (calib.interval=%.1f h, last calib=%.1f h ago',
-                                self.args.calibration_interval_s/3600, time_since_last_calib/3600)
+                                self.args.calibration_interval_s / 3600, time_since_last_calib / 3600)
                     self.state.charging = True
                     return UpdateResult(switches=BatterySwitches(charge=True))
 
-                return # nop
+                return  # nop
 
         if self.state.charging:
             if sample.soc >= self.args.charge_stop:
