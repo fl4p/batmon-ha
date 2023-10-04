@@ -1,11 +1,22 @@
 # Changelog
 
+## [0.0.71] - 2023-10-04
+
+* Add SOK Bms (initial work by @mdshw5)
+* Fix battery groups with missing temperature values
+* Daly enumerate services
+* Add `influxdb` dependency
+* Implement calibration for Soc Algorithm
+* fix `MQTT entity name starts with the device name` (#142)
+
 ## [0.0.70] - 2023-09-20
+
 * Fix Supvervolt voltages
 * Add suppport for Supervolt BMS sending chunked strings
 * Try to fetch BMS device info first (for debugging)
 
 ## [0.0.69] - 2023-09-02
+
 * Add restart loop to prevent batmon from stopping (#127)
 * Fix ANT BMS cell voltages
 * Add watchdog timer
@@ -13,11 +24,13 @@
 * Fix `add_parallel` with empty temperatures
 
 ## [0.0.68] - 2023-08-22
+
 * Add ANT BMS switches (untested)
 * Fix `current_calibration_factor` and energy dashboard meters
 * Fix mqtt names (#126)
 
 ## [0.0.67] - 2023-08-22
+
 * Add ANT BMS
 * Add Supervolt BMS
 * offset cell min_index max_index by +1
@@ -26,11 +39,13 @@
 * Minor fixes
 
 ## [0.0.64] - 2023-07-24
+
 * fix `JSON result was not a dictionary` (remove `json_attributes_topic`)
 * Add `current_calibration`
-* Daly BMS: Fix bug on timeout 
+* Daly BMS: Fix bug on timeout
 
 ## [0.0.63] - 2023-05-09
+
 * Add option `bt_power_cycle` to power cycle the Bluetooth hardware on start-up
 * Add info about bleak version and BMS device info on failures
 * Fix `InvalidStateError`
@@ -54,28 +69,29 @@ Due to a mistake with git branching, I pushed this update multiple times (v0.0.6
 * Fix JK `Multiple Characteristics with this UUID` error [#83](https://github.com/fl4p/batmon-ha/issues/83)
 * Fix `bleak.exc.BleakError: Not connected` [#85](https://github.com/fl4p/batmon-ha/issues/85)
 
-
 ## [0.0.57] - 2023-04-07
+
 * Fix JBD charge/discharge switch
 * Change warning if meter states file not found
 
 ## [0.0.56] - 2023-04-01
+
 - Add apparmor.txt @MariusHerget
 - Fix pin pairing (Victron SmartShunt)
 - Fix circular import
 
 ## [0.0.54] - 2023-03-06
+
 - Fix main loop exception handling and possible watchdog issue
 - Change Daly connecting code to use BT scanner
 - Add HA Energy Dashboard support
 - Add `adapter` option to choose the BT hardware adapter
 
-
 ## [0.0.53] - 2023-03-06
 
 ### Added
 
-- Victron SmartShunt GATT notify 
+- Victron SmartShunt GATT notify
 - Add dummy JBD device for testing
 - Timestamps in logs
 - Total cycle meter
@@ -112,7 +128,6 @@ Due to a mistake with git branching, I pushed this update multiple times (v0.0.6
 - Fix BLE discovery with empty device names
 - Fix JK soc issue (now using SoC the BMS provides instead of computing it)
 
-
 ## [0.0.50] - 2023-02-03
 
 ### Added
@@ -126,7 +141,7 @@ Due to a mistake with git branching, I pushed this update multiple times (v0.0.6
 
 - Serially install apk packages for error tracking
 - Switch states have now class `power`
-- fix `float division by zero` 
+- fix `float division by zero`
 - Dummy BMS now reports AC current
 - Fix spinning loop in `background_loop` causing high CPU usage
 

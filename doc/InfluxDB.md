@@ -1,10 +1,8 @@
 
 batmon can directly write to InfluxDB, without a MQTT broker.
 
-Install the `influxdb` package:
-```
-pip3 install influxdb
-```
+See [Standalone.md](Standalone.md) for instructions how to run batmon without Home Assistant.
+
 
 add this to the options.json:
 ```
