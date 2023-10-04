@@ -53,7 +53,7 @@ class SocArgs:
         self.charge_start = charge_start
         self.discharge_stop = discharge_stop
         self.discharge_start = discharge_start
-        self.calibration_interval = calibration_interval
+        self.calibration_interval_s = (calibration_interval_h or 0) * 3600
 
     def __str__(self):
         return dict_to_short_string(self.__dict__)
@@ -61,14 +61,14 @@ class SocArgs:
 
 class SocState:
     def __init__(self, charging: bool, last_calibration_time: float):
-        self.charging = charging
+        self.charging = charging # this is not currently used (write only)
         self.last_calibration_time = last_calibration_time
 
     def __str__(self):
         return f'SocState(chg={self.charging}, t_calib={int(self.last_calibration_time)})'
 
 
-class Soc(BaseAlgorithm):
+class SocAlgorithm(BaseAlgorithm):
 
     def __init__(self, name, args: SocArgs, state: SocState):
         super().__init__(name=name)
@@ -78,13 +78,25 @@ class Soc(BaseAlgorithm):
 
     # def restore(self, charging, last_calibration_time):
 
-    def update(self, sample: BmsSample) -> UpdateResult:
+    def update(self, sample: BmsSample) -> Optional[UpdateResult]:
         # SOC_SPAN_MARGIN = 1 / 5
 
-        if self.args.calibration_interval:
-            need_calibration = sample.timestamp - self.state.last_calibration_time > self.args.calibration_interval
+        if self.args.calibration_interval_s:
+            time_since_last_calib = sample.timestamp - self.state.last_calibration_time
+            need_calibration = time_since_last_calib > self.args.calibration_interval_s
             if need_calibration:
-                pass
+                if sample.soc == 100:
+                    logger.info('Reached 100% soc, calibration done.')
+                    self.state.last_calibration_time = sample.timestamp
+                    return UpdateResult(switches=BatterySwitches())  # return sth not None to store state
+
+                if not sample.switches['charge']:
+                    logger.info('Need calibration, charge to 100% soc (calib.interval=%.1f h, last calib=%.1f h ago',
+                                self.args.calibration_interval_s/3600, time_since_last_calib/3600)
+                    self.state.charging = True
+                    return UpdateResult(switches=BatterySwitches(charge=True))
+
+                return # nop
 
         if self.state.charging:
             if sample.soc >= self.args.charge_stop:
@@ -106,7 +118,7 @@ class Soc(BaseAlgorithm):
 
 # noinspection PyShadowingBuiltins
 def create_algorithm(repr: Union[dict, str], bms_name=None) -> BaseAlgorithm:
-    classes = dict(soc=Soc)
+    classes = dict(soc=SocAlgorithm)
     args, kwargs = [], {}
     if isinstance(repr, dict):
         repr = dict(repr)
