@@ -156,7 +156,7 @@ class BmsSampler:
                                 logger.info('%s algo set %s switch -> %s', bms.name, swk, res.switches[swk])
                                 await self.bms.set_switch('charge', res.switches[swk])
 
-                if self.num_samples == 0 and sample.switches:
+                if self.num_samples == 0 and sample.switches and mqtt_client:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
                     subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                        switches=sample.switches.keys())

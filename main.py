@@ -191,28 +191,31 @@ async def main():
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
 
-    port_idx = user_config.mqtt_broker.rfind(':')
-    if port_idx > 0:
-        user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
-        user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
+    if user_config.get('mqtt_broker'):
+        port_idx = user_config.mqtt_broker.rfind(':')
+        if port_idx > 0:
+            user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
+            user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
 
-    logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
-    # paho_monkey_patch()
-    mqtt_client = paho.Client()
-    mqtt_client.enable_logger(logger)
-    if user_config.get('mqtt_user', None):
-        mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
+        logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
+        # paho_monkey_patch()
+        mqtt_client = paho.Client()
+        mqtt_client.enable_logger(logger)
+        if user_config.get('mqtt_user', None):
+            mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
 
-    mqtt_client.on_message = mqtt_message_handler
+        mqtt_client.on_message = mqtt_message_handler
 
-    try:
-        mqtt_client.connect(user_config.mqtt_broker, port=user_config.get('mqtt_port', 1883))
-        mqtt_client.loop_start()
-    except Exception as ex:
-        logger.error('mqtt connection error %s', ex)
+        try:
+            mqtt_client.connect(user_config.mqtt_broker, port=user_config.get('mqtt_port', 1883))
+            mqtt_client.loop_start()
+        except Exception as ex:
+            logger.error('mqtt connection error %s', ex)
 
-    if not user_config.mqtt_broker:
-        mqtt_util.disable_warnings()
+        if not user_config.mqtt_broker:
+            mqtt_util.disable_warnings()
+    else:
+        mqtt_client = None
 
     from bmslib.store import load_meter_states
     try:

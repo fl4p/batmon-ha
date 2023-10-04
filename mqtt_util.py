@@ -104,6 +104,8 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
     # print('mqtt: ' + topic, data)
     # return
+    if client is None:
+        return
 
     lv = _last_values.get(topic, None)
     if lv and lv[1] == data and (time.time() - lv[0]) < (MIN_VALUE_EXPIRY / 2):
