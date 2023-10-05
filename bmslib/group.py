@@ -122,7 +122,7 @@ def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
         capacity=sum(s.capacity for s in samples),
         cycle_capacity=sum(s.cycle_capacity for s in samples),
         num_cycles=statistics.mean(s.num_cycles for s in samples),
-        soc=statistics.mean(s.soc for s in samples),
+        soc=statistics.mean(s.soc * s.capacity for s in samples) / sum(s.capacity for s in samples),
         temperatures=sum(((s.temperatures or []) for s in samples), []),
         mos_temperature=max((s.mos_temperature for s in samples if is_finite(s.mos_temperature)), default=math.nan),
         switches={k: v for s in samples for k, v in s.switches.items()},
