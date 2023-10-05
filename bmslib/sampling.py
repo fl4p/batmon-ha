@@ -1,6 +1,8 @@
 import random
 import re
 import time
+import math
+from copy import copy
 from typing import Optional, List
 
 import paho.mqtt.client
@@ -45,6 +47,8 @@ class BmsSampler:
         self.current_calibration_factor = current_calibration_factor
 
         self.sinks = sinks or []
+
+        self.downsampler = Downsampler()
 
         self._t_pub = 0
         self._t_wd_reset = time.time()  # watchdog
@@ -164,20 +168,21 @@ class BmsSampler:
                 for sink in self.sinks:
                     sink.publish_sample(bms.name, sample)
 
-                # sample_acc += sample
+                self.downsampler += sample
 
                 publish_discovery = (self.num_samples % 60) == 0
 
                 if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
                     self._t_pub = t_now
 
-                    # TODO should publish an averaged sample
-                    # sample = sample_acc.pop()
+                    sample = self.downsampler.pop()
+
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
                     logger.info('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
+                    # TODO fetch_voltages at t_fetch interval and down-sampling?
                     voltages = await bms.fetch_voltages()
                     if self.bms_group:
                         self.bms_group.update_voltages(bms, voltages)
@@ -240,3 +245,43 @@ class BmsSampler:
             pass
         except Exception as e:
             logger.warning('%s error fetching device info: %s', self.bms.name, e)
+
+
+class Downsampler:
+
+    def __init__(self):
+        self._power = 0
+        self._current = 0
+        self._voltage = 0
+        self._num = 0
+        self._last: Optional[BmsSample] = None
+
+    def __iadd__(self, s: BmsSample):
+        self._power += s._power
+        self._current += s.current
+        self._voltage += s.voltage
+        self._num += 1
+        self._last = s
+
+    def pop(self):
+        if self._num == 0:
+            return None
+
+        if self._num == 1:
+            return self._last
+
+        n = 1 / self._num
+        s = copy(self._last)
+
+        if not math.isnan(s._power):
+            s._power = self._power * n
+        s.current = self._current * n
+        s.voltage = self._voltage * n
+
+        self._power = 0
+        self._current = 0
+        self._voltage = 0
+        self._num = 0
+        self._last = None
+
+        return s
