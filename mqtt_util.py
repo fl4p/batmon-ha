@@ -1,3 +1,10 @@
+"""
+
+HA mdi: icons https://pictogrammers.com/library/mdi/
+
+
+"""
+
 import json
 import math
 import queue

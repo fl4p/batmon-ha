@@ -147,9 +147,10 @@ You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending M
 All you need is an operating system supported by [bleak](https://pypi.org/project/bleak/).
 See [doc/Standalone.md](doc/Standalone.md)
 
-# Donate
+# Contribute / Donate
 
 * [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)
+* [Patreon](patreon.com/user?u=88448325) (Donations & News)
 
 ## References
 

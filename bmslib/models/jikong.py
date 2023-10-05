@@ -157,8 +157,11 @@ class JKBt(BtBms):
 
     async def fetch_device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
-        # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1059
+        # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1152
         buf = self._resp_table[0x03]
+        psk = read_str(buf, 6 + 16 + 8 + 16 + 40 + 11)
+        if psk:
+            self.logger.info("PSK = '%s' (Note that anyone within BLE range can read this!)", psk)
         return DeviceInfo(
             model=read_str(buf, 6),
             hw_version=read_str(buf, 6 + 16),
@@ -254,8 +257,8 @@ class JKBt(BtBms):
 
 async def main():
     # await bmslib.bt.bt_discovery(logger=get_logger())
-    #mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A' # caravan
-    mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2' # bat100ah
+    # mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A' # caravan
+    mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
 
     bms = JKBt(mac_address, name='jk', verbose_log=False)
     async with bms:
