@@ -90,6 +90,7 @@ class BtBms:
 
             self._adapter = adapter
             if adapter:  # hci0, hci1 (BT adapter hardware)
+                self.logger.info('Using adapter %s', adapter)
                 kwargs['adapter'] = adapter
 
             self.client = BleakClient(address,
