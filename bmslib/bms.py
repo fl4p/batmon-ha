@@ -70,6 +70,8 @@ class BmsSample:
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 
+        self.num = 0
+
         if switches:
             assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
 

@@ -208,6 +208,12 @@ sample_desc = {
         "unit_of_measurement": "s",
         "precision": 0,
         "icon": "sort-time-descending"},
+    "meter/sample_count": {
+        "field": "num",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit_of_measurement": "N",
+        "icon": "counter"},
 }
 
 

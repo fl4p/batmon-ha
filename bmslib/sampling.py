@@ -135,6 +135,7 @@ class BmsSampler:
 
                 if self.invert_current:
                     sample = sample.invert_current()
+                sample.num = self.num_samples
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
