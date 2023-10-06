@@ -1,0 +1,36 @@
+{
+  "devices": [
+    {
+      "address": "<device bluetooth MAC address>",
+      "type": "<jk|jbd|daly|victron|dummy>",
+      "alias": "<name displayed in HomeAssistant>"
+      "pin": "<for device requiring a PIN like victron>"
+    },   
+    {
+      "address": "C8:47:8C:E4:55:E5",
+      "type": "jk",
+      "alias": "jk_bms1"
+    },
+    {
+      "address": "C8:47:8C:E4:55:E5",
+      "type": "jk",
+      "alias": "jk_bms2"
+    },
+    {
+      "address": "jk_bms1,jk_bms2",
+      "type": "group_parallel",
+      "alias": "jk_battery_group1"
+    }
+  ],
+  "mqtt_broker": "homeassistant.local",
+  "mqtt_user": "pv",
+  "mqtt_password": "Offgrid",
+  "concurrent_sampling": false,
+  "keep_alive": false,
+  "sample_period": 60.0,
+  "publish_period": 60.0,
+  "invert_current": false,
+  "expire_values_after": 120,
+  "verbose_log": false,
+  "watchdog": true
+}

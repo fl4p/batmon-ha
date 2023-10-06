@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=homeassistant/amd64-base:latest
 FROM $BUILD_FROM
 
 WORKDIR /app
