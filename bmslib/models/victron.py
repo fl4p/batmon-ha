@@ -51,6 +51,7 @@ class SmartShuntBt(BtBms):
         super().__init__(address, **kwargs)
         self._keep_alive_task: Optional[asyncio.Task] = None
         self._values = {}
+        self._values_t = {k:0 for k in VICTRON_CHARACTERISTICS.keys()}
 
     async def _keep_alive_loop(self):
         interval = 60_000
@@ -65,7 +66,8 @@ class SmartShuntBt(BtBms):
         self._keep_alive_task = asyncio.create_task(self._keep_alive_loop())
         for k,char in VICTRON_CHARACTERISTICS.items():
             self._values[k] = parse_value(await self.client.read_gatt_char(char['uuid']), char)
-            await self.client.start_notify(char['uuid'], partial(self._handle_notification, k))
+            self._values_t[k] = time.time()
+            await self.start_notify(char['uuid'], partial(self._handle_notification, k))
 
     async def disconnect(self):
         self._keep_alive_task.cancel()
@@ -79,11 +81,12 @@ class SmartShuntBt(BtBms):
     def _handle_notification(self, key, sender, data):
         val = parse_value(data, VICTRON_CHARACTERISTICS[key])
         self._values[key] = val
+        self._values_t[key] = time.time()
         self.logger.debug('msg %s %s', key, val)
 
     async def fetch(self) -> BmsSample:
         values = self._values
-        sample = BmsSample(**values)
+        sample = BmsSample(**values, timestamp=min(self._values_t.values()))
         return sample
 
     async def fetch_voltages(self):
