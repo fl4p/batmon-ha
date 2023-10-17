@@ -46,6 +46,7 @@ MAX_RESPONSE_SIZE = 320
 
 
 class JKBt(BtBms):
+    SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb"
     CHAR_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
     TIMEOUT = 8
@@ -58,8 +59,8 @@ class JKBt(BtBms):
         self._resp_table = {}
         self.num_cells = None
         self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
-        self.char_handle_notify = self.CHAR_UUID
-        self.char_handle_write = self.CHAR_UUID
+        self.char_handle_notify = None
+        self.char_handle_write = None
 
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -111,7 +112,7 @@ class JKBt(BtBms):
         """
         Connecting JK with bluetooth appears to require a prior bluetooth scan and discovery, otherwise the connectiong fails with
         `[org.bluez.Error.Failed] Software caused connection abort`. Maybe the scan triggers some wake up?
-        :param timeout:
+        :param timeout:`
         :return:
         """
 
@@ -121,10 +122,17 @@ class JKBt(BtBms):
             self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
-        # there might be 2 chars with same uuid (weird?), one for notify/read and one for write
-        # https://github.com/fl4p/batmon-ha/issues/83
-        self.char_handle_notify = self.characteristic_uuid_to_handle(self.CHAR_UUID, 'notify')
-        self.char_handle_write = self.characteristic_uuid_to_handle(self.CHAR_UUID, 'write')
+        service = self.get_service(self.SERVICE_UUID)
+        self.char_handle_write = self.find_char(self.CHAR_UUID, 'write', service=service)
+
+        if self.char_handle_write and self.char_handle_write.handle == 0x03:
+            # from https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L197C17-L197C17
+            self.char_handle_notify = self.find_char(0x05, 'notify')
+
+        if not self.char_handle_notify:
+            # there might be 2 chars with same uuid (weird?), one for notify/read and one for write
+            # https://github.com/fl4p/batmon-ha/issues/83
+            self.char_handle_notify = self.find_char(self.CHAR_UUID, 'notify')
 
         self.logger.debug('char_handle_notify=%s, char_handle_write=%s', self.char_handle_notify,
                           self.char_handle_write)
@@ -252,7 +260,7 @@ class JKBt(BtBms):
         await self._q(cmd=0x96, resp=(0x02, 0x01))  # query settings
 
     def debug_data(self):
-        return self._resp_table
+        return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
 
 
 async def main():
