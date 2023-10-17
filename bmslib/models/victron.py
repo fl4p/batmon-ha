@@ -4,6 +4,7 @@
 """
 import asyncio
 import math
+import time
 from functools import partial
 from typing import Optional
 
@@ -54,7 +55,7 @@ class SmartShuntBt(BtBms):
         self._values_t = {k:0 for k in VICTRON_CHARACTERISTICS.keys()}
 
     async def _keep_alive_loop(self):
-        interval = 60_000
+        interval = 20_000
         data = interval.to_bytes(length=2, byteorder="little", signed=False)
         while True:
             self.logger.debug('write keep_alive %s', data)
