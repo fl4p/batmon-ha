@@ -270,8 +270,12 @@ async def main():
 
     tasks = sampler_list + extra_tasks
 
-    # before we start the loops connect to each bms
-    for t in tasks:
+    # before we start the loops connect to each bms in random order
+    tasks_shuffle = list(tasks)
+    random.shuffle(tasks_shuffle)
+    for t in tasks_shuffle:
+        if isinstance(t, BmsSampler) and t.bms.is_virtual:
+            continue
         try:
             await t()
         except:
