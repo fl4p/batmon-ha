@@ -177,6 +177,11 @@ class BtBms:
     def is_connected(self):
         return self.client.is_connected
 
+    @property
+    def is_virtual(self):
+        from bmslib.group import VirtualGroupBms
+        return isinstance(self, VirtualGroupBms)
+
     async def connect(self, timeout=20):
         """
         Establish a BLE connection

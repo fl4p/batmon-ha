@@ -170,14 +170,14 @@ async def main():
         dev_args[name] = dev
 
     bms_by_name: Dict[str, bmslib.bt.BtBms] = {
-        **{bms.address: bms for bms in bms_list if not isinstance(bms, VirtualGroupBms)},
+        **{bms.address: bms for bms in bms_list if not bms.is_virtual},
         **{bms.name: bms for bms in bms_list}}
     groups_by_bms: Dict[str, BmsGroup] = {}
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
 
-        if isinstance(bms, VirtualGroupBms):
+        if bms.is_virtual:
             group_bms = bms
             for member_ref in bms.get_member_refs():
                 if member_ref not in bms_by_name:
@@ -251,7 +251,7 @@ async def main():
     ) for bms in bms_list]
 
     # move groups to the end
-    sampler_list = sorted(sampler_list, key=lambda s: isinstance(s.bms, VirtualGroupBms))
+    sampler_list = sorted(sampler_list, key=lambda s: bms.is_virtual)
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
