@@ -255,7 +255,9 @@ async def main():
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
-    logger.info('Fetching %d BMS + %d others %s, period=%.2fs, keep_alive=%s', len(sampler_list), len(extra_tasks),
+    logger.info('Fetching %d BMS + %d virtual + %d others %s, period=%.2fs, keep_alive=%s',
+                sum(not bms.is_virtual for bms in bms_list),
+                sum(bms.is_virtual for bms in bms_list), len(extra_tasks),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
     watchdog_en = user_config.get('watchdog', False)
