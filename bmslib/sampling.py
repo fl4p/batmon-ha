@@ -263,6 +263,7 @@ class Downsampler:
         self._voltage += s.voltage
         self._num += 1
         self._last = s
+        return self
 
     def pop(self):
         if self._num == 0:
