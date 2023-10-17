@@ -31,7 +31,7 @@ def read_str(buf, offset, encoding='utf-8'):
     return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
 
 
-def _jk_command(address, value: list):
+def _jk_command(address, value: list = ()):
     n = len(value)
     assert n <= 13, "val %s too long" % value
     frame = bytes([0xAA, 0x55, 0x90, 0xEB, address, n])
@@ -153,6 +153,7 @@ class JKBt(BtBms):
         await super().disconnect()
 
     async def _q(self, cmd, resp):
+        await asyncio.sleep(.1)
         with self._fetch_futures.acquire(resp):
             frame = _jk_command(cmd, [])
             self.logger.debug("write %s", frame)
@@ -264,9 +265,12 @@ class JKBt(BtBms):
 
 
 async def main():
+    _jk_command(0x96)
+
     # await bmslib.bt.bt_discovery(logger=get_logger())
     # mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A' # caravan
     mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
+    mac_address = 'BB92A45B-ABA1-2EA8-1BD3-DA140771C79D'
 
     bms = JKBt(mac_address, name='jk', verbose_log=False)
     async with bms:
