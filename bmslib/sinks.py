@@ -34,6 +34,9 @@ class InfluxDBSink(BmsSampleSink):
         self.time_last_flush = 0
 
     def publish_voltages(self, bms_name, voltages: List[int]):
+        if len(voltages) == 0:
+            return
+
         point = {
             "measurement": 'batmon',
             "time": datetime.datetime.utcnow(),
