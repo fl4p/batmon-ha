@@ -80,3 +80,19 @@ systemctl start batmon.service
 
 # Docker
 Small modifications are needed to run this inside Docker, see https://github.com/fl4p/batmon-ha/issues/25#issuecomment-1400900525
+
+
+
+# Minimal options.json
+```
+{
+  "devices": [
+    {
+      "address": "",
+      "type": "jk",
+      "alias": "jk1"
+    }    
+  ],
+  "keep_alive": true
+}
+```

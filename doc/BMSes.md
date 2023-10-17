@@ -45,6 +45,13 @@
 * Balance Current Positive: SuperCap->Cell_LO (charging the lowest cell from super cap)
 * Balance Current Negative: Cell_HI->SuperCap (discharging the highest cell to super cap)
 * Value of balance current is inflated
+* Not working with batmon:
+  * JK_B2A24S15P address=C8:47:8C:E8:5C:21
+  * JK_B2A24S20P 11.XW 11.26 `bytearray(b'U\xaa\xeb\x90\x03sJK_B2A24S20P\x00\x00\x00\x0011.XW\x00\x00\x0011.26\x00\x00\x00\xdc;\x8d\x00\x03\x00\x00\x00JK_B2A24S20P\x00\x00\x00\x001234\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00230219\x00\x002120147127\x000000\x00Input Userdata\x00\x00123456\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00Input Userdata\x00\x00|\xf8\xff\xff\x1f\r\`
+  * JK_B2A20S20P 11.XW 11.26H `bytearray(b'U\xaa\xeb\x90\x03\xa5JK_B2A20S20P\x00\x00\x00\x0011.XW\x00\x00\x0011.26H\x00\x00<#\x82\x00\x1c\x00\x00\x00JK_B2A20S20P\x00\x00\x00\x001234\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00230425\x00\x003010545162\x000000\x00`
+  * JK_B2A20S20P 11.XW 11.25 https://github.com/fl4p/batmon-ha/issues/133
+* Working
+  *  JK-B2A24S15P works but no the newer (https://github.com/fl4p/batmon-ha/issues/111)
 
 # ANT BMS
 
