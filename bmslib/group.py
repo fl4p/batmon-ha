@@ -57,6 +57,14 @@ class VirtualGroupBms:
     def is_connected(self):
         return set(self.group.samples.keys()) == set(self.group.bms_names)
 
+    @property
+    def is_virtual(self):
+        return True
+
+    @property
+    def connect_time(self):
+        return max(bms.connect_time for bms in self.members)
+
     def debug_data(self):
         return "missing %s" % (set(self.group.bms_names) - set(self.group.samples.keys()))
 
