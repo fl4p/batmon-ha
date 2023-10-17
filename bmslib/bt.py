@@ -6,6 +6,7 @@ from typing import Callable, List, Union
 
 import backoff
 from bleak import BleakClient, BleakScanner
+from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
@@ -112,6 +113,15 @@ class BtBms:
         return self._connect_time
 
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None], **kwargs):
+        """
+        This function wraps BleakClient.start_notify, differences:
+          * Accept a list of char_specifiers and tries them until it finds a match
+          * Before subscribing it un-subscribes dangling subscriptions
+        :param char_specifier:
+        :param callback:
+        :param kwargs:
+        :return:
+        """
         if not isinstance(char_specifier, list):
             char_specifier = [char_specifier]
         exception = None
@@ -128,12 +138,19 @@ class BtBms:
         await enumerate_services(self.client, self.logger)
         raise exception
 
-    def characteristic_uuid_to_handle(self, uuid: str, property_name: str) -> Union[str, int]:
-        for service in self.client.services:
+    def find_char(self, uuid_or_handle: Union[str, int], property_name: str, service=None) -> Union[None, BleakGATTCharacteristic]:
+        for service in ((service,) if service else self.client.services):
             for char in service.characteristics:
-                if char.uuid == uuid and property_name in char.properties:
-                    return char.handle
-        return uuid
+                if (char.uuid == uuid_or_handle or char.handle == uuid_or_handle) and property_name in char.properties:
+                    return char
+        return None
+
+    def get_service(self, uuid):
+        for s in self.client.services:
+            if s.uuid.startswith(uuid):
+                return s
+        raise RuntimeError("service %s not found (have %s)", uuid, list(s.uuid for s in self.client.services ))
+
 
     def _on_disconnect(self, _client):
         if self.keep_alive and self._connect_time:
