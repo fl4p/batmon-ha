@@ -120,8 +120,9 @@ class BmsSampler:
                 t_hour = t_now * (1 / 3600)
 
                 if sample.timestamp < t_now - self.expire_after_seconds:
-                    logger.warning('%s expired sample', bms.name)
-                    return
+                    raise Exception("sample %s expired", sample.timestamp)
+                    #logger.warning('%s expired sample', bms.name)
+                    #return
 
                 if self.current_calibration_factor and self.current_calibration_factor != 1:
                     sample = sample.multiply_current(self.current_calibration_factor)
@@ -229,7 +230,7 @@ class BmsSampler:
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
         dt_max = max(dt_conn, dt_fetch)
-        if self.bms.verbose_log or dt_max > 1 or (dt_max > 0.01 and random.random() < 0.05):
+        if bms.verbose_log or dt_max > 1 or (dt_max > 0.01 and random.random() < 0.05 and not bms.is_virtual):
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):

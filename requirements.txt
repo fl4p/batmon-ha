@@ -11,3 +11,4 @@ crcmod
 
 #influxdb #optional (installed with install_bleak.py)
 # the influxdb package appears to be not available from some platforms, so install it only if needed
+# see https://github.com/fl4p/batmon-ha/issues/147 (rpi 3)

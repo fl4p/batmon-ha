@@ -30,6 +30,7 @@ if installed_ver == ver and (influxdb_installed or not need_influxdb):
     sys.exit(0)
 
 logger.info(f'bleak {installed_ver} installed, want {ver}, running pip3 ' + ' '.join(args))
+logger.info('influxdb installed=%s need=%s', influxdb_installed, need_influxdb)
 
 p = subprocess.Popen(["pip3"] + args, stdout=sys.stdout, stderr=sys.stderr)  # , stdout=subprocess.PIPE)
 p.wait(timeout=120)

@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "0.0.71"
+version: "0.0.72"
 slug: "batmon"
 init: false
 arch:
@@ -66,4 +66,5 @@ schema:
   influxdb_username: "str?"
   influxdb_password: "str?"
   influxdb_ssl: "bool?"
+  influxdb_verify_ssl: "bool?"
   influxdb_database: "str?"

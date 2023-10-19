@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.72] - 2023-10-19
+* Fix JK BLE characteristic handles
+* Remove `influxdb` requirement and install if needed
+* Fix SoC for groups
+* Implement down-sampler (mean)
+* Initial device fetch in random order
+* Fix victron sampling, add timestamp
+
 ## [0.0.71] - 2023-10-04
 
 * Add SOK Bms (initial work by @mdshw5)
