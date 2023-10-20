@@ -156,6 +156,9 @@ class BtBms:
         if self.keep_alive and self._connect_time:
             self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
 
+        if self.is_connected:
+            self.logger.warning("%s _on_disconnect but is_connected=True")
+
         #if not self._in_disconnect:
         #    self._pending_disconnect_call = True
 

@@ -1,37 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" serverName="homassistant.local caravan" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" serverName="homeassistant.local (project level)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="alarmpi">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
-      <paths name="homassistant.local caravan">
+      <paths name="homeassistant.local (project level)">
         <serverdata>
           <mappings>
             <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
           </mappings>
-          <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
-        </serverdata>
-      </paths>
-      <paths name="homeassistant.local (h26)">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-          <excludedPaths>
-            <excludedPath path="/batmon-ha/venv" />
-            <excludedPath local="true" path="$PROJECT_DIR$/venv" />
-          </excludedPaths>
         </serverdata>
       </paths>
     </serverData>

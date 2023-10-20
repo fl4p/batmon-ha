@@ -37,7 +37,8 @@ I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
 ## Installation
 
-* Go to your Home Assistant Add-on store and add this repository: [`https://github.com/fl4p/home-assistant-addons`](https://github.com/fl4p/home-assistant-addons)
+* Go to your Home Assistant Add-on store and add this
+  repository: [`https://github.com/fl4p/home-assistant-addons`](https://github.com/fl4p/home-assistant-addons)
   [![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=2af0a32d_batmon&repository_url=https%3A%2F%2Fgithub.com%2Ffl4p%2Fhome-assistant-addons)
 * Install Batmon add-on
 * Install, configure and start Mosquito MQTT broker (don't forget to configure the MQTT integration)
@@ -103,7 +104,8 @@ peaks, leading to even greater error.
 * `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
-  This equals to `(Total Energy Charge) - (Total Energy Discharge)`.
+  This equals to `(Total Energy Charge) - (Total Energy Discharge)`. It will increase over time because batteries are
+  not ideal. You can create a derivative helper to compute energy flow within e.g. 24h.
 * `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
   This is not a value provided by the BMS, Batmon computes this by differentiating the SoC (
   e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
@@ -122,18 +124,20 @@ peaks, leading to even greater error.
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
 * Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
   appears that disabling WiFi helps. ([#42](https://github.com/fl4p/batmon-ha/issues/42))
-* Cheap inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the bluetooth
+* Cheap inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the
+  bluetooth
   hardware
-* Either bleak or bluetooth support in HA docker seems unstable. see related issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* Either bleak or bluetooth support in HA docker seems unstable. see related
+  issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
-
 
 ## TODO
 
 * Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
 * Port to MicroPython for MCU (ESP32 etc.)
-* make this a custom integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
+* make this a custom
+  integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
 * use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
 * Implement BMS data push (JK)
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)

@@ -1,3 +1,5 @@
+* Batmon show pw in logs
+* batmon set soc
 * Impedance computation
 * Calibrated SoC
 * Pin bleak version
