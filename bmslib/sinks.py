@@ -2,7 +2,7 @@ import datetime
 import math
 import queue
 import time
-from typing import List
+from typing import List, Dict
 
 from bmslib.bms import BmsSample
 from bmslib.sampling import BmsSampleSink
@@ -72,6 +72,16 @@ class InfluxDBSink(BmsSampleSink):
         }
         self.Q.put(point)
         self._maybe_flush()
+
+    def publish_meters(self, bms_name, readings: Dict[str, float]):
+        now = datetime.datetime.utcnow()
+        point = {
+            "measurement": 'batmon',
+            "time": now,
+            "fields": {(f"meter_%s" % name): round(value, 4) for name,value in readings.items()},
+            "tags": dict(device=bms_name)
+        }
+        self.Q.put(point)
 
     def _maybe_flush(self):
         now = time.time()

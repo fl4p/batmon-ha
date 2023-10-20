@@ -3,7 +3,7 @@ import re
 import time
 import math
 from copy import copy
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import paho.mqtt.client
 
@@ -24,6 +24,9 @@ class BmsSampleSink:
         raise NotImplementedError()
 
     def publish_voltages(self, bms_name: str, voltages: List[int]):
+        raise NotImplementedError()
+
+    def publish_meters(self, bms_name:str, readings: Dict[str, float]):
         raise NotImplementedError()
 
 
@@ -121,8 +124,8 @@ class BmsSampler:
 
                 if sample.timestamp < t_now - self.expire_after_seconds:
                     raise Exception("sample %s expired", sample.timestamp)
-                    #logger.warning('%s expired sample', bms.name)
-                    #return
+                    # logger.warning('%s expired sample', bms.name)
+                    # return
 
                 if self.current_calibration_factor and self.current_calibration_factor != 1:
                     sample = sample.multiply_current(self.current_calibration_factor)
@@ -169,6 +172,7 @@ class BmsSampler:
 
                 for sink in self.sinks:
                     sink.publish_sample(bms.name, sample)
+                    sink.publish_meters(bms.name, {m.name: m.get() for m in self.meters})
 
                 self.downsampler += sample
 
