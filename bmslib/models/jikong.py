@@ -171,7 +171,7 @@ class JKBt(BtBms):
         psk = read_str(buf, 6 + 16 + 8 + 16 + 40 + 11)
         if psk:
             self.logger.info("PSK = '%s' (Note that anyone within BLE range can read this!)", psk)
-        return DeviceInfo(
+        return DeviceInfo(mnf="JK",
             model=read_str(buf, 6),
             hw_version=read_str(buf, 6 + 16),
             sw_version=read_str(buf, 6 + 16 + 8),

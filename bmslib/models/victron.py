@@ -8,7 +8,7 @@ import time
 from functools import partial
 from typing import Optional
 
-from bmslib.bms import BmsSample
+from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
 
 VICTRON_CHARACTERISTICS = {
@@ -105,6 +105,17 @@ class SmartShuntBt(BtBms):
 
     async def fetch_temperatures(self):
         return []
+
+    async def fetch_device_info(self) -> DeviceInfo:
+        dev = DeviceInfo(
+            mnf="Victron",
+            model='SmartShunt',
+            hw_version=None,
+            sw_version=None,
+            name=None,
+            sn=None,
+        )
+        return dev
 
 
 async def main():

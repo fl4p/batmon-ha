@@ -118,9 +118,11 @@ class AntBt(BtBms):
 
     async def fetch_device_info(self) -> DeviceInfo:
         buf: bytearray = await self._q(AntCommandFuncs.DeviceInfo, 0x026c, 0x20, resp_code=0x12)
+        hw = bytearray.decode(buf[6:6 + 16].strip(b'\0'), 'utf-8')
         dev = DeviceInfo(
-            model='ANT',
-            hw_version=bytearray.decode(buf[6:6 + 16].strip(b'\0'), 'utf-8'),
+            mnf="ANT",
+            model='ANT-' + hw,
+            hw_version=hw,
             sw_version=bytearray.decode(buf[22:22 + 16].strip(b'\0'), 'utf-8'),
             name=None,
             sn=None,

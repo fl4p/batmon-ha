@@ -7,7 +7,8 @@ MIN_VALUE_EXPIRY = 20
 
 
 class DeviceInfo:
-    def __init__(self, model: str, hw_version: str, sw_version: str, name: Optional[str], sn: Optional[str] = None):
+    def __init__(self, mnf:str, model: str, hw_version: Optional[str], sw_version: Optional[str], name: Optional[str], sn: Optional[str] = None):
+        self.mnf = mnf
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version
