@@ -43,11 +43,14 @@ class BaseAlgorithm:
 
 
 class SocArgs:
-    def __init__(self, charge_stop, charge_start='100%', discharge_stop=None, discharge_start=None,
+    def __init__(self, charge_stop, charge_start=None, discharge_stop=None, discharge_start=None,
                  calibration_interval_h=24 * 14):
         charge_stop = float(charge_stop.strip('%'))
-        charge_start = float(charge_start.strip('%'))
-        # assert charge_stop >= charge_start
+        if not charge_start:
+            charge_start = charge_stop
+        else:
+            charge_start = float(charge_start.strip('%'))
+            assert charge_stop >= charge_start
 
         self.charge_stop = charge_stop
         self.charge_start = charge_start
