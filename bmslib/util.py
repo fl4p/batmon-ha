@@ -1,4 +1,6 @@
 import logging
+import os
+import time
 
 
 class dotdict(dict):
@@ -27,9 +29,20 @@ def get_logger(verbose=False):
     return logger
 
 
-def dict_to_short_string(d:dict):
-    return '(' + ','.join( f'{k}={v}' for k,v in d.items() if v is not None) + ')'
+def dict_to_short_string(d: dict):
+    return '(' + ','.join(f'{k}={v}' for k, v in d.items() if v is not None) + ')'
 
 
 def to_hex_str(data):
     return " ".join(map(lambda b: hex(b)[2:], data))
+
+
+def exit_process(is_error=True, delayed=False):
+    from threading import Thread
+    import _thread
+    status = 1 if is_error else 0
+    Thread(target=lambda: (time.sleep(3), _thread.interrupt_main()), daemon=True).start()
+    Thread(target=lambda: (time.sleep(6), os._exit(status)), daemon=True).start()
+    if not delayed:
+        import sys
+        sys.exit(status)
