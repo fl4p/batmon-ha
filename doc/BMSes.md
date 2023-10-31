@@ -1,3 +1,28 @@
+# Eval Properties
+* Idle consumption
+* Burden resistance
+* Average balancer current
+* Current Sensor
+  * resolution (bit)
+  * accuracy, linearity (gain error)
+  * AC+DC currents (100 Hz for inverters)
+  * current peaks
+* Bluetooth security
+* Balancer settings (during charge/discharge), dV
+* Protection params
+  * voltage Cell Chemistry
+  * Hysteresis
+* Short circuit protection (current & delay)
+* sleep behavior
+  * energy saving mode?
+  * auto re-start after UV shutdown?
+* SoC
+  * Track battery capacity over time (calibrate nominal full charge)
+  * set SoC at (sane) voltage levels (e.g. UV -> SoC:=0%)
+  * does it track self consumption and battery self discharge?
+* Cycle Counter
+
+
 ## Daly BMS
 
 * Insecure! Password is validated in the app client-side (is publicly readable in device info). Remedy: Disconnect BT

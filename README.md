@@ -14,7 +14,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Captures SoC, Current, Power, individual cell voltages and temperatures
 * Monitor multiple devices at the same time
 * Energy consumption meters (using trapezoidal power integrators)
-* Integrates with Home Assistant Energy dashboard
+* Integrates with Home Assistant Energy dashboard and [Utility Meter](doc/HA%20Energy%20Dashboard.md) sensor helper
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
 * Can write data to [InfluxDB](doc/InfluxDB.md)
@@ -85,7 +85,7 @@ For verbose logs of particular BMS add `debug: true`.
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
 * Set `publish_period` to a higher value than `sample_period` to throttle MQTT data, while sampling BMS for accurate
-  energy meters.
+  energy meters. On publish, samples since previous publish are averaged.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
@@ -96,10 +96,7 @@ For verbose logs of particular BMS add `debug: true`.
 ## Energy Meters
 
 Batmon implements energy metering by integrating the power values from the BMS with the trapezoidal rule. You can add
-theses meters to your Home
-Assistant Energy Dashboard. The accuracy depends on the accuracy of the voltage and current readings from the BMS.
-Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
-peaks, leading to even greater error.
+theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*.
 
 * `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)
@@ -109,6 +106,10 @@ peaks, leading to even greater error.
 * `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
   This is not a value provided by the BMS, Batmon computes this by differentiating the SoC (
   e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
+
+The accuracy depends on the accuracy of the voltage and current readings from the BMS.
+Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
+peaks, leading to even greater error.
 
 ## Troubleshooting
 
