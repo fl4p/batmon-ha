@@ -1,6 +1,7 @@
 import datetime
 import math
 import queue
+import sys
 import time
 from typing import List, Dict
 
@@ -13,6 +14,7 @@ logger = get_logger()
 
 from collections.abc import MutableMapping
 
+
 def flatten(dictionary, parent_key='', separator='_'):
     items = []
     for key, value in dictionary.items():
@@ -20,10 +22,11 @@ def flatten(dictionary, parent_key='', separator='_'):
         if isinstance(value, MutableMapping):
             items.extend(flatten(value, new_key, separator=separator).items())
         elif isinstance(value, list):
-            items.extend(flatten({str(i):value[i] for i in range(len(value))}, new_key, separator=separator).items())
+            items.extend(flatten({str(i): value[i] for i in range(len(value))}, new_key, separator=separator).items())
         else:
             items.append((new_key, value))
     return dict(items)
+
 
 class InfluxDBSink(BmsSampleSink):
     def __init__(self, **kwargs):
@@ -32,6 +35,10 @@ class InfluxDBSink(BmsSampleSink):
         self.Q = queue.Queue(200_000)
         self.db = kwargs.get('database')
         self.time_last_flush = 0
+
+        if not kwargs.get('verify_ssl', False):
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def publish_voltages(self, bms_name, voltages: List[int]):
         if len(voltages) == 0:
@@ -57,10 +64,10 @@ class InfluxDBSink(BmsSampleSink):
         self._maybe_flush()
 
     def publish_sample(self, bms_name, sample: BmsSample):
-        fields =  flatten({**sample.values(), "timestamp": None})
+        fields = flatten({**sample.values(), "timestamp": None})
         remove_none_values(fields)
         for k, v in fields.items():
-            if isinstance(v , int):
+            if isinstance(v, int):
                 fields[k] = float(v)
         if not fields:
             return
@@ -78,7 +85,7 @@ class InfluxDBSink(BmsSampleSink):
         point = {
             "measurement": 'batmon',
             "time": now,
-            "fields": {(f"meter_%s" % name): round(value, 4) for name,value in readings.items()},
+            "fields": {(f"meter_%s" % name): round(value, 4) for name, value in readings.items()},
             "tags": dict(device=bms_name)
         }
         self.Q.put(point)
@@ -91,7 +98,11 @@ class InfluxDBSink(BmsSampleSink):
                 batch.append(self.Q.get())
             # self.influxdb_client.write_points(batch, time_precision='ms')
             if batch:
-                res = self.influxdb_client.write_points(batch, time_precision='ms')
+                try:
+                    res = self.influxdb_client.write_points(batch, time_precision='ms')
+                except:
+                    res = False
+                    logger.error(sys.exc_info(), exc_info=True)
                 if not res:
                     logger.error('Failed to write points to influxdb')
                 self.time_last_flush = now

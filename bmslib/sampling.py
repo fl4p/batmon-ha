@@ -1,5 +1,6 @@
 import random
 import re
+import sys
 import time
 import math
 from copy import copy
@@ -9,7 +10,7 @@ import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
-from bmslib.bms import DeviceInfo, BmsSample
+from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
@@ -26,7 +27,7 @@ class BmsSampleSink:
     def publish_voltages(self, bms_name: str, voltages: List[int]):
         raise NotImplementedError()
 
-    def publish_meters(self, bms_name:str, readings: Dict[str, float]):
+    def publish_meters(self, bms_name: str, readings: Dict[str, float]):
         raise NotImplementedError()
 
 
@@ -171,8 +172,11 @@ class BmsSampler:
                                        switches=sample.switches.keys())
 
                 for sink in self.sinks:
-                    sink.publish_sample(bms.name, sample)
-                    sink.publish_meters(bms.name, {m.name: m.get() for m in self.meters})
+                    try:
+                        sink.publish_sample(bms.name, sample)
+                        sink.publish_meters(bms.name, {m.name: m.get() for m in self.meters})
+                    except:
+                        logger.error(sys.exc_info(), exc_info=True)
 
                 self.downsampler += sample
 

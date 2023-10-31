@@ -14,6 +14,7 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
     # __hasattr__ = dict.__contains__
 
+
 def get_logger(verbose=False):
     # log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
     log_format = '%(asctime)s %(levelname)s [%(module)s] %(message)s'
