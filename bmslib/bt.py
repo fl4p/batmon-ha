@@ -5,6 +5,7 @@ import time
 from typing import Callable, List, Union
 
 import backoff
+import bleak.exc
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
@@ -171,7 +172,12 @@ class BtBms:
         if self.verbose_log:
             self.logger.info('connecting %s (%s) adapter=%s timeout=%d', self.name, self.address, self._adapter or "default", timeout)
         # bleak`s connect timeout is buggy (on macos)
-        await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
+        try:
+            await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
+        except bleak.exc.BleakDeviceNotFoundError as exc:
+            self.logger.error("%s, starting scanner", exc)
+            await bt_discovery(self.logger)
+            raise
         if self.verbose_log:
             await enumerate_services(self.client, logger=self.logger)
         self._connect_time = time.time()
