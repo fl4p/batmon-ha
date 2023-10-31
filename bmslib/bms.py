@@ -23,6 +23,10 @@ class DeviceInfo:
             s += ',#' + self.sn
         return s + ')'
 
+class PowerMonitorSample:
+    # Todo this is a draft
+    def __init__(self, voltage, current, power=math.nan, total_energy=math.nan):
+        pass
 
 class BmsSample:
     def __init__(self, voltage, current, power=math.nan,
