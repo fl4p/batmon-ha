@@ -169,7 +169,7 @@ class BtBms:
 
     async def _connect_client(self, timeout):
         if self.verbose_log:
-            self.logger.info('connecting %s (%s) adapter=%s', self.name, self.address, self._adapter)
+            self.logger.info('connecting %s (%s) adapter=%s timeout=%d', self.name, self.address, self._adapter or "default", timeout)
         # bleak`s connect timeout is buggy (on macos)
         await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
         if self.verbose_log:
