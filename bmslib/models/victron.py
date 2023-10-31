@@ -4,6 +4,7 @@
 """
 import asyncio
 import math
+import sys
 import time
 from functools import partial
 from typing import Optional
@@ -58,25 +59,36 @@ class SmartShuntBt(BtBms):
     async def _keep_alive_loop(self):
         interval = 20_000
         data = interval.to_bytes(length=2, byteorder="little", signed=False)
-        while True:
+        while self.is_connected:
             self.logger.debug('write keep_alive %s', data)
-            await self.client.write_gatt_char('6597ffff-4bda-4c1e-af4b-551c4cf74769', data, response=False)
+            try:
+                await self.client.write_gatt_char('6597ffff-4bda-4c1e-af4b-551c4cf74769', data, response=False)
+            except:
+                self.logger.warning('error sending keep alive %s', data , exc_info=1)
             await asyncio.sleep(interval / 1000 / 2)
 
-    async def _subscribe(self, key):
+    async def _fetch_value(self, key: str, reload_services=False):
+        if reload_services:
+            await self.client.get_services()
         char = VICTRON_CHARACTERISTICS[key]
-        self._values[key] = parse_value(await self.client.read_gatt_char(char['uuid']), char)
+        data = await asyncio.wait_for(self.client.read_gatt_char(char['uuid']), timeout=self.TIMEOUT)
+        return parse_value(data, char)
+
+    async def _subscribe(self, key: str, val=None):
+        char = VICTRON_CHARACTERISTICS[key]
+        self._values[key] = val or await self._fetch_value(key)
         self._values_t[key] = time.time()
         await self.start_notify(char['uuid'], partial(self._handle_notification, key))
 
-    async def connect(self, timeout=20):
+    async def connect(self, timeout=8):
         await super().connect(timeout=timeout)
         self._keep_alive_task = asyncio.create_task(self._keep_alive_loop())
         for k, char in VICTRON_CHARACTERISTICS.items():
             await self._subscribe(k)
 
     async def disconnect(self):
-        self._keep_alive_task.cancel()
+        if self._keep_alive_task and not self._keep_alive_task.done():
+            self._keep_alive_task.cancel()
         for k, char in VICTRON_CHARACTERISTICS.items():
             try:
                 await self.client.stop_notify(char['uuid'])
@@ -91,11 +103,15 @@ class SmartShuntBt(BtBms):
         self.logger.debug('msg %s %s', key, val)
 
     async def fetch(self) -> BmsSample:
+
         t_expire = time.time() - 10
         for k, t in self._values_t.items():
             if t < t_expire and not math.isnan(self._values.get(k, 0)):
-                self.logger.warning('value for %s expired %s, re-sub', k, t)
-                await self._subscribe(k)
+                # check if value actually changed before re-subscription
+                val = await self._fetch_value(k, reload_services=True)
+                if val != self._values.get(k):
+                    self.logger.warning('value for %s expired %s, re-sub', k, t)
+                    await self._subscribe(k, val)
         values = self._values
         sample = BmsSample(**values, timestamp=max(v for k, v in self._values_t.items() if not math.isnan(values[k])))
         return sample
@@ -120,7 +136,7 @@ class SmartShuntBt(BtBms):
 
 async def main():
     # raise NotImplementedError()
-    v = SmartShuntBt(address='95E605C8-E9DC-DD43-E368-D9B1DA8301B7', name='test')
+    v = SmartShuntBt(address='8B133977-182C-62EE-8E81-41FF77969EE9', name='test')
     await v.connect()
 
     _prev_val = None
