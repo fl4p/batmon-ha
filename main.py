@@ -3,6 +3,7 @@ import atexit
 import random
 import signal
 import sys
+import threading
 import time
 import traceback
 from typing import List, Dict
@@ -23,7 +24,7 @@ from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
-from bmslib.util import get_logger
+from bmslib.util import get_logger, exit_process
 from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
@@ -54,11 +55,53 @@ def store_states(samplers: List[BmsSampler]):
     store_meter_states(meter_states)
 
 
+t_last_store = 0
+
+
+def bg_checks(sampler_list, timeout, t_start):
+    global shutdown
+
+    now = time.time()
+
+    if timeout:
+        # compute time since last successful publish
+        pdt = now - (mqtt_last_publish_time() or t_start)
+        if pdt > timeout:
+            if mqtt_last_publish_time():
+                logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
+            else:
+                logger.error("MQTT never published a message after %.0fs, exit", timeout)
+            shutdown = True
+            return False
+
+    global t_last_store
+    # store persistent states (metering) every 30s
+    if now - (t_last_store or t_start) > 30:
+        t_last_store = now
+        try:
+            store_states(sampler_list)
+        except Exception as e:
+            logger.error('Error storing states: %s', e)
+
+    return True
+
+
+def background_thread(timeout: float, sampler_list: List[BmsSampler]):
+    t_start = time.time()
+    while not shutdown:
+        if not bg_checks(sampler_list, timeout, t_start):
+            break
+        time.sleep(4)
+    logger.info("Background thread ends. shutdown=%s", shutdown)
+    time.sleep(3)
+    logger.info("Process still alive, kill")
+    exit_process(True, True)
+
+
 async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
     global shutdown
 
     t_start = time.time()
-    t_last_store = t_start
 
     if timeout:
         logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
@@ -66,29 +109,10 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
     while not shutdown:
 
         await mqtt_process_action_queue()
-        now = time.time()
-
-        if timeout:
-            # compute time since last successful publish
-            pdt = now - (mqtt_last_publish_time() or t_start)
-            if pdt > timeout:
-                if mqtt_last_publish_time():
-                    logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
-                else:
-                    logger.error("MQTT never published a message after %.0fs, exit", timeout)
-                shutdown = True
-                break
-
-        if now - t_last_store > 10:
-            t_last_store = now
-            try:
-                store_states(sampler_list)
-            except Exception as e:
-                logger.error('Error starting states: %s', e)
+        if not bg_checks(sampler_list, timeout, t_start):
+            break
 
         await asyncio.sleep(.1)
-
-
 
 
 async def main():
@@ -265,10 +289,14 @@ async def main():
     watchdog_en = user_config.get('watchdog', False)
     max_errors = 200 if watchdog_en else 0
 
+    wd_timeout = max(5 * 60., sample_period * 4) if watchdog_en else 0
     asyncio.create_task(background_loop(
-        timeout=max(15 * 60., sample_period * 4) if watchdog_en else 0,
+        timeout=wd_timeout,
         sampler_list=sampler_list
     ))
+
+    # add another daemon thread, asyncio can dead-lock with bleak TODO bug?
+    threading.Thread(target=lambda: background_thread(wd_timeout, sampler_list), daemon=True).start()
 
     tasks = sampler_list + extra_tasks
 
@@ -332,7 +360,7 @@ async def main():
 
 def on_exit(*args, **kwargs):
     global shutdown
-    logger.info('exit signal handler... %s, %s, shutdown already %s', args, kwargs, shutdown)
+    logger.info('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
     shutdown += 1
     if shutdown == 5:
         sys.exit(1)
