@@ -77,6 +77,7 @@ class SocAlgorithm(BaseAlgorithm):
         super().__init__(name=name)
         self.args = args
         self.state: SocState = state
+        self._logged_calib = False
         # self._debug_state = {}
 
     # def restore(self, charging, last_calibration_time):
@@ -91,13 +92,19 @@ class SocAlgorithm(BaseAlgorithm):
                 if sample.soc == 100:
                     logger.info('Reached 100% soc, calibration done.')
                     self.state.last_calibration_time = sample.timestamp
-                    return UpdateResult(switches=BatterySwitches())  # return sth not None to store state
+                    self.state.charging = False
+                    return UpdateResult(switches=BatterySwitches(charge=False))
+                    # ^^ don't return None here, need to store state!
 
                 if not sample.switches['charge']:
                     logger.info('Need calibration, charge to 100% soc (calib.interval=%.1f h, last calib=%.1f h ago',
                                 self.args.calibration_interval_s / 3600, time_since_last_calib / 3600)
                     self.state.charging = True
                     return UpdateResult(switches=BatterySwitches(charge=True))
+
+                if not self._logged_calib:
+                    logger.info("Calibrating SoC ...")
+                    self._logged_calib = True
 
                 return  # nop
 
