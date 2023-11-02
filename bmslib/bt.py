@@ -72,6 +72,7 @@ class BtBms:
         self._fetch_futures = FuturesPool()
         self._psk = psk
         self._connect_time = 0
+        self._pending_disconnect_call = False
 
         if not _uses_pin and psk:
             self.logger.warning('%s usually does not use a pairing PIN', type(self).__name__)
@@ -79,6 +80,7 @@ class BtBms:
         if address.startswith('test_'):
             from bmslib.models.dummy import BleakDummyClient
             self.client = BleakDummyClient(address, disconnected_callback=self._on_disconnect)
+            self._adapter = "fake"
         else:
             kwargs = {}
             if psk:
@@ -143,7 +145,7 @@ class BtBms:
         for service in ((service,) if service else self.client.services):
             for char in service.characteristics:
                 if (char.uuid == uuid_or_handle or char.handle == uuid_or_handle) and property_name in char.properties:
-                    return char
+                    return char if char.__hash__ else char.uuid
         return None
 
     def get_service(self, uuid):
@@ -178,9 +180,15 @@ class BtBms:
             self.logger.error("%s, starting scanner", exc)
             await bt_discovery(self.logger)
             raise
-        if self.verbose_log:
-            await enumerate_services(self.client, logger=self.logger)
+
         self._connect_time = time.time()
+
+        if self.verbose_log:
+            try:
+                await enumerate_services(self.client, logger=self.logger)
+            except:
+                pass
+
         if self._psk:
             def get_passkey(device: str, pin, passkey):
                 if pin:
