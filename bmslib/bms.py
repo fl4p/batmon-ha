@@ -7,7 +7,8 @@ MIN_VALUE_EXPIRY = 20
 
 
 class DeviceInfo:
-    def __init__(self, mnf:str, model: str, hw_version: Optional[str], sw_version: Optional[str], name: Optional[str], sn: Optional[str] = None):
+    def __init__(self, mnf: str, model: str, hw_version: Optional[str], sw_version: Optional[str], name: Optional[str],
+                 sn: Optional[str] = None):
         self.mnf = mnf
         self.model = model
         self.hw_version = hw_version
@@ -23,10 +24,12 @@ class DeviceInfo:
             s += ',#' + self.sn
         return s + ')'
 
+
 class PowerMonitorSample:
     # Todo this is a draft
     def __init__(self, voltage, current, power=math.nan, total_energy=math.nan):
         pass
+
 
 class BmsSample:
     def __init__(self, voltage, current, power=math.nan,
@@ -34,9 +37,9 @@ class BmsSample:
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature:float=math.nan,
+                 mos_temperature: float = math.nan,
                  switches: Optional[Dict[str, bool]] = None,
-                 uptime=math.nan, timestamp=None):
+                 uptime=math.nan, timestamp: Optional[float] = None):
         """
 
         :param voltage:
@@ -49,7 +52,8 @@ class BmsSample:
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
-        :param uptime BMS uptime in seconds
+        :param uptime: BMS uptime in seconds
+        :param timestamp: seconds since epoch (unix timestamp from time.time())
         """
         self.voltage: float = voltage
         self.current: float = current or 0  # -
@@ -75,7 +79,7 @@ class BmsSample:
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 
-        self.num = 0
+        self.num_samples = 0
 
         if switches:
             assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
