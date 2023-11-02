@@ -217,9 +217,9 @@ sample_desc = {
         "state_class": "measurement",
         "unit_of_measurement": "s",
         "precision": 0,
-        "icon": "sort-time-descending"},
+        "icon": "clock"},
     "meter/sample_count": {
-        "field": "num",
+        "field": "num_samples",
         "device_class": None,
         "state_class": "measurement",
         "unit_of_measurement": "N",
@@ -279,7 +279,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     device_json = {
         "identifiers": [(device_info and device_info.sn) or device_topic],
-        # "manufacturer": device_topic,  # Daly
+        "manufacturer": (device_info and device_info.mnf)  or None,
         "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
         "model": (device_info and device_info.model) or None,
         "sw_version": (device_info and device_info.sw_version) or None,
@@ -367,7 +367,9 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             }
 
     for topic, data in discovery_msg.items():
-        mqtt_single_out(client, topic, json.dumps(data))
+        j = json.dumps(data)
+        logger.info('discovery msg %s: %s', topic, j)
+        mqtt_single_out(client, topic, j)
 
 
 _switch_callbacks = {}
@@ -422,4 +424,3 @@ def paho_monkey_patch():
     paho.Client._handle_pingresp = _handle_pingresp
 
     logger.debug("applied paho monkey patch _handle_pingresp")
-
