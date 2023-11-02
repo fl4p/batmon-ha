@@ -60,6 +60,8 @@ class BmsSampler:
 
         self._t_pub = 0
         self._t_wd_reset = time.time()  # watchdog
+        self._last_time_log_data = 0
+        self._t_discovery = 0
 
         self.algorithm = None
         if algorithms:
@@ -147,7 +149,7 @@ class BmsSampler:
 
                 if self.invert_current:
                     sample = sample.invert_current()
-                sample.num = self.num_samples
+                sample.num_samples = self.num_samples
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
@@ -187,7 +189,33 @@ class BmsSampler:
 
                 self.downsampler += sample
 
-                publish_discovery = (self.num_samples % 60) == 0
+                publish_discovery = (t_now - self._t_discovery) >= 120
+                if publish_discovery:
+                    self._t_discovery = t_now
+
+                log_data = (t_now - self._last_time_log_data) >= 30
+                if log_data:
+                    self._last_time_log_data = t_now
+
+                voltages = []
+
+                async def cached_fetch_voltages():
+                    nonlocal voltages
+                    if voltages:
+                        return voltages
+
+                    # TODO fetch_voltages at t_fetch interval and down-sampling?
+                    voltages = await bms.fetch_voltages()
+
+                    if self.bms_group:
+                        self.bms_group.update_voltages(bms, voltages)
+
+                    return voltages
+
+                if self.sinks:
+                    voltages = await cached_fetch_voltages()
+                    for sink in self.sinks:
+                        sink.publish_voltages(bms.name, voltages)
 
                 if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period:
                     self._t_pub = t_now
@@ -195,33 +223,30 @@ class BmsSampler:
                     sample = self.downsampler.pop()
 
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
-                    logger.info('%s: %s', bms.name, sample)
+                    log_data and logger.info('%s: %s', bms.name, sample)
 
                     self.publish_meters()
 
-                    # TODO fetch_voltages at t_fetch interval and down-sampling?
-                    voltages = await bms.fetch_voltages()
-                    if self.bms_group:
-                        self.bms_group.update_voltages(bms, voltages)
-
-                    for sink in self.sinks:
-                        sink.publish_voltages(bms.name, voltages)
+                    voltages = await cached_fetch_voltages()
                     publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
                     temperatures = sample.temperatures or await bms.fetch_temperatures()
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
-                    if voltages or temperatures:
-                        logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)), temperatures)
+                    if log_data and (voltages or temperatures):
+                        logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)),
+                                    temperatures)
 
                 # publish home assistant discovery every 60 samples
                 if publish_discovery:
+                    logger.info("Sending HA discovery for %s (num_samples=%d)", bms.name, self.num_samples)
                     if self.device_info is None:
                         await self._try_fetch_device_info()
                     publish_hass_discovery(
                         mqtt_client, device_topic=self.mqtt_topic_prefix,
                         expire_after_seconds=self.expire_after_seconds,
                         sample=sample,
-                        num_cells=len(voltages), num_temp_sensors=len(temperatures),
+                        num_cells=len(voltages),
+                        num_temp_sensors=len(temperatures),
                         device_info=self.device_info,
                     )
 
@@ -236,7 +261,7 @@ class BmsSampler:
             logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
 
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
-            if bms.is_connected and time.time() - t_interact > 2 * self.expire_after_seconds:
+            if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
                 logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
                 await bms.disconnect()
 
@@ -245,7 +270,8 @@ class BmsSampler:
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
         dt_max = max(dt_conn, dt_fetch)
-        if bms.verbose_log or dt_max > 1 or (dt_max > 0.01 and random.random() < 0.05 and not bms.is_virtual):
+        if bms.verbose_log or dt_max > 1 or (
+                dt_max > 0.01 and random.random() < 0.1 and not bms.is_virtual and log_data):
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
