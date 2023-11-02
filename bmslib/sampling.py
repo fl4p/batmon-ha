@@ -20,6 +20,10 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 logger = get_logger(verbose=False)
 
 
+class SampleExpiredError(Exception):
+    pass
+
+
 class BmsSampleSink:
     def publish_sample(self, bms_name: str, sample: BmsSample):
         raise NotImplementedError()
@@ -87,6 +91,9 @@ class BmsSampler:
     async def __call__(self):
         try:
             return await self.sample()
+        except SampleExpiredError as e:
+            logger.warning("Expired: %s", e)
+            raise
         except Exception:
             dd = self.bms.debug_data()
             if dd:
@@ -123,8 +130,8 @@ class BmsSampler:
                 t_now = time.time()
                 t_hour = t_now * (1 / 3600)
 
-                if sample.timestamp < t_now - self.expire_after_seconds:
-                    raise Exception("sample %s expired", sample.timestamp)
+                if sample.timestamp < t_now - max(self.expire_after_seconds, MIN_VALUE_EXPIRY):
+                    raise SampleExpiredError("sample %s expired", sample.timestamp)
                     # logger.warning('%s expired sample', bms.name)
                     # return
 
