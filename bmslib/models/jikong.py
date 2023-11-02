@@ -15,8 +15,9 @@ fix connection abort:
 
 """
 import asyncio
+import time
 from collections import defaultdict
-from typing import List, Callable, Dict
+from typing import List, Callable, Dict, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
@@ -56,7 +57,7 @@ class JKBt(BtBms):
         if kwargs.get('psk'):
             self.logger.warning('JK usually does not use a pairing PIN')
         self._buffer = bytearray()
-        self._resp_table = {}
+        self._resp_table: Dict[int, Tuple[bytearray, float]] = {}
         self.num_cells = None
         self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
         self.char_handle_notify = None
@@ -98,10 +99,10 @@ class JKBt(BtBms):
                 self._decode_msg(bytearray(self._buffer))
             self._buffer.clear()
 
-    def _decode_msg(self, buf):
+    def _decode_msg(self, buf: bytearray):
         resp_type = buf[4]
         self.logger.debug('got response %d (len%d)', resp_type, len(buf))
-        self._resp_table[resp_type] = buf
+        self._resp_table[resp_type] = buf, time.time()
         self._fetch_futures.set_result(resp_type, self._buffer[:])
         callbacks = self._callbacks.get(resp_type, None)
         if callbacks:
@@ -125,7 +126,7 @@ class JKBt(BtBms):
         service = self.get_service(self.SERVICE_UUID)
         self.char_handle_write = self.find_char(self.CHAR_UUID, 'write', service=service)
 
-        if self.char_handle_write and self.char_handle_write.handle == 0x03:
+        if self.char_handle_write and hasattr(self.char_handle_write, 'handle') and self.char_handle_write.handle == 0x03:
             # from https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L197C17-L197C17
             self.char_handle_notify = self.find_char(0x05, 'notify')
 
@@ -143,7 +144,7 @@ class JKBt(BtBms):
         await self._q(cmd=0x96, resp=(0x02, 0x01))  # device state (resp 0x01 & 0x02)
         # after these 2 commands the bms will continuously send 0x02-type messages
 
-        buf = self._resp_table[0x01]
+        buf, _ = self._resp_table[0x01]
         self.num_cells = buf[114]
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
         # self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
@@ -167,20 +168,20 @@ class JKBt(BtBms):
     async def fetch_device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1152
-        buf = self._resp_table[0x03]
+        buf,_ = self._resp_table[0x03]
         psk = read_str(buf, 6 + 16 + 8 + 16 + 40 + 11)
         if psk:
             self.logger.info("PSK = '%s' (Note that anyone within BLE range can read this!)", psk)
         return DeviceInfo(mnf="JK",
-            model=read_str(buf, 6),
-            hw_version=read_str(buf, 6 + 16),
-            sw_version=read_str(buf, 6 + 16 + 8),
-            name=read_str(buf, 6 + 16 + 8 + 16),
-            sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
-        )
+                          model=read_str(buf, 6),
+                          hw_version=read_str(buf, 6 + 16),
+                          sw_version=read_str(buf, 6 + 16 + 8),
+                          name=read_str(buf, 6 + 16 + 8 + 16),
+                          sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
+                          )
 
-    def _decode_sample(self, buf) -> BmsSample:
-        buf_set = self._resp_table[0x01]
+    def _decode_sample(self, buf:bytearray, t_buf:float) -> BmsSample:
+        buf_set, t_set = self._resp_table[0x01]
 
         is_new_11fw = buf[189] == 0x00 and buf[189 + 32] > 0
         offset = 0
@@ -217,6 +218,7 @@ class JKBt(BtBms):
             #  #buf[166 + offset]),  charge FET state
             # buf[167 + offset]), discharge FET state
             uptime=float(u32(162 + offset)),  # seconds
+            timestamp=t_buf,
         )
 
     async def fetch(self, wait=True) -> BmsSample:
@@ -232,8 +234,8 @@ class JKBt(BtBms):
             with self._fetch_futures.acquire(0x02):
                 await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
-        buf = self._resp_table[0x02]
-        return self._decode_sample(buf)
+        buf,t_buf = self._resp_table[0x02]
+        return self._decode_sample(buf, t_buf)
 
     async def subscribe(self, callback: Callable[[BmsSample], None]):
         self._callbacks[0x02].append(lambda buf: callback(self._decode_sample(buf)))
@@ -244,7 +246,7 @@ class JKBt(BtBms):
         """
         if self.num_cells is None:
             raise Exception("num_cells not set")
-        buf = self._resp_table[0x02]
+        buf,t_buf = self._resp_table[0x02]
         voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') for i in
                     range(self.num_cells)]
         return voltages
