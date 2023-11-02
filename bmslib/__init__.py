@@ -9,6 +9,7 @@ class FuturesPool:
     """
     Manage a collection of named futures.
     """
+
     def __init__(self):
         self._futures: Dict[str, asyncio.Future] = {}
 
@@ -17,7 +18,12 @@ class FuturesPool:
             tuple(self.acquire(n) for n in name)
             return FutureContext(name, pool=self)
 
-        assert name not in self._futures, "already waiting for %s" % name
+        assert isinstance(name, (str, int))
+
+        existing = self._futures.get(name)
+        if existing and not existing.done():
+            raise Exception("already waiting for future named '%s'" % name)
+
         fut = asyncio.Future()
         self._futures[name] = fut
         return FutureContext(name, pool=self)
@@ -39,6 +45,7 @@ class FuturesPool:
     def remove(self, name):
         if isinstance(name, tuple):
             return tuple(self.remove(n) for n in name)
+        assert isinstance(name, (str, int))
         self._futures.pop(name, None)
 
     async def wait_for(self, name: NameType, timeout):
@@ -49,7 +56,8 @@ class FuturesPool:
         try:
             return await asyncio.wait_for(self._futures.get(name), timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            raise asyncio.TimeoutError("waiting for %s" % name)
+            self.remove(name)
+            raise asyncio.TimeoutError("timeout waiting for %s" % name)
         finally:
             self.remove(name)
 
