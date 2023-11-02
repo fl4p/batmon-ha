@@ -27,6 +27,9 @@ def round_to_n(x, n):
     if isinstance(x, str) or not math.isfinite(x) or not x:
         return x
 
+    if n == 0:
+        return str(round(x, None))
+
     digits = -int(math.floor(math.log10(abs(x)))) + (n - 1)
 
     try:
