@@ -35,6 +35,7 @@ class InfluxDBSink(BmsSampleSink):
         self.Q = queue.Queue(200_000)
         self.db = kwargs.get('database')
         self.time_last_flush = 0
+        self._last_volt : Dict[str, List[int]] = {}
 
         if not kwargs.get('verify_ssl', False):
             import urllib3
@@ -44,15 +45,26 @@ class InfluxDBSink(BmsSampleSink):
         if len(voltages) == 0:
             return
 
-        point = {
-            "measurement": 'batmon',
-            "time": datetime.datetime.utcnow(),
-            "fields": {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages))},
-            "tags": dict(device=bms_name)
-        }
-        self.Q.put(point)
+        if bms_name not in self._last_volt or len(voltages) != len(self._last_volt[bms_name]):
+            self._last_volt[bms_name] = [-1] * len(voltages)
+        last_volt = self._last_volt[bms_name]
+
+        fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if voltages[i] != last_volt[i]}
+
+        if fields:
+            point = {
+                "measurement": 'batmon',
+                "time": datetime.datetime.utcnow(),
+                "fields": fields,
+                "tags": dict(device=bms_name)
+            }
+            self.Q.put(point)
 
         for i in range(len(voltages)):
+            if voltages[i] == last_volt[i]:
+                continue
+            last_volt[i] = voltages[i]
+
             point = {
                 "measurement": 'cells',
                 "time": datetime.datetime.utcnow(),
@@ -60,6 +72,7 @@ class InfluxDBSink(BmsSampleSink):
                 "tags": dict(device=bms_name, cell_index=i),
             }
             self.Q.put(point)
+
 
         self._maybe_flush()
 
