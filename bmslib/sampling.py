@@ -183,7 +183,6 @@ class BmsSampler:
                 for sink in self.sinks:
                     try:
                         sink.publish_sample(bms.name, sample)
-                        sink.publish_meters(bms.name, {m.name: m.get() for m in self.meters})
                     except:
                         logger.error(sys.exc_info(), exc_info=True)
 
@@ -280,6 +279,14 @@ class BmsSampler:
             topic = f"{device_topic}/meter/{meter.name}"
             s = round_to_n(meter.get(), 4)
             mqtt_single_out(self.mqtt_client, topic, s)
+
+        if self.sinks:
+            readings = {m.name: m.get() for m in self.meters}
+            for sink in self.sinks:
+                try:
+                    sink.publish_meters(self.bms.name, readings)
+                except:
+                    logger.error(sys.exc_info(), exc_info=True)
 
     async def _try_fetch_device_info(self):
         try:
