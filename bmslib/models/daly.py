@@ -176,6 +176,11 @@ class DalyBt(BtBms):
             num_cycles=await self.get_states_cached('num_cycles'),
             **sample_kwargs,
         )
+
+        if sample.soc < 0 or sample.soc > 100:
+            self.logger.warning('soc %s out of range, bin data: %s', sample, parts)
+            raise ValueError("unexpected soc %s" % sample.soc)
+
         return sample
 
     async def _fetch_status(self):
