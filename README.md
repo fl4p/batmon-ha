@@ -95,8 +95,8 @@ For verbose logs of particular BMS add `debug: true`.
 
 ## Energy Meters
 
-Batmon implements energy metering by integrating the power values from the BMS with the trapezoidal rule. You can add
-theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*.
+Batmon implements energy metering by computing the integral of power values from the BMS with the trapezoidal rule. You
+can add theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*, see [doc/HA Energy Dashboard.md](doc/HA%20Energy%20Dashboard.md).
 
 * `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)
