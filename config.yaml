@@ -14,14 +14,16 @@ host_dbus: true
 apparmor: true
 services:
   - mqtt:need
+
+discovery:
+  - mqtt
+
+
 options:
   devices:
     - address: D6:6C:0A:61:14:30
       type: sok
       alias: battery1
-  mqtt_user: ""
-  mqtt_password: ""
-  mqtt_broker: "core-mosquitto"
   concurrent_sampling: false
   keep_alive: true
   verbose_log: false
@@ -45,7 +47,7 @@ schema:
 
   mqtt_user: "str?"
   mqtt_password: "str?"
-  mqtt_broker: "str"
+  mqtt_broker: "str?"
   mqtt_port: "int(1,65535)?"
 
   concurrent_sampling: "bool"
