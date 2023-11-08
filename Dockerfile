@@ -19,12 +19,12 @@ RUN apk add git
 # py3-pip
 
 # Copy data for add-on
-COPY run.sh run.sh
-COPY main.py main.py
-COPY requirements.txt requirements.txt
+#COPY run.sh run.sh
+#COPY main.py main.py
+#COPY requirements.txt requirements.txt
 COPY . .
 
 RUN pip3 install -r requirements.txt
-RUN chmod a+x run.sh
+RUN chmod a+x addon_main.sh
 
-CMD [ "./run.sh" ]
+CMD [ "./addon_main.sh" ]
