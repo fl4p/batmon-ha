@@ -12,23 +12,29 @@ logger = get_logger()
 def is_readable(file):
     return isfile(file) and access(file, R_OK)
 
+
 root_dir = '/data/' if is_readable('/data/options.json') else ''
-bms_meter_states = root_dir + 'bms_meter_states.json'
+bms_meter_states_fn = root_dir + 'bms_meter_states.json'
+
 lock = Lock()
+
 
 def store_file(fn):
     return root_dir + fn
 
+
 def load_meter_states():
     with lock:
-        with open(bms_meter_states) as f:
+        with open(bms_meter_states_fn) as f:
             meter_states = json.load(f)
         return meter_states
 
+
 def store_meter_states(meter_states):
     with lock:
-        with open(bms_meter_states, 'w') as f:
+        with open(bms_meter_states_fn, 'w') as f:
             json.dump(meter_states, f, indent=2)
+
 
 def store_algorithm_state(bms_name, algorithm_name, state=None):
     fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
