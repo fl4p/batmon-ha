@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import os
 import random
 import signal
 import sys
@@ -216,6 +217,11 @@ async def main():
                                     groups_by_bms[member_name], group_bms)
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
+
+    # import env vars from addon_main.sh
+    for k,en in dict(mqtt_broker='MQTT_HOST', mqtt_user='MQTT_USER', mqtt_password='MQTT_PASSWORD').items():
+        if not user_config.get(k) and os.environ.get(en):
+            user_config[k] = os.environ[en]
 
     if user_config.get('mqtt_broker'):
         port_idx = user_config.mqtt_broker.rfind(':')
