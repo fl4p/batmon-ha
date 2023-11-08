@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-if False:
+if False: # read from csv files
     df = pd.read_csv('mppt_scan_I.csv')
     I = pd.Series(df.A.values, index=pd.DatetimeIndex(df.time.values))
 
@@ -15,7 +15,7 @@ if False:
     U = df.pivot_table(values='V', index=pd.DatetimeIndex(df.time.values), columns='entity_id')
     U = U['bat_caravan_cell_voltages_1'].ffill(limit=20)
 
-else:
+else: # query influxdb (configuration influxdb_server.json)
     import influxdb
 
     with open('influxdb_server.json') as fp:
@@ -36,6 +36,12 @@ else:
        WHERE time >= 1694527270071ms and time <= 1694551907278ms
         GROUP BY time(1s), "device"::tag, "cell_index"::tag fill(null)
         """)
+
+     #   r = influxdb_client.query("""
+     #    SELECT mean(voltage_cell002) as u, mean(current) as i FROM "autogen"."batmon"
+     #   WHERE time >= '2023-11-07T20' and time <= 1694551907278ms
+     #    GROUP BY time(1s), "device"::tag, "cell_index"::tag fill(null)
+     #    """)
 
 
         # &from=1693810297203&to=1693852625487
@@ -118,7 +124,16 @@ m, c = np.linalg.lstsq(A, y, rcond=None)[0]
 r2 = 1 - c / (y.size * y.var())
 plt.plot(x, m * x + c, 'r', label='ols %.2f mOhm (r2 %.5f minmax %.2f)' % (
     m , r2, (U.max() - U.min()) / (I.max() - I.min()) * 1e3))
+
 plt.plot(x, np.std(y) / np.std(x) * x + c, 'b', label='std %.2f' % (np.std(y) / np.std(x) ))
+
+df = pd.concat(dict(u=U, i=1/I), axis=1).ffill(limit=20).dropna(how='any')
+# relaxation: exclude areas where recent current range is above threshold
+# df = df[abs(df.i.rolling('10s').max() - df.i.rolling('10s').min()) < 4]
+df = df[i_mask & u_mask]
+corr = df[I.abs() > 0.1].corr().iloc[0,1]
+plt.plot(x, corr * x + c, 'b', label='corr %.2f' % (corr ))
+
 plt.legend()
 
 plt.show()

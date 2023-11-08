@@ -42,3 +42,28 @@ Ideas:
 
 
 https://www.ti.com/lit/wp/slpy002/slpy002.pdf
+
+
+# Useful Statistical Formulas
+
+* stddev(x) = pct_change(x)**2
+* stddev(x) = sqrt(variance(x))
+* variance(x) = E(xx) - E(x)E(x)
+* covariance(x,y) = E(xy) - E(x)*E(y)
+* corr(x,y) = cov(x,y) / sqrt(var(x)*var(y))
+* TODO book about bazesian statistics
+
+Now lets apply this to our cell resistance algorithm. R=dU/dI .
+So we use the corr(), as it is normalized, having the same dimensionality as the inputs.
+
+
+* cross correlation of dU and dI to find sample time offset
+* corr(dU,1/dI) gives us the estimated cell resistance.
+* it eliminates any uncorellated noise that is not present in both signals dU,dI
+* see [Reducing the Noise Floor and Improving the SNR with Cross-Correlation Techniques](https://www.zhinst.com/europe/en/blogs/how-reduce-noise-floor-and-improve-snr-employing-cross-correlation-techniques#Basic%20Principle) 
+
+corr(x,y) = avg(x*y) - avg(x)*avg(y)
+corr(x,y) = ( E(xy)-E(x)E(y) ) / sqrt( E(xx)E(yy) - E(xx)E(y)E(y) - E(yy)E(x)E(x) + E(x)E(x)E(y)E(y) )
+
+Addionally, we can use cross-correlation, wich basically computes a table of corr(x[t],y[t+n]), for a range of offsets n.
+This is computanaly intense and probably best solved by a FFT convolution.
