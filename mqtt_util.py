@@ -368,7 +368,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     for topic, data in discovery_msg.items():
         j = json.dumps(data)
-        logger.info('discovery msg %s: %s', topic, j)
+        logger.debug('discovery msg %s: %s', topic, j)
         mqtt_single_out(client, topic, j)
 
 
