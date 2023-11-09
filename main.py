@@ -18,8 +18,8 @@ import bmslib.models.dummy
 import bmslib.models.jbd
 import bmslib.models.jikong
 import bmslib.models.supervolt
-import bmslib.sok
 import bmslib.models.victron
+import bmslib.models.sok
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -164,7 +164,7 @@ async def main():
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=bmslib.models.supervolt.SuperVoltBt,
-        sok=bmslib.sok.SokBt,
+        sok=bmslib.models.sok.SokBt,
         dummy=bmslib.models.dummy.DummyBt,
     )
 
