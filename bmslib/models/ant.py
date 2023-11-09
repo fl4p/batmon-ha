@@ -167,12 +167,12 @@ class AntBt(BtBms):
         # soh = u16(offset)  # state of health
         offset += 2
 
-        # charge mos state
-        switch_chg = data[offset]
-        offset += 1
-
         # dsg mos state
         switch_dsg = data[offset]
+        offset += 1
+
+        # charge mos state
+        switch_chg = data[offset]
         offset += 1
 
         # bal state
