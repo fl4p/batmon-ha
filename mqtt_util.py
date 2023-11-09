@@ -269,17 +269,18 @@ def publish_cell_voltages(client, device_topic, voltages):
 def publish_temperatures(client, device_topic, temperatures):
     for i in range(0, len(temperatures)):
         topic = f"{device_topic}/temperatures/{i + 1}"
-        mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
+        if not is_none_or_nan(temperatures[i]):
+            mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
 
 
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
-                           num_temp_sensors,
+                           temperatures,
                            device_info: DeviceInfo = None):
     discovery_msg = {}
 
     device_json = {
         "identifiers": [(device_info and device_info.sn) or device_topic],
-        "manufacturer": (device_info and device_info.mnf)  or None,
+        "manufacturer": (device_info and device_info.mnf) or None,
         "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
         "model": (device_info and device_info.model) or None,
         "sw_version": (device_info and device_info.sw_version) or None,
@@ -323,9 +324,10 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             k = 'cell_voltages/%s' % f
             _hass_discovery(k, device_class=None, unit="")
 
-    for i in range(0, num_temp_sensors):
+    for i in range(0, len(temperatures)):
         k = 'temperatures/%d' % (i + 1)
-        _hass_discovery(k, "temperature", unit="°C")
+        if not is_none_or_nan(temperatures[i]):
+            _hass_discovery(k, "temperature", unit="°C")
 
     meters = {
         # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics

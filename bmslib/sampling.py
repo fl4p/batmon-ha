@@ -245,7 +245,7 @@ class BmsSampler:
                         expire_after_seconds=self.expire_after_seconds,
                         sample=sample,
                         num_cells=len(voltages),
-                        num_temp_sensors=len(temperatures),
+                        temperatures=temperatures,
                         device_info=self.device_info,
                     )
 
