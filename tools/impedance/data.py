@@ -37,4 +37,4 @@ def fetch_influxdb_ha(time_range):
     print(r)
 
 
-fetch_influxdb_ha(['2022-02-01','2022-03-01'])
+# fetch_influxdb_ha(['2022-02-01','2022-03-01'])

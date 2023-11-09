@@ -14,8 +14,11 @@ def estimate(u,i):
     if u.std() / u.mean() < 0.0005:
         raise ValueError("not enough u variance")
 
-    if u.mean() < 2.0:
+    if u.mean() < 2000.0:
         raise ValueError("u too small")
+
+    if u.max() - u.min() < 10:
+        raise ValueError("u range too small")
 
     res, u0 = cov(i, u)
 
