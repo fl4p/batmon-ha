@@ -164,7 +164,7 @@ class JKBt(BtBms):
 
     async def _write(self, address, value):
         frame = _jk_command(address, value)
-        self.logger.info("write> %s", frame)
+        self.logger.debug("write> %s", frame)
         await self.client.write_gatt_char(self.char_handle_write, data=frame)
 
     async def fetch_device_info(self):

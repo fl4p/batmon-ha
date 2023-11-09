@@ -192,7 +192,7 @@ class BmsSampler:
                 if publish_discovery:
                     self._t_discovery = t_now
 
-                log_data = (t_now - self._last_time_log_data) >= 30
+                log_data = (t_now - self._last_time_log_data) >= 30 or bms.verbose_log
                 if log_data:
                     self._last_time_log_data = t_now
 
@@ -257,7 +257,7 @@ class BmsSampler:
             logger.error('%s group not ready: %s', bms.name, ex)
             return
         except Exception as ex:
-            logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)))
+            logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)), exc_info=1)
 
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
             if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
@@ -285,6 +285,8 @@ class BmsSampler:
             for sink in self.sinks:
                 try:
                     sink.publish_meters(self.bms.name, readings)
+                except NotImplementedError:
+                    pass
                 except:
                     logger.error(sys.exc_info(), exc_info=True)
 
