@@ -28,6 +28,27 @@ class FuturesPool:
         self._futures[name] = fut
         return FutureContext(name, pool=self)
 
+    async def acquire_timeout(self, name: NameType, timeout):
+        if isinstance(name, tuple):
+            await asyncio.gather(*tuple(self.acquire_timeout(n, timeout) for n in name), return_exceptions=False)
+            return FutureContext(name, pool=self)
+
+        assert isinstance(name, (str, int))
+
+        existing = self._futures.get(name)
+        if existing and not existing.done():
+            for i in range(int(timeout * 10)):
+                await asyncio.sleep(.1)
+                if existing.done():
+                    existing = None
+                    break
+            if existing:
+                raise Exception("already waiting for future named '%s'" % name)
+
+        fut = asyncio.Future()
+        self._futures[name] = fut
+        return FutureContext(name, pool=self)
+
     def set_result(self, name, value):
         fut = self._futures.get(name, None)
         if fut:
