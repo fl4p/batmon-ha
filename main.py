@@ -356,6 +356,12 @@ async def main():
 
     store_states(sampler_list)
 
+    for sink in sinks:
+        try:
+            sink.flush()
+        except:
+            pass
+
     for bms in bms_list:
         try:
             logger.info("Disconnecting %s", bms)
