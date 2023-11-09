@@ -238,7 +238,6 @@ def publish_sample(client, device_topic, sample: BmsSample):
         for switch_name, switch_state in sample.switches.items():
             assert isinstance(switch_state, bool)
             topic = f"{device_topic}/switch/{switch_name}"
-            logger.info("%s %s", topic, switch_state)
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
 
@@ -396,8 +395,8 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
         assert isinstance(state, bool)
         logger.info('Set %s %s switch %s', bms.name, switch_name, state)
         await bms.set_switch(switch_name, state)
-        # topic = f"{device_topic}/switch/{switch_name}"
-        # mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
+        topic = f"{device_topic}/switch/{switch_name}"
+        mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
 
     for switch_name in switches:
         state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"
