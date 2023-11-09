@@ -4,7 +4,7 @@ HA mdi: icons https://pictogrammers.com/library/mdi/
 
 
 """
-
+import asyncio
 import json
 import math
 import queue
@@ -236,7 +236,9 @@ def publish_sample(client, device_topic, sample: BmsSample):
 
     if sample.switches:
         for switch_name, switch_state in sample.switches.items():
+            assert isinstance(switch_state, bool)
             topic = f"{device_topic}/switch/{switch_name}"
+            logger.info("%s %s", topic, switch_state)
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
 
@@ -386,21 +388,23 @@ async def mqtt_process_action_queue():
         except Exception as e:
             logger.error('exception in action callback: %s', e)
             logger.error('Stack: %s', traceback.format_exc())
+            await asyncio.sleep(1)
 
 
 def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switches):
-    async def set_switch(switch_name, state):
+    async def set_switch(switch_name: str, state: bool):
+        assert isinstance(state, bool)
         logger.info('Set %s %s switch %s', bms.name, switch_name, state)
         await bms.set_switch(switch_name, state)
-        topic = f"{device_topic}/switch/{switch_name}"
-        mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
+        # topic = f"{device_topic}/switch/{switch_name}"
+        # mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
 
     for switch_name in switches:
         state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"
         logger.info("subscribe %s", state_topic)
         mqtt_client.subscribe(state_topic, qos=2)
         _switch_callbacks[state_topic] = \
-            lambda msg, switch_name=switch_name: set_switch(switch_name, msg.lower() == "on")
+            lambda msg, sn=switch_name: set_switch(sn, msg.lower() == "on")
 
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
