@@ -126,7 +126,8 @@ class JKBt(BtBms):
         service = self.get_service(self.SERVICE_UUID)
         self.char_handle_write = self.find_char(self.CHAR_UUID, 'write', service=service)
 
-        if self.char_handle_write and hasattr(self.char_handle_write, 'handle') and self.char_handle_write.handle == 0x03:
+        if self.char_handle_write and hasattr(self.char_handle_write,
+                                              'handle') and self.char_handle_write.handle == 0x03:
             # from https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L197C17-L197C17
             self.char_handle_notify = self.find_char(0x05, 'notify')
 
@@ -155,7 +156,7 @@ class JKBt(BtBms):
 
     async def _q(self, cmd, resp):
         await asyncio.sleep(.1)
-        with self._fetch_futures.acquire(resp):
+        with await self._fetch_futures.acquire_timeout(resp, timeout=self.TIMEOUT / 2):
             frame = _jk_command(cmd, [])
             self.logger.debug("write %s", frame)
             await self.client.write_gatt_char(self.char_handle_write, data=frame)
@@ -163,12 +164,13 @@ class JKBt(BtBms):
 
     async def _write(self, address, value):
         frame = _jk_command(address, value)
+        self.logger.info("write> %s", frame)
         await self.client.write_gatt_char(self.char_handle_write, data=frame)
 
     async def fetch_device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1152
-        buf,_ = self._resp_table[0x03]
+        buf, _ = self._resp_table[0x03]
         psk = read_str(buf, 6 + 16 + 8 + 16 + 40 + 11)
         if psk:
             self.logger.info("PSK = '%s' (Note that anyone within BLE range can read this!)", psk)
@@ -180,7 +182,7 @@ class JKBt(BtBms):
                           sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
                           )
 
-    def _decode_sample(self, buf:bytearray, t_buf:float) -> BmsSample:
+    def _decode_sample(self, buf: bytearray, t_buf: float) -> BmsSample:
         buf_set, t_set = self._resp_table[0x01]
 
         is_new_11fw = buf[189] == 0x00 and buf[189 + 32] > 0
@@ -231,10 +233,10 @@ class JKBt(BtBms):
         """
 
         if wait:
-            with self._fetch_futures.acquire(0x02):
+            with await self._fetch_futures.acquire_timeout(0x02, timeout=self.TIMEOUT / 2):
                 await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
-        buf,t_buf = self._resp_table[0x02]
+        buf, t_buf = self._resp_table[0x02]
         return self._decode_sample(buf, t_buf)
 
     async def subscribe(self, callback: Callable[[BmsSample], None]):
@@ -246,7 +248,7 @@ class JKBt(BtBms):
         """
         if self.num_cells is None:
             raise Exception("num_cells not set")
-        buf,t_buf = self._resp_table[0x02]
+        buf, t_buf = self._resp_table[0x02]
         voltages = [int.from_bytes(buf[(6 + i * 2):(6 + i * 2 + 2)], byteorder='little') for i in
                     range(self.num_cells)]
         return voltages
@@ -259,26 +261,39 @@ class JKBt(BtBms):
             balance=0x1F
         )
         await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
-        await asyncio.sleep(0.1)
-        await self._q(cmd=0x96, resp=(0x02, 0x01))  # query settings
+        self._resp_table.pop(0x01, None)  # switch states are stored in settings frame
+        await asyncio.sleep(0.2)  # not sure if this is needed
+        await self._q(cmd=0x96, resp=0x01)  # query settings
 
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
 
 
 async def main():
-    _jk_command(0x96)
+    # _jk_command(0x96)
 
     # await bmslib.bt.bt_discovery(logger=get_logger())
-    # mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A' # caravan
-    mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
-    mac_address = 'BB92A45B-ABA1-2EA8-1BD3-DA140771C79D'
+    mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'  # caravan
+    # mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
+    mac_address = 'BB92A45B-ABA1-2EA8-1BD3-DA140771C79D'  # caravan (intel)
 
     bms = JKBt(mac_address, name='jk', verbose_log=False)
     async with bms:
         while True:
             s = await bms.fetch(wait=True)
-            print(s, 'I_bal=', s.balance_current, await bms.fetch_voltages())
+            # print(s, 'I_bal=', s.balance_current, await bms.fetch_voltages())
+            print(s.switches)
+
+            b = not s.switches.get("charge")
+
+            await bms.set_switch("charge", b)
+
+            s = await bms.fetch()
+            print(s.switches)
+
+            if s.switches.get("charge") != b:
+                print('error', s)
+
             # new_state = not s.switches['charge']
             # await bms.set_switch('charge', new_state)
             # await bms._q(cmd=0x96, resp= 0x01)
