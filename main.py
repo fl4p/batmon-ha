@@ -269,6 +269,12 @@ async def main():
         from bmslib.sinks import InfluxDBSink
         sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
 
+    if user_config.get("telemetry"):
+        try:
+            from bmslib.sinks import TelemetrySink
+            sinks.append(TelemetrySink(bms_by_name=bms_by_name))
+        except:
+            logger.error(sys.exc_info(), exc_info=True)
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),

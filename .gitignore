@@ -9,3 +9,5 @@ bms_meter_states.json
 
 /venv
 tools/impedance/influxdb_*.json
+
+user_id

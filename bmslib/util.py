@@ -1,5 +1,7 @@
 import logging
 import os
+import random
+import string
 import time
 
 
@@ -47,3 +49,13 @@ def exit_process(is_error=True, delayed=False):
     if not delayed:
         import sys
         sys.exit(status)
+
+
+def _id_generator(size=6, chars=string.ascii_uppercase + string.ascii_lowercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
+
+
+def sid_generator(n=2):
+    assert n >= 2
+    return _id_generator(n-1, string.ascii_lowercase + string.ascii_uppercase) + _id_generator(1, string.digits)
+

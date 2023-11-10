@@ -17,11 +17,12 @@ else:
 
 try:
     import influxdb
+
     influxdb_installed = True
 except ImportError:
     influxdb_installed = False
 
-need_influxdb = bool(user_config.get('influxdb_host'))
+need_influxdb = bool(user_config.get('influxdb_host') or user_config.get('telemetry'))
 if need_influxdb:
     args.append('influxdb')
 
