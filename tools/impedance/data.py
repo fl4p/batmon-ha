@@ -6,6 +6,8 @@ import pandas as pd
 import pytz
 from dateutil.tz import tzutc
 
+from tools.impedance.cache import disk_cache_deco
+
 
 def to_utc(t, **kwargs) -> pd.Timestamp:
     if isinstance(t, pd.Timestamp) and len(kwargs) == 0 and (t.tzinfo == pytz.utc or t.tzinfo == tzutc()):
@@ -26,6 +28,7 @@ def ql_time_range(time_range, freq=None):
     # noinspection SqlDialectInspection
 
 
+@disk_cache_deco()
 def fetch_influxdb_ha(measurement, time_range, entity_id):
     with open('influxdb_ha.json') as fp:
         influxdb_client = influxdb.InfluxDBClient(**{k[9:]: v for k, v in json.load(fp).items()})
@@ -52,7 +55,7 @@ def fetch_influxdb_ha(measurement, time_range, entity_id):
     return points
 
 
-def fetch_batmon_ha_sensors(tr, alias, num_cells):
+def fetch_batmon_ha_sensors(tr, alias, num_cells, freq='1s'):
     i = fetch_influxdb_ha("A", tr, alias + "_soc_current").v.rename('i')
     soc = fetch_influxdb_ha("%", tr, alias + "_soc_soc_percent").v.rename('soc')
     temp1 = fetch_influxdb_ha("°C", tr, alias + "_temperatures_1").v.rename('temp0')
@@ -63,7 +66,8 @@ def fetch_batmon_ha_sensors(tr, alias, num_cells):
     ]
     print("joining..")
 
-    um = pd.concat([i, soc, temp1, temp2] + u, axis=1).resample("5s").mean()
+
+    um = pd.concat([i, soc, temp1, temp2] + u, axis=1).resample(freq).mean()
     um.loc[:, "temp0"].ffill(limit=1000, inplace=True)
     um.loc[:, "temp1"].ffill(limit=1000, inplace=True)
     um.ffill(limit=200, inplace=True)
