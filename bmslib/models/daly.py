@@ -20,7 +20,7 @@ from bmslib.bt import BtBms, enumerate_services
 
 
 def calc_crc(message_bytes):
-    return bytes([sum(message_bytes) & 0xFF])
+    return sum(message_bytes) & 0xFF
 
 
 def daly_command_message(command: int, extra=""):
@@ -38,7 +38,7 @@ def daly_command_message(command: int, extra=""):
     message = "a5%i0%02x08%s" % (address, command, extra)
     message = message.ljust(24, "0")
     message_bytes = bytearray.fromhex(message)
-    message_bytes += calc_crc(message_bytes)
+    message_bytes.append(calc_crc(message_bytes))
 
     return message_bytes
 
@@ -72,8 +72,16 @@ class DalyBt(BtBms):
         for response_bytes in responses:
             self.logger.debug('daly resp: %s', response_bytes)
 
+            check_comp = calc_crc(response_bytes[0:12])
+            check_expect = response_bytes[12]
+
             command = response_bytes[2]
             response_bytes = response_bytes[4:-1]
+
+            if check_comp != check_expect:
+                self.logger.warning("checksum fail, expected %s, got %s. %s", check_expect, check_comp, response_bytes)
+                continue
+
 
             # buffer for multi-response commands
             buf = self._fetch_nr.get(command, None)
@@ -264,9 +272,9 @@ class DalyBt(BtBms):
 
 async def main():
     mac_address = '3D7394B1-BCFD-4CDC-A10D-3D113E2317A6'  # daly osx
-    # mac_address = ''
+    mac_address = '62E06493-A9CC-A884-87B9-03BAB9A95FDB'
 
-    bms = DalyBt(mac_address)
+    bms = DalyBt(mac_address, name="daly")
     await bms.connect()
     sample = await bms.fetch_voltages(num_cells=8)
     print(sample)
