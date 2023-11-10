@@ -5,10 +5,11 @@ def estimate(u,i):
     assert len(u) == len(i), "lengths do not match"
     assert len(u) > 4, "not enough samples"
 
-    if i.abs().mean() < 0.1:
+    i_abs = i.abs()
+    if i_abs.mean() < 0.1 or i_abs.max() < 1:
         raise ValueError("i too close to 0")
 
-    if i.std() / i.abs().mean() < 0.05:
+    if i.std() / i_abs.mean() < 0.05:
         raise ValueError("not enough i variance")
 
     if u.std() / u.mean() < 0.0005:
