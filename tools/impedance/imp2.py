@@ -10,19 +10,21 @@ df = datasets.batmon(
     #('2023-11-09T03:30:00Z', '2023-11-09T06:30:00Z'), # fridge
 #('2023-11-08T06:30:00Z', '2023-11-08T09:30:00Z'), # coffee
 #('2023-11-04T06:30:00Z', '2023-11-04T10:30:00Z'), # 3cook
-('2023-11-09T06:30:00Z', '2023-11-09T08:30:00Z'), # pancakes
-    freq="5s", device='bat_caravan', cell_index=7,
+#('2023-11-09T06:30:00Z', '2023-11-09T08:30:00Z'), # pancakes
+('2023-11-10T10:30:00Z', '2023-11-10T10:50:00Z'), # ehub test
+    freq="5s", device='jk_bms', cell_index=0,
 )
 
-df = fetch_batmon_ha_sensors(("2022-01-23", "2022-01-25"), 'daly_bms', num_cells=1)
-df.loc[:, "u"] = df.loc[:, str(0)]
-df.loc[:,'i'] *= -1
-df.loc[:,'temp1'] = df.temp0
-#df.drop(columns='temp1', inplace=True)
-
+if 0:
+    df = fetch_batmon_ha_sensors(("2022-01-23", "2022-01-25"), 'daly_bms', num_cells=1)
+    df.loc[:, "u"] = df.loc[:, str(0)]
+    df.loc[:,'i'] *= -1
+    df.loc[:,'temp1'] = df.temp0
 #df = df.iloc[9000:16000]
 #df = df[df.i.abs() > 1]
-#df = df.rolling(5).mean()
+#df = df.rolling(3).mean()
+df = df.rolling(3).mean()
+df = df[df.i.pct_change().abs() > 0.1]
 df.dropna(how="any",inplace=True)
 
 matplotlib.use('MacOSX')
@@ -35,6 +37,10 @@ ax[3].step(df.index, df.temp1, where='post', label='temp1', marker='.')
 plt.legend()
 
 # plt.show()
+
+#df.loc[:,'i'] = df.i.pct_change() * abs(df.i).mean()
+#df.loc[:,'u'] = df.u.pct_change() * df.u.mean()
+#df = df.iloc[1:]
 
 # plt.figure()
 fig, ax = plt.subplots(1, 1)

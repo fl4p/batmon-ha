@@ -10,12 +10,27 @@ from tools.impedance.data import fetch_batmon_ha_sensors
 cell_results = {}
 
 num_cells = 8
-#df = fetch_batmon_ha_sensors(("2022-01-05", "2022-02-05"), 'daly_bms', num_cells=num_cells)
-#df = fetch_batmon_ha_sensors(("2022-01-05", "2023-02-05"), 'daly_bms', num_cells=num_cells)
+#df = fetch_batmon_ha_sensors(("2022-01-05", "2022-05-05"), 'daly_bms', num_cells=num_cells, freq="5s")
+#df = fetch_batmon_ha_sensors(("2022-10-25", "2022-12-01"), 'daly_bms', num_cells=num_cells, freq="5s")
+#df.loc[:, 'i'] *= -1
 
-df = fetch_batmon_ha_sensors(("2022-01-05", "2022-05-05"), 'daly_bms', num_cells=num_cells)
+#df = datasets.daly22_full(num_cells=num_cells, freq='5s')
+df = datasets.jbd22_full(num_cells=num_cells, freq='5s')
 
-df.loc[:,'i'] *= -1
+# df = df.rolling(5).mean()
+df = df.rolling(3).mean()
+#df = df.rolling(3).mean()
+#df = df[df.i.pct_change().abs() > 0.05]
+
+block_size = 300
+# block_size = 300
+
+df = df.iloc[:len(df) - len(df) % block_size]
+
+cv = df.loc[:, tuple(str(ci) for ci in range(num_cells))]
+df.loc[:, 'cv_max'] = cv.max(axis=1)
+df.loc[:, 'cv_min'] = cv.min(axis=1)
+
 
 for ci in range(num_cells):
     print('cell', ci)
@@ -32,28 +47,27 @@ for ci in range(num_cells):
             device='bat_caravan', cell_index=ci,
         )
 
-    df.loc[:,"u"] = df.loc[:,str(ci)]
-
-    block_size = 1200
+    df.loc[:, "u"] = df.loc[:, str(ci)]
 
     # df = df.iloc[:int(len(df) / 2)]
 
     # df = df.rolling(5).mean()
     # df.dropna(how="any", inplace=True)
 
-    df = df.iloc[:len(df) - len(df) % block_size]
-
     if ci == 0:
         fig, ax = plt.subplots(4, 1)
         dfr = df.resample("2min").mean()
         ax[0].step(dfr.index, dfr.u, where='post', label='U', marker='.')
-        #ax[0].set_xlim((2, 100))
+        # ax[0].set_xlim((2, 100))
+
         ax[1].step(dfr.index, dfr.i, where='post', label='I', marker='.')
+
         ax[2].step(dfr.index, dfr.soc, where='post', label='soc', marker='.')
-        ax[2].set_xlim((0,100))
+        ax[2].set_ylim((0, 100))
+
         ax[3].step(dfr.index, dfr.temp0, where='post', label='temp0')
         ax[3].step(dfr.index, dfr.temp1, where='post', label='temp1')
-        plt.ylim((10, 40))
+        ax[3].set_ylim((10, 40))
         plt.legend()
 
         # df.u.plot()
@@ -71,10 +85,18 @@ for ci in range(num_cells):
 
     for b in blocks:
         t = b.index[-1]
+
+        if b.u.max() > 3500 or b.u.min() < 2700:
+            #if b.cv_max.max() > 3500 or b.cv_min.min() < 2700:
+            # skip almost full or empty (LiFePo4)
+            results.append((t, math.nan, math.nan))
+            continue
+
         try:
             r, u0 = tools.impedance.ac_impedance.estimate(b.u, b.i)
             results.append((t, r, u0))
         except Exception as e:
+            results.append((t, math.nan, math.nan))
             # print('error %s at block %s' % (e, t))
             pass
 
@@ -86,10 +108,10 @@ for ci in range(num_cells):
     # results.r.plot(label='c%d R(q25)=%.2f' % (ci, results.r.quantile(.25)))
 
     if ci == 0:
-        plt.step(results.r.index, results.r.values, where='post', marker='.', alpha=.2, label='R(c%d) raw' % (ci))
+        plt.step(results.r.index, results.r.values, where='post', marker='.', alpha=.1, label='R(c%d) raw' % (ci))
 
     fl = int(len(results) / 60)
-    plt.step(results.r.index, results.r.rolling(fl).median().rolling(fl*2).mean().values, where='post', marker='.',
+    plt.step(results.r.index, results.r.ffill(limit=3).rolling(fl).median().rolling(fl * 2).mean().values, where='post', marker='.',
              label='R(c%d) med=%.2f Q25=%.2f' % (ci, results.r.median(), results.r.quantile(.25)))
 
     cell_results[ci] = results
