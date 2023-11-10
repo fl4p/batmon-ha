@@ -23,8 +23,8 @@ import struct
 import statistics
 
 from bmslib import FuturesPool
-from .bms import BmsSample
-from .bt import BtBms
+from bmslib.bms import BmsSample
+from bmslib.bt import BtBms
 
 
 def get_str(ubit, uuid):
