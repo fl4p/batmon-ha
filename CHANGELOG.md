@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.73] - 2023-11-10
+this is a rather big update. I've set version num to 1.0, so it looks more tidy.
+* add manufacturer to device info
+* start scanner if device not discovered
+* influxdb publish meters
+* add additional watchdog thread (to detect event loop issues) 
+* incr meter integral recovery time to 10 minutes
+* add unit tests
+* futures pool add  `acquire_timeout`
+* BmsSample rename `num` to `num_samples` (breaking change)
+* JK capture timestamps
+* daly assert soc range (https://github.com/fl4p/batmon-ha/issues/158)
+* import mqtt credentials from hassio service
+* fix soc group bms (https://github.com/fl4p/batmon-ha/issues/155)
+* sample expiry fix
+* fix uptime (https://github.com/fl4p/batmon-ha/issues/157)
+* fix temperature sensor discovery
+* fix JK switches
+* fix ANT switches
+* victron fixes
+* soc algo fix and assert thresholds
+
 ## [0.0.72] - 2023-10-19
 * Fix JK BLE characteristic handles
 * Remove `influxdb` requirement and install if needed
