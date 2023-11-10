@@ -20,6 +20,6 @@ def cov(x, y=None):
         x = x.iloc[:, 0]
     (n, m), (m2, v) = np.cov(x, y)
     # assert _1 == 1, "%s != 1 %s" % (_1, np.cov(x, y))
-    assert m == m2, "m m2"
+    assert m == m2, "m m2 %s" % m
     assert v, "v"  # todo
     return m / n, np.mean(y) - m / n * np.mean(x)

@@ -2,6 +2,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 import tools.impedance.datasets as datasets
+from tools.impedance.data import fetch_batmon_ha_sensors
 from tools.impedance.stats import cov
 
 df = datasets.ant24_2023_07()
@@ -12,9 +13,16 @@ df = datasets.batmon(
 ('2023-11-09T06:30:00Z', '2023-11-09T08:30:00Z'), # pancakes
     freq="5s", device='bat_caravan', cell_index=7,
 )
+
+df = fetch_batmon_ha_sensors(("2022-01-23", "2022-01-25"), 'daly_bms', num_cells=1)
+df.loc[:, "u"] = df.loc[:, str(0)]
+df.loc[:,'i'] *= -1
+df.loc[:,'temp1'] = df.temp0
+#df.drop(columns='temp1', inplace=True)
+
 #df = df.iloc[9000:16000]
 #df = df[df.i.abs() > 1]
-df = df.rolling(5).mean()
+#df = df.rolling(5).mean()
 df.dropna(how="any",inplace=True)
 
 matplotlib.use('MacOSX')

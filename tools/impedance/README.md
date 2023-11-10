@@ -67,3 +67,14 @@ corr(x,y) = ( E(xy)-E(x)E(y) ) / sqrt( E(xx)E(yy) - E(xx)E(y)E(y) - E(yy)E(x)E(x
 
 Addionally, we can use cross-correlation, wich basically computes a table of corr(x[t],y[t+n]), for a range of offsets n.
 This is computanaly intense and probably best solved by a FFT convolution.
+
+
+
+# Current Impl State
+* use `imp2.py` to visualize
+* block_compute can process large time ranges of years
+* cell resistance appears to increase with cell index, 
+  * how to the bms measure single cell voltage?
+  * do higher cells ge tmore noisy?
+* ("2022-01-05", "2022-05-05")
+  * cell0: using data from daly_bms and jbd_bms  both result a median R of 2.8/2.9mOhm.

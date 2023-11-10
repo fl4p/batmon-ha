@@ -17,8 +17,16 @@ def estimate(u,i):
     if u.mean() < 2000.0:
         raise ValueError("u too small")
 
-    if u.max() - u.min() < 10:
+    u_mi = u.min()
+    u_mx = u.max()
+    if u_mx - u_mi < 10:
         raise ValueError("u range too small")
+
+    if u_mi < 2000:
+        raise ValueError("u min too small")
+
+    if u_mx > 4000:
+        raise ValueError("u max too large")
 
     res, u0 = cov(i, u)
 
