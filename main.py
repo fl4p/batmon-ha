@@ -219,7 +219,7 @@ async def main():
                 bms.add_member(bms_by_name[member_ref])
 
     # import env vars from addon_main.sh
-    for k,en in dict(mqtt_broker='MQTT_HOST', mqtt_user='MQTT_USER', mqtt_password='MQTT_PASSWORD').items():
+    for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_user='MQTT_USER', mqtt_password='MQTT_PASSWORD').items():
         if not user_config.get(k) and os.environ.get(en):
             user_config[k] = os.environ[en]
 
@@ -271,7 +271,7 @@ async def main():
 
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
-        dt_max_seconds=max(90., sample_period * 2),
+        dt_max_seconds=max(60. * 10, sample_period * 2),
         expire_after_seconds=expire_values_after and max(expire_values_after, int(sample_period * 2 + .5),
                                                          int(publish_period * 2 + .5)),
         invert_current=ic,
