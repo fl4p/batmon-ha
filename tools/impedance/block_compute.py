@@ -10,26 +10,68 @@ from tools.impedance.data import fetch_batmon_ha_sensors
 cell_results = {}
 
 num_cells = 8
-#df = fetch_batmon_ha_sensors(("2022-01-05", "2022-05-05"), 'daly_bms', num_cells=num_cells, freq="5s")
-#df = fetch_batmon_ha_sensors(("2022-10-25", "2022-12-01"), 'daly_bms', num_cells=num_cells, freq="5s")
-#df.loc[:, 'i'] *= -1
+# df = fetch_batmon_ha_sensors(("2022-01-05", "2022-05-05"), 'daly_bms', num_cells=num_cells, freq="5s")
+# df = fetch_batmon_ha_sensors(("2022-10-25", "2022-12-01"), 'daly_bms', num_cells=num_cells, freq="5s")
+# df.loc[:, 'i'] *= -1
 
-#df = datasets.daly22_full(num_cells=num_cells, freq='5s')
-df = datasets.jbd22_full(num_cells=num_cells, freq='5s')
+freq = '5s'
 
+#df = datasets.daly22_full(num_cells=num_cells, freq=freq)
+df = datasets.jbd_full(num_cells=num_cells, freq='5s')
+# df = datasets.batmon(
+# ('2023-11-10T16:30:00Z', '2023-11-10T18:10:00Z'), # dalyJKBalNoise
+#    freq="5s", device='daly_bms', num_cells=num_cells,
+# )
+
+# filtering (smoothing
 # df = df.rolling(5).mean()
+df = df.rolling(2).mean()
 df = df.rolling(3).mean()
-#df = df.rolling(3).mean()
-#df = df[df.i.pct_change().abs() > 0.05]
+# df = df.rolling(5).mean()
+# df = df.rolling(3).mean()
 
-block_size = 300
+
+# masking
+# df = df[df.i.pct_change().abs() > 0.05]
+# df = df[df.i.abs() > 1]
+df[df.i.abs() < 0.5] = math.nan
+
+I = df.i
+i_mask = ((((I + 0.01).ewm(span=60).mean().pct_change() * 1e2) ** 2).ewm(span=10).mean() < 0.03) \
+    # & ((((I + 0.01).pct_change() * 1e2) ** 2).ewm(span=40).mean() < 0.02)
+# df = df[i_mask]
+# df = df[df.i < -1]
+# df.loc[~i_mask, 'i'] = math.nan
+
+block_size = 1200
 # block_size = 300
 
 df = df.iloc[:len(df) - len(df) % block_size]
 
-cv = df.loc[:, tuple(str(ci) for ci in range(num_cells))]
-df.loc[:, 'cv_max'] = cv.max(axis=1)
-df.loc[:, 'cv_min'] = cv.min(axis=1)
+
+# cv = df.loc[:, tuple(str(ci) for ci in range(num_cells))]
+# df.loc[:, 'cv_max'] = cv.max(axis=1)
+# df.loc[:, 'cv_min'] = cv.min(axis=1)
+
+
+def check_constraints(b):
+    if "u" not in b:
+        return False
+    u_max, u_min = b.u.max(), b.u.min()
+
+    if u_max - u_min < 10 or u_max - u_min > 500:
+        return False
+        # raise ValueError("u range too small")
+
+    if u_min < 2700:
+        return False
+        # raise ValueError("u min too small")
+
+    if u_max > 3500:
+        return False
+        # raise ValueError("u max too large")
+
+    return True
 
 
 for ci in range(num_cells):
@@ -56,7 +98,7 @@ for ci in range(num_cells):
 
     if ci == 0:
         fig, ax = plt.subplots(4, 1)
-        dfr = df.resample("2min").mean()
+        dfr = df.asfreq("15min")
         ax[0].step(dfr.index, dfr.u, where='post', label='U', marker='.')
         # ax[0].set_xlim((2, 100))
 
@@ -82,19 +124,19 @@ for ci in range(num_cells):
     blocks = [df.iloc[i: i + block_size] for i in range(0, len(df), step)]
 
     results = []
+    ok = 0
 
     for b in blocks:
         t = b.index[-1]
 
-        if b.u.max() > 3500 or b.u.min() < 2700:
-            #if b.cv_max.max() > 3500 or b.cv_min.min() < 2700:
-            # skip almost full or empty (LiFePo4)
+        if not check_constraints(b):
             results.append((t, math.nan, math.nan))
             continue
 
         try:
-            r, u0 = tools.impedance.ac_impedance.estimate(b.u, b.i)
+            r, u0 = tools.impedance.ac_impedance.estimate(b.u, b.i, ignore_nan=True)
             results.append((t, r, u0))
+            ok += 1
         except Exception as e:
             results.append((t, math.nan, math.nan))
             # print('error %s at block %s' % (e, t))
@@ -104,14 +146,23 @@ for ci in range(num_cells):
     results.set_index("time", inplace=True)
     # results.drop(columns="time", inplace=True)
     # print(results)
-    print('cell', ci, "have estimate for %d/%d blocks" % (len(results), len(blocks)))
+    print('cell', ci, "have estimate for %d/%d blocks" % (ok, len(blocks)))
     # results.r.plot(label='c%d R(q25)=%.2f' % (ci, results.r.quantile(.25)))
 
     if ci == 0:
         plt.step(results.r.index, results.r.values, where='post', marker='.', alpha=.1, label='R(c%d) raw' % (ci))
 
-    fl = int(len(results) / 60)
-    plt.step(results.r.index, results.r.ffill(limit=3).rolling(fl).median().rolling(fl * 2).mean().values, where='post', marker='.',
+    # fl = int(400)  # len(results) / 400)
+    nday = 3600 * 24 / (pd.to_timedelta(freq).total_seconds() * step)
+    curve = (results.r
+             .ffill(limit=4)  # int(nday / 4 + 1))
+             .rolling(int(nday * 3), min_periods=int(nday * 2)).median()
+             .rolling(int(nday * 3), min_periods=int(nday * 1)).mean()
+             )
+    curve = curve.ffill()
+    plt.step(curve.index,
+             curve.values, where='post',
+             marker='.',
              label='R(c%d) med=%.2f Q25=%.2f' % (ci, results.r.median(), results.r.quantile(.25)))
 
     cell_results[ci] = results
@@ -123,9 +174,11 @@ plt.ylim((0, 6))
 plt.grid()
 plt.show()
 
-for ci, results in cell_results.items():
-    plt.hist(results.r, bins=30, range=(results.r.quantile(.2), results.r.quantile(.8)), alpha=0.5, label='c%i' % ci)
+if False:  # show hist
+    for ci, results in cell_results.items():
+        plt.hist(results.r, bins=30, range=(results.r.quantile(.2), results.r.quantile(.8)), alpha=0.5,
+                 label='c%i' % ci)
 
-plt.legend()
-plt.grid()
-plt.show()
+    plt.legend()
+    plt.grid()
+    plt.show()

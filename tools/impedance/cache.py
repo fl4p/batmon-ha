@@ -127,7 +127,7 @@ def disk_cache_deco(ignore_kwargs=None):
         # noinspection PyBroadException
         @wraps(target)
         def _fallback_cache_wrapper(*args, **kwargs):
-            kwargs_cache = {k: v for k, v in kwargs.items() if k not in ignore_kwargs}
+            kwargs_cache = {k: v for k, v in kwargs.items() if k not in ignore_kwargs and v is not None}
             k0, k1 = ckh(args, kwargs_cache)
             cache_key_str = '/'.join([mod.__name__, target.__name__ + "__" + k0, k1])
 
