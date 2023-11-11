@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import queue
+import statistics
 import sys
 import time
 from typing import List, Dict
@@ -56,6 +57,11 @@ class InfluxDBSink(BmsSampleSink):
 
         fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
                   voltages[i] != last_volt[i]}
+
+        fields["voltage_cell_max"] = int(max(voltages))
+        fields["voltage_cell_min"] = int(min(voltages))
+        fields["voltage_cell_mean"] = float(statistics.mean(voltages))
+        fields["voltage_cell_median"] = float(statistics.median(voltages))
 
         if fields:
             point = {
