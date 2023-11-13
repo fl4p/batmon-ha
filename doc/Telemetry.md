@@ -19,7 +19,7 @@ We live in times of data collection and privacy became scarce. I highly respect 
 * temperatures
 * num cycles
 * bms model name
-* anonymized MAC address
+* anonymized (through sha1 hash) MAC address 
 
 
 When you disable telemetry batmon will stop sending any more data. Samples it has sent will not be deleted automatically.

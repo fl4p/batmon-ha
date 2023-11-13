@@ -117,6 +117,7 @@ peaks, leading to even greater error.
 * Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon
   on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
 * When experiencing unstable connection enable `keep_alive`
+* `TimeoutError: timeout waiting`: put BT devices closer, disable inverters and other EMI sources
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Toggle `install_newer_bleak` option

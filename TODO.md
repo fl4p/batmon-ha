@@ -1,3 +1,4 @@
+* track emptiest cell
 * always install newer bleak. if need to pair, install old bleak
 * Batmon show pw in logs
 * batmon set soc

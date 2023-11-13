@@ -82,6 +82,7 @@
 
 * Weird SoC computation at certain voltage levels (which doesn't really work)
 * Buggy android app
+* Good current sensor, proper aliasing filter for inverter current (100 Hz)
 
 # My Recommandation
 
