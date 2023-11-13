@@ -17,7 +17,12 @@ num_cells = 8
 freq = '5s'
 
 #df = datasets.daly22_full(num_cells=num_cells, freq=freq)
-df = datasets.jbd_full(num_cells=num_cells, freq='5s')
+
+#df = datasets.jbd_full(num_cells=num_cells, freq=freq)
+#df = df["2022-11-01":]
+
+df = datasets.jk_full(num_cells=num_cells, freq=freq)
+
 # df = datasets.batmon(
 # ('2023-11-10T16:30:00Z', '2023-11-10T18:10:00Z'), # dalyJKBalNoise
 #    freq="5s", device='daly_bms', num_cells=num_cells,

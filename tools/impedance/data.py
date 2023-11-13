@@ -6,7 +6,7 @@ import pandas as pd
 import pytz
 from dateutil.tz import tzutc
 
-from tools.impedance.cache import disk_cache_deco
+from bmslib.cache.disk import disk_cache_deco
 
 
 def to_utc(t, **kwargs) -> pd.Timestamp:
@@ -23,24 +23,30 @@ def ql_time_range(time_range, freq=None):
     time_range = list(map(to_utc, time_range))
     if freq is not None:
         time_range = list(map(lambda t: t - pd.to_timedelta(freq), time_range))
+    assert time_range[0] <= time_range[1]
     return " (time >= '%s' and time < '%s') " % (time_range[0].isoformat(), time_range[1].isoformat())
 
     # noinspection SqlDialectInspection
 
 
 @disk_cache_deco()
-def fetch_influxdb_ha(measurement, time_range, entity_id):
+def fetch_influxdb_ha(measurement, time_range, entity_id, freq=None):
     with open('influxdb_ha.json') as fp:
         influxdb_client = influxdb.InfluxDBClient(**{k[9:]: v for k, v in json.load(fp).items()})
 
     # print(influxdb_client.get_list_measurements())
 
     q = """
-         SELECT value as v FROM "home_assistant"."autogen"."%(measurement)s"
-         WHERE %(tr)s and "entity_id" = '%(entity_id)s' """ % (dict(
+         SELECT %(agg)s(value) as v FROM "home_assistant"."autogen"."%(measurement)s"
+         WHERE %(tr)s and "entity_id" = '%(entity_id)s' 
+         %(group_by)s
+         """ % (dict(
+        agg='mean' if freq else '',
+        group_by=f"GROUP BY time({freq})" if freq else "",
         measurement=measurement,
         tr=ql_time_range(time_range),
         entity_id=entity_id,
+
     ))
     print(q.replace('\n', ' ').strip(), '...')
     r = influxdb_client.query(q)
@@ -56,12 +62,14 @@ def fetch_influxdb_ha(measurement, time_range, entity_id):
 
 
 def fetch_batmon_ha_sensors(tr, alias, num_cells, freq='1s'):
-    i = fetch_influxdb_ha("A", tr, alias + "_soc_current").v.rename('i')
-    soc = fetch_influxdb_ha("%", tr, alias + "_soc_soc_percent").v.rename('soc')
-    temp1 = fetch_influxdb_ha("°C", tr, alias + "_temperatures_1").v.rename('temp0')
-    temp2 = fetch_influxdb_ha("°C", tr, alias + "_temperatures_2").v.rename('temp1')
+    # f = None
+    f = freq
+    i = fetch_influxdb_ha("A", tr, alias + "_soc_current", freq=f ).v.rename('i')
+    soc = fetch_influxdb_ha("%", tr, alias + "_soc_soc_percent", freq=f).v.rename('soc')
+    temp1 = fetch_influxdb_ha("°C", tr, alias + "_temperatures_1", freq=f).v.rename('temp0')
+    temp2 = fetch_influxdb_ha("°C", tr, alias + "_temperatures_2", freq=f).v.rename('temp1')
     u = [
-        fetch_influxdb_ha("V", tr, alias + "_cell_voltages_%i" % (1 + ci)).v.rename(str(ci)) * 1e3  # rename(dict(v=ci))
+        fetch_influxdb_ha("V", tr, alias + "_cell_voltages_%i" % (1 + ci), freq=f).v.rename(str(ci)) * 1e3  # rename(dict(v=ci))
         for ci in range(num_cells)
     ]
     print("joining..")
