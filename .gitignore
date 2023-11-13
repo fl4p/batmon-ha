@@ -11,3 +11,5 @@ bms_meter_states.json
 tools/impedance/influxdb_*.json
 
 user_id
+
+*.pickle
