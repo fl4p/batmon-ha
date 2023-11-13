@@ -52,6 +52,8 @@ class JKBt(BtBms):
 
     TIMEOUT = 8
 
+    SOC_NOT_FULL_YET = 99.0  # when the gauge reaches 100% but no OV yet
+
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         if kwargs.get('psk'):

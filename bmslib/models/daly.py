@@ -53,6 +53,8 @@ def daly_command_message(command: int, extra=""):
 class DalyBt(BtBms):
     TIMEOUT = 12
 
+    SOC_NOT_FULL_YET = 99.1  # when the gauge reaches 100% but no OV yet
+
     def __init__(self, address, **kwargs):
         if kwargs.get('psk'):
             self.logger.warning('JBD usually does not use a pairing PIN')
