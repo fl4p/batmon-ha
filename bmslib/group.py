@@ -96,6 +96,9 @@ class VirtualGroupBms:
 
         raise GroupNotReady("group %s waiting for member data %s" % (self.name, self.debug_data()))
 
+    async def disconnect(self):
+        pass
+
     async def __aenter__(self):
         await self.connect()
 

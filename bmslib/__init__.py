@@ -74,6 +74,9 @@ class FuturesPool:
             tasks = [self.wait_for(n, timeout) for n in name]
             return await asyncio.gather(*tasks, return_exceptions=False)
 
+        if name not in self._futures:
+            raise KeyError('future %s not found' % name)
+
         try:
             return await asyncio.wait_for(self._futures.get(name), timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError):

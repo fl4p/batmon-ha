@@ -344,7 +344,7 @@ class BtBms:
 
     def set_keep_alive(self, keep):
         if keep:
-            self.logger.info("BMS %s keep alive enabled", self.__str__())
+            self.logger.debug("BMS %s keep alive enabled", self.__str__())
         self.keep_alive = keep
 
     def debug_data(self):

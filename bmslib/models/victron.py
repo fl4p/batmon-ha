@@ -51,7 +51,7 @@ class SmartShuntBt(BtBms):
     TIMEOUT = 8
 
     def __init__(self, address, **kwargs):
-        super().__init__(address, **kwargs)
+        super().__init__(address, _uses_pin=True, **kwargs)
         self._keep_alive_task: Optional[asyncio.Task] = None
         self._values = {}
         self._values_t = {k: 0 for k in VICTRON_CHARACTERISTICS.keys()}

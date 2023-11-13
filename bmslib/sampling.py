@@ -111,7 +111,7 @@ class BmsSampler:
 
         was_connected = bms.is_connected
 
-        if not was_connected:
+        if not was_connected and not bms.is_virtual:
             logger.info('connecting bms %s', bms)
 
         t_conn = time.time()
