@@ -1,9 +1,11 @@
 import json
+import os
 import re
 from os import access, R_OK
 from os.path import isfile
 from threading import Lock
 
+from bmslib.cache import random_str
 from bmslib.util import dotdict, get_logger
 
 logger = get_logger()
@@ -32,8 +34,10 @@ def load_meter_states():
 
 def store_meter_states(meter_states):
     with lock:
-        with open(bms_meter_states_fn, 'w') as f:
+        s = f'.{random_str(6)}.tmp'
+        with open(bms_meter_states_fn + s, 'w') as f:
             json.dump(meter_states, f, indent=2)
+        os.replace(bms_meter_states_fn + s, bms_meter_states_fn)
 
 
 def store_algorithm_state(bms_name, algorithm_name, state=None):
