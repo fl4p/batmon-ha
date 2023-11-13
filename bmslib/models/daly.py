@@ -1,6 +1,9 @@
 """
 
 References
+[uart v1.0 pdf](https://diysolarforum.com/resources/daly-smart-bms-manual-and-documentation.48/download
+[uart v1.2 pdf](https://forums.ni.com/t5/LabVIEW/RS-485-Modbus-communication-of-daly-BMS/m-p/4286648#M1250877
+
 https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py
 https://github.com/esphome/esphome/tree/dev/esphome/components/daly_bms
 
@@ -17,6 +20,7 @@ from typing import Dict
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms, enumerate_services
+from bmslib.cache.mem import mem_cache_deco
 
 
 def calc_crc(message_bytes):
@@ -33,9 +37,12 @@ def daly_command_message(command: int, extra=""):
     """
     # 95 -> a58095080000000000000000c2
 
+    assert isinstance(command, int)
+
     address = 8  # 4 = USB, 8 = Bluetooth
 
     message = "a5%i0%02x08%s" % (address, command, extra)
+    #          "a5%i0%s  08%s"
     message = message.ljust(24, "0")
     message_bytes = bytearray.fromhex(message)
     message_bytes.append(calc_crc(message_bytes))
@@ -81,7 +88,6 @@ class DalyBt(BtBms):
             if check_comp != check_expect:
                 self.logger.warning("checksum fail, expected %s, got %s. %s", check_expect, check_comp, response_bytes)
                 continue
-
 
             # buffer for multi-response commands
             buf = self._fetch_nr.get(command, None)
@@ -191,6 +197,7 @@ class DalyBt(BtBms):
 
         return sample
 
+    @mem_cache_deco(ttl=30)
     async def _fetch_status(self):
         response_data = await self._q(0x93)
 
@@ -276,8 +283,12 @@ async def main():
 
     bms = DalyBt(mac_address, name="daly")
     await bms.connect()
+    s = await bms.fetch()
+    print(s)
     sample = await bms.fetch_voltages(num_cells=8)
     print(sample)
+    await bms.fetch()
+    await bms.set_switch("discharge", True)
     await bms.disconnect()
 
 
