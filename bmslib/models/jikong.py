@@ -236,6 +236,9 @@ class JKBt(BtBms):
             with await self._fetch_futures.acquire_timeout(0x02, timeout=self.TIMEOUT / 2):
                 await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
 
+        if 0x01 not in self._resp_table:
+            await self._q(cmd=0x96, resp=0x01)  # query settings
+
         buf, t_buf = self._resp_table[0x02]
         return self._decode_sample(buf, t_buf)
 
@@ -261,9 +264,10 @@ class JKBt(BtBms):
             balance=0x1F
         )
         await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
-        self._resp_table.pop(0x01, None)  # switch states are stored in settings frame
-        await asyncio.sleep(0.2)  # not sure if this is needed
-        await self._q(cmd=0x96, resp=0x01)  # query settings
+        await asyncio.sleep(.2) # wait a bit before triggering settings fetch
+        self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
+        #await asyncio.sleep(0.2)  # not sure if this is needed
+
 
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
