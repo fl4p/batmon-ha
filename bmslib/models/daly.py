@@ -141,7 +141,7 @@ class DalyBt(BtBms):
         else:
             self._fetch_nr.pop(command, None)
 
-        with self._fetch_futures.acquire(command):
+        with await self._fetch_futures.acquire_timeout(command, timeout=self.TIMEOUT/2):
             self.logger.debug("daly send: %s", msg)
             await self.client.write_gatt_char(self.UUID_TX, msg)
 

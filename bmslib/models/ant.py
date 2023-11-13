@@ -112,7 +112,7 @@ class AntBt(BtBms):
         await super().disconnect()
 
     async def _q(self, cmd: AntCommandFuncs, addr, val, resp_code):
-        with self._fetch_futures.acquire(resp_code):
+        with await self._fetch_futures.acquire_timeout(resp_code, timeout=self.TIMEOUT/2):
             await self.client.write_gatt_char(self.CHAR_UUID, data=_ant_command(cmd, addr, val))
             return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
 
