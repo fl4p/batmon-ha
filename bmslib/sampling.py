@@ -180,6 +180,9 @@ class BmsSampler:
                     subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                        switches=sample.switches.keys())
 
+                if self.sinks and not sample.temperatures:
+                    sample.temperatures = await bms.fetch_temperatures()
+
                 for sink in self.sinks:
                     try:
                         sink.publish_sample(bms.name, sample)
