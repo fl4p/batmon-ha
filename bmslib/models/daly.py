@@ -69,7 +69,7 @@ class DalyBt(BtBms):
     async def get_states_cached(self, key):
         if not self._states:
             self._states = await self.fetch_states()
-            self.logger.info('got daly states: %s', self._states)
+            self.logger.debug('got daly states: %s', self._states)
         return self._states.get(key)
 
     def _notification_callback(self, _sender, data):
@@ -80,6 +80,10 @@ class DalyBt(BtBms):
 
         for response_bytes in responses:
             self.logger.debug('daly resp: %s', response_bytes)
+
+            if len(response_bytes) < RESP_LEN:
+                self.logger.warning("msg too short: %s", response_bytes)
+                continue
 
             check_comp = calc_crc(response_bytes[0:12])
             check_expect = response_bytes[12]
@@ -127,7 +131,7 @@ class DalyBt(BtBms):
                 await self.client.write_gatt_char(sx, bytearray(b""))
                 self.UUID_RX = rx
                 self.UUID_TX = tx
-                self.logger.info("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
+                self.logger.debug("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
                 break
             except Exception as e:
                 self.logger.warning("tried rx/tx/sx uuids %s/%s/%s: %s", rx, tx, sx, e)

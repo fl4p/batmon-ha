@@ -102,6 +102,9 @@ class BmsSampler:
         except SampleExpiredError as e:
             logger.warning("Expired: %s", e)
             raise
+        except bleak.exc.BleakDeviceNotFoundError:
+            logger.error("%s device not found", self.bms)
+            pass
         except Exception:
             dd = self.bms.debug_data()
             if dd:
@@ -197,11 +200,11 @@ class BmsSampler:
 
                 self.downsampler += sample
 
-                publish_discovery = (t_now - self._t_discovery) >= 120
+                publish_discovery = (t_now - self._t_discovery) >= (60 * 10)
                 if publish_discovery:
                     self._t_discovery = t_now
 
-                log_data = (t_now - self._last_time_log_data) >= 30 or bms.verbose_log
+                log_data = (t_now - self._last_time_log_data) >= 60 or bms.verbose_log
                 if log_data:
                     self._last_time_log_data = t_now
 
@@ -266,7 +269,8 @@ class BmsSampler:
             logger.error('%s group not ready: %s', bms.name, ex)
             return
         except Exception as ex:
-            logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)), exc_info=1)
+            logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)),
+                         exc_info=not isinstance(ex, bleak.exc.BleakDeviceNotFoundError))
 
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
             if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
@@ -278,8 +282,9 @@ class BmsSampler:
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
         dt_max = max(dt_conn, dt_fetch)
-        if bms.verbose_log or dt_max > 1 or (
-                dt_max > 0.01 and random.random() < 0.1 and not bms.is_virtual and log_data):
+        if bms.verbose_log or (  # or dt_max > 1
+                dt_max > 0.01 and random.random() < (0.05 if sample.num_samples < 1e3 else 0.01)
+                and not bms.is_virtual and log_data):
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
     def publish_meters(self):
