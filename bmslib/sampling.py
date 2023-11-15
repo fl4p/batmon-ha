@@ -6,11 +6,13 @@ import math
 from copy import copy
 from typing import Optional, List, Dict
 
+import bleak.exc
 import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
+from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum
 from bmslib.util import get_logger
@@ -114,6 +116,13 @@ class BmsSampler:
             logger.info('Bleak version %s', bmslib.bt.bleak_version())
             raise
 
+    @mem_cache_deco(ttl=8)
+    async def _fetch_temperatures_cached(self):
+        try:
+            return await self.bms.fetch_temperatures()
+        except:
+            return None
+
     async def sample(self):
         bms = self.bms
         mqtt_client = self.mqtt_client
@@ -146,6 +155,8 @@ class BmsSampler:
                     # logger.warning('%s expired sample', bms.name)
                     # return
 
+                sample.num_samples = self.num_samples
+
                 if self.current_calibration_factor and self.current_calibration_factor != 1:
                     sample = sample.multiply_current(self.current_calibration_factor)
 
@@ -153,12 +164,15 @@ class BmsSampler:
                 self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
                 self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)  # kWh
 
+                if (self.sinks or self.bms_group) and not sample.temperatures:
+                    sample.temperatures = await self._fetch_temperatures_cached()
+
                 if self.bms_group:
+                    # update before invert current
                     self.bms_group.update(bms, sample)
 
                 if self.invert_current:
                     sample = sample.invert_current()
-                sample.num_samples = self.num_samples
 
                 self.current_integrator += (t_hour, sample.current)  # Ah
                 self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
@@ -188,9 +202,6 @@ class BmsSampler:
                     logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
                     subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                        switches=sample.switches.keys())
-
-                if self.sinks and not sample.temperatures:
-                    sample.temperatures = await bms.fetch_temperatures()
 
                 for sink in self.sinks:
                     try:
@@ -241,8 +252,12 @@ class BmsSampler:
                     voltages = await cached_fetch_voltages()
                     publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
-                    temperatures = sample.temperatures or await bms.fetch_temperatures()
-                    publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix, temperatures=temperatures)
+                    temperatures = sample.temperatures or await self._fetch_temperatures_cached()
+
+                    if temperatures:
+                        publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix,
+                                             temperatures=temperatures)
+
                     if log_data and (voltages or temperatures):
                         logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)),
                                     temperatures)
