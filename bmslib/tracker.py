@@ -6,6 +6,7 @@ Battery tracker:
     balance of other cells then doesn't affect back capacity
 - track capacity through current integration TODO
 - track SoC error when empty or full (TODO
+- track battery eff TODO
 
 """
 

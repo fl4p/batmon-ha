@@ -25,6 +25,8 @@ class SampleExpiredError(Exception):
 
 
 class BmsSampleSink:
+    """ Interface of an arbitrary data sink of battery samples """
+
     def publish_sample(self, bms_name: str, sample: BmsSample):
         raise NotImplementedError()
 
@@ -36,6 +38,10 @@ class BmsSampleSink:
 
 
 class BmsSampler:
+    """
+    Samples a single BMS and schedules publishing the samples to MQTT and arbitrary sinks.
+    Also updates meters.
+    """
 
     def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
                  invert_current=False, meter_state=None, publish_period=None,
@@ -303,6 +309,7 @@ class BmsSampler:
 
 
 class Downsampler:
+    """ Averages multiple BmsSamples """
 
     def __init__(self):
         self._power = 0
