@@ -29,8 +29,11 @@ from bmslib.util import get_logger, exit_process
 from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
+
 user_config: Dict[str, any] = load_user_config()
+
 shutdown = False
+t_last_store = 0
 
 
 async def fetch_loop(fn, period, max_errors):
@@ -54,9 +57,6 @@ def store_states(samplers: List[BmsSampler]):
     meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
     from bmslib.store import store_meter_states
     store_meter_states(meter_states)
-
-
-t_last_store = 0
 
 
 def bg_checks(sampler_list, timeout, t_start):
@@ -274,7 +274,8 @@ async def main():
             from bmslib.sinks import TelemetrySink
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
         except:
-            logger.error(sys.exc_info(), exc_info=True)
+            logger.warning("failed to init telemetry", exc_info=True)
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),

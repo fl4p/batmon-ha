@@ -8,6 +8,7 @@ import random
 import string
 from functools import wraps
 
+from bmslib.cache import to_hashable, random_str
 from bmslib.util import get_logger
 
 cache_dir = os.path.expanduser('~') + "/.cache/batmon"

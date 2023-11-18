@@ -400,7 +400,7 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
 
     for switch_name in switches:
         state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"
-        logger.info("subscribe %s", state_topic)
+        logger.debug("subscribe %s", state_topic)
         mqtt_client.subscribe(state_topic, qos=2)
         _switch_callbacks[state_topic] = \
             lambda msg, sn=switch_name: set_switch(sn, msg.lower() == "on")

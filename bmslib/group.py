@@ -32,12 +32,16 @@ class BmsGroup:
         return sum_parallel(self.samples.values())
 
     def fetch_voltages(self):
-        return sum((self.voltages[name] for name in self.bms_names), [])
+        try:
+            return sum((self.voltages[name] for name in self.bms_names), [])
+        except KeyError as e:
+            raise GroupNotReady(e)
 
 
 class GroupNotReady(Exception):
-    # TODO rename GroupMissingData ?
     pass
+    # TODO rename GroupMissingData ?
+
 
 
 class VirtualGroupBms:
@@ -118,11 +122,14 @@ class VirtualGroupBms:
     async def fetch_device_info(self):
         raise NotImplementedError()
 
+
 def is_finite(x):
     return x is not None and math.isfinite(x)
 
+
 def finite_or_fallback(x, fallback):
     return x if is_finite(x) else fallback
+
 
 def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(

@@ -96,7 +96,14 @@ class BmsSample:
 
     def __str__(self):
         # noinspection PyStringFormat
-        return 'BmsSampl(%(soc).1f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,Q=%(charge).0f/%(capacity).0fAh,mos=%(mos_temperature).0f°C)' % self.values()
+        s = 'BmsSampl('
+        if not math.isnan(self.soc):
+            s += '%.1f%%,' % self.soc
+        vals = self.values()
+        s += 'U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,' % vals
+        if not math.isnan(self.charge):
+            s += 'Q=%(charge).0f/%(capacity).0fAh,mos=%(mos_temperature).0f°C' % vals
+        return s.rstrip(',') + ')'
 
     def invert_current(self):
         return self.multiply_current(-1)

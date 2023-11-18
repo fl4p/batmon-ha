@@ -141,7 +141,7 @@ def hash_urlsafe(s: str):
     if not s:
         return None
     sh = hashlib.sha1(s.encode("utf-8"))
-    return base64.urlsafe_b64encode(sh.digest()[1::2]).replace(b'=',b"")
+    return base64.urlsafe_b64encode(sh.digest()[1::2]).replace(b'=', b"")
 
 
 def get_user_id():

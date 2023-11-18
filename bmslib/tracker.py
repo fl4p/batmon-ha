@@ -4,9 +4,11 @@ Battery tracker:
 - detect the weakest cell:
     if same cell is empty first and full first, pack capacity is limited by this cell.
     balance of other cells then doesn't affect back capacity
+    if we found the weakest cell, we can consider the battery is balanced, as balancing would not increase available cap
 - track capacity through current integration TODO
 - track SoC error when empty or full (TODO
 - track battery eff TODO
+- estimate cell charge offset by curve fitting of voltages
 
 """
 
