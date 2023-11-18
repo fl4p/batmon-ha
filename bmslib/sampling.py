@@ -1,3 +1,4 @@
+import asyncio
 import random
 import re
 import sys
@@ -68,8 +69,10 @@ class BmsSampler:
 
         self._t_pub = 0
         self._t_wd_reset = time.time()  # watchdog
-        self._last_time_log_data = 0
+        self._last_time_log = 0
         self._t_discovery = 0
+        self._time_next_retry = 0
+        self._num_errors = 0
 
         self.algorithm = None
         if algorithms:
@@ -99,42 +102,64 @@ class BmsSampler:
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
 
     async def __call__(self):
+        self._num_errors += 1
         try:
-            return await self.sample()
+            s = await self._sample_inner()
+            if s:
+                self._num_errors = 0
+            return s
+        except bleak.exc.BleakDeviceNotFoundError:
+            t_wait = min(1.5 ** self._num_errors, 120)
+            logger.error("%s device not found, retry in %d seconds", self.bms, t_wait)
+            self._time_next_retry = time.time() + t_wait
+            return None
+
         except SampleExpiredError as e:
             logger.warning("Expired: %s", e)
-            raise
-        except bleak.exc.BleakDeviceNotFoundError:
-            logger.error("%s device not found", self.bms)
-            pass
-        except Exception:
+            return None
+
+        except GroupNotReady as e:
+            logger.warning("%s Group not ready: %s", self.bms.name, e)
+            return None
+
+        except Exception as ex:
+            logger.error('%s error: %s', self.bms.name, str(ex) or str(type(ex)), exc_info=1)
             dd = self.bms.debug_data()
-            if dd:
-                logger.info("%s bms debug data: %s", self.bms.name, dd)
-            if self.device_info:
-                logger.info('%s device info: %s', self.bms.name, self.device_info)
+            dd and logger.info("%s bms debug data: %s", self.bms.name, dd)
+            self.device_info and logger.info('%s device info: %s', self.bms.name, self.device_info)
             logger.info('Bleak version %s', bmslib.bt.bleak_version())
+
+            bms = self.bms
+            t_interact = max(self._t_wd_reset, self.bms.connect_time)
+            if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
+                logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
+                await bms.disconnect()
+
             raise
 
-    @mem_cache_deco(ttl=8)
+    @mem_cache_deco(ttl=30)
     async def _fetch_temperatures_cached(self):
         try:
             return await self.bms.fetch_temperatures()
         except:
             return None
 
-    async def sample(self):
+    async def _sample_inner(self):
         bms = self.bms
         mqtt_client = self.mqtt_client
 
         was_connected = bms.is_connected
 
+        t_conn = time.time()
+
+        if not was_connected and t_conn < self._time_next_retry:
+            logger.debug('retry in %.0f sec', self._time_next_retry - t_conn)
+            await asyncio.sleep(4)
+            return None
+
         if not was_connected and not bms.is_virtual:
             logger.info('connecting bms %s', bms)
 
-        t_conn = time.time()
-
-        try:
             async with bms:
                 if not was_connected:
                     logger.info('connected bms %s!', bms)
@@ -215,9 +240,9 @@ class BmsSampler:
                 if publish_discovery:
                     self._t_discovery = t_now
 
-                log_data = (t_now - self._last_time_log_data) >= 60 or bms.verbose_log
+                log_data = (t_now - self._last_time_log) >= (60 if self.num_samples < 1000 else 300) or bms.verbose_log
                 if log_data:
-                    self._last_time_log_data = t_now
+                    self._last_time_log = t_now
 
                 voltages = []
 
@@ -258,7 +283,7 @@ class BmsSampler:
                         publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix,
                                              temperatures=temperatures)
 
-                    if log_data and (voltages or temperatures):
+                    if log_data and (voltages or temperatures) and not bms.is_virtual:
                         logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)),
                                     temperatures)
 
@@ -279,20 +304,6 @@ class BmsSampler:
                 self.num_samples += 1
                 t_disc = time.time()
                 self._t_wd_reset = t_disc
-
-        except GroupNotReady as ex:
-            logger.error('%s group not ready: %s', bms.name, ex)
-            return
-        except Exception as ex:
-            logger.error('%s error: %s', bms.name, str(ex) or str(type(ex)),
-                         exc_info=not isinstance(ex, bleak.exc.BleakDeviceNotFoundError))
-
-            t_interact = max(self._t_wd_reset, self.bms.connect_time)
-            if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
-                logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
-                await bms.disconnect()
-
-            raise
 
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
