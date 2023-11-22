@@ -42,6 +42,7 @@ class InfluxDBSink(BmsSampleSink):
         self.time_last_flush = 0
         self._last_volt: Dict[str, List[int]] = {}
         self.flush_interval = flush_interval
+        self.silent = False
 
         if not kwargs.get('verify_ssl', False):
             import urllib3
@@ -126,8 +127,8 @@ class InfluxDBSink(BmsSampleSink):
                 res = self.influxdb_client.write_points(batch, time_precision='ms')
             except:
                 res = False
-                logger.error(sys.exc_info(), exc_info=True)
-            if not res:
+                not self.silent and logger.error(sys.exc_info(), exc_info=True)
+            if not res and not self.silent:
                 logger.error('Failed to write points to influxdb')
             self.time_last_flush = time.time()
 
@@ -184,11 +185,15 @@ class TelemetrySink(InfluxDBSink):
         self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
 
         logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.addrh_by_name)
+        self.silent = True
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
         tags_ = dict(uid=self.uid, did=self.did)
         tags and tags_.update(tags)
-        super().publish_sample(self.addrh_by_name[bms_name], sample, tags=tags_)
+        try:
+            super().publish_sample(self.addrh_by_name[bms_name], sample, tags=tags_)
+        except:
+            pass
 
     def publish_voltages(self, bms_name, voltages: List[int]):
         # tags_ = dict(uid=self.uid, did=self.did)

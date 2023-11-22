@@ -1,6 +1,8 @@
 """
  JK, jikong
 
+Manual
+https://github.com/NEEY-electronic/JK/blob/JK-BMS/JKBMS%20INSTRUCTION.pdf
 
 https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 https://github.com/jblance/jkbms

@@ -1,9 +1,9 @@
 import asyncio
+import math
 import random
 import re
 import sys
 import time
-import math
 from copy import copy
 from typing import Optional, List, Dict
 
@@ -59,7 +59,7 @@ class BmsSampler:
         self.expire_after_seconds = expire_after_seconds
         self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
-        self.publish_period = publish_period
+        self.publish_period = publish_period or 0
         self.bms_group = bms_group  # group, virtual, parent
         self.current_calibration_factor = current_calibration_factor
 
@@ -123,7 +123,7 @@ class BmsSampler:
             return None
 
         except Exception as ex:
-            logger.error('%s error: %s', self.bms.name, str(ex) or str(type(ex)), exc_info=1)
+            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)), exc_info=1)
             dd = self.bms.debug_data()
             dd and logger.info("%s bms debug data: %s", self.bms.name, dd)
             self.device_info and logger.info('%s device info: %s', self.bms.name, self.device_info)

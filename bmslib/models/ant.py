@@ -232,7 +232,8 @@ class AntBt(BtBms):
 
 
 async def main():
-    mac_address = '9AA68C04-9C48-4FAD-7798-13ABB4878996'
+    # mac_address = '9AA68C04-9C48-4FAD-7798-13ABB4878996'
+    mac_address = '08E27970-3DA3-65C0-05E4-B1A8482449C5'
 
     # print(to_hex_str(_ant_command(AntCommandFuncs.DeviceInfo, 0x026c, 0x20)))
 
