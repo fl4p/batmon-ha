@@ -40,8 +40,8 @@ async def fetch_loop(fn, period, max_errors):
     num_errors_row = 0
     while not shutdown:
         try:
-            await fn()
-            num_errors_row = 0
+            if await fn():
+                num_errors_row = 0
         except Exception as e:
             num_errors_row += 1
             logger.error('Error (num %d, max %d) reading BMS: %s', num_errors_row, max_errors, e)
@@ -120,7 +120,7 @@ async def main():
     global shutdown
 
     bms_list: List[bmslib.bt.BtBms] = []
-    extra_tasks = []
+    extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
 
     if user_config.get('bt_power_cycle'):
         try:
