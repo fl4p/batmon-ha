@@ -36,4 +36,7 @@ logger.info('influxdb installed=%s need=%s', influxdb_installed, need_influxdb)
 p = subprocess.Popen(["pip3"] + args, stdout=sys.stdout, stderr=sys.stderr)  # , stdout=subprocess.PIPE)
 p.wait(timeout=120)
 
-sys.exit(p.returncode)
+#sys.exit(p.returncode)
+
+# we continue to run the add-on even if pip command fails
+sys.exit(0)
