@@ -382,6 +382,7 @@ def on_exit(*args, **kwargs):
     global shutdown
     logger.info('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
     shutdown += 1
+    bmslib.bt.BtBms.shutdown = True
     if shutdown == 5:
         sys.exit(1)
 

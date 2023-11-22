@@ -62,6 +62,8 @@ def bt_power(on):
 
 
 class BtBms:
+    shutdown = False
+
     def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False,
                  _uses_pin=False):
         self.address = address
@@ -171,6 +173,9 @@ class BtBms:
             self.logger.warning('error clearing futures pool: %s', str(e) or type(e))
 
     async def _connect_client(self, timeout):
+        if BtBms.shutdown:
+            raise RuntimeError("in shutdown")
+
         if self.verbose_log:
             self.logger.info('connecting %s (%s) adapter=%s timeout=%d', self.name, self.address,
                              self._adapter or "default", timeout)
@@ -241,6 +246,9 @@ class BtBms:
         if self._pending_disconnect_call:
             self._pending_disconnect_call = False
             await self.disconnect()
+
+        if BtBms.shutdown:
+            raise RuntimeError("in shutdown")
 
         import bleak
         scanner_kw = {}
