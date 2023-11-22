@@ -15,6 +15,7 @@ B4:E8:42:C2:84:13
 
 """
 import asyncio
+import math
 import struct
 from typing import Dict
 
@@ -207,6 +208,19 @@ class DalyBt(BtBms):
     async def _fetch_status(self):
         response_data = await self._q(0x93)
 
+        # dsgOFF:
+        # bytearray(b'\x01\x01\x01]\x00\x03\xda,')    '1 1 1 5d 0 3 da 2c'
+        # bytearray(b'\x01\x01\x01k\x00\x03\xe2L')    '1 1 1 6b 0 3 e2 4c'
+        # bytearray(b'\x01\x01\x01v\x00\x03\xe3P')    '1 1 1 76 0 3 e3 50'
+        # bytearray(b'\x01\x01\x01\x80\x00\x03\xe3P')
+        # dsgON:
+        # bytearray(b'\x01\x01\x01\xca\x00\x03\xdd8') '1 1 1 ca 0 3 dd 38'
+        # bytearray(b'\x01\x01\x01\xf0\x00\x03\xdf@') '1 1 1 f0 0 3 df 40'
+        # bytearray(b'\x01\x01\x01\x15\x00\x03\xe0D') '1 1 1 15 0 3 e0 44'
+        # bytearray(b'\x01\x01\x01!\x00\x03\xe0D')
+
+        # self.logger.info(response_data)
+
         parts = struct.unpack('>b ? ? B l', response_data)
 
         if parts[0] == 0:
@@ -216,13 +230,15 @@ class DalyBt(BtBms):
         else:
             mode = "discharging"
 
-        return {
+        status = {
             "mode": mode,
             "charging_mosfet": parts[1],
-            "discharging_mosfet": parts[2],
+            "discharging_mosfet": parts[2],  # TODO this is NOT the actual switch state
             # "bms_cycles": parts[3], unstable result
             "capacity_ah": parts[4] / 1000,  # this is the current charge
         }
+        self.logger.debug("status %s", status)
+        return status
 
     async def fetch_states(self):
 
@@ -239,6 +255,14 @@ class DalyBt(BtBms):
                 break
             states[state_names[state_index]] = bool(int(bit))
             state_index += 1
+
+        # dshOFF
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdc')
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdd')
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdf')
+        # dsgON
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdf')
+        # dsg SATE not in here!
         data = {
             "num_cells": parts[0],
             "num_temps": parts[1],
@@ -247,6 +271,7 @@ class DalyBt(BtBms):
             "states": states,
             "num_cycles": parts[5],
         }
+        self.logger.debug("state %s", data)
         return data
 
     async def fetch_voltages(self, num_cells=0):
@@ -254,7 +279,7 @@ class DalyBt(BtBms):
             num_cells = await self.get_states_cached('num_cells')
             assert isinstance(num_cells, int) and 0 < num_cells <= 32, "num_cells %s outside range" % num_cells
 
-        num_resp = round(num_cells / 3 + .5)  # bms sends tuples of 3 (ceil)
+        num_resp = math.ceil(num_cells / 3)  # bms sends tuples of 3 (ceil)
         resp = await self._q(0x95, num_responses=num_resp)
         voltages = []
         for i in range(num_resp):
@@ -269,7 +294,7 @@ class DalyBt(BtBms):
             assert isinstance(num_sensors, int) and 0 < num_sensors <= 32, "num_sensors %s outside range" % num_sensors
 
         temperatures = []
-        n_resp = round(num_sensors / 7 + .5)  # bms sends tuples of 7 (ceil)
+        n_resp = math.ceil(num_sensors / 7)  # bms sends tuples of 7 (ceil)
         resp = await self._q(0x96, num_responses=n_resp)
         if n_resp == 1:
             resp = [resp]
@@ -280,7 +305,7 @@ class DalyBt(BtBms):
         return [t - 40 for t in temperatures[:num_sensors]]
 
     def debug_data(self):
-        return self._last_response
+        return dict(r=self._last_response, buf=self._fetch_nr, rx=self.UUID_RX, tx=self.UUID_TX)
 
 
 async def main():
