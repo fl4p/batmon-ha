@@ -20,6 +20,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Can write data to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
+* Short delays for responsive automation (fast load shedding)
 
 ### Supported Devices (bluetooth low energy)
 
@@ -85,7 +86,8 @@ For verbose logs of particular BMS add `debug: true`.
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
 * Set `publish_period` to a higher value than `sample_period` to throttle MQTT data, while sampling BMS for accurate
-  energy meters. On publish, samples since previous publish are averaged.
+  energy meters. On publish, samples since previous publish are averaged. Periods shorter than 2s can slow down history
+  plots in HA.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
@@ -96,7 +98,8 @@ For verbose logs of particular BMS add `debug: true`.
 ## Energy Meters
 
 Batmon implements energy metering by computing the integral of power values from the BMS with the trapezoidal rule. You
-can add theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*, see [doc/HA Energy Dashboard.md](doc/HA%20Energy%20Dashboard.md).
+can add theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*,
+see [doc/HA Energy Dashboard.md](doc/HA%20Energy%20Dashboard.md).
 
 * `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)

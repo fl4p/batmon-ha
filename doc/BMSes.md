@@ -56,12 +56,15 @@
 
 ## JK BMS
 
+* [Manual](https://github.com/NEEY-electronic/JK/blob/JK-BMS/JKBMS%20INSTRUCTION.pdf)
 * Insecure! built-in Bluetooth, PIN is validated client-side (is publicly readable in device info)
 * When UVP is reached the BMS shuts down overnight and needs an activation (i.e. some solar charger (Epever) will not
   start)
 * Poor current sensor design, "Abnormal current sensor", frequent
   interrupts https://diysolarforum.com/threads/jk-abnormal-current-sensor.42795/#post-556556, doesn't capture noisy
   current of cheap inverters
+  * "abnormal current sensor" happens when the superimposed AC current is higher than the DC part, so the total current
+    wave form crosses zero (e.g. during the day with 30 A DC solar current and an 50 Hz inverter drawing 60A DC+AC on average)
 * Weird Bluetooth implementation (Android app doesnt work?, Need to scan & retry on RPI, Apple/iOS app works)
 * https://github.com/NEEY-electronic/JK/tree/JK-BMS
 * 750 mW stand-by consumption, which is a lot (with 24V battery)

@@ -1,5 +1,12 @@
 # Stand-alone setup
 You can run the add-on without Home Assistant and without Docker.
+It works on any platform supported by bleak, that currently is:
+* Windows 10 or higher
+* Linux distributions with BlueZ >= 5.43
+* OS X/macOS via Core Bluetooth API, OS X version  >= 10.11
+
+
+
 Imagine a remote RPI sending MQTT data over WiFi. It is also useful for developing.
 You need to have python3 installed.
 
