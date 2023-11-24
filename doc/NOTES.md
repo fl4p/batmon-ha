@@ -44,3 +44,22 @@ bleak/examples/service_explorer.py
 * Device info
 * Switches
 * Voltages
+
+
+
+# Disk stats
+```cronexp
+docker stats
+iostat -m
+top
+sqllite> SELECT * FROM dbstat;
+```
+* disable unused devices
+* set recorder settings (purge interval, flush interval)
+* call service recorder.disable through auatomatin script (manually triggered)
+* disable HA bluetooth integration if not used (batmon doesnt need it as it accesses BLE adapter)
+
+
+# https://developers.home-assistant.io/docs/api/supervisor/endpoints/#service
+/core/info
+/os/info # data disk

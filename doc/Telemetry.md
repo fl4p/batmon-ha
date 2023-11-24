@@ -24,3 +24,10 @@ We live in times of data collection and privacy became scarce. I highly respect 
 
 When you disable telemetry batmon will stop sending any more data. Samples it has sent will not be deleted automatically.
 Please contact me (email address in my github profile) if you want me to delete your data.
+
+[
+
+# HA Analytics
+https://analytics.home-assistant.io/custom_integrations.json
+https://community.home-assistant.io/t/custom-integration-sonnenbatterie/181781?page=4
+https://analytics.home-assistant.io/addons.json
