@@ -7,6 +7,7 @@ import queue
 import statistics
 import sys
 import time
+import zlib
 from typing import List, Dict
 
 from bmslib.bms import BmsSample
@@ -37,6 +38,23 @@ class InfluxDBSink(BmsSampleSink):
     def __init__(self, flush_interval=2, **kwargs):
         import influxdb
         self.influxdb_client = influxdb.InfluxDBClient(**kwargs)
+
+        def _request_gzip(data, headers, **kwargs):
+            if headers is None:
+                headers = {}
+            if data:
+                headers['content-encoding'] = 'gzip'
+                compress = zlib.compressobj(wbits=16 + zlib.MAX_WBITS)
+                # n = len(data)
+                data = compress.compress(data) + compress.flush()
+                headers['Content-Length'] = str(len(data))
+                # logger.debug("comp ratio %.2f %s %s", len(data) / n, len(data), self.influxdb_client._database)
+
+            return self.influxdb_client._session.request_(data=data, headers=headers, **kwargs)
+
+        self.influxdb_client._session.request_ = self.influxdb_client._session.request
+        self.influxdb_client._session.request = _request_gzip
+
         self.Q = queue.Queue(200_000)
         self.db = kwargs.get('database')
         self.time_last_flush = 0
