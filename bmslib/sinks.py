@@ -14,7 +14,7 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 from bmslib.sampling import BmsSampleSink
 from bmslib.util import get_logger, sid_generator
-from mqtt_util import remove_none_values
+from mqtt_util import remove_none_values, remove_equal_values
 
 logger = get_logger()
 
@@ -62,11 +62,13 @@ class InfluxDBSink(BmsSampleSink):
         self.flush_interval = flush_interval
         self.silent = False
 
+        self._prev_fields = {}
+
         if not kwargs.get('verify_ssl', False):
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    def publish_voltages(self, bms_name, voltages: List[int]):
+    def publish_voltages(self, bms_name, voltages: List[int], short=False):
         if len(voltages) == 0:
             return
 
@@ -77,10 +79,11 @@ class InfluxDBSink(BmsSampleSink):
         fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
                   voltages[i] != last_volt[i]}
 
-        fields["voltage_cell_max"] = int(max(voltages))
-        fields["voltage_cell_min"] = int(min(voltages))
-        fields["voltage_cell_mean"] = float(statistics.mean(voltages))
-        fields["voltage_cell_median"] = float(statistics.median(voltages))
+        if not short:
+            fields["voltage_cell_max"] = int(max(voltages))
+            fields["voltage_cell_min"] = int(min(voltages))
+            fields["voltage_cell_mean"] = float(statistics.mean(voltages))
+            fields["voltage_cell_median"] = float(statistics.median(voltages))
 
         if fields:
             point = {
@@ -96,13 +99,14 @@ class InfluxDBSink(BmsSampleSink):
                 continue
             last_volt[i] = voltages[i]
 
-            point = {
-                "measurement": 'cells',
-                "time": datetime.datetime.utcnow(),
-                "fields": dict(voltage=int(round(voltages[i]))),
-                "tags": dict(device=bms_name, cell_index=i),
-            }
-            self.Q.put(point)
+            if not short:
+                point = {
+                    "measurement": 'cells',
+                    "time": datetime.datetime.utcnow(),
+                    "fields": dict(voltage=int(round(voltages[i]))),
+                    "tags": dict(device=bms_name, cell_index=i),
+                }
+                self.Q.put(point)
 
         self._maybe_flush()
 
@@ -112,6 +116,12 @@ class InfluxDBSink(BmsSampleSink):
         for k, v in fields.items():
             if isinstance(v, int):
                 fields[k] = float(v)
+            elif isinstance(v, float):
+                fields[k] = round(v, 2)
+        fields1 = dict(fields)
+        remove_equal_values(fields, self._prev_fields.get(bms_name))
+        self._prev_fields[bms_name] = fields1
+
         if not fields:
             return
         point = {
@@ -213,9 +223,9 @@ class TelemetrySink(InfluxDBSink):
         except:
             pass
 
-    def publish_voltages(self, bms_name, voltages: List[int]):
+    def publish_voltages(self, bms_name, voltages: List[int], short=True):
         # tags_ = dict(uid=self.uid, did=self.did)
-        super().publish_voltages(self.addrh_by_name[bms_name], voltages)
+        super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
         raise NotImplementedError()

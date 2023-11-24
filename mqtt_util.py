@@ -57,6 +57,13 @@ def remove_none_values(fields: dict):
             if not v:
                 del fields[k]
 
+def remove_equal_values(fields: dict, other:dict):
+    if not other:
+        return
+    for k in list(fields.keys()):
+        if k in other and fields[k] == other[k]:
+            del fields[k]
+
 
 def build_mqtt_hass_config_discovery(base, topic):
     # Instead of daly_bms should be here added a proper name (unique), like serial or something
