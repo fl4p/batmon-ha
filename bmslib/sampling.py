@@ -285,17 +285,19 @@ class BmsSampler:
             # if abs(z_score) > 12:
             #    logger.info('%s Power z_score %.1f (avg=%.0f std=%.2f last=%.0f)', bms.name, z_score, self.power_stats.avg.value, self.power_stats.stddev, sample.power)
 
-            PWR_CHG_REG = 25  # regularisation to suppress changes when power is low
+            PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
+            PWR_CHG_HOLD = 4
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
             if abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
-                self._t_last_power_jump = t_now
-                if (t_now - self._t_pub) < self.publish_period:
+                if bms.verbose_log or (
+                        (t_now - self._t_pub) < self.publish_period and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
                     logger.info('%s Power jump %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
+                self._t_last_power_jump = t_now
             self._last_power = sample.power
 
             if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period or \
-                    (t_now - self._t_last_power_jump) < 5:
+                    (t_now - self._t_last_power_jump) < PWR_CHG_HOLD:
                 self._t_pub = t_now
 
                 sample = self.downsampler.pop()
