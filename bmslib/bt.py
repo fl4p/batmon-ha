@@ -363,7 +363,13 @@ class BtBms:
 
 # noinspection DuplicatedCode
 async def enumerate_services(client: BleakClient, logger):
-    for service in client.services:
+    try:
+        # might raise bleak.exc.BleakError: Service Discovery has not been performed yet
+        services = client.services
+        assert services
+    except:
+        services = await client.get_services()
+    for service in services:
         logger.info(f"[Service] {service}")
         for char in service.characteristics:
             if "read" in char.properties:
