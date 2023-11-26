@@ -7,7 +7,7 @@ https://github.com/NEEY-electronic/JK/blob/JK-BMS/JKBMS%20INSTRUCTION.pdf
 https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py
 https://github.com/jblance/jkbms
 https://github.com/sshoecraft/jktool/blob/main/jk_info.c
-https://github.com/syssi/esphome-jk-bms
+https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp
 https://github.com/PurpleAlien/jk-bms_grafana
 
 
@@ -212,7 +212,7 @@ class JKBt(BtBms):
             charge=f32u(142 + offset),  # "remaining capacity"
 
             temperatures=[temp(i16(130 + offset)), temp(i16(132 + offset))],
-            mos_temperature=i16(134 + offset) / 10,
+            mos_temperature=i16((112 if is_new_11fw else 134) + offset) / 10,
             balance_current=i16(138 + offset) / 1000,
 
             # 146 charge_full (see above)
