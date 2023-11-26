@@ -27,6 +27,32 @@ class SampleExpiredError(Exception):
     pass
 
 
+class PeriodicBoolSignal:
+    def __init__(self, period):
+        self.period = period
+        self._last_t = 0
+        self.state = True
+
+    def __bool__(self):
+        return self.state
+
+    def get(self):
+        return self.state
+
+    def set_time(self, t):
+        if self._last_t == 0:
+            self._last_t = t
+
+        dt = t - self._last_t
+
+        if dt < self.period:
+            if self.state:
+                self.state = False
+        else:
+            self._last_t = t
+            self.state = True
+
+
 class BmsSampleSink:
     """ Interface of an arbitrary data sink of battery samples """
 
@@ -46,12 +72,20 @@ class BmsSampler:
     Also updates meters.
     """
 
-    def __init__(self, bms: bmslib.bt.BtBms, mqtt_client: paho.mqtt.client.Client, dt_max_seconds, expire_after_seconds,
-                 invert_current=False, meter_state=None, publish_period=None,
+    def __init__(self, bms: bmslib.bt.BtBms,
+                 mqtt_client: paho.mqtt.client.Client,
+                 dt_max_seconds,
+                 expire_after_seconds,
+                 invert_current=False,
+                 meter_state=None,
+                 publish_period=None,
                  sinks: Optional[List[BmsSampleSink]] = None,
                  algorithms: Optional[list] = None,
                  current_calibration_factor=1.0,
-                 bms_group: Optional[BmsGroup] = None):
+                 over_power=None,
+                 bms_group: Optional[BmsGroup] = None
+                 ):
+
         self.bms = bms
         self.mqtt_topic_prefix = re.sub(r'[^\w_.-]', '_', bms.name)
         self.mqtt_client = mqtt_client
@@ -59,20 +93,26 @@ class BmsSampler:
         self.expire_after_seconds = expire_after_seconds
         self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
-        self.publish_period = publish_period or 0
         self.bms_group = bms_group  # group, virtual, parent
         self.current_calibration_factor = current_calibration_factor
+        self.over_power = over_power or math.nan
 
         self.sinks = sinks or []
 
         self.downsampler = Downsampler()
 
-        self._t_pub = 0
+        self.period_pub = PeriodicBoolSignal(period=publish_period or 0)
+        self.period_discov = PeriodicBoolSignal(60 * 5)
+        self.period_30s = PeriodicBoolSignal(period=30)
+
         self._t_wd_reset = time.time()  # watchdog
         self._last_time_log = 0
-        self._t_discovery = 0
-        self._time_next_retry = 0
+
+        self._last_power = 0
+        self._t_last_power_jump = 0
+
         self._num_errors = 0
+        self._time_next_retry = 0
 
         self.algorithm = None
         if algorithms:
@@ -99,8 +139,6 @@ class BmsSampler:
                 meter.restore(meter_state[meter.name]['reading'])
 
         # self.power_stats = EWM(span=120, std_regularisation=0.1)
-        self._last_power = 0
-        self._t_last_power_jump = 0
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
@@ -249,10 +287,6 @@ class BmsSampler:
 
             self.downsampler += sample
 
-            publish_discovery = (t_now - self._t_discovery) >= (60 * 10)
-            if publish_discovery:
-                self._t_discovery = t_now
-
             log_data = (t_now - self._last_time_log) >= (60 if self.num_samples < 1000 else 300) or bms.verbose_log
             if log_data:
                 self._last_time_log = t_now
@@ -290,14 +324,15 @@ class BmsSampler:
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
             if abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
                 if bms.verbose_log or (
-                        (t_now - self._t_pub) < self.publish_period and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
+                        not self.period_pub and (
+                        t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
                     logger.info('%s Power jump %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
                 self._t_last_power_jump = t_now
             self._last_power = sample.power
 
-            if publish_discovery or not self.publish_period or (t_now - self._t_pub) >= self.publish_period or \
-                    (t_now - self._t_last_power_jump) < PWR_CHG_HOLD:
+            if self.period_discov or self.period_pub or \
+                (t_now - self._t_last_power_jump) < PWR_CHG_HOLD or abs(sample.power) > self.over_power:
                 self._t_pub = t_now
 
                 sample = self.downsampler.pop()
@@ -305,7 +340,8 @@ class BmsSampler:
                 publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
                 log_data and logger.info('%s: %s', bms.name, sample)
 
-                self.publish_meters()
+                if self.period_30s:
+                    self.publish_meters()
 
                 voltages = await cached_fetch_voltages()
                 publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
@@ -321,7 +357,7 @@ class BmsSampler:
                                 temperatures)
 
             # publish home assistant discovery every 60 samples
-            if publish_discovery:
+            if self.period_discov:
                 logger.info("Sending HA discovery for %s (num_samples=%d)", bms.name, self.num_samples)
                 if self.device_info is None:
                     await self._try_fetch_device_info()
@@ -335,13 +371,17 @@ class BmsSampler:
                 )
 
                 # publish sample again after discovery
-                if self.publish_period > 2:
+                if self.period_pub.period > 2:
                     await asyncio.sleep(1)
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
 
         self.num_samples += 1
         t_disc = time.time()
         self._t_wd_reset = t_disc
+
+        self.period_pub.set_time(t_now)
+        self.period_30s.set_time(t_now)
+        self.period_discov.set_time(t_now)
 
         dt_conn = t_fetch - t_conn
         dt_fetch = t_disc - t_fetch
