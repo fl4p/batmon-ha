@@ -94,8 +94,8 @@ def background_thread(timeout: float, sampler_list: List[BmsSampler]):
             break
         time.sleep(4)
     logger.info("Background thread ends. shutdown=%s", shutdown)
-    time.sleep(3)
-    logger.info("Process still alive, kill")
+    time.sleep(10)
+    logger.info("Process still alive, suicide")
     exit_process(True, True)
 
 

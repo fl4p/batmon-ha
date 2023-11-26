@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.74] - 2023-11-26
+* Add Daly checksum verification (https://github.com/fl4p/batmon-ha/issues/158)
+* Fix daly bms num_responses (https://github.com/fl4p/batmon-ha/issues/163)
+* Ignore voltage fetch errors and continue (https://github.com/fl4p/batmon-ha/issues/163)
+* Fix JK 11.x FW mos temp zero (https://github.com/fl4p/batmon-ha/issues/157)
+* Copy meter states file before write
+* JK fix bouncing switches
+* Reduce log verbosity
+* Reduce temp fetch and meter publish interval
+* Cleanup error handling
+* Continue on errors with pip in install_bleak
+* InfluxDB add GZIP compression
+
 ## [1.73] - 2023-11-10
 this is a rather big update. I've set version num to 1.0, so it looks more tidy.
 * add manufacturer to device info
