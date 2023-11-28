@@ -182,7 +182,7 @@ class BtBms:
         # bleak`s connect timeout is buggy (on macos)
         try:
             await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
-        except bleak.exc.BleakDeviceNotFoundError as exc:
+        except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
             self.logger.error("%s, starting scanner", exc)
             await bt_discovery(self.logger)
             raise
@@ -263,7 +263,8 @@ class BtBms:
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
                 if self.client.address not in discovered:
-                    raise bleak.exc.BleakDeviceNotFoundError(
+                    exc_t = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
+                    raise exc_t(
                         self.client.address, 'Device %s not discovered. Make sure it in range and is not being '
                                              'accessed by another app. (found %s)' % (self.client.address, discovered))
 

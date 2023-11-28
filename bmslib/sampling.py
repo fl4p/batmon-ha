@@ -196,8 +196,8 @@ class BmsSampler:
 
         was_connected = bms.is_connected
 
-        if not was_connected:
-            self._num_errors = 0
+        # if not was_connected:
+        #    self._num_errors = 0
 
         t_conn = time.time()
 
