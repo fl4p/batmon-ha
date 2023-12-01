@@ -57,6 +57,9 @@ class AntBt(BtBms):
     TIMEOUT = 16
     WRITE_REGISTER = 0x51
 
+    TEMPERATURE_STEP = 1 # it sends out noisy data in between
+    TEMPERATURE_SMOOTH = 40
+
     def __init__(self, address, **kwargs):
         super().__init__(address, _uses_pin=False, **kwargs)
         self._buffer = bytearray()

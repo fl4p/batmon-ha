@@ -56,6 +56,9 @@ class DalyBt(BtBms):
 
     SOC_NOT_FULL_YET = 99.1  # when the gauge reaches 100% but no OV yet
 
+    TEMPERATURE_STEP = 1
+    TEMPERATURE_SMOOTH = 40
+
     def __init__(self, address, **kwargs):
         if kwargs.get('psk'):
             self.logger.warning('JBD usually does not use a pairing PIN')

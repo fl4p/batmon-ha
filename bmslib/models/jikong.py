@@ -55,6 +55,8 @@ class JKBt(BtBms):
     TIMEOUT = 8
 
     SOC_NOT_FULL_YET = 99.0  # when the gauge reaches 100% but no OV yet
+    TEMPERATURE_STEP = 0.1
+    TEMPERATURE_SMOOTH = 30
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
