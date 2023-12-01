@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import queue
+import random
 import statistics
 import sys
 import time
@@ -69,15 +70,18 @@ class InfluxDBSink(BmsSampleSink):
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def publish_voltages(self, bms_name, voltages: List[int], short=False):
-        if len(voltages) == 0:
+        if not voltages:
             return
 
         if bms_name not in self._last_volt or len(voltages) != len(self._last_volt[bms_name]):
             self._last_volt[bms_name] = [-1] * len(voltages)
+
         last_volt = self._last_volt[bms_name]
 
+        pub_anyway = random.random() < (1/800)
+
         fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
-                  voltages[i] != last_volt[i]}
+                  voltages[i] != last_volt[i] or pub_anyway}
 
         if not short:
             fields["voltage_cell_max"] = int(max(voltages))
@@ -95,7 +99,7 @@ class InfluxDBSink(BmsSampleSink):
             self.Q.put(point)
 
         for i in range(len(voltages)):
-            if voltages[i] == last_volt[i]:
+            if voltages[i] == last_volt[i] and not pub_anyway:
                 continue
             last_volt[i] = voltages[i]
 
@@ -119,7 +123,8 @@ class InfluxDBSink(BmsSampleSink):
             elif isinstance(v, float):
                 fields[k] = round(v, 2)
         fields1 = dict(fields)
-        remove_equal_values(fields, self._prev_fields.get(bms_name))
+        if random.random() > (1/800):
+            remove_equal_values(fields, self._prev_fields.get(bms_name))
         self._prev_fields[bms_name] = fields1
 
         if not fields:
