@@ -15,6 +15,8 @@ from bmslib.util import get_logger, dotdict
 
 
 class DummyBt(BtBms):
+    TEMPERATURE_STEP = .1
+
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._switches = dict(charge=True, discharge=True)
@@ -37,13 +39,15 @@ class DummyBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         self.I = math.sin(time.time() / 16 + self._seed)
+        temp_prec = 1/self.TEMPERATURE_STEP
         sample = BmsSample(
             voltage=12 - math.sin(time.time() / 16 + self._seed) * .5,
             current=self.I,
             charge=(.5 + math.sin(time.time() / 32 + self._seed) * .5) * 100,
             capacity=100,
             num_cycles=3,
-            temperatures=[21],
+            temperatures=[round((21 + math.sin(time.time() / 256 + self._seed) + random.random()/10) * temp_prec) / temp_prec],
+            mos_temperature=round((23 + math.sin(time.time() / 256 + self._seed) + random.random()/10) * temp_prec) / temp_prec,
             switches=self._switches,
             uptime=(time.time() - self._t0)
         )
@@ -52,7 +56,7 @@ class DummyBt(BtBms):
     async def fetch_voltages(self):
         #  I>0 -> dsg
         o = int(self.I * self._cell_r * -1000)
-        return [3000+o, 3010+o, 3020+o, 3030+o]
+        return [3000 + o, 3010 + o, 3020 + o, 3030 + o]
 
     async def set_switch(self, switch: str, state: bool):
         self.logger.info('set_switch %s %s', switch, state)
@@ -129,6 +133,7 @@ class JKDummy:
                 dotdict(uuid=JKBt.CHAR_UUID, properties='write,notify', handle=2, descriptors=[])
             ])
         ]
+
     async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None]):
         self._callbacks[char_specifier] = callback
 
