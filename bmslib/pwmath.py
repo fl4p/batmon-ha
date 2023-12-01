@@ -23,6 +23,32 @@ class EWMA:
         return self.y
 
 
+class LHQ:
+    """
+    Low-Pass hysteresis quantizer
+
+    1. smooth the already quantized signal with a exponential weighted moving average
+    2. Hysteresis
+    3. Quantize to 2x input precision (add 1 bit)
+    """
+
+    def __init__(self, span=20, inp_q=0.1):
+        self.ewma = EWMA(span=span)
+        self.last = math.nan
+        self.inp_q = inp_q
+
+    def add(self, x):
+        self.ewma.add(x)
+        # quantize(mean((last,x,x))
+        m = (self.last + 2 * self.ewma.value) / 3
+        if math.isnan(m):
+            if math.isnan(self.last):
+                self.last = x
+            return math.nan
+        self.last = round(m * 2 / self.inp_q) * .5 * self.inp_q
+        return self.last
+
+
 class EWM:
     # Implement EWMA statistics mean and stddev
     def __init__(self, span: int, std_regularisation: float):
@@ -161,6 +187,14 @@ def test_diff_abs_sum():
     assert round(i.get(), 5) == 0.2
 
 
+def test_lhq():
+    l = LHQ(span=2, inp_q=.1)
+    l.add(0)
+    assert l.add(0.1) == 0.05
+    assert l.add(0.1) == 0.1
+
+
 if __name__ == "__main__":
     test_integrator()
     test_diff_abs_sum()
+    test_lhq()
