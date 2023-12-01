@@ -13,6 +13,8 @@ from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
+BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
+
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
 async def bt_discovery(logger):
@@ -263,8 +265,7 @@ class BtBms:
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
                 if self.client.address not in discovered:
-                    exc_t = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
-                    raise exc_t(
+                    raise BleakDeviceNotFoundError(
                         self.client.address, 'Device %s not discovered. Make sure it in range and is not being '
                                              'accessed by another app. (found %s)' % (self.client.address, discovered))
 

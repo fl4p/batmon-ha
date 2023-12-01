@@ -7,7 +7,6 @@ import time
 from copy import copy
 from typing import Optional, List, Dict
 
-import bleak.exc
 import paho.mqtt.client
 
 import bmslib.bt
@@ -150,7 +149,7 @@ class BmsSampler:
             if s:
                 self._num_errors = 0
             return s
-        except bleak.exc.BleakDeviceNotFoundError:
+        except bmslib.bt.BleakDeviceNotFoundError:
             t_wait = min(1.5 ** self._num_errors, 120)
             logger.error("%s device not found, retry in %d seconds", self.bms, t_wait)
             self._time_next_retry = time.time() + t_wait
