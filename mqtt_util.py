@@ -295,7 +295,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
-    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None):
+    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": f"{name or k.replace('/', ' ')}",
@@ -304,7 +304,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "unit_of_measurement": unit,
             # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
-            "expire_after": expire_after_seconds,
+            "expire_after": max(expire_after_seconds, 3600*2) if long_expiry else expire_after_seconds,
             "device": device_json,
         }
         if icon:
@@ -349,7 +349,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
     }
     for name, m in meters.items():
-        _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter")
+        _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter", long_expiry=True)
 
     switches = (sample.switches and sample.switches.keys())
     if switches:
