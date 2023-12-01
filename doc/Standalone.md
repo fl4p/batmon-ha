@@ -65,6 +65,8 @@ If your OS uses systemd, you can use this service file to start batmon on boot (
 ```
 [Unit]
 Description=Batmon
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
