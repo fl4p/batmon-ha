@@ -40,10 +40,13 @@ class JbdBt(BtBms):
         # print("bms msg {0}: {1}".format(sender, data))
         self._buffer += data
 
-        if self._buffer.endswith(b'w'):
+        if self._buffer.endswith(b'w'): # 0x77
             command = self._buffer[1]
             buf = self._buffer[:]
             self._buffer.clear()
+
+            # TODO add checksum here
+            # https://github.com/syssi/esphome-jbd-bms/blob/main/components/jbd_bms_ble/jbd_bms_ble.h#L194
 
             # print(command, 'buffer endswith w', self._buffer)
             self._last_response = buf
