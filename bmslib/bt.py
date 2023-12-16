@@ -80,6 +80,18 @@ def bt_power(on):
         raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err or out, 'utf-8')))
 
 
+_last_power_cycle = 0
+async def bt_power_cycle(debounce=30):
+    global _last_power_cycle
+    if time.time() < _last_power_cycle  +debounce:
+        return False
+    bt_power(False)
+    await asyncio.sleep(1)
+    bt_power(True)
+    await asyncio.sleep(.1)
+    _last_power_cycle = time.time()
+    return True
+
 class BtBms:
     shutdown = False
 
@@ -201,8 +213,11 @@ class BtBms:
         # bleak`s connect timeout is buggy (on macos)
         try:
             await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
-        #except bleak.exc.InProgress as exc:
-        #    raise
+        except bleak.exc.BleakDBusError as exc:
+            if exc.dbus_error == 'org.bluez.Error.InProgress':
+                self.logger.error("BlueZ error in client.connect(): %s", exc)
+                await bt_power_cycle()
+            raise
         except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
             self.logger.error("%s, starting scanner", exc)
             await bt_discovery(self.logger, timeout=5.0)
