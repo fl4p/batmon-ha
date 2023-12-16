@@ -21,7 +21,20 @@ freq = '5s'
 #df = datasets.jbd_full(num_cells=num_cells, freq=freq)
 #df = df["2022-11-01":]
 
-df = datasets.jk_full(num_cells=num_cells, freq=freq)
+#df = datasets.jk_full(num_cells=num_cells, freq=freq)
+
+df = datasets.batmon(
+    # ('2023-11-09T03:30:00Z', '2023-11-09T06:30:00Z'), # fridge
+    # ('2023-11-08T06:30:00Z', '2023-11-08T09:30:00Z'), # coffee
+    # ('2023-11-04T06:30:00Z', '2023-11-04T10:30:00Z'), # 3cook
+    # ('2023-11-09T06:30:00Z', '2023-11-09T08:30:00Z'), # pancakes
+    # ('2023-11-10T10:30:00Z', '2023-11-10T10:50:00Z'),  # ehub test
+    # ('2023-11-11T12:00:00Z', '2023-11-11T13:00:00Z'),  # varing sun
+    ('2023-11-13T00:00:00Z', '2023-11-13T17:00:00Z'),  # recent
+    freq="1s", device='ant24', cell_index=0, num_cells=num_cells,
+)
+#df.loc[:, 'u'] = df.loc[:, str(0)]
+df.ffill(limit=1000, inplace=True)
 
 # df = datasets.batmon(
 # ('2023-11-10T16:30:00Z', '2023-11-10T18:10:00Z'), # dalyJKBalNoise

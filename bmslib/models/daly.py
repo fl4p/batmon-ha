@@ -177,6 +177,7 @@ class DalyBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         status = await self._fetch_status()
+
         sample = await self.fetch_soc(sample_kwargs=dict(
             charge=status['capacity_ah'],
             switches=dict(
@@ -184,9 +185,11 @@ class DalyBt(BtBms):
                 discharge=bool(status['discharging_mosfet'])
             ),
         ))
+        # self.logger.info(sample.switches)
         return sample
 
     async def fetch_soc(self, sample_kwargs=None):
+        timestamp = time.time()
         resp = await self._q(0x90)
 
         parts = struct.unpack('>h h h h', resp)
@@ -198,6 +201,7 @@ class DalyBt(BtBms):
             current=(parts[2] - 30000) / 10,  # negative=charging, positive=discharging
             soc=parts[3] / 10,
             num_cycles=await self.get_states_cached('num_cycles'),
+            timestamp=timestamp,
             **sample_kwargs,
         )
 

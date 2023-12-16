@@ -57,7 +57,8 @@ def remove_none_values(fields: dict):
             if not v:
                 del fields[k]
 
-def remove_equal_values(fields: dict, other:dict):
+
+def remove_equal_values(fields: dict, other: dict):
     if not other:
         return
     for k in list(fields.keys()):
@@ -298,13 +299,13 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
-            "name": f"{name or k.replace('/', ' ')}",
+            "name": name or k.replace('/', ' '),
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
             # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
-            "expire_after": max(expire_after_seconds, 3600*2) if long_expiry else expire_after_seconds,
+            "expire_after": max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds,
             "device": device_json,
         }
         if icon:
@@ -320,17 +321,18 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
-        _hass_discovery(k, "voltage", unit="V")
+        n = 'Cell Volt %0*d' % (1 + int(math.log10(num_cells)), i + 1)
+        _hass_discovery(k, "voltage", name=n, unit="V")
 
     if num_cells > 1:
         statistic_fields = ["min", "max", "average", "median", "delta"]
         for f in statistic_fields:
             k = 'cell_voltages/%s' % f
-            _hass_discovery(k, device_class="voltage", unit="V")
+            _hass_discovery(k, name="Cell Volt %s" % f, device_class="voltage", unit="V")
 
         for f in ["min_index", "max_index"]:
             k = 'cell_voltages/%s' % f
-            _hass_discovery(k, device_class=None, unit="")
+            _hass_discovery(k, name="Cell Index %s" % f[:3], device_class=None, unit="")
 
     for i in range(0, len(temperatures)):
         k = 'temperatures/%d' % (i + 1)
