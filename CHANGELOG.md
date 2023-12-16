@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.75] - 2023-12-16
+* fix HA install error (https://github.com/fl4p/batmon-ha/issues/175)
+* fix meter expiry
+* optimized sampling schedule
+* add temperature noise filter
+
 ## [1.74] - 2023-11-26
 * Add Daly checksum verification (https://github.com/fl4p/batmon-ha/issues/158)
 * Fix daly bms num_responses (https://github.com/fl4p/batmon-ha/issues/163)
