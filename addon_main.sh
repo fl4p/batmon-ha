@@ -1,6 +1,8 @@
 #!/usr/bin/with-contenv bashio
 
-python3 install_bleak.py
+. /app/venv/bin/activate
+
+python install_bleak.py
 
 
 MQTT_HOST=$(bashio::services mqtt "host")

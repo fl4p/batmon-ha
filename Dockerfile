@@ -24,7 +24,9 @@ RUN apk add git
 #COPY requirements.txt requirements.txt
 COPY . .
 
-RUN pip3 install -r requirements.txt
+RUN python3 -m venv venv && \
+    . ./venv/bin/activate && \
+    python -m pip install -r requirements.txt
 RUN chmod a+x addon_main.sh
 
 CMD [ "./addon_main.sh" ]
