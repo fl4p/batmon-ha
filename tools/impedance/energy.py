@@ -6,16 +6,18 @@ from matplotlib import pyplot as plt
 import tools.impedance.datasets as datasets
 
 num_cells = 8
-df = datasets.daly22_aug(num_cells=num_cells, freq='5s')
+#df = datasets.daly22_1(num_cells=num_cells, freq='5s')
+df = datasets.batmon(("2023-11-13", "2023-11-18"), 'daly_bms', num_cells=num_cells, freq='5s')
 
+df.loc[:,'i'] =  df.loc[:,'i'].fillna(0)
 #df = datasets.jbd22(num_cells=num_cells, freq='5s')
 #df = df.iloc[18000:25000]
 
 
 cv = df.loc[:, tuple(str(ci) for ci in range(num_cells))]
-
-is_empty = cv.min(axis=1) < 2700
-is_full = cv.max(axis=1) > 3500
+cf_filt = cv.rolling(3).median()
+is_empty = cf_filt.min(axis=1) < 2700
+is_full = cf_filt.max(axis=1) > 3450
 ef = pd.concat([is_empty, is_full], axis=1)
 
 q = df.i.fillna(0).cumsum() * 5 / 3600
