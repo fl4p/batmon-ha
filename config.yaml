@@ -77,3 +77,5 @@ schema:
   influxdb_ssl: "bool?"
   influxdb_verify_ssl: "bool?"
   influxdb_database: "str?"
+
+#  telemetry: "bool?"
