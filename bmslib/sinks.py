@@ -78,7 +78,7 @@ class InfluxDBSink(BmsSampleSink):
 
         last_volt = self._last_volt[bms_name]
 
-        pub_anyway = random.random() < (1/800)
+        pub_anyway = random.random() < (1/100)
 
         fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
                   voltages[i] != last_volt[i] or pub_anyway}
@@ -121,9 +121,9 @@ class InfluxDBSink(BmsSampleSink):
             if isinstance(v, int):
                 fields[k] = float(v)
             elif isinstance(v, float):
-                fields[k] = round(v, 2)
+                fields[k] = round(v, 3)
         fields1 = dict(fields)
-        if random.random() > (1/800):
+        if random.random() > (1/200):
             remove_equal_values(fields, self._prev_fields.get(bms_name))
         self._prev_fields[bms_name] = fields1
 
@@ -145,7 +145,7 @@ class InfluxDBSink(BmsSampleSink):
         point = {
             "measurement": 'batmon',
             "time": now,
-            "fields": {(f"meter_%s" % name): round(value, 4) for name, value in readings.items()},
+            "fields": {(f"meter_%s" % name): round(value, 5) for name, value in readings.items()},
             "tags": dict(device=bms_name)
         }
         self.Q.put(point)

@@ -2,12 +2,13 @@ import asyncio
 import atexit
 import os
 import random
+import re
 import signal
 import sys
 import threading
 import time
 import traceback
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import paho.mqtt.client as paho
 
@@ -17,9 +18,9 @@ import bmslib.models.daly
 import bmslib.models.dummy
 import bmslib.models.jbd
 import bmslib.models.jikong
+import bmslib.models.sok
 import bmslib.models.supervolt
 import bmslib.models.victron
-import bmslib.models.sok
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import VirtualGroupBms, BmsGroup
@@ -276,6 +277,8 @@ async def main():
         except:
             logger.warning("failed to init telemetry", exc_info=True)
 
+
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),
@@ -333,9 +336,9 @@ async def main():
             loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
             done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
-            logger.warning('Done= %s, Pending=%s', done, pending)
+            logger.debug('Done= %s, Pending=%s', done, pending)
             for task in loops:
-                logger.warning('Task %s is done=%s', task, task.done())
+                logger.debug('Task %s is done=%s', task, task.done())
                 task.done() or task.cancel()
 
     else:

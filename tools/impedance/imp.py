@@ -155,38 +155,6 @@ class BatteryResistanceTrackerParams():
         self.chg_current_threshold = 5
 
 
-class EWMA:
-    def __init__(self, span: int):
-        self.alpha = math.nan
-        self.y = math.nan
-        self.update_span(span)
-
-    def update_span(self, span):
-        self.alpha = (2 / (span + 1))
-
-    def add(self, x):
-        if not math.isfinite(x):
-            return
-        if not math.isfinite(self.y):
-            self.y = x
-        self.y = (1 - self.alpha) * self.y + self.alpha * x
-
-
-class EWM:
-    def __init__(self, span: int, std_regularisation: float):
-        self.avg = EWMA(span)
-        self.std = EWMA(span)
-        self._last_x = math.nan
-        self.std_regularisation = std_regularisation
-
-    def add(self, x):
-        self.avg.add(x)
-        if math.isfinite(self._last_x):
-            if self.std_regularisation != 0:
-                x = abs(x) * self.std_regularisation
-            pct = (x - self._last_x) / self._last_x
-            self.std.add(pct)
-        self._last_x = x
 
 
 class BatteryResistanceTracker():

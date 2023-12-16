@@ -43,7 +43,7 @@ class FuturesPool:
                     existing = None
                     break
             if existing:
-                raise Exception("already waiting for future named '%s'" % name)
+                raise Exception("still waiting for future named '%s'" % name)
 
         fut = asyncio.Future()
         self._futures[name] = fut

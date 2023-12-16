@@ -14,7 +14,7 @@ from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
-from bmslib.pwmath import Integrator, DiffAbsSum
+from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, mqtt_single_out, round_to_n
@@ -139,11 +139,17 @@ class BmsSampler:
 
         # self.power_stats = EWM(span=120, std_regularisation=0.1)
 
+        temp_step = getattr(bms, 'TEMPERATURE_STEP', 0)
+        temp_smooth = getattr(bms, 'TEMPERATURE_SMOOTH', 10)
+        self._lhq_temp = defaultdict(lambda: LHQ(span=temp_smooth, inp_q=temp_step)) if temp_step else None
+
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
 
     async def __call__(self):
         self._num_errors += 1
+        t_now = time.time()
+
         try:
             s = await self._sample_inner()
             if s:
@@ -156,11 +162,14 @@ class BmsSampler:
             return None
 
         except SampleExpiredError as e:
-            logger.warning("Expired: %s", e)
+            logger.warning("%s: expired: %s", self.bms.name, e)
             return None
 
         except GroupNotReady as e:
-            logger.warning("%s Group not ready: %s", self.bms.name, e)
+            log_data = (t_now - self._last_time_log) >= (60 if self.num_samples < 1000 else 300) or self.bms.verbose_log
+            if log_data:
+                self._last_time_log = t_now
+                logger.warning("%s: Group not ready: %s", self.bms.name, e)
             return None
 
         except Exception as ex:
@@ -179,6 +188,7 @@ class BmsSampler:
             if bms.is_connected and self._num_errors > 20:
                 logger.warning("disconnecting %s due to too many errors %d", bms, self._num_errors)
                 await bms.disconnect()
+                self._num_errors = 0
 
             raise
 
@@ -188,6 +198,11 @@ class BmsSampler:
             return await self.bms.fetch_temperatures()
         except:
             return None
+
+    def _filter_temperatures(self, temperatures):
+        if not temperatures or self._lhq_temp is None:
+            return temperatures
+        return [round(self._lhq_temp[i].add(temperatures[i]), 2) for i in range(len(temperatures))]
 
     async def _sample_inner(self):
         bms = self.bms
@@ -224,7 +239,7 @@ class BmsSampler:
             t_hour = t_now * (1 / 3600)
 
             if sample.timestamp < t_now - max(self.expire_after_seconds, MIN_VALUE_EXPIRY):
-                raise SampleExpiredError("sample %s expired", sample.timestamp)
+                raise SampleExpiredError("sample %s expired" % sample.timestamp)
                 # logger.warning('%s expired sample', bms.name)
                 # return
 
@@ -241,6 +256,11 @@ class BmsSampler:
 
             if (self.sinks or self.bms_group) and not sample.temperatures:
                 sample.temperatures = await self._fetch_temperatures_cached()
+
+            sample.temperatures = self._filter_temperatures(sample.temperatures)
+
+            if not math.isnan(sample.mos_temperature) and self._lhq_temp is not None:
+                sample.mos_temperature = self._lhq_temp['mos'].add(sample.mos_temperature)
 
             if self.bms_group:
                 # update before invert current
@@ -321,17 +341,16 @@ class BmsSampler:
             PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
             PWR_CHG_HOLD = 4
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
-            if abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
+            if not bms.is_virtual and abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
                 if bms.verbose_log or (
-                        not self.period_pub and (
-                        t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
+                        not self.period_pub and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
                     logger.info('%s Power jump %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
                 self._t_last_power_jump = t_now
             self._last_power = sample.power
 
             if self.period_discov or self.period_pub or \
-                (t_now - self._t_last_power_jump) < PWR_CHG_HOLD or abs(sample.power) > self.over_power:
+                    (t_now - self._t_last_power_jump) < PWR_CHG_HOLD or abs(sample.power) > self.over_power:
                 self._t_pub = t_now
 
                 sample = self.downsampler.pop()
@@ -339,21 +358,23 @@ class BmsSampler:
                 publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
                 log_data and logger.info('%s: %s', bms.name, sample)
 
-                if self.period_30s:
-                    self.publish_meters()
-
                 voltages = await cached_fetch_voltages()
                 publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
-                temperatures = sample.temperatures or await self._fetch_temperatures_cached()
-
-                if temperatures:
+                # temperatures = None
+                if self.period_30s or self.period_discov:
+                    if not sample.temperatures:
+                        sample.temperatures = await self._fetch_temperatures_cached()
+                        sample.temperatures = self._filter_temperatures(sample.temperatures)
                     publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix,
-                                         temperatures=temperatures)
+                                         temperatures=sample.temperatures)
 
-                if log_data and (voltages or temperatures) and not bms.is_virtual:
+                if log_data and (voltages or sample.temperatures) and not bms.is_virtual:
                     logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)),
-                                temperatures)
+                                sample.temperatures)
+
+            if self.period_discov or self.period_30s:
+                self.publish_meters()
 
             # publish home assistant discovery every 60 samples
             if self.period_discov:
@@ -364,8 +385,8 @@ class BmsSampler:
                     mqtt_client, device_topic=self.mqtt_topic_prefix,
                     expire_after_seconds=self.expire_after_seconds,
                     sample=sample,
-                    num_cells=len(voltages),
-                    temperatures=temperatures,
+                    num_cells=len(voltages) if voltages else 0,
+                    temperatures=sample.temperatures,
                     device_info=self.device_info,
                 )
 
@@ -376,7 +397,7 @@ class BmsSampler:
 
         self.num_samples += 1
         t_disc = time.time()
-        self._t_wd_reset = t_disc
+        self._t_wd_reset = sample.timestamp or t_disc
 
         self.period_pub.set_time(t_now)
         self.period_30s.set_time(t_now)

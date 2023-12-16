@@ -59,6 +59,8 @@ def batmon(tr, device="bat_caravan", cell_index=0, num_cells=1, freq="1s"):
     points.temp1.ffill(limit=200, inplace=True)
     points.set_index(pd.DatetimeIndex(points.time), inplace=True)
     points.drop(columns='time', inplace=True)
+    dn = points.dropna(axis=1, how='all').dropna(how="any")
+    points = points.loc[dn.first_valid_index():dn.last_valid_index(), :]
     return points[points.i.first_valid_index():]
 
 
@@ -163,4 +165,15 @@ def ant24_23_11_11_fridge(freq='1s', **kwargs):
     df = df.loc[dn.first_valid_index():dn.last_valid_index(), :]
     return df
 
+
+def ant24_23_11_21_pulse_coffee():
+    pass
+    # 2023-11-21 08:00:12
+    # 2023-11-21 08:15:12
 #
+
+
+# def ant24_and daly()
+# tesla charging using edecoa 3500w 8A-> 5A
+    # 2023-11-23 17:00:00
+    # 2023-11-23 18:00:00
