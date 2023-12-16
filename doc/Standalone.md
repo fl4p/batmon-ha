@@ -13,7 +13,8 @@ You need to have python3 installed.
 ```
 git clone https://github.com/fl4p/batmon-ha
 cd batmon-ha
-pip3 install -r requirements.txt
+python3 -m venv ./venv
+./venv/bin/pip3 install -r requirements.txt
 ```
 
 Create `options.json` within the `batmon-ha` directory. Use this as an example and adjust as needed:
@@ -58,7 +59,7 @@ Create `options.json` within the `batmon-ha` directory. Use this as an example a
 
 Then start:
 ```
-python3 main.py
+./venv/bin/python3 main.py
 ```
 
 If your OS uses systemd, you can use this service file to start batmon on boot (and restart when it crashes):
@@ -71,9 +72,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 Restart=always
+RestartSec=5s
 User=pi
 WorkingDirectory=/home/pi/batmon-ha
-ExecStart=/usr/bin/env python3 main.py
+ExecStart=/home/pi/batmon-ha/venv/bin/python3 main.py
 
 [Install]
 WantedBy=multi-user.target
@@ -84,6 +86,17 @@ Place this file to `/etc/systemd/system/batmon.service` and enable to start on b
 ```
 systemctl enable batmon.service
 systemctl start batmon.service 
+```
+
+Alternatively, you can add batmon to crontab:
+
+```shell
+crontab -e
+```
+
+add this line at the bottom:
+```
+@reboot cd /home/pi/batmon-ha && /home/pi/batmon-ha/venv/bin/python3 main.py
 ```
 
 
