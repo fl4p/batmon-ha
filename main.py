@@ -23,6 +23,7 @@ import bmslib.models.supervolt
 import bmslib.models.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
+from bmslib.calibration import CalibrationTable
 from bmslib.group import VirtualGroupBms, BmsGroup
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
@@ -288,7 +289,7 @@ async def main():
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
         algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
-        current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
+        current_calibration=CalibrationTable(dev_args[bms.name].get('current_calibration', None)),
         bms_group=groups_by_bms.get(bms.name),
         sinks=sinks,
     ) for bms in bms_list]

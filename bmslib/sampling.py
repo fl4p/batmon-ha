@@ -13,6 +13,7 @@ import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
+from bmslib.calibration import CalibrationTable
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger
@@ -80,7 +81,7 @@ class BmsSampler:
                  publish_period=None,
                  sinks: Optional[List[BmsSampleSink]] = None,
                  algorithms: Optional[list] = None,
-                 current_calibration_factor=1.0,
+                 current_calibration: CalibrationTable = None,
                  over_power=None,
                  bms_group: Optional[BmsGroup] = None
                  ):
@@ -93,7 +94,7 @@ class BmsSampler:
         self.device_info: Optional[DeviceInfo] = None
         self.num_samples = 0
         self.bms_group = bms_group  # group, virtual, parent
-        self.current_calibration_factor = current_calibration_factor
+        self.current_calibration = current_calibration
         self.over_power = over_power or math.nan
 
         self.sinks = sinks or []
@@ -245,8 +246,8 @@ class BmsSampler:
 
             sample.num_samples = self.num_samples
 
-            if self.current_calibration_factor and self.current_calibration_factor != 1:
-                sample = sample.multiply_current(self.current_calibration_factor)
+            if self.current_calibration:
+                sample = sample.multiply_current(self.current_calibration(sample.current))
 
             # discharging P>0
             self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
