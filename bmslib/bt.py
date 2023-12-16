@@ -28,7 +28,7 @@ async def bt_discovery(logger, adapter=None, timeout=5.0):
     def on_detect(d, a: AdvertisementData):
         logger.info("BT %s %26s", d.address, d.name)  # , ', '.join(a.service_uuids)
 
-    await scanner.start(on_detect, clear=True, stop_after=timeout)
+    await scanner.start(on_detect, clear=True, stop_after=timeout * 2)
     await asyncio.sleep(timeout)
 
     if not scanner.devices:
