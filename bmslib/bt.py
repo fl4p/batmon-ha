@@ -4,27 +4,44 @@ import subprocess
 import time
 from typing import Callable, List, Union
 
-import backoff
 import bleak.exc
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.scanner import AdvertisementData
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
+from .bt_scan import BtSharedScannerCollection
 from .util import get_logger
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
+static_connect_mutex = asyncio.Lock()
 
-@backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
-async def bt_discovery(logger):
+
+# @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
+async def bt_discovery(logger, adapter=None, timeout=5.0):
     logger.info('BT Discovery:')
-    devices = await BleakScanner.discover()
-    if not devices:
+
+    scanner = get_scanner(adapter=adapter)
+
+    def on_detect(d, a: AdvertisementData):
+        logger.info("BT %s %26s", d.address, d.name)  # , ', '.join(a.service_uuids)
+
+    await scanner.start(on_detect, clear=True, stop_after=timeout)
+    await asyncio.sleep(timeout)
+
+    if not scanner.devices:
         logger.info(' - no devices found - ')
-    for d in devices:
-        logger.info("BT %s %26s", d.address, d.name)
-    return devices
+
+    return list(scanner.devices.values())
+
+
+_scanner_collection = BtSharedScannerCollection()
+
+
+def get_scanner(adapter=None):
+    return _scanner_collection.get_scanner(adapter)
 
 
 def bleak_version() -> str:
@@ -184,9 +201,11 @@ class BtBms:
         # bleak`s connect timeout is buggy (on macos)
         try:
             await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
+        #except bleak.exc.InProgress as exc:
+        #    raise
         except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
             self.logger.error("%s, starting scanner", exc)
-            await bt_discovery(self.logger)
+            await bt_discovery(self.logger, timeout=5.0)
             raise
 
         self._connect_time = time.time()
@@ -252,22 +271,26 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        import bleak
-        scanner_kw = {}
-        if self._adapter:
-            scanner_kw['adapter'] = self._adapter
-        scanner = bleak.BleakScanner(**scanner_kw)
-        self.logger.debug("starting scan")
-        await scanner.start()
+        scan = get_scanner(self._adapter)
+
+        try:
+            await scan.start(clear=True)
+        except:
+            self.logger.error("Failed to start scanner", exc_info=1)
+            if False:
+                bt_power(False)  # self._adapter
+                bt_power(True)
+
+            raise
 
         attempt = 1
         while True:
             try:
-                discovered = set(b.address for b in scanner.discovered_devices)
-                if self.client.address not in discovered:
+                if not await scan.wait_for_device(self.client.address, 5.0):
                     raise BleakDeviceNotFoundError(
-                        self.client.address, 'Device %s not discovered. Make sure it in range and is not being '
-                                             'accessed by another app. (found %s)' % (self.client.address, discovered))
+                        self.client.address,
+                        'Device %s not discovered. Make sure it in range and not being accessed by another app. (found %s)'
+                        % (self.client.address, set(scan.devices.keys())))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout / 2)
@@ -279,10 +302,7 @@ class BtBms:
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
-                    await scanner.stop()
                     raise
-
-        await scanner.stop()
 
     async def disconnect(self):
         self._in_disconnect = True
@@ -342,7 +362,9 @@ class BtBms:
         # print("enter")
         if self.keep_alive and self.is_connected:
             return
-        await self.connect()
+
+        async with static_connect_mutex:
+            await self.connect()
 
     async def __aexit__(self, *args):
         # print("exit")
