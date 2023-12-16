@@ -17,6 +17,7 @@ B4:E8:42:C2:84:13
 import asyncio
 import math
 import struct
+import time
 from typing import Dict
 
 from bmslib.bms import BmsSample
@@ -173,7 +174,14 @@ class DalyBt(BtBms):
     async def set_switch(self, switch: str, state: bool):
         fet_addr = dict(discharge=0xD9, charge=0xDA)
         msg = daly_command_message(fet_addr[switch], extra="01" if state else "00")
+        self.logger.info('write %s', msg)
+        self._fetch_status.invalidate(self)
+        status = await self._fetch_status()
         await self.client.write_gatt_char(self.UUID_TX, msg)
+
+        #if switch == "charge" and state != status['discharging_mosfet']:
+        #   msg = daly_command_message(fet_addr["discharge"], extra="01" if status['discharging_mosfet'] else "00")
+        #    await self.client.write_gatt_char(self.UUID_TX, msg)
 
     async def fetch(self) -> BmsSample:
         status = await self._fetch_status()
