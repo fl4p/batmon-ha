@@ -288,7 +288,7 @@ async def main():
         meter_state=meter_states.get(bms.name),
         publish_period=publish_period,
         algorithms=dev_args[bms.name].get('algorithm') and dev_args[bms.name].get('algorithm', '').split(";"),
-        current_calibration_factor=dev_args[bms.name].get('current_calibration', 1.0),
+        current_calibration_factor=float(dev_args[bms.name].get('current_calibration', 1.0)),
         bms_group=groups_by_bms.get(bms.name),
         sinks=sinks,
     ) for bms in bms_list]
