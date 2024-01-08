@@ -222,6 +222,7 @@ class JKBt(BtBms):
             switches=dict(
                 charge=bool(buf_set[118]),
                 discharge=bool(buf_set[122]),
+                balance=bool(buf_set[126]),
             ),
             #  #buf[166 + offset]),  charge FET state
             # buf[167 + offset]), discharge FET state
