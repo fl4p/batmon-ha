@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.76] - 2024-01-17
+* Add JK Balance switch
+* allow forward slash `/` in mqtt topic prefix
+
 ## [1.75] - 2023-12-16
 * fix HA install error (https://github.com/fl4p/batmon-ha/issues/175)
 * fix meter expiry
