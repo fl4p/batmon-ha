@@ -204,6 +204,10 @@ class JKBt(BtBms):
 
         temp = lambda x: float('nan') if x == -2000 else (x / 10)
 
+        temperatures = [temp(i16(130 + offset)), temp(i16(132 + offset))]
+        if is_new_11fw:
+            temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
@@ -213,7 +217,7 @@ class JKBt(BtBms):
             capacity=f32u(146 + offset),  # computed capacity (starts at self.capacity, which is user-defined),
             charge=f32u(142 + offset),  # "remaining capacity"
 
-            temperatures=[temp(i16(130 + offset)), temp(i16(132 + offset))],
+            temperatures=temperatures,
             mos_temperature=i16((112 if is_new_11fw else 134) + offset) / 10,
             balance_current=i16(138 + offset) / 1000,
 
@@ -271,10 +275,9 @@ class JKBt(BtBms):
             balance=0x1F
         )
         await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
-        await asyncio.sleep(.2) # wait a bit before triggering settings fetch
+        await asyncio.sleep(.2)  # wait a bit before triggering settings fetch
         self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
-        #await asyncio.sleep(0.2)  # not sure if this is needed
-
+        # await asyncio.sleep(0.2)  # not sure if this is needed
 
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
