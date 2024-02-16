@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.77] - 2024-02-16
+* Fix meter rounding (https://github.com/fl4p/batmon-ha/issues/169)
+* Fix paho 2.0 compatibility (https://github.com/fl4p/batmon-ha/issues/195)
+* JK add temperature sensor 3 and 4
+
 ## [1.76] - 2024-01-17
 * Add JK Balance switch
 * allow forward slash `/` in mqtt topic prefix
