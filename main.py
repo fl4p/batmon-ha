@@ -2,28 +2,20 @@ import asyncio
 import atexit
 import os
 import random
-import re
 import signal
 import sys
 import threading
 import time
 import traceback
-from typing import List, Dict, Tuple
+from typing import List, Dict
 
 import paho.mqtt.client as paho
 
 import bmslib.bt
-import bmslib.models.ant
-import bmslib.models.daly
-import bmslib.models.dummy
-import bmslib.models.jbd
-import bmslib.models.jikong
-import bmslib.models.sok
-import bmslib.models.supervolt
-import bmslib.models.victron
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
-from bmslib.group import VirtualGroupBms, BmsGroup
+from bmslib.group import BmsGroup
+from bmslib.models import get_bms_model_class, construct_bms
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
@@ -141,59 +133,27 @@ async def main():
         devices = []
         logger.error('Error discovering devices: %s', e)
 
-    def name2addr(name: str):
-        return next((d.address for d in devices if (d.name or "").strip() == name.strip()), name)
-
-    def dev_by_addr(address: str):
-        dev = next((d for d in devices if d.address == address), None)
-        if not dev:
-            raise Exception("Can't resolve device name %s, not discovered" % address)
-        return dev
-
     verbose_log = user_config.get('verbose_log', False)
     if verbose_log:
         logger.info('Verbose logging enabled')
 
     logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
-    bms_registry = dict(
-        daly=bmslib.models.daly.DalyBt,
-        jbd=bmslib.models.jbd.JbdBt,
-        jk=bmslib.models.jikong.JKBt,
-        ant=bmslib.models.ant.AntBt,
-        victron=bmslib.models.victron.SmartShuntBt,
-        group_parallel=bmslib.group.VirtualGroupBms,
-        # group_serial=bmslib.group.VirtualGroupBms, # TODO
-        supervolt=bmslib.models.supervolt.SuperVoltBt,
-        sok=bmslib.models.sok.SokBt,
-        dummy=bmslib.models.dummy.DummyBt,
-    )
-
     names = set()
     dev_args: Dict[str, dict] = {}
 
     for dev in user_config.get('devices', []):
-        addr: str = dev['address']
 
-        if not addr or addr.startswith('#'):
+        bms = construct_bms(dev, verbose_log, devices)
+
+        if bms is None:
+            logger.info("Skip %s", dev)
             continue
 
-        if dev['type'] not in bms_registry:
-            logger.warning('Unknown device type %s', dev)
-            continue
-
-        bms_class = bms_registry[dev['type']]
-        if dev.get('debug'):
-            logger.info('Verbose log for %s enabled', addr)
-        addr = name2addr(addr)
-        name: str = dev.get('alias') or dev_by_addr(addr).name
+        name = bms.name
         assert name not in names, "duplicate name %s" % name
-        bms_list.append(bms_class(addr,
-                                  name=name,
-                                  verbose_log=verbose_log or dev.get('debug'),
-                                  psk=dev.get('pin'),
-                                  adapter=dev.get('adapter'),
-                                  ))
+
+        bms_list.append(bms)
         names.add(name)
         dev_args[name] = dev
 
@@ -276,8 +236,6 @@ async def main():
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
         except:
             logger.warning("failed to init telemetry", exc_info=True)
-
-
 
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
