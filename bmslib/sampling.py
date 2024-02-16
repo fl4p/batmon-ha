@@ -418,7 +418,7 @@ class BmsSampler:
         device_topic = self.mqtt_topic_prefix
         for meter in self.meters:
             topic = f"{device_topic}/meter/{meter.name}"
-            s = round(meter.get(), 4)
+            s = round(meter.get(), 3)
             mqtt_single_out(self.mqtt_client, topic, s)
 
         if self.sinks:
