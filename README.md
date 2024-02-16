@@ -52,7 +52,7 @@ Add an entry for each device, such as:
 ```
 - address: CC:44:8C:F7:AD:BB
   type: jk
-  alias: battery1
+  alias: battery1            # MQTT topic prefix (regex [\w_.-/])
   pin: "12345"               # pairing PSK, victron only (optional)
   adapter: "hci0"            # switch the bluetooth hw adapter (optional)
   debug: true                # verbose log for this device only (optional)
@@ -65,8 +65,8 @@ displayed in the discovery list.
 
 `type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `sok`, `victron` or `dummy`.
 
-With the `alias` field you can set the name as displayed in Home Assistant. Otherwise, the name as found in Bluetooth
-discovery is used.
+With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
+Otherwise, the name as found in Bluetooth  discovery is used.
 
 If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456
 with device's PIN).
