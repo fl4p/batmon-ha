@@ -21,7 +21,7 @@ import time
 from collections import defaultdict
 from typing import List, Callable, Dict, Tuple
 
-from bmslib.bms import BmsSample, DeviceInfo
+from bmslib.bms import BmsSample, DeviceInfo, ErrorCodes, true_bits
 from bmslib.bt import BtBms
 from bmslib.util import to_hex_str
 
@@ -46,6 +46,26 @@ def _jk_command(address, value: list = ()):
 
 MIN_RESPONSE_SIZE = 300
 MAX_RESPONSE_SIZE = 320
+
+jk_errors = [
+    ErrorCodes.Chg_OT,
+    ErrorCodes.Chg_UT,
+    "Error 0x00 0x04",
+    ErrorCodes.Cell_UV,
+    "Error 0x00 0x10",
+    "Error 0x00 0x20",
+    "Error 0x00 0x40",
+    "Error 0x00 0x80",
+
+    "Error 0x01 0x00",
+    "Error 0x02 0x00",
+    ErrorCodes.Cell_Count_Wrong,
+    ErrorCodes.Current_Sensor_Abnormal,  # 0000 1000 0000 0000
+    ErrorCodes.Cell_OV,
+    "Error 0x20 0x00",  # 0010 0000 0000 0000
+    ErrorCodes.Chg_OC,
+    "Error 0x80 0x00",  # 1000 0000 0000 0000
+]
 
 
 class JKBt(BtBms):
@@ -208,6 +228,16 @@ class JKBt(BtBms):
         if is_new_11fw:
             temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
 
+        # this->publish_state_(this->errors_bitmask_sensor_, (float) raw_errors_bitmask);
+        #
+        if is_new_11fw:
+            # uint16_t raw_errors_bitmask = (uint16_t(data[134 + offset]) << 8) | (uint16_t(data[134 + 1 + offset]) << 0)
+            error_mask = None
+        else:
+            u16(buf)
+            buf[(136):(136+1):]
+            # uint16_t raw_errors_bitmask = (uint16_t(data[136 + offset]) << 8) | (uint16_t(data[136 + 1 + offset]) << 0);
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
@@ -232,6 +262,7 @@ class JKBt(BtBms):
             # buf[167 + offset]), discharge FET state
             uptime=float(u32(162 + offset)),  # seconds
             timestamp=t_buf,
+            errors=[jk_errors[i] for i in true_bits(error_mask, len(jk_errors))]
         )
 
     async def fetch(self, wait=True) -> BmsSample:

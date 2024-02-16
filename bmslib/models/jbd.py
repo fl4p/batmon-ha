@@ -1,6 +1,6 @@
 """
 JBD protocol references
-https://github.com/syssi/esphome-jbd-bms
+https://github.com/syssi/esphome-jbd-bms/blob/main/components/jbd_bms_ble/jbd_bms_ble.cpp
 https://github.com/syssi/esphome-jbd-bms/blob/main/docs/Jiabaida.communication.protocol.pdf
 https://gitlab.com/bms-tools/bms-tools/-/tree/master/bmstools?ref_type=heads
 https://github.com/sshoecraft/jbdtool/blob/1168edac728d1e0bdea6cd4fa142548c445f80ec/main.c
@@ -13,13 +13,33 @@ https://github.com/tgalarneau/bms
 
 """
 import asyncio
+from enum import IntEnum
 
-from bmslib.bms import BmsSample
+from bmslib.bms import BmsSample, true_bits
 from bmslib.bt import BtBms
+from bmslib.models import ErrorCodes
 
 
 def _jbd_command(command: int):
     return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
+
+
+error_table = {
+    0x00: ErrorCodes.CellOV,
+    0x01: ErrorCodes.CellUV,
+    0x02: ErrorCodes.PackOV,
+    0x03: ErrorCodes.PackUV,
+    0x04: ErrorCodes.ChgOT,
+    0x05: ErrorCodes.ChgUT,
+    0x06: ErrorCodes.DsgOT,
+    0x07: ErrorCodes.DsgUT,
+    0x08: ErrorCodes.ChgOC,
+    0x09: ErrorCodes.DsgOC,
+    0x0A: ErrorCodes.Short,
+    0x0B: ErrorCodes.BmsHwFault,
+    0x0C: ErrorCodes.MosSWLock,  # register 0xE1 "MOSFET control"
+    # 0x0D: "charge timeout close"
+}
 
 
 class JbdBt(BtBms):
@@ -51,9 +71,9 @@ class JbdBt(BtBms):
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
-        #try:
+        # try:
         #    await super().connect(**kwargs)
-        #except Exception as e:
+        # except Exception as e:
         #    self.logger.info("normal connect failed (%s), connecting with scanner", e)
         #    await self._connect_with_scanner(**kwargs)
 
@@ -72,6 +92,8 @@ class JbdBt(BtBms):
         # binary reading
         #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
 
+        u16 = lambda data, i: int.from_bytes(data[i:(i + 2)], byteorder='little', signed=False)
+
         buf = await self._q(cmd=0x03)
         buf = buf[4:]
 
@@ -79,6 +101,9 @@ class JbdBt(BtBms):
         num_temp = int.from_bytes(buf[22:23], 'big')
 
         mos_byte = int.from_bytes(buf[20:21], 'big')
+
+        error_mask = u16(buf, 16)
+        errors = [error_table[i] for i in true_bits(error_mask, len(error_table))]
 
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
@@ -97,6 +122,7 @@ class JbdBt(BtBms):
                 charge=mos_byte == 1 or mos_byte == 3,
             ),
 
+            errors=errors,
             # charge_enabled
             # discharge_enabled
         )

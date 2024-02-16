@@ -1,6 +1,7 @@
 import math
 import time
 from copy import copy
+from enum import IntEnum, auto
 from typing import List, Dict, Optional
 
 MIN_VALUE_EXPIRY = 20
@@ -31,6 +32,33 @@ class PowerMonitorSample:
         pass
 
 
+class ErrorCodes(IntEnum):
+    Cell_OV = auto()
+    Cell_UV = auto()
+    Pack_OV = auto()
+    Pack_UV = auto()
+    Chg_OT = auto()
+    Chg_UT = auto()  # charge under temperature
+    Dsg_OT = auto()  # discharge over temperature
+    Dsg_UT = auto()
+    Chg_OC = auto()
+    Dsg_OC = auto()
+    Short = auto()
+    Bms_HW_Fault = auto()  # ic font-end error
+    Mos_SW_Lock = auto()
+
+    Cell_Count_Wrong = auto()
+    Current_Sensor_Abnormal = auto()
+
+
+def true_bits(mask, n):
+    bitp = []
+    for i in range(n):
+        if mask & (1 << i):
+            bitp.append(i)
+    return bitp
+
+
 class BmsSample:
     def __init__(self, voltage, current, power=math.nan,
                  charge=math.nan, capacity=math.nan, cycle_capacity=math.nan,
@@ -39,7 +67,8 @@ class BmsSample:
                  temperatures: List[float] = None,
                  mos_temperature: float = math.nan,
                  switches: Optional[Dict[str, bool]] = None,
-                 uptime=math.nan, timestamp: Optional[float] = None):
+                 uptime=math.nan, timestamp: Optional[float] = None,
+                 errors: Optional[List[ErrorCodes]] = None):
         """
 
         :param voltage:
@@ -80,6 +109,8 @@ class BmsSample:
         self.timestamp = timestamp or time.time()
 
         self.num_samples = 0
+
+        self.errors = errors
 
         if switches:
             assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
