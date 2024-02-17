@@ -14,8 +14,8 @@ import paho.mqtt.client as paho
 import bmslib.bt
 import mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
-from bmslib.group import BmsGroup
-from bmslib.models import get_bms_model_class, construct_bms
+from bmslib.group import BmsGroup, VirtualGroupBms
+from bmslib.models import construct_bms
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
@@ -165,17 +165,18 @@ async def main():
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
 
-        if bms.is_virtual:
+        if isinstance(bms, VirtualGroupBms):
             group_bms = bms
             for member_ref in bms.get_member_refs():
                 if member_ref not in bms_by_name:
-                    logger.warning('BMS names: %s', set(bms_by_name.keys()))
-                    logger.warning('Please choose one of these names')
+                    logger.warning('Please choose one of these names: %s', set(bms_by_name.keys()))
                     raise Exception("unknown bms '%s' in group %s" % (member_ref, group_bms))
+
                 member_name = bms_by_name[member_ref].name
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,
                                     groups_by_bms[member_name], group_bms)
+                
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
 
