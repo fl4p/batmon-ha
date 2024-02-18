@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.78] - 2024-02-18
+* Fix `NameError: name 'logger' is not defined`
+
 ## [1.77] - 2024-02-16
 * Fix meter rounding (https://github.com/fl4p/batmon-ha/issues/169)
 * Fix paho 2.0 compatibility (https://github.com/fl4p/batmon-ha/issues/195)
