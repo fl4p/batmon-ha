@@ -451,7 +451,7 @@ class Downsampler:
         self._last: Optional[BmsSample] = None
 
     def __iadd__(self, s: BmsSample):
-        self._power += s._power
+        self._power += s.power
         self._current += s.current
         self._voltage += s.voltage
         self._num += 1

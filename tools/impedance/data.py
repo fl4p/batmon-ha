@@ -87,4 +87,4 @@ def fetch_batmon_ha_sensors(tr, alias, num_cells, freq='1s'):
 
 
 if __name__ == "__main__":
-    fetch_batmon_ha_sensors(("2022-01-05", "2022-02-05"), 'daly_bms')
+    fetch_batmon_ha_sensors(("2022-01-05", "2022-02-05"), 'daly_bms', num_cells=8)

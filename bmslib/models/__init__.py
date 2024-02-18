@@ -1,6 +1,7 @@
-from enum import IntEnum, auto
 
+from bmslib.util import get_logger
 
+logger = get_logger()
 
 
 def get_bms_model_class(name):

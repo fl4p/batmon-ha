@@ -1,10 +1,11 @@
 import json
-import math
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from bmslib.pwmath import EWM
 
 if False:  # read from csv files
     df = pd.read_csv('mppt_scan_I.csv')

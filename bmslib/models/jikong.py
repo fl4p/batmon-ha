@@ -254,7 +254,7 @@ class JKBt(BtBms):
         return self._decode_sample(buf, t_buf)
 
     async def subscribe(self, callback: Callable[[BmsSample], None]):
-        self._callbacks[0x02].append(lambda buf: callback(self._decode_sample(buf)))
+        self._callbacks[0x02].append(lambda buf: callback(self._decode_sample(buf, t_buf=time.time())))
 
     async def fetch_voltages(self):
         """
