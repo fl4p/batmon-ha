@@ -4,6 +4,7 @@ HA mdi: icons https://pictogrammers.com/library/mdi/
 
 
 """
+import os
 import asyncio
 import json
 import math
@@ -11,6 +12,7 @@ import queue
 import statistics
 import time
 import traceback
+import json
 
 import paho.mqtt.client as paho
 
@@ -22,6 +24,7 @@ logger = get_logger()
 
 no_publish_fail_warn = False
 
+standalone = os.environ.get('STANDALONE', False)
 
 def round_to_n(x, n):
     if isinstance(x, str) or not math.isfinite(x) or not x:
@@ -234,20 +237,35 @@ sample_desc = {
         "icon": "counter"},
 }
 
-
 def publish_sample(client, device_topic, sample: BmsSample):
+    if standalone:
+        transformed_values = {}
+
+    # Process sensor values
     for k, v in sample_desc.items():
-        topic = f"{device_topic}/{k}"
         s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
         if not is_none_or_nan(s):
-            mqtt_single_out(client, topic, s)
+            if standalone:
+                transformed_values[k] = s
+            else:
+                topic = f"{device_topic}/{k}"
+                mqtt_single_out(client, topic, s)
 
+    # Process switches
     if sample.switches:
+        if standalone:
+            transformed_values['switches'] = {}
         for switch_name, switch_state in sample.switches.items():
             assert isinstance(switch_state, bool)
-            topic = f"{device_topic}/switch/{switch_name}"
-            mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
+            if standalone:
+                transformed_values['switches'][switch_name] = 'ON' if switch_state else 'OFF'
+            else:
+                topic = f"{device_topic}/switch/{switch_name}"
+                mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
+    if standalone:
+        topic = f"{device_topic}/sample"
+        mqtt_single_out(client, topic, json.dumps(transformed_values))
 
 def publish_cell_voltages(client, device_topic, voltages):
     # "highest_voltage": parts[0] / 1000,
@@ -258,11 +276,19 @@ def publish_cell_voltages(client, device_topic, voltages):
     if not voltages:
         return
 
-    for i in range(0, len(voltages)):
-        topic = f"{device_topic}/cell_voltages/{i + 1}"
-        mqtt_single_out(client, topic, voltages[i] / 1000)
+    if standalone:
+        result = {}
 
-    if len(voltages) > 1:
+    for i in range(0, len(voltages)):
+        if standalone:
+            result[i] = voltages[i] / 1000
+        else:
+            topic = f"{device_topic}/cell_voltages/{i + 1}"
+            mqtt_single_out(client, topic, voltages[i] / 1000)
+
+    if standalone:
+        mqtt_single_out(client, f"{device_topic}/cell_voltages", json.dumps(result))
+    elif len(voltages) > 1:
         x = range(len(voltages))
         high_i = max(x, key=lambda i: voltages[i])
         low_i = min(x, key=lambda i: voltages[i])
@@ -276,10 +302,19 @@ def publish_cell_voltages(client, device_topic, voltages):
 
 
 def publish_temperatures(client, device_topic, temperatures):
+    if standalone:
+        result = []
+
     for i in range(0, len(temperatures)):
-        topic = f"{device_topic}/temperatures/{i + 1}"
         if not is_none_or_nan(temperatures[i]):
-            mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
+            if standalone:
+                result.append(round_to_n(temperatures[i], 4))
+            else:
+                topic = f"{device_topic}/temperatures/{i + 1}"
+                mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
+
+    if standalone:
+        mqtt_single_out(client, f"{device_topic}/temperatures", json.dumps(result))
 
 
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
