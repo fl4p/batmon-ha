@@ -182,8 +182,10 @@ async def main():
 
     # import env vars from addon_main.sh
     for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_user='MQTT_USER', mqtt_password='MQTT_PASSWORD').items():
-        if not user_config.get(k) and os.environ.get(en):
-            user_config[k] = os.environ[en]
+        env_value = os.environ.get(en)
+        if env_value is not None or k not in user_config:
+            logger.info(f"Setting {k} to user_config: {env_value}")
+            user_config[k] = env_value
 
     if user_config.get('mqtt_broker'):
         port_idx = user_config.mqtt_broker.rfind(':')

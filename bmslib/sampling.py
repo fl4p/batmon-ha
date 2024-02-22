@@ -1,9 +1,12 @@
+import os
 import asyncio
 import math
 import random
 import re
 import sys
 import time
+import json
+
 from collections import defaultdict
 from copy import copy
 from typing import Optional, List, Dict
@@ -22,6 +25,7 @@ from mqtt_util import publish_sample, publish_cell_voltages, publish_temperature
 
 logger = get_logger(verbose=False)
 
+standalone = os.environ.get('STANDALONE', False)
 
 class SampleExpiredError(Exception):
     pass
@@ -378,7 +382,7 @@ class BmsSampler:
                 self.publish_meters()
 
             # publish home assistant discovery every 60 samples
-            if self.period_discov:
+            if self.period_discov and not standalone:
                 logger.info("Sending HA discovery for %s (num_samples=%d)", bms.name, self.num_samples)
                 if self.device_info is None:
                     await self._try_fetch_device_info()
@@ -416,10 +420,20 @@ class BmsSampler:
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix
+        
+        if standalone:
+            result = {}
+
         for meter in self.meters:
-            topic = f"{device_topic}/meter/{meter.name}"
-            s = round(meter.get(), 3)
-            mqtt_single_out(self.mqtt_client, topic, s)
+            value = round(meter.get(), 3)
+            if standalone:
+                result[meter.name] = value
+            else:
+                topic = f"{device_topic}/meter/{meter.name}"
+                mqtt_single_out(self.mqtt_client, topic, value)
+
+        if standalone:
+            mqtt_single_out(self.mqtt_client, f"{device_topic}/meter", json.dumps(result))
 
         if self.sinks:
             readings = {m.name: m.get() for m in self.meters}
@@ -480,3 +494,4 @@ class Downsampler:
         self._last = None
 
         return s
+
