@@ -1,10 +1,20 @@
 # Stand-alone setup
-You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
+You can run the add-on without Home Assistant and without Docker.
+It works on any platform supported by bleak, that currently is:
+* Windows 10 or higher
+* Linux distributions with BlueZ >= 5.43
+* OS X/macOS via Core Bluetooth API, OS X version  >= 10.11
+
+
+
+Imagine a remote RPI sending MQTT data over WiFi. It is also useful for developing.
+You need to have python3 installed.
 
 ```
 git clone https://github.com/fl4p/batmon-ha
 cd batmon-ha
-pip3 install -r requirements.txt
+python3 -m venv ./venv
+./venv/bin/pip3 install -r requirements.txt
 ```
 
 Create `options.json` within the `batmon-ha` directory. Use this as an example and adjust as needed:
@@ -49,20 +59,23 @@ Create `options.json` within the `batmon-ha` directory. Use this as an example a
 
 Then start:
 ```
-python3 main.py
+./venv/bin/python3 main.py
 ```
 
 If your OS uses systemd, you can use this service file to start batmon on boot (and restart when it crashes):
 ```
 [Unit]
 Description=Batmon
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 Restart=always
+RestartSec=5s
 User=pi
 WorkingDirectory=/home/pi/batmon-ha
-ExecStart=/usr/bin/env python3 main.py
+ExecStart=/home/pi/batmon-ha/venv/bin/python3 main.py
 
 [Install]
 WantedBy=multi-user.target
@@ -75,6 +88,33 @@ systemctl enable batmon.service
 systemctl start batmon.service 
 ```
 
+Alternatively, you can add batmon to crontab:
+
+```shell
+crontab -e
+```
+
+add this line at the bottom:
+```
+@reboot cd /home/pi/batmon-ha && /home/pi/batmon-ha/venv/bin/python3 main.py
+```
+
 
 # Docker
 Small modifications are needed to run this inside Docker, see https://github.com/fl4p/batmon-ha/issues/25#issuecomment-1400900525
+
+
+
+# Minimal options.json
+```
+{
+  "devices": [
+    {
+      "address": "",
+      "type": "jk",
+      "alias": "jk1"
+    }    
+  ],
+  "keep_alive": true
+}
+```

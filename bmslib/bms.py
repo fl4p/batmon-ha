@@ -7,7 +7,9 @@ MIN_VALUE_EXPIRY = 20
 
 
 class DeviceInfo:
-    def __init__(self, model: str, hw_version: str, sw_version: str, name: Optional[str], sn: Optional[str] = None):
+    def __init__(self, mnf: str, model: str, hw_version: Optional[str], sw_version: Optional[str], name: Optional[str],
+                 sn: Optional[str] = None):
+        self.mnf = mnf
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version
@@ -23,15 +25,21 @@ class DeviceInfo:
         return s + ')'
 
 
+class PowerMonitorSample:
+    # Todo this is a draft
+    def __init__(self, voltage, current, power=math.nan, total_energy=math.nan):
+        pass
+
+
 class BmsSample:
     def __init__(self, voltage, current, power=math.nan,
                  charge=math.nan, capacity=math.nan, cycle_capacity=math.nan,
                  num_cycles=math.nan, soc=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
-                 mos_temperature=math.nan,
+                 mos_temperature: float = math.nan,
                  switches: Optional[Dict[str, bool]] = None,
-                 uptime=math.nan, timestamp=None):
+                 uptime=math.nan, timestamp: Optional[float] = None):
         """
 
         :param voltage:
@@ -44,7 +52,8 @@ class BmsSample:
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
-        :param uptime BMS uptime in seconds
+        :param uptime: BMS uptime in seconds
+        :param timestamp: seconds since epoch (unix timestamp from time.time())
         """
         self.voltage: float = voltage
         self.current: float = current or 0  # -
@@ -70,6 +79,8 @@ class BmsSample:
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 
+        self.num_samples = 0
+
         if switches:
             assert all(map(lambda x: isinstance(x, bool), switches.values())), "non-bool switches values %s" % switches
 
@@ -85,7 +96,14 @@ class BmsSample:
 
     def __str__(self):
         # noinspection PyStringFormat
-        return 'BmsSampl(%(soc).1f%%,U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,q=%(charge).1fAh/%(capacity).0f,mos=%(mos_temperature).1f°C)' % self.values()
+        s = 'BmsSampl('
+        if not math.isnan(self.soc):
+            s += '%.1f%%,' % self.soc
+        vals = self.values()
+        s += 'U=%(voltage).1fV,I=%(current).2fA,P=%(power).0fW,' % vals
+        if not math.isnan(self.charge):
+            s += 'Q=%(charge).0f/%(capacity).0fAh,mos=%(mos_temperature).0f°C' % vals
+        return s.rstrip(',') + ')'
 
     def invert_current(self):
         return self.multiply_current(-1)

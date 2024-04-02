@@ -9,6 +9,7 @@ class FuturesPool:
     """
     Manage a collection of named futures.
     """
+
     def __init__(self):
         self._futures: Dict[str, asyncio.Future] = {}
 
@@ -17,7 +18,33 @@ class FuturesPool:
             tuple(self.acquire(n) for n in name)
             return FutureContext(name, pool=self)
 
-        assert name not in self._futures, "already waiting for %s" % name
+        assert isinstance(name, (str, int))
+
+        existing = self._futures.get(name)
+        if existing and not existing.done():
+            raise Exception("already waiting for future named '%s'" % name)
+
+        fut = asyncio.Future()
+        self._futures[name] = fut
+        return FutureContext(name, pool=self)
+
+    async def acquire_timeout(self, name: NameType, timeout):
+        if isinstance(name, tuple):
+            await asyncio.gather(*tuple(self.acquire_timeout(n, timeout) for n in name), return_exceptions=False)
+            return FutureContext(name, pool=self)
+
+        assert isinstance(name, (str, int))
+
+        existing = self._futures.get(name)
+        if existing and not existing.done():
+            for i in range(int(timeout * 10)):
+                await asyncio.sleep(.1)
+                if existing.done():
+                    existing = None
+                    break
+            if existing:
+                raise Exception("still waiting for future named '%s'" % name)
+
         fut = asyncio.Future()
         self._futures[name] = fut
         return FutureContext(name, pool=self)
@@ -39,6 +66,7 @@ class FuturesPool:
     def remove(self, name):
         if isinstance(name, tuple):
             return tuple(self.remove(n) for n in name)
+        assert isinstance(name, (str, int))
         self._futures.pop(name, None)
 
     async def wait_for(self, name: NameType, timeout):
@@ -46,10 +74,14 @@ class FuturesPool:
             tasks = [self.wait_for(n, timeout) for n in name]
             return await asyncio.gather(*tasks, return_exceptions=False)
 
+        if name not in self._futures:
+            raise KeyError('future %s not found' % name)
+
         try:
             return await asyncio.wait_for(self._futures.get(name), timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            raise
+            self.remove(name)
+            raise asyncio.TimeoutError("timeout waiting for %s" % name)
         finally:
             self.remove(name)
 

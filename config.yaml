@@ -1,27 +1,36 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "0.0.69"
+version: "1.78"
 slug: "batmon"
 init: false
+host_dbus: true
+apparmor: true
+
+homeassistant_api: true # http://supervisor/core/api
+hassio_api: true        # http://supervisor
+
+# watchdog: true # todo  https://developers.home-assistant.io/docs/add-ons/configuration/
+
 arch:
   - aarch64
   - amd64
   - armhf
   - armv7
   - i386
-host_dbus: true
-apparmor: true
+
 services:
   - mqtt:need
+
+discovery:
+  - mqtt
+
+
 options:
   devices:
-    - address: CC:44:88:FF:AA:BB
-      type: jk
+    - address: D6:6C:0A:61:14:30
+      type: sok
       alias: battery1
-  mqtt_user: ""
-  mqtt_password: ""
-  mqtt_broker: "core-mosquitto"
   concurrent_sampling: false
   keep_alive: true
   verbose_log: false
@@ -45,7 +54,7 @@ schema:
 
   mqtt_user: "str?"
   mqtt_password: "str?"
-  mqtt_broker: "str"
+  mqtt_broker: "str?"
   mqtt_port: "int(1,65535)?"
 
   concurrent_sampling: "bool"
@@ -66,4 +75,7 @@ schema:
   influxdb_username: "str?"
   influxdb_password: "str?"
   influxdb_ssl: "bool?"
+  influxdb_verify_ssl: "bool?"
   influxdb_database: "str?"
+
+#  telemetry: "bool?"

@@ -1,20 +1,32 @@
 """
 
 References
+[uart v1.0 pdf](https://diysolarforum.com/resources/daly-smart-bms-manual-and-documentation.48/download
+[uart v1.2 pdf](https://forums.ni.com/t5/LabVIEW/RS-485-Modbus-communication-of-daly-BMS/m-p/4286648#M1250877
+
 https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py
 https://github.com/esphome/esphome/tree/dev/esphome/components/daly_bms
 
+mac-addresses / pattern
+B4:E8:42:C2:84:13
+96:69:08:01:06:A7
+76:67:02:03:02:3E
+3D7394B1-BCFD-4CDC-A10D-3D113E2317A6 # darwin
+
 """
 import asyncio
+import math
 import struct
+import time
 from typing import Dict
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.bt import BtBms, enumerate_services
+from bmslib.cache.mem import mem_cache_deco
 
 
 def calc_crc(message_bytes):
-    return bytes([sum(message_bytes) & 0xFF])
+    return sum(message_bytes) & 0xFF
 
 
 def daly_command_message(command: int, extra=""):
@@ -27,18 +39,26 @@ def daly_command_message(command: int, extra=""):
     """
     # 95 -> a58095080000000000000000c2
 
+    assert isinstance(command, int)
+
     address = 8  # 4 = USB, 8 = Bluetooth
 
     message = "a5%i0%02x08%s" % (address, command, extra)
+    #          "a5%i0%s  08%s"
     message = message.ljust(24, "0")
     message_bytes = bytearray.fromhex(message)
-    message_bytes += calc_crc(message_bytes)
+    message_bytes.append(calc_crc(message_bytes))
 
     return message_bytes
 
 
 class DalyBt(BtBms):
     TIMEOUT = 12
+
+    SOC_NOT_FULL_YET = 99.1  # when the gauge reaches 100% but no OV yet
+
+    TEMPERATURE_STEP = 1
+    TEMPERATURE_SMOOTH = 40
 
     def __init__(self, address, **kwargs):
         if kwargs.get('psk'):
@@ -54,7 +74,7 @@ class DalyBt(BtBms):
     async def get_states_cached(self, key):
         if not self._states:
             self._states = await self.fetch_states()
-            self.logger.info('got daly states: %s', self._states)
+            self.logger.debug('got daly states: %s', self._states)
         return self._states.get(key)
 
     def _notification_callback(self, _sender, data):
@@ -66,8 +86,19 @@ class DalyBt(BtBms):
         for response_bytes in responses:
             self.logger.debug('daly resp: %s', response_bytes)
 
+            if len(response_bytes) < RESP_LEN:
+                self.logger.warning("msg too short: %s", response_bytes)
+                continue
+
+            check_comp = calc_crc(response_bytes[0:12])
+            check_expect = response_bytes[12]
+
             command = response_bytes[2]
             response_bytes = response_bytes[4:-1]
+
+            if check_comp != check_expect:
+                self.logger.warning("checksum fail, expected %s, got %s. %s", check_expect, check_comp, response_bytes)
+                continue
 
             # buffer for multi-response commands
             buf = self._fetch_nr.get(command, None)
@@ -105,13 +136,14 @@ class DalyBt(BtBms):
                 await self.client.write_gatt_char(sx, bytearray(b""))
                 self.UUID_RX = rx
                 self.UUID_TX = tx
-                self.logger.info("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
+                self.logger.debug("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
                 break
             except Exception as e:
                 self.logger.warning("tried rx/tx/sx uuids %s/%s/%s: %s", rx, tx, sx, e)
                 continue
 
         if not self.UUID_RX:
+            await enumerate_services(self.client, self.logger)
             raise Exception("Notify characteristic (rx) not found")
 
     async def disconnect(self):
@@ -126,7 +158,7 @@ class DalyBt(BtBms):
         else:
             self._fetch_nr.pop(command, None)
 
-        with self._fetch_futures.acquire(command):
+        with await self._fetch_futures.acquire_timeout(command, timeout=self.TIMEOUT / 2):
             self.logger.debug("daly send: %s", msg)
             await self.client.write_gatt_char(self.UUID_TX, msg)
 
@@ -142,10 +174,18 @@ class DalyBt(BtBms):
     async def set_switch(self, switch: str, state: bool):
         fet_addr = dict(discharge=0xD9, charge=0xDA)
         msg = daly_command_message(fet_addr[switch], extra="01" if state else "00")
+        self.logger.info('write %s', msg)
+        self._fetch_status.invalidate(self)
+        status = await self._fetch_status()
         await self.client.write_gatt_char(self.UUID_TX, msg)
+
+        #if switch == "charge" and state != status['discharging_mosfet']:
+        #   msg = daly_command_message(fet_addr["discharge"], extra="01" if status['discharging_mosfet'] else "00")
+        #    await self.client.write_gatt_char(self.UUID_TX, msg)
 
     async def fetch(self) -> BmsSample:
         status = await self._fetch_status()
+
         sample = await self.fetch_soc(sample_kwargs=dict(
             charge=status['capacity_ah'],
             switches=dict(
@@ -153,9 +193,11 @@ class DalyBt(BtBms):
                 discharge=bool(status['discharging_mosfet'])
             ),
         ))
+        # self.logger.info(sample.switches)
         return sample
 
     async def fetch_soc(self, sample_kwargs=None):
+        timestamp = time.time()
         resp = await self._q(0x90)
 
         parts = struct.unpack('>h h h h', resp)
@@ -167,12 +209,32 @@ class DalyBt(BtBms):
             current=(parts[2] - 30000) / 10,  # negative=charging, positive=discharging
             soc=parts[3] / 10,
             num_cycles=await self.get_states_cached('num_cycles'),
+            timestamp=timestamp,
             **sample_kwargs,
         )
+
+        if sample.soc < 0 or sample.soc > 100:
+            self.logger.warning('soc %s out of range, bin data: %s', sample, parts)
+            raise ValueError("unexpected soc %s" % sample.soc)
+
         return sample
 
+    @mem_cache_deco(ttl=30)
     async def _fetch_status(self):
         response_data = await self._q(0x93)
+
+        # dsgOFF:
+        # bytearray(b'\x01\x01\x01]\x00\x03\xda,')    '1 1 1 5d 0 3 da 2c'
+        # bytearray(b'\x01\x01\x01k\x00\x03\xe2L')    '1 1 1 6b 0 3 e2 4c'
+        # bytearray(b'\x01\x01\x01v\x00\x03\xe3P')    '1 1 1 76 0 3 e3 50'
+        # bytearray(b'\x01\x01\x01\x80\x00\x03\xe3P')
+        # dsgON:
+        # bytearray(b'\x01\x01\x01\xca\x00\x03\xdd8') '1 1 1 ca 0 3 dd 38'
+        # bytearray(b'\x01\x01\x01\xf0\x00\x03\xdf@') '1 1 1 f0 0 3 df 40'
+        # bytearray(b'\x01\x01\x01\x15\x00\x03\xe0D') '1 1 1 15 0 3 e0 44'
+        # bytearray(b'\x01\x01\x01!\x00\x03\xe0D')
+
+        # self.logger.info(response_data)
 
         parts = struct.unpack('>b ? ? B l', response_data)
 
@@ -183,13 +245,15 @@ class DalyBt(BtBms):
         else:
             mode = "discharging"
 
-        return {
+        status = {
             "mode": mode,
             "charging_mosfet": parts[1],
-            "discharging_mosfet": parts[2],
+            "discharging_mosfet": parts[2],  # TODO this is NOT the actual switch state
             # "bms_cycles": parts[3], unstable result
             "capacity_ah": parts[4] / 1000,  # this is the current charge
         }
+        self.logger.debug("status %s", status)
+        return status
 
     async def fetch_states(self):
 
@@ -206,6 +270,14 @@ class DalyBt(BtBms):
                 break
             states[state_names[state_index]] = bool(int(bit))
             state_index += 1
+
+        # dshOFF
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdc')
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdd')
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdf')
+        # dsgON
+        # bytearray(b'\x08\x01\x00\x00\x02\x005\xdf')
+        # dsg SATE not in here!
         data = {
             "num_cells": parts[0],
             "num_temps": parts[1],
@@ -214,6 +286,7 @@ class DalyBt(BtBms):
             "states": states,
             "num_cycles": parts[5],
         }
+        self.logger.debug("state %s", data)
         return data
 
     async def fetch_voltages(self, num_cells=0):
@@ -221,7 +294,7 @@ class DalyBt(BtBms):
             num_cells = await self.get_states_cached('num_cells')
             assert isinstance(num_cells, int) and 0 < num_cells <= 32, "num_cells %s outside range" % num_cells
 
-        num_resp = round(num_cells / 3 + .5)  # bms sends tuples of 3 (ceil)
+        num_resp = math.ceil(num_cells / 3)  # bms sends tuples of 3 (ceil)
         resp = await self._q(0x95, num_responses=num_resp)
         voltages = []
         for i in range(num_resp):
@@ -236,7 +309,7 @@ class DalyBt(BtBms):
             assert isinstance(num_sensors, int) and 0 < num_sensors <= 32, "num_sensors %s outside range" % num_sensors
 
         temperatures = []
-        n_resp = round(num_sensors / 7 + .5)  # bms sends tuples of 7 (ceil)
+        n_resp = math.ceil(num_sensors / 7)  # bms sends tuples of 7 (ceil)
         resp = await self._q(0x96, num_responses=n_resp)
         if n_resp == 1:
             resp = [resp]
@@ -247,17 +320,21 @@ class DalyBt(BtBms):
         return [t - 40 for t in temperatures[:num_sensors]]
 
     def debug_data(self):
-        return self._last_response
+        return dict(r=self._last_response, buf=self._fetch_nr, rx=self.UUID_RX, tx=self.UUID_TX)
 
 
 async def main():
     mac_address = '3D7394B1-BCFD-4CDC-A10D-3D113E2317A6'  # daly osx
-    # mac_address = ''
+    mac_address = '62E06493-A9CC-A884-87B9-03BAB9A95FDB'
 
-    bms = DalyBt(mac_address)
+    bms = DalyBt(mac_address, name="daly")
     await bms.connect()
+    s = await bms.fetch()
+    print(s)
     sample = await bms.fetch_voltages(num_cells=8)
     print(sample)
+    await bms.fetch()
+    await bms.set_switch("discharge", True)
     await bms.disconnect()
 
 
