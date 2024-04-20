@@ -59,7 +59,7 @@ class JbdBt(BtBms):
         #  https://github.com/roccotsi2/esp32-smart-bms-simulation
 
         buf = await self._q(cmd=bytes.fromhex("D2 03 00 00 00 3E D7 B9"))
-        buf = buf[4:]
+        buf = buf[3:]
 
         #num_cell = int.from_bytes(buf[21:22], 'big')
         num_temp = int.from_bytes(buf[22:23], 'big')
