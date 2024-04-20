@@ -1,4 +1,5 @@
 import asyncio
+import math
 import statistics
 from copy import copy
 from typing import Dict, Iterable, List
@@ -31,11 +32,16 @@ class BmsGroup:
         return sum_parallel(self.samples.values())
 
     def fetch_voltages(self):
-        return sum((self.voltages[name] for name in self.bms_names), [])
+        try:
+            return sum((self.voltages[name] for name in self.bms_names), [])
+        except KeyError as e:
+            raise GroupNotReady(e)
 
 
 class GroupNotReady(Exception):
     pass
+    # TODO rename GroupMissingData ?
+
 
 
 class VirtualGroupBms:
@@ -54,6 +60,14 @@ class VirtualGroupBms:
     @property
     def is_connected(self):
         return set(self.group.samples.keys()) == set(self.group.bms_names)
+
+    @property
+    def is_virtual(self):
+        return True
+
+    @property
+    def connect_time(self):
+        return max(bms.connect_time for bms in self.members)
 
     def debug_data(self):
         return "missing %s" % (set(self.group.bms_names) - set(self.group.samples.keys()))
@@ -86,6 +100,9 @@ class VirtualGroupBms:
 
         raise GroupNotReady("group %s waiting for member data %s" % (self.name, self.debug_data()))
 
+    async def disconnect(self):
+        pass
+
     async def __aenter__(self):
         await self.connect()
 
@@ -106,6 +123,14 @@ class VirtualGroupBms:
         raise NotImplementedError()
 
 
+def is_finite(x):
+    return x is not None and math.isfinite(x)
+
+
+def finite_or_fallback(x, fallback):
+    return x if is_finite(x) else fallback
+
+
 def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(
         voltage=statistics.mean(s.voltage for s in samples),
@@ -115,9 +140,9 @@ def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
         capacity=sum(s.capacity for s in samples),
         cycle_capacity=sum(s.cycle_capacity for s in samples),
         num_cycles=statistics.mean(s.num_cycles for s in samples),
-        soc=statistics.mean(s.soc for s in samples),
+        soc=sum(s.soc * s.capacity for s in samples) / sum(s.capacity for s in samples),
         temperatures=sum(((s.temperatures or []) for s in samples), []),
-        mos_temperature=max(s.mos_temperature for s in samples),
-        switches={k: v for s in samples for k, v in s.switches.items()},
+        mos_temperature=max((s.mos_temperature for s in samples if is_finite(s.mos_temperature)), default=math.nan),
+        switches={k: v for s in samples for k, v in (s.switches or {}).items()},
         timestamp=min(s.timestamp for s in samples),
     )

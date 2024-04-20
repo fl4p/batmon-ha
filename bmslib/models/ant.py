@@ -57,6 +57,9 @@ class AntBt(BtBms):
     TIMEOUT = 16
     WRITE_REGISTER = 0x51
 
+    TEMPERATURE_STEP = 1 # it sends out noisy data in between
+    TEMPERATURE_SMOOTH = 40
+
     def __init__(self, address, **kwargs):
         super().__init__(address, _uses_pin=False, **kwargs)
         self._buffer = bytearray()
@@ -112,15 +115,17 @@ class AntBt(BtBms):
         await super().disconnect()
 
     async def _q(self, cmd: AntCommandFuncs, addr, val, resp_code):
-        with self._fetch_futures.acquire(resp_code):
+        with await self._fetch_futures.acquire_timeout(resp_code, timeout=self.TIMEOUT/2):
             await self.client.write_gatt_char(self.CHAR_UUID, data=_ant_command(cmd, addr, val))
             return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
 
     async def fetch_device_info(self) -> DeviceInfo:
         buf: bytearray = await self._q(AntCommandFuncs.DeviceInfo, 0x026c, 0x20, resp_code=0x12)
+        hw = bytearray.decode(buf[6:6 + 16].strip(b'\0'), 'utf-8')
         dev = DeviceInfo(
-            model='ANT',
-            hw_version=bytearray.decode(buf[6:6 + 16].strip(b'\0'), 'utf-8'),
+            mnf="ANT",
+            model='ANT-' + hw,
+            hw_version=hw,
             sw_version=bytearray.decode(buf[22:22 + 16].strip(b'\0'), 'utf-8'),
             name=None,
             sn=None,
@@ -165,12 +170,12 @@ class AntBt(BtBms):
         # soh = u16(offset)  # state of health
         offset += 2
 
-        # charge mos state
-        switch_chg = data[offset]
-        offset += 1
-
         # dsg mos state
         switch_dsg = data[offset]
+        offset += 1
+
+        # charge mos state
+        switch_chg = data[offset]
         offset += 1
 
         # bal state
@@ -230,7 +235,8 @@ class AntBt(BtBms):
 
 
 async def main():
-    mac_address = '9AA68C04-9C48-4FAD-7798-13ABB4878996'
+    # mac_address = '9AA68C04-9C48-4FAD-7798-13ABB4878996'
+    mac_address = '08E27970-3DA3-65C0-05E4-B1A8482449C5'
 
     # print(to_hex_str(_ant_command(AntCommandFuncs.DeviceInfo, 0x026c, 0x20)))
 
