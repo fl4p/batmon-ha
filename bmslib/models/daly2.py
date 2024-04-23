@@ -59,24 +59,24 @@ class JbdBt(BtBms):
         #  https://github.com/roccotsi2/esp32-smart-bms-simulation
 
         buf = await self._q(cmd=bytes.fromhex("D2 03 00 00 00 3E D7 B9"))
-        buf = buf[4:]
+        buf = buf[3:]
 
         #num_cell = int.from_bytes(buf[21:22], 'big')
-        num_temp = int.from_bytes(buf[22:23], 'big')
+        num_temp = int.from_bytes(buf[100:102], 'big')
 
         mos_byte = int.from_bytes(buf[20:21], 'big')
 
         sample = BmsSample(
             voltage=int.from_bytes(buf[80:82], byteorder='big') / 10,
-            current=(int.from_bytes(buf[82:84], byteorder='big', signed=True) - 30000) / 10,
+            current=(int.from_bytes(buf[82:84], byteorder='big') - 30000) / 10,
             soc=int.from_bytes(buf[84:86], byteorder='big') / 10,
 
-            charge=int.from_bytes(buf[4:6], byteorder='big', signed=True) / 100,
-            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
+            charge=int.from_bytes(buf[96:98], byteorder='big') / 10,
+            #capacity=int.from_bytes(buf[6:8], byteorder='big', signed=True) / 100,
 
-            num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=True),
+            num_cycles=int.from_bytes(buf[102:104], byteorder='big'),
 
-            temperatures=[(int.from_bytes(buf[23 + i * 2:i * 2 + 25], 'big') - 2731) / 10 for i in range(num_temp)],
+            temperatures=[(int.from_bytes(buf[64 + i * 2:i * 2 + 66], 'big') - 40) for i in range(num_temp)],
 
             switches=dict(
                 discharge=mos_byte == 2 or mos_byte == 3,
