@@ -5,7 +5,7 @@ git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
 
 # bleak==0.20.2 # (installed with install_bleak.py)
 
-paho-mqtt>=2.0.0
+paho-mqtt==2.1.0
 backoff
 crcmod
 

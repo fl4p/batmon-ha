@@ -9,7 +9,8 @@ import time
 import traceback
 from typing import List, Dict
 
-import paho.mqtt.client as paho
+import paho.mqtt.client
+from paho.mqtt.enums import CallbackAPIVersion
 
 import bmslib.bt
 import mqtt_util
@@ -23,7 +24,7 @@ from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process
 
 logger = get_logger(verbose=False)
 
-user_config: Dict[str, any] = load_user_config()
+user_config = load_user_config()
 
 shutdown = False
 t_last_store = 0
@@ -193,7 +194,7 @@ async def main():
 
         logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
         # paho_monkey_patch()
-        mqtt_client = paho.Client(paho.CallbackAPIVersion.VERSION1)
+        mqtt_client = paho.mqtt.client.Client(CallbackAPIVersion.VERSION2)
         mqtt_client.enable_logger(logger)
         if user_config.get('mqtt_user', None):
             mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
