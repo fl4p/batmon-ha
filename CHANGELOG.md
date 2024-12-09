@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.79] - 2024-12-09
+* Fix #259 OverflowError
+* pin paho version 2.1
+* fix daly2 @patman15
+* changed jk frame version detection
+
 ## [1.78] - 2024-02-18
 * Fix `NameError: name 'logger' is not defined`
 
