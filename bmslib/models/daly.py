@@ -61,9 +61,9 @@ class DalyBt(BtBms):
     TEMPERATURE_SMOOTH = 40
 
     def __init__(self, address, **kwargs):
-        if kwargs.get('psk'):
-            self.logger.warning('JBD usually does not use a pairing PIN')
         super().__init__(address, **kwargs)
+        if kwargs.get('psk'):
+            self.logger.warning('Daly usually does not use a pairing PIN')
         self.UUID_RX = None
         self.UUID_TX = None
         self._fetch_nr: Dict[int, list] = {}

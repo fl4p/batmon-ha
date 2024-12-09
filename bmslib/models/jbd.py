@@ -29,8 +29,6 @@ class JbdBt(BtBms):
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
-        if kwargs.get('psk'):
-            self.logger.warning('JBD usually does not use a pairing PIN')
         self._buffer = bytearray()
         self._switches = None
         self._last_response = None
