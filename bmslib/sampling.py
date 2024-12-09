@@ -157,7 +157,7 @@ class BmsSampler:
                 self._num_errors = 0
             return s
         except bmslib.bt.BleakDeviceNotFoundError:
-            t_wait = min(1.5 ** self._num_errors, 120)
+            t_wait = 1.5 ** min(self._num_errors, 12)
             logger.error("%s device not found, retry in %d seconds", self.bms, t_wait)
             self._time_next_retry = time.time() + t_wait
             return None
