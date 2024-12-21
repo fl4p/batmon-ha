@@ -191,7 +191,10 @@ class JKBt(BtBms):
     def _decode_sample(self, buf: bytearray, t_buf: float) -> BmsSample:
         buf_set, t_set = self._resp_table[0x01]
 
-        is_new_11fw = buf[189] in {0x0, 0x1} and buf[189 + 32] > 0  # 32 cell version
+        # old fw: field "Nominal_Capacity" starts at buf[146], new fw buf[146] == 0
+        # new fw: field "Nominal_Capacity" starts at buf[178], old fw buf[178] == 0
+        is_new_11fw = buf[178] > 0 and buf[146] == 0
+
         offset = 0
         if is_new_11fw:
             offset = 32
