@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.80] - 2024-12-28
+* Fix JK firmware detection (merge #267)
+
 ## [1.79] - 2024-12-09
 * Fix #259 OverflowError
 * pin paho version 2.1
