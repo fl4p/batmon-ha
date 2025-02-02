@@ -299,7 +299,9 @@ class DalyBt(BtBms):
         voltages = []
         for i in range(num_resp):
             v = struct.unpack(">b 3h x", resp[i])
-            assert v[0] == i + 1, "out-of-order frame %s != #%s" % (v, i + 1)
+            if v[0] != i + 1:
+
+                raise ValueError("out-of-order frame %s != #%s" % (v, i + 1))
             voltages += v[1:]
         return voltages[0:num_cells]
 

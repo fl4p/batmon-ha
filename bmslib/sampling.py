@@ -1,14 +1,14 @@
+from collections import defaultdict
+
 import asyncio
 import math
+import paho.mqtt.client
 import random
 import re
 import sys
 import time
-from collections import defaultdict
 from copy import copy
 from typing import Optional, List, Dict
-
-import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
@@ -18,7 +18,7 @@ from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger
 from mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, mqtt_single_out, round_to_n
+    subscribe_switches, mqtt_single_out
 
 logger = get_logger(verbose=False)
 
@@ -216,6 +216,8 @@ class BmsSampler:
 
         t_conn = time.time()
 
+        err = False
+
         if not was_connected and t_conn < self._time_next_retry:
             logger.debug('retry in %.0f sec', self._time_next_retry - t_conn)
             await asyncio.sleep(4)
@@ -314,7 +316,7 @@ class BmsSampler:
             voltages = []
 
             async def cached_fetch_voltages():
-                nonlocal voltages
+                nonlocal voltages, err
                 if voltages:
                     return voltages
 
@@ -326,6 +328,7 @@ class BmsSampler:
                         self.bms_group.update_voltages(bms, voltages)
                 except:
                     logger.error("%s error fetching voltage", bms.name, exc_info=1)
+                    err = True
                     voltages = None
 
                 return voltages
@@ -371,7 +374,8 @@ class BmsSampler:
                                          temperatures=sample.temperatures)
 
                 if log_data and (voltages or sample.temperatures) and not bms.is_virtual:
-                    logger.info('%s volt=[%s] temp=%s', bms.name, ','.join(map(str, voltages)),
+                    logger.info('%s volt=[%s] temp=%s', bms.name,
+                                ','.join(map(str, voltages)) if voltages else voltages,
                                 sample.temperatures)
 
             if self.period_discov or self.period_30s:
@@ -412,7 +416,8 @@ class BmsSampler:
                 and not bms.is_virtual and log_data):
             logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
-        return sample
+        # pass "light" errors to the caller to trigger a re-connect after too many
+        return sample if not err else None
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix
