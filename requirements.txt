@@ -1,14 +1,10 @@
-#bleak
-#git+https://github.com/hbldh/bleak@ed0b1c1cddf3a2f01882512745199e0f8f4dfa68 #https://github.com/hbldh/bleak/pull/640
-#git+https://github.com/jpeters-ml/bleak@ed0b1c1
-git+https://github.com/jpeters-ml/bleak@feature/windowsPairing
 
-# bleak==0.20.2 # (installed with install_bleak.py)
+bleak==0.22.3 # see Dockerfile
 
 paho-mqtt==2.1.0
 backoff
 crcmod
 
-#influxdb #optional (installed with install_bleak.py)
+#influxdb # see Dockerfile
 # the influxdb package appears to be not available from some platforms, so install it only if needed
 # see https://github.com/fl4p/batmon-ha/issues/147 (rpi 3)

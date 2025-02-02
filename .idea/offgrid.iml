@@ -6,5 +6,6 @@
     </content>
     <orderEntry type="jdk" jdkName="ha" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module" module-name="udp-relay" />
   </component>
 </module>

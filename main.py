@@ -113,6 +113,14 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 async def main():
     global shutdown
 
+    pair_only = len(sys.argv) > 1 and sys.argv[1] == "pair-only"
+    if pair_only:
+        logger.info('Started in pair-only mode (bleak %s)', bmslib.bt.bleak_version())
+        psks = set(dev.get('psk', None) for dev in user_config.get('devices', []) if dev.get('psk', None))
+        if not psks:
+            logger.info('No PSK, nothing to pair')
+            sys.exit(0)
+
     bms_list: List[bmslib.bt.BtBms] = []
     extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
 
@@ -287,6 +295,9 @@ async def main():
             await t()
         except:
             pass
+
+    if pair_only:
+        sys.exit(0)
 
     if parallel_fetch:
         # parallel_fetch now uses a loop for each BMS, so they don't delay each other

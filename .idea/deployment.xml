@@ -21,6 +21,17 @@
           </excludedPaths>
         </serverdata>
       </paths>
+      <paths name="rpi ha zerotier">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath path="tools" />
+            <excludedPath local="true" path="$PROJECT_DIR$/tools" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
     </serverData>
   </component>
 </project>

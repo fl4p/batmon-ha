@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/offgrid.iml" filepath="$PROJECT_DIR$/.idea/offgrid.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../influxdb-udp-relay/.idea/udp-relay.iml" filepath="$PROJECT_DIR$/../influxdb-udp-relay/.idea/udp-relay.iml" />
     </modules>
   </component>
 </project>
