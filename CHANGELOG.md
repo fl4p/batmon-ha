@@ -1,33 +1,49 @@
 # Changelog
 
+## [1.81]
+* Create separate venv with a modified bleak version for pairing.
+  Speeds up start-up and doesn't break with lost internet connection
+* Pin bleak version to  `0.22.3`
+* Remove `install_newer_bleak` version
+* Capture fetch_voltage errors and re-connect
+* Add `jk_24s` and `jk_32s` BMS types to explicitly set the JK version (disable auto-detect)
+* Add `daly2` type
+
 ## [1.80] - 2024-12-28
+
 * Fix JK firmware detection (merge #267)
 
 ## [1.79] - 2024-12-09
+
 * Fix #259 OverflowError
 * pin paho version 2.1
 * fix daly2 @patman15
 * changed jk frame version detection
 
 ## [1.78] - 2024-02-18
+
 * Fix `NameError: name 'logger' is not defined`
 
 ## [1.77] - 2024-02-16
+
 * Fix meter rounding (https://github.com/fl4p/batmon-ha/issues/169)
 * Fix paho 2.0 compatibility (https://github.com/fl4p/batmon-ha/issues/195)
 * JK add temperature sensor 3 and 4
 
 ## [1.76] - 2024-01-17
+
 * Add JK Balance switch
 * allow forward slash `/` in mqtt topic prefix
 
 ## [1.75] - 2023-12-16
+
 * fix HA install error (https://github.com/fl4p/batmon-ha/issues/175)
 * fix meter expiry
 * optimized sampling schedule
 * add temperature noise filter
 
 ## [1.74] - 2023-11-26
+
 * Add Daly checksum verification (https://github.com/fl4p/batmon-ha/issues/158)
 * Fix daly bms num_responses (https://github.com/fl4p/batmon-ha/issues/163)
 * Ignore voltage fetch errors and continue (https://github.com/fl4p/batmon-ha/issues/163)
@@ -41,11 +57,13 @@
 * InfluxDB add GZIP compression
 
 ## [1.73] - 2023-11-10
+
 this is a rather big update. I've set version num to 1.0, so it looks more tidy.
+
 * add manufacturer to device info
 * start scanner if device not discovered
 * influxdb publish meters
-* add additional watchdog thread (to detect event loop issues) 
+* add additional watchdog thread (to detect event loop issues)
 * incr meter integral recovery time to 10 minutes
 * add unit tests
 * futures pool add  `acquire_timeout`
@@ -63,6 +81,7 @@ this is a rather big update. I've set version num to 1.0, so it looks more tidy.
 * soc algo fix and assert thresholds
 
 ## [0.0.72] - 2023-10-19
+
 * Fix JK BLE characteristic handles
 * Remove `influxdb` requirement and install if needed
 * Fix SoC for groups

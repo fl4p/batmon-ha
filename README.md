@@ -63,7 +63,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `supervolt`, `sok`, `victron` or `dummy`.
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `supervolt`, `sok`, `victron` or `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.
@@ -94,6 +94,7 @@ For verbose logs of particular BMS add `debug: true`.
   after it exists)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
   =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
+* type `daly2` is for a newer Daly BMS version which is untested
 
 ## Energy Meters
 
@@ -136,6 +137,10 @@ peaks, leading to even greater error.
   issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
+* to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
+  the slug in the URL of the add-on page.
+* to see logs during installation: Settings / System / Logs / Supervisor (choose from the menu at the top-right
+  corner), [link](`http://homeassistant.local:8123/config/logs?provider=supervisor`)
 
 ## TODO
 
