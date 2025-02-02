@@ -16,9 +16,10 @@ fix connection abort:
 - https://github.com/hbldh/bleak/issues/666
 
 """
+from collections import defaultdict
+
 import asyncio
 import time
-from collections import defaultdict
 from typing import List, Callable, Dict, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
@@ -68,6 +69,7 @@ class JKBt(BtBms):
         self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
         self.char_handle_notify = None
         self.char_handle_write = None
+        self.is_new_11fw_32s = None  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
 
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -126,7 +128,7 @@ class JKBt(BtBms):
         try:
             await super().connect(timeout=6)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
+            self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         service = self.get_service(self.SERVICE_UUID)
@@ -191,12 +193,13 @@ class JKBt(BtBms):
     def _decode_sample(self, buf: bytearray, t_buf: float) -> BmsSample:
         buf_set, t_set = self._resp_table[0x01]
 
-        # old fw: field "Nominal_Capacity" starts at buf[146], new fw buf[146] == 0
-        # new fw: field "Nominal_Capacity" starts at buf[178], old fw buf[178] == 0
-        is_new_11fw = buf[178] > 0 and buf[146] == 0
-
         offset = 0
-        if is_new_11fw:
+        if self.is_new_11fw_32s is None:
+            # TODO fix detection
+            # https://github.com/fl4p/batmon-ha/pull/267
+            self.is_new_11fw_32s = buf[189] in {0x0, 0x1} and buf[189 + 32] > 0  # 32 cell version
+            self.logger.info('%s detected model: %s', self, "32s (fw>=11)" if self.is_new_11fw_32s else "24s (fw<11)")
+        if self.is_new_11fw_32s:
             offset = 32
             self.logger.debug('New 11.x firmware, offset=%s', offset)
 
@@ -208,7 +211,7 @@ class JKBt(BtBms):
         temp = lambda x: float('nan') if x == -2000 else (x / 10)
 
         temperatures = [temp(i16(130 + offset)), temp(i16(132 + offset))]
-        if is_new_11fw:
+        if self.is_new_11fw_32s:
             temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
 
         return BmsSample(
@@ -221,7 +224,7 @@ class JKBt(BtBms):
             charge=f32u(142 + offset),  # "remaining capacity"
 
             temperatures=temperatures,
-            mos_temperature=i16((112 if is_new_11fw else 134) + offset) / 10,
+            mos_temperature=i16((112 if self.is_new_11fw_32s else 134) + offset) / 10,
             balance_current=i16(138 + offset) / 1000,
 
             # 146 charge_full (see above)
@@ -318,6 +321,18 @@ async def main():
             # await asyncio.sleep(4)
             # s = await bms.fetch(wait=True)
             # print(s)
+
+
+class JKBt_24s(JKBt):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.is_new_11fw_32s = False
+
+
+class JKBt_32s(JKBt):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.is_new_11fw_32s = True
 
 
 if __name__ == '__main__':

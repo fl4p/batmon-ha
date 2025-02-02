@@ -1,4 +1,3 @@
-
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -16,17 +15,21 @@ def get_bms_model_class(name):
 
     import bmslib.group
 
+    from bmslib import models
+
     bms_registry = dict(
-        daly=bmslib.models.daly.DalyBt,
-        jbd=bmslib.models.jbd.JbdBt,
-        jk=bmslib.models.jikong.JKBt,
-        ant=bmslib.models.ant.AntBt,
-        victron=bmslib.models.victron.SmartShuntBt,
+        daly=models.daly.DalyBt,
+        jbd=models.jbd.JbdBt,
+        jk=models.jikong.JKBt,  # auto detect
+        jk_24s=models.jikong.JKBt_24s,  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
+        jk_32s=models.jikong.JKBt_32s,
+        ant=models.ant.AntBt,
+        victron=models.victron.SmartShuntBt,
         group_parallel=bmslib.group.VirtualGroupBms,
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
-        supervolt=bmslib.models.supervolt.SuperVoltBt,
-        sok=bmslib.models.sok.SokBt,
-        dummy=bmslib.models.dummy.DummyBt,
+        supervolt=models.supervolt.SuperVoltBt,
+        sok=models.sok.SokBt,
+        dummy=models.dummy.DummyBt,
     )
 
     return bms_registry.get(name)

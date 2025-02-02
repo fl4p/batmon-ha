@@ -121,7 +121,7 @@ class DalyBt(BtBms):
         try:
             await super().connect(timeout=timeout)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
+            self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         CHARACTERISTIC_UUIDS = [

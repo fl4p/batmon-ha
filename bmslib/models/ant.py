@@ -105,7 +105,7 @@ class AntBt(BtBms):
         try:
             await super().connect(timeout=6)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", str(e) or type(e))
+            self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         await self.start_notify(self.CHAR_UUID, self._notification_handler)

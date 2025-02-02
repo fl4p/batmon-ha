@@ -63,10 +63,10 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jbd`, `ant`, `daly`, `supervolt`, `sok`, `victron` or `dummy`.
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `supervolt`, `sok`, `victron` or `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
-Otherwise, the name as found in Bluetooth  discovery is used.
+Otherwise, the name as found in Bluetooth discovery is used.
 
 If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456
 with device's PIN).
@@ -92,6 +92,8 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
+* For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
+  =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
 
 ## Energy Meters
 
@@ -121,7 +123,8 @@ peaks, leading to even greater error.
 * `TimeoutError: timeout waiting`: put BT devices closer, disable inverters and other EMI sources
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
-* Try to find the BMS with a BLE scan ([Chrome Browser](chrome://bluetooth-internals/#devices), [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html))
+* Try to find the BMS with a BLE
+  scan ([Chrome Browser](chrome://bluetooth-internals/#devices), [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html))
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
 * Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
