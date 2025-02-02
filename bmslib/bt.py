@@ -1,13 +1,12 @@
 import asyncio
+import backoff
+import bleak.exc
 import re
 import subprocess
 import time
-from typing import Callable, List, Union
-
-import backoff
-import bleak.exc
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from typing import Callable, List, Union
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
@@ -93,8 +92,8 @@ class BtBms:
                 except ImportError:
                     self.logger.warn(
                         "Installed bleak version %s has no pairing agent, pairing with a pin will likely fail! "
-                        "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`",
-                        bleak_version())
+                        # "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`"
+                        , bleak_version())
 
             self._adapter = adapter
             if adapter:  # hci0, hci1 (BT adapter hardware)

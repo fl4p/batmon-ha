@@ -92,8 +92,6 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exists)
-* Enable `install_newer_bleak` to install bleak 0.20.2, which is more stable than the default version. The default
-  version is known to be working with Victron SmartShunt.
 
 ## Energy Meters
 
@@ -123,7 +121,6 @@ peaks, leading to even greater error.
 * `TimeoutError: timeout waiting`: put BT devices closer, disable inverters and other EMI sources
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
-* Toggle `install_newer_bleak` option
 * Try to find the BMS with a BLE scan ([Chrome Browser](chrome://bluetooth-internals/#devices), [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html))
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
