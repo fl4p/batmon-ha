@@ -65,7 +65,7 @@ def load_user_config():
             conf = dotdict(json.load(f))
             _user_config_migrate_addresses(conf)
     except Exception as e:
-        print('error reading /data/options.json, trying options.json', e)
+        logger.warning('error reading /data/options.json, trying options.json %s', e)
         with open('options.json') as f:
             conf = dotdict(json.load(f))
     return conf

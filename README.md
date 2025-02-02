@@ -124,7 +124,7 @@ peaks, leading to even greater error.
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Toggle `install_newer_bleak` option
-* Try to find the BMS with a BLE scan [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html)
+* Try to find the BMS with a BLE scan ([Chrome Browser](chrome://bluetooth-internals/#devices), [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html))
 * After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
   connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
 * Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
