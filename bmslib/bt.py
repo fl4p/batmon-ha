@@ -4,15 +4,18 @@ import bleak.exc
 import re
 import subprocess
 import time
+import uuid
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
-from typing import Callable, List, Union
+from typing import Callable, List, Union, Iterable
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
+
+CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
@@ -118,7 +121,8 @@ class BtBms:
     def connect_time(self):
         return self._connect_time
 
-    async def start_notify(self, char_specifier, callback: Callable[[int, bytearray], None], **kwargs):
+    async def start_notify(self, char_specifier: Union[CharSpec, List[CharSpec]],
+                           callback: Callable[[int, bytearray], None], **kwargs) -> CharSpec:
         """
         This function wraps BleakClient.start_notify, differences:
           * Accept a list of char_specifiers and tries them until it finds a match
@@ -126,7 +130,7 @@ class BtBms:
         :param char_specifier:
         :param callback:
         :param kwargs:
-        :return:
+        :return: the accepeted char_specifier
         """
         if not isinstance(char_specifier, list):
             char_specifier = [char_specifier]
