@@ -6,6 +6,7 @@ logger = get_logger()
 def get_bms_model_class(name):
     import bmslib.models.ant
     import bmslib.models.daly
+    import bmslib.models.daly2
     import bmslib.models.dummy
     import bmslib.models.jbd
     import bmslib.models.jikong
@@ -19,6 +20,7 @@ def get_bms_model_class(name):
 
     bms_registry = dict(
         daly=models.daly.DalyBt,
+        daly2=models.daly2.Daly2Bt,
         jbd=models.jbd.JbdBt,
         jk=models.jikong.JKBt,  # auto detect
         jk_24s=models.jikong.JKBt_24s,  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6

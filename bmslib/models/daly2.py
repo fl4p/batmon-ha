@@ -17,7 +17,7 @@ def _daly_command(command: int):
     return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
 
 
-class JbdBt(BtBms):
+class Daly2Bt(BtBms):
     UUID_RX = '0000fff1-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000fff2-0000-1000-8000-00805f9b34fb'
     TIMEOUT = 8
