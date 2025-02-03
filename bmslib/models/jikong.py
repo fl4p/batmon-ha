@@ -195,10 +195,8 @@ class JKBt(BtBms):
 
         offset = 0
         if self.is_new_11fw_32s is None:
-            # TODO fix detection
-            # https://github.com/fl4p/batmon-ha/pull/267
-            self.is_new_11fw_32s = buf[189] in {0x0, 0x1} and buf[189 + 32] > 0  # 32 cell version
-            self.logger.info('%s detected model: %s', self, "32s (fw>=11)" if self.is_new_11fw_32s else "24s (fw<11)")
+            self.is_new_11fw_32s = True
+
         if self.is_new_11fw_32s:
             offset = 32
             self.logger.debug('New 11.x firmware, offset=%s', offset)
@@ -255,6 +253,16 @@ class JKBt(BtBms):
 
         if 0x01 not in self._resp_table:
             await self._q(cmd=0x96, resp=0x01)  # query settings
+
+        if self.is_new_11fw_32s is None:
+            di = None
+            try:
+                di = await self.fetch_device_info()
+                self.is_new_11fw_32s = int(di.sw_version.split('.')[0]) >= 11
+                self.logger.info('%s SW ver %s detected frame ver: %s', self,di.sw_version,
+                                 "32s (fw>=11)" if self.is_new_11fw_32s else "24s (fw<11)")
+            except Exception as e:
+                self.logger.info("Unrecognized SW version %s", di)
 
         buf, t_buf = self._resp_table[0x02]
         return self._decode_sample(buf, t_buf)
