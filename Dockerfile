@@ -21,7 +21,7 @@ COPY . .
 # create a separate venv for a specific bleak version that has a pairing agent that can pair devices with a PSK
 RUN python3 -m venv venv_bleak_pairing
 RUN venv_bleak_pairing/bin/pip3 install -r requirements.txt
-RUN venv_bleak_pairing/bin/pip3 install 'git+https://github.com/jpeters-ml/bleak@feature/windowsPairing'
+RUN venv_bleak_pairing/bin/pip3 install 'git+https://github.com/jpeters-ml/bleak@feature/windowsPairing' || true
 
 
 RUN python3 -m venv venv
