@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.82]
+* Rollback bleak version to 0.20.2 (https://github.com/fl4p/batmon-ha/issues/275)
+* Fix JK frame version detection
+* Supervolt: add char UUIDs for newer version
+
 ## [1.81]
 * Create separate venv with a modified bleak version for pairing.
   Speeds up start-up and doesn't break with lost internet connection
