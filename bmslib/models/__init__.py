@@ -1,3 +1,5 @@
+from functools import partial
+
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -13,6 +15,7 @@ def get_bms_model_class(name):
     import bmslib.models.sok
     import bmslib.models.supervolt
     import bmslib.models.victron
+    import bmslib.models.BLE_BMS_wrap
 
     import bmslib.group
 
@@ -31,6 +34,8 @@ def get_bms_model_class(name):
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
+        seplos=partial(models.BLE_BMS_wrap.BMS, type='seplos'),
+
         dummy=models.dummy.DummyBt,
     )
 
@@ -65,7 +70,7 @@ def construct_bms(dev, verbose_log, bt_discovered_devices):
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
-    return bms_class(addr,
+    return bms_class(address=addr,
                      name=name,
                      verbose_log=verbose_log or dev.get('debug'),
                      psk=dev.get('pin'),
