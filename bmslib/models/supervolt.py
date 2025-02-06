@@ -79,27 +79,25 @@ class SuperVoltBt(BtBms):
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
 
-        rxtx_uuids = {
-            # key: std uart TX (tx on device/BMS side, rx on host)
-            # https://github.com/fl4p/batmon-ha/issues/226
+        notify_write_uuids = {
+            # notify:write (rx:tx)
             '6e400003-b5a3-f393-e0a9-e50e24dcca9e': '6e400002-b5a3-f393-e0a9-e50e24dcca9e',  # old
-            '0000ff02-0000-1000-8000-00805f9b34fb': '0000ff01-0000-1000-8000-00805f9b34fb',  # new
+            '0000ff01-0000-1000-8000-00805f9b34fb': '0000ff02-0000-1000-8000-00805f9b34fb',  # new
         }
 
-        for rx, tx in rxtx_uuids.items():
+        for notify, write in notify_write_uuids.items():
             try:
-                await self.client.write_gatt_char(char_specifier=tx, data=bytearray(b""))
-                await self.start_notify(rx, self._notification_handler)
-                self.UUID_RX = rx
-                self.UUID_TX = tx
+                await self.client.write_gatt_char(char_specifier=write, data=bytearray(b""))
+                await self.start_notify(notify, self._notification_handler)
+                self.UUID_RX = notify
+                self.UUID_TX = write
                 break
             except Exception as e:
-                self.logger.info('tried char rx/tx=%r/%r, err %s', rx, tx, e)
+                self.logger.info('tried char n/w=%r/%r, err %s', notify, write, e)
                 continue
         else:
             await enumerate_services(self.client, self.logger)
             raise Exception("Notify characteristic (rx) not found")
-
 
     async def disconnect(self):
         try:
