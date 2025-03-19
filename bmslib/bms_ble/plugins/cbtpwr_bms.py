@@ -23,9 +23,9 @@ from bmslib.bms_ble.const import (
     KEY_DESIGN_CAP,
     KEY_PROBLEM,
 )
-from homeassistant.util.unit_conversion import _HRS_TO_SECS
+#from homeassistant.util.unit_conversion import _HRS_TO_SECS
 
-from .basebms import BaseBMS, BMSsample, crc_sum
+from .basebms import BaseBMS, BMSsample, crc_sum, _HRS_TO_SECS
 
 
 class BMS(BaseBMS):

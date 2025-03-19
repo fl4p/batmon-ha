@@ -9,7 +9,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from custom_components.bms_ble.const import (
+from bmslib.bms_ble.const import (
     ATTR_BATTERY_CHARGING,
     ATTR_BATTERY_LEVEL,
     ATTR_CURRENT,

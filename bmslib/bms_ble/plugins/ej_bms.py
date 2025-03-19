@@ -8,7 +8,7 @@ from typing import Final
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 
-from custom_components.bms_ble.const import (
+from bmslib.bms_ble.const import (
     ATTR_BATTERY_CHARGING,
     ATTR_BATTERY_LEVEL,
     ATTR_CURRENT,

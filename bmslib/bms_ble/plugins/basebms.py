@@ -6,13 +6,13 @@ import logging
 from statistics import fmean
 from typing import Final, Literal
 
-from bleak import BleakClient
+from bleak import BleakClient, normalize_uuid_str
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import establish_connection
 
-from custom_components.bms_ble.const import (
+from bmslib.bms_ble.const import (
     ATTR_BATTERY_CHARGING,
     ATTR_BATTERY_LEVEL,
     ATTR_CURRENT,
@@ -232,7 +232,7 @@ class BaseBMS(metaclass=ABCMeta):
         self._data_event.clear()
 
         await self._client.start_notify(
-            self.uuid_rx(), getattr(self, "_notification_handler")
+            normalize_uuid_str(self.uuid_rx()), getattr(self, "_notification_handler")
         )
 
     async def _connect(self) -> None:
@@ -270,7 +270,7 @@ class BaseBMS(metaclass=ABCMeta):
 
         self._log.debug("TX BLE data: %s", data.hex(" "))
         self._data_event.clear()  # clear event before requesting new data
-        await self._client.write_gatt_char(char or self.uuid_tx(), data)
+        await self._client.write_gatt_char(normalize_uuid_str(char or self.uuid_tx()), data)
         if wait_for_notify:
             await asyncio.wait_for(self._wait_event(), timeout=self.BAT_TIMEOUT)
 

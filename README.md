@@ -66,7 +66,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `seplos`, `supervolt`, `sok`, `victron` or `dummy`.
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `seplos`, `seplos_v2`, `supervolt`, `sok`, `victron` or `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.

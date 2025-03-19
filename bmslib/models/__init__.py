@@ -37,8 +37,8 @@ def get_bms_model_class(name):
     import bmslib.bms_ble.plugins.redodo_bms
     import bmslib.bms_ble.plugins.roypow_bms
 
-    for k in dir(plugins):
-        print(k)
+    #for k in dir(plugins):
+    #    print(k)
 
     bms_registry = dict(
         daly=models.daly.DalyBt,
@@ -53,13 +53,17 @@ def get_bms_model_class(name):
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
-        seplos=partial(models.BLE_BMS_wrap.BMS, module=plugins.seplos_bms),
-        seplos_v2=partial(models.BLE_BMS_wrap.BMS, module=plugins.seplos_v2_bms),
-        tdt=partial(models.BLE_BMS_wrap.BMS, module=plugins.tdt_bms),
-        daly_ble=partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms),
-
+        daly_ble=partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble'),
         dummy=models.dummy.DummyBt,
     )
+
+    for k in dir(plugins):
+        if k.startswith('_') or not k.endswith('_bms'):
+            continue
+        if k[:-4] in bms_registry:
+            continue
+        # print(k)
+        bms_registry[k[:-4]] = partial(models.BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
 
     return bms_registry.get(name)
 

@@ -3,12 +3,11 @@
 import logging
 from typing import Final
 
-from homeassistant.const import (  # noqa: F401
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-)
+ATTR_BATTERY_CHARGING: Final = "battery_charging"
+ATTR_BATTERY_LEVEL: Final = "battery_level"
+ATTR_VOLTAGE: Final = "voltage"
+ATTR_TEMPERATURE: Final = "temperature"
+
 
 BMS_TYPES: Final[list[str]] = [
     "abc_bms",
