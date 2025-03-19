@@ -12,17 +12,21 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import establish_connection
 
-from bmslib.bms_ble.const import (
+from custom_components.bms_ble.const import (
     ATTR_BATTERY_CHARGING,
+    ATTR_BATTERY_LEVEL,
     ATTR_CURRENT,
     ATTR_CYCLE_CAP,
     ATTR_CYCLE_CHRG,
     ATTR_DELTA_VOLTAGE,
     ATTR_POWER,
+    ATTR_PROBLEM,
     ATTR_RUNTIME,
     ATTR_TEMPERATURE,
     ATTR_VOLTAGE,
     KEY_CELL_VOLTAGE,
+    KEY_DESIGN_CAP,
+    KEY_PROBLEM,
     KEY_TEMP_VALUE,
 )
 
@@ -49,7 +53,8 @@ type BMSsample = dict[str, int | float | bool]
 class BaseBMS(metaclass=ABCMeta):
     """Base class for battery management system."""
 
-    BAT_TIMEOUT: float = 10
+    BAT_TIMEOUT = 10
+    MAX_CELL_VOLTAGE: Final[float] = 5.906  # max cell potential
 
     def __init__(
         self,
@@ -70,14 +75,13 @@ class BaseBMS(metaclass=ABCMeta):
         self._ble_device: Final[BLEDevice] = ble_device
         self._reconnect: Final[bool] = reconnect
         self.name: Final[str] = self._ble_device.name or "undefined"
-        self._log: Final[logging.Logger] = logging.getLogger(logger_name)
-        if not self._log.filters:
-            self._log.addFilter(self._prefix_filter)
+        self._log: Final[logging.Logger] = logging.getLogger(
+            f"{logger_name.replace('.plugins', '')}::{self.name}:"
+            f"{self._ble_device.address[-5:].replace(':','')})"
+        )
 
         self._log.debug(
-            "initializing %s, BT address: %s",
-            self.device_id(),
-            ble_device.address,
+            "initializing %s, BT address: %s", self.device_id(), ble_device.address
         )
         self._client: BleakClient = BleakClient(
             self._ble_device,
@@ -86,13 +90,6 @@ class BaseBMS(metaclass=ABCMeta):
         )
         self._data: bytearray = bytearray()
         self._data_event: Final[asyncio.Event] = asyncio.Event()
-
-    def _prefix_filter(self, record: logging.LogRecord) -> Literal[True]:
-        """Add BMS name and 2 bytes of MAC as prefix to all messages."""
-        setattr(
-            record, "msg", f"{self.name}[{self._ble_device.address[-5:]}]: {record.msg}"
-        )
-        return True
 
     @staticmethod
     @abstractmethod
@@ -152,7 +149,7 @@ class BaseBMS(metaclass=ABCMeta):
         data: data dictionary from BMS
         values: list of values to add to the dictionary
         """
-        if not values:
+        if not values or not data:
             return
 
         def can_calc(value: str, using: frozenset[str]) -> bool:
@@ -173,6 +170,12 @@ class BaseBMS(metaclass=ABCMeta):
                 float(v) for k, v in data.items() if k.startswith(KEY_CELL_VOLTAGE)
             ]
             data[ATTR_DELTA_VOLTAGE] = round(max(cell_voltages) - min(cell_voltages), 3)
+
+        # calculate cycle charge from design capacity and SoC
+        if can_calc(ATTR_CYCLE_CHRG, frozenset({KEY_DESIGN_CAP, ATTR_BATTERY_LEVEL})):
+            data[ATTR_CYCLE_CHRG] = (
+                data[KEY_DESIGN_CAP] * data[ATTR_BATTERY_LEVEL]
+            ) / 100
 
         # calculate cycle capacity from voltage and cycle charge
         if can_calc(ATTR_CYCLE_CAP, frozenset({ATTR_VOLTAGE, ATTR_CYCLE_CHRG})):
@@ -196,8 +199,27 @@ class BaseBMS(metaclass=ABCMeta):
             )
         # calculate temperature (average of all sensors)
         if can_calc(ATTR_TEMPERATURE, frozenset({f"{KEY_TEMP_VALUE}0"})):
-            temp_values = [v for k, v in data.items() if k.startswith(KEY_TEMP_VALUE)]
-            data[ATTR_TEMPERATURE] = round(fmean(temp_values), 3)
+            data[ATTR_TEMPERATURE] = round(
+                fmean([v for k, v in data.items() if k.startswith(KEY_TEMP_VALUE)]),
+                3,
+            )
+
+        # do sanity check on values to set problem state
+        data[ATTR_PROBLEM] = (
+            data.get(ATTR_PROBLEM, False)
+            or bool(data.get(KEY_PROBLEM, False))
+            or (
+                data.get(ATTR_VOLTAGE, 1) <= 0
+                or any(
+                    v <= 0 or v > BaseBMS.MAX_CELL_VOLTAGE
+                    for k, v in data.items()
+                    if k.startswith(KEY_CELL_VOLTAGE)
+                )
+                or data.get(ATTR_DELTA_VOLTAGE, 0) > BaseBMS.MAX_CELL_VOLTAGE
+                or data.get(ATTR_CYCLE_CHRG, 1) <= 0
+                or data.get(ATTR_BATTERY_LEVEL, 0) > 100
+            )
+        )
 
     def _on_disconnect(self, _client: BleakClient) -> None:
         """Disconnect callback function."""
@@ -305,6 +327,18 @@ def crc_xmodem(data: bytearray) -> int:
         for _ in range(8):
             crc = (crc << 1) ^ 0x1021 if (crc & 0x8000) else (crc << 1)
     return crc & 0xFFFF
+
+
+def crc8(data: bytearray) -> int:
+    """Calculate CRC-8/MAXIM-DOW."""
+    crc: int = 0x00  # Initialwert für CRC
+
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x8C if crc & 0x1 else crc >> 1
+
+    return crc & 0xFF
 
 
 def crc_sum(frame: bytes) -> int:

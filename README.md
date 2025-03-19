@@ -30,6 +30,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Daly BMS
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
 * ANT BMS
+* Seplos BMS
 * Supervolt BMS
 * SOK BMS
 * Victron SmartShunt (make sure to update to the latest firmware
@@ -65,7 +66,7 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `supervolt`, `sok`, `victron` or `dummy`.
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `seplos`, `supervolt`, `sok`, `victron` or `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.

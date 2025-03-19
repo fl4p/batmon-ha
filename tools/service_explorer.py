@@ -33,7 +33,7 @@ async def enumerate_services(client: BleakClient):
                 try:
                     value = bytes(await client.read_gatt_char(char.uuid))
                     logger.info(
-                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                            f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
                     )
                 except Exception as e:
                     logger.error(

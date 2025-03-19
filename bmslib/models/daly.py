@@ -124,6 +124,8 @@ class DalyBt(BtBms):
             self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
+        # rx, tx, sx
+        # sx:
         CHARACTERISTIC_UUIDS = [
             (17, 15, 48),  # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
             ('0000fff1-0000-1000-8000-00805f9b34fb', '0000fff2-0000-1000-8000-00805f9b34fb',
@@ -133,7 +135,10 @@ class DalyBt(BtBms):
         for rx, tx, sx in CHARACTERISTIC_UUIDS:
             try:
                 await self.client.start_notify(rx, self._notification_callback)
-                await self.client.write_gatt_char(sx, bytearray(b""))
+                try:
+                    await self.client.write_gatt_char(sx, bytearray(b""))
+                except:
+                    await self.client.write_gatt_char(tx, bytearray(b""))
                 self.UUID_RX = rx
                 self.UUID_TX = tx
                 self.logger.debug("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
@@ -167,7 +172,7 @@ class DalyBt(BtBms):
             except TimeoutError:
                 n_recv = num_responses - self._fetch_nr.get(command, [None]).count(None)
                 raise TimeoutError(
-                    "timeout awaiting result %02x, got %d/%d responses" % (command, n_recv, num_responses))
+                    "timeout awaiting result for cmd=0x%02x, got %d/%d responses" % (command, n_recv, num_responses))
 
             return sample
 

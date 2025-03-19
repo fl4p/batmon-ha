@@ -1,10 +1,12 @@
 import asyncio
+import math
 import time
 from typing import Dict, Tuple
 
 from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
+from bmslib.bms_ble.const import ATTR_BATTERY_LEVEL, KEY_CELL_COUNT
 from bmslib.bt import BtBms
 
 
@@ -34,10 +36,10 @@ class BLEDeviceResolver:
                 raise RuntimeError("in shutdown")
 
             try:
-                discovered = {d.address: d for d in scanner.discovered_devices}
-                for a, device in discovered.items():
-                    BLEDeviceResolver.devices[(adapter, a)] = device
-                if addr in discovered:
+                for d in scanner.discovered_devices:
+                    BLEDeviceResolver.devices[(adapter, d.address)] = d
+                    BLEDeviceResolver.devices[(adapter, d.name)] = d
+                if key in BLEDeviceResolver.devices:
                     break
             except Exception as e:
                 pass
@@ -57,12 +59,10 @@ class BMS():
         self._type = type
         self._keep_alive = keep_alive
 
-        self._buffer = bytearray()
-        self._switches = None
-        self._last_response = None
-        self._voltages = []
+        self._last_sample = None
 
         self.is_virtual = False
+        self.verbose_log = False
 
         self.connect_time = time.time()
 
@@ -101,8 +101,10 @@ class BMS():
             raise RuntimeError("device %s not found" % self.address)
 
         import bmslib.bms_ble.plugins.seplos_bms
+        import bmslib.bms_ble.plugins.daly_bms
         modules = dict(
-            seplos=bmslib.bms_ble.plugins.seplos_bms
+            seplos=bmslib.bms_ble.plugins.seplos_bms,
+            daly=bmslib.bms_ble.plugins.daly_bms,
         )
 
         self.ble_bms: bmslib.bms_ble.plugins.basebms.BaseBMS = modules[self._type].BMS(
@@ -137,12 +139,38 @@ class BMS():
         )
 
     async def fetch(self) -> BmsSample:
-        sample = await self.ble_bms.async_update()
+        from bmslib.bms_ble.const import (
+            ATTR_CURRENT,
+            ATTR_CYCLE_CAP,
+            ATTR_CYCLE_CHRG,
+            ATTR_POWER,
+            ATTR_TEMPERATURE,
+            ATTR_VOLTAGE,
+            ATTR_CYCLES,
+            ATTR_BALANCE_CUR,
+        )
 
-        pass
+        sample = await self.ble_bms.async_update()
+        self._last_sample = sample
+        return BmsSample(
+            soc=sample[ATTR_BATTERY_LEVEL],
+            voltage=sample[ATTR_VOLTAGE],
+            current=sample[ATTR_CURRENT], power=sample.get(ATTR_POWER, math.nan),
+            capacity=sample.get(ATTR_CYCLE_CHRG, math.nan),  # todo ?
+            cycle_capacity=sample.get(ATTR_CYCLE_CAP, math.nan),  # todo ?
+            num_cycles=sample.get(ATTR_CYCLES, math.nan),
+            balance_current=sample.get(ATTR_BALANCE_CUR, math.nan),
+            temperatures=[sample.get(ATTR_TEMPERATURE)],  # todo?
+            # mos_temperature=
+
+        )
 
     async def fetch_voltages(self):
-        return self._voltages
+        s = self._last_sample
+        if s is None:
+            return []
+        v = [self._last_sample[f'cell#{i}'] for i in range(s[KEY_CELL_COUNT])]
+        return v
 
     def debug_data(self):
-        return self._last_response
+        return self._last_sample

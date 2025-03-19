@@ -1,0 +1,29 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "O dispositivo já está configurado.",
+      "no_devices_found": "Nenhum dispositivo suportado encontrado via Bluetooth.",
+      "not_supported": "O dispositivo não é suportado."
+    },
+    "flow_title": "Configuração de {name}",
+    "step": {
+      "user": {
+        "description": "Escolha um dispositivo para configurar:",
+        "data": {
+          "address": "Nome Bluetooth (endereço MAC)"
+        }
+      },
+      "bluetooth_confirm": {
+        "description": "Pretende configurar {name}?"
+      }
+    }
+  },
+  "exceptions": {
+    "device_not_found": {
+      "message": "Não foi possível encontrar o BMS ({MAC}) via Bluetooth."
+    },
+    "missing_unique_id": {
+      "message": "ID único em falta para o dispositivo."
+    }
+  }
+}

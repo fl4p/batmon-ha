@@ -21,6 +21,25 @@ def get_bms_model_class(name):
 
     from bmslib import models
 
+    from bmslib.bms_ble import plugins
+    import bmslib.bms_ble.plugins.seplos_bms
+    import  bmslib.bms_ble.plugins.seplos_v2_bms
+    import bmslib.bms_ble.plugins.daly_bms
+    import bmslib.bms_ble.plugins.tdt_bms
+    import bmslib.bms_ble.plugins.ej_bms
+    import bmslib.bms_ble.plugins.abc_bms
+    import bmslib.bms_ble.plugins.cbtpwr_bms
+    import bmslib.bms_ble.plugins.dpwrcore_bms
+    import bmslib.bms_ble.plugins.ecoworthy_bms
+    import bmslib.bms_ble.plugins.ective_bms
+    import bmslib.bms_ble.plugins.felicity_bms
+    import bmslib.bms_ble.plugins.ogt_bms
+    import bmslib.bms_ble.plugins.redodo_bms
+    import bmslib.bms_ble.plugins.roypow_bms
+
+    for k in dir(plugins):
+        print(k)
+
     bms_registry = dict(
         daly=models.daly.DalyBt,
         daly2=models.daly2.Daly2Bt,
@@ -34,7 +53,10 @@ def get_bms_model_class(name):
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
-        seplos=partial(models.BLE_BMS_wrap.BMS, type='seplos'),
+        seplos=partial(models.BLE_BMS_wrap.BMS, module=plugins.seplos_bms),
+        seplos_v2=partial(models.BLE_BMS_wrap.BMS, module=plugins.seplos_v2_bms),
+        tdt=partial(models.BLE_BMS_wrap.BMS, module=plugins.tdt_bms),
+        daly_ble=partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms),
 
         dummy=models.dummy.DummyBt,
     )

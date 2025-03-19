@@ -3,22 +3,18 @@
 import logging
 from typing import Final
 
-#from homeassistant.const import (  # noqa: F401
-#    ATTR_BATTERY_CHARGING,
-#    ATTR_BATTERY_LEVEL,
-#    ATTR_TEMPERATURE,
-#    ATTR_VOLTAGE,
-#)
-
-ATTR_BATTERY_CHARGING: Final = "battery_charging"
-ATTR_BATTERY_LEVEL: Final = "battery_level"
-ATTR_VOLTAGE: Final = "voltage"
-ATTR_TEMPERATURE: Final = "temperature"
-
+from homeassistant.const import (  # noqa: F401
+    ATTR_BATTERY_CHARGING,
+    ATTR_BATTERY_LEVEL,
+    ATTR_TEMPERATURE,
+    ATTR_VOLTAGE,
+)
 
 BMS_TYPES: Final[list[str]] = [
+    "abc_bms",
     "cbtpwr_bms",
     "daly_bms",
+    "ecoworthy_bms",
     "ective_bms",
     "ej_bms",
     "jbd_bms",
@@ -27,8 +23,10 @@ BMS_TYPES: Final[list[str]] = [
     "redodo_bms",
     "seplos_bms",
     "seplos_v2_bms",
+    "roypow_bms",
     "tdt_bms",
     "dpwrcore_bms",  # only name filter
+    "felicity_bms",
 ]  # available BMS types
 DOMAIN: Final[str] = "bms_ble"
 LOGGER: Final = logging.getLogger(__package__)
@@ -44,6 +42,7 @@ ATTR_CYCLES: Final[str] = "cycles"  # [#]
 ATTR_DELTA_VOLTAGE: Final[str] = "delta_voltage"  # [V]
 ATTR_LQ: Final[str] = "link_quality"  # [%]
 ATTR_POWER: Final[str] = "power"  # [W]
+ATTR_PROBLEM: Final[str] = "problem"  # [bool]
 ATTR_RSSI: Final[str] = "rssi"  # [dBm]
 ATTR_RUNTIME: Final[str] = "runtime"  # [s]
 ATTR_TEMP_SENSORS: Final[str] = "temperature_sensors"  # [°C]
@@ -52,6 +51,8 @@ ATTR_TEMP_SENSORS: Final[str] = "temperature_sensors"  # [°C]
 KEY_CELL_COUNT: Final[str] = "cell_count"  # [#]
 KEY_CELL_VOLTAGE: Final[str] = "cell#"  # [V]
 KEY_DESIGN_CAP: Final[str] = "design_capacity"  # [Ah]
+KEY_PACK: Final[str] = "pack"  # prefix for pack sensors
 KEY_PACK_COUNT: Final[str] = "pack_count"  # [#]
+KEY_PROBLEM: Final[str] = "problem_code"  # [#]
 KEY_TEMP_SENS: Final[str] = "temp_sensors"  # [#]
 KEY_TEMP_VALUE: Final[str] = "temp#"  # [°C]
