@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.83]
+* Add Seplos BMS ([BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) wrapper)
+* Ignore influxdb setup error
 ## [1.82]
 * Rollback bleak version to 0.20.2 (https://github.com/fl4p/batmon-ha/issues/275)
 * Fix JK frame version detection

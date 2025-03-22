@@ -237,8 +237,11 @@ async def main():
 
     sinks = []
     if user_config.get('influxdb_host', None):
-        from bmslib.sinks import InfluxDBSink
-        sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
+        try:
+            from bmslib.sinks import InfluxDBSink
+            sinks.append(InfluxDBSink(**{k[9:]: v for k, v in user_config.items() if k.startswith('influxdb_')}))
+        except Exception as e:
+            logger.warning('Failed to load influxdb sink: %s', e)
 
     if user_config.get("telemetry"):
         try:
