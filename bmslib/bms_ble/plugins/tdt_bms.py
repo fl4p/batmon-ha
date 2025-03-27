@@ -90,15 +90,17 @@ class BMS(BaseBMS):
         return "fff2"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_RUNTIME,
-            ATTR_TEMPERATURE,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_RUNTIME,
+                ATTR_TEMPERATURE,
+            }
+        )  # calculate further values from BMS provided set ones
 
     async def _init_connection(self) -> None:
         await self._await_reply(

@@ -104,14 +104,16 @@ class BMS(BaseBMS):
         return "ffe1"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_TEMPERATURE,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_TEMPERATURE,
+            }
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -129,6 +131,10 @@ class BMS(BaseBMS):
         self._log.debug(
             "RX BLE data (%s): %s", "start" if data == self._data else "cnt.", data
         )
+
+        if not self._data.startswith(BMS._HEAD):
+            self._data.clear()
+            return
 
         # verify that data is long enough
         if len(self._data) < BMS._MIN_LEN + self._exp_len:

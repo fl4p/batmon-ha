@@ -86,15 +86,17 @@ class BMS(BaseBMS):
         return "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_RUNTIME,
-            ATTR_VOLTAGE,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_RUNTIME,
+                ATTR_VOLTAGE,
+            }
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -185,7 +187,7 @@ class BMS(BaseBMS):
         raw_data: dict[int, bytearray] = {}
 
         # query real-time information and capacity
-        for cmd in [b":000250000E03~", b":001031000E05~"]:
+        for cmd in (b":000250000E03~", b":001031000E05~"):
             await self._await_reply(cmd)
             rsp: int = int(self._data_final[3:5], 16) & 0x7F
             raw_data[rsp] = self._data_final

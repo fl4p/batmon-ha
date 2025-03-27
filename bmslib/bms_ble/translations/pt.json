@@ -25,5 +25,21 @@
     "missing_unique_id": {
       "message": "ID único em falta para o dispositivo."
     }
-  }
+  },
+  "entity": {
+    "sensor": {
+      "cycles": {
+        "name": "Ciclos"
+      },
+      "delta_voltage": {
+        "name": "Voltagem delta"
+      },
+      "link_quality": {
+        "name": "Qualidade de ligação"
+      },
+      "runtime": {
+        "name": "Run"
+      }
+    }
+  }  
 }

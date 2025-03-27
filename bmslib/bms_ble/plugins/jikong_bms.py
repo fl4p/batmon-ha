@@ -94,14 +94,16 @@ class BMS(BaseBMS):
         return "ffe1"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_POWER,
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_RUNTIME,
-            ATTR_TEMPERATURE,
-        }
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_POWER,
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_RUNTIME,
+                ATTR_TEMPERATURE,
+            }
+        )
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -199,7 +201,7 @@ class BMS(BaseBMS):
             -32 if int(self._bms_info.get("sw_version", "")[:2]) < 11 else 0
         )
         self._valid_reply = 0xC8  # BMS ready confirmation
-        await asyncio.wait_for(self._wait_event(), timeout=self.BAT_TIMEOUT)
+        await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
         self._valid_reply = 0x02  # cell information
 
     @staticmethod

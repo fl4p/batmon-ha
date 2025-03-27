@@ -34,7 +34,7 @@ from .basebms import BaseBMS, BMSsample, crc_modbus
 class BMS(BaseBMS):
     """ECO-WORTHY battery class implementation."""
 
-    _HEAD: Final[tuple] = (b"\xA1", b"\xA2")
+    _HEAD: Final[tuple] = (b"\xa1", b"\xa2")
     _CELL_POS: Final[int] = 14
     _TEMP_POS: Final[int] = 80
     _FIELDS: Final[
@@ -88,16 +88,18 @@ class BMS(BaseBMS):
         raise NotImplementedError
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CHRG,
-            ATTR_CYCLE_CAP,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_RUNTIME,
-            ATTR_TEMPERATURE,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CHRG,
+                ATTR_CYCLE_CAP,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_RUNTIME,
+                ATTR_TEMPERATURE,
+            }
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -106,7 +108,7 @@ class BMS(BaseBMS):
         self._log.debug("RX BLE data: %s", data)
 
         if not data.startswith(BMS._HEAD):
-            self._log.debug("Invalid frame type: 0x%X", data[0:1])
+            self._log.debug("invalid frame type: '%s'", data[0:1].hex())
             return
 
         if (crc := crc_modbus(data[:-2])) != int.from_bytes(data[-2:], "little"):
@@ -166,7 +168,7 @@ class BMS(BaseBMS):
 
         self._data_final.clear()
         self._data_event.clear()  # clear event to ensure new data is acquired
-        await asyncio.wait_for(self._wait_event(), timeout=self.BAT_TIMEOUT)
+        await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
 
         result: BMSsample = BMS._decode_data(self._data_final)
 

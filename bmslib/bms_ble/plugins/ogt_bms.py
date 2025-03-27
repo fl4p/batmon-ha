@@ -1,6 +1,7 @@
 """Module to support Offgridtec Smart Pro BMS."""
 
 from collections.abc import Callable
+from string import digits
 from typing import Final
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -31,7 +32,7 @@ CRYPT_SEQ: Final[list[int]] = [2, 5, 4, 3, 1, 4, 1, 6, 8, 3, 7, 2, 5, 8, 9, 3]
 class BMS(BaseBMS):
     """Offgridtec LiFePO4 Smart Pro type A and type B battery class implementation."""
 
-    BAT_TIMEOUT = 1
+    TIMEOUT = 1
     IDX_NAME: Final = 0
     IDX_LEN: Final = 1
     IDX_FCT: Final = 2
@@ -39,7 +40,11 @@ class BMS(BaseBMS):
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Intialize private BMS members."""
         super().__init__(__name__, ble_device, reconnect)
-        self._type: str = self.name[9] if len(self.name) >= 10 else "?"
+        self._type: str = (
+            self.name[9]
+            if len(self.name) >= 10 and set(self.name[10:]).issubset(digits)
+            else "?"
+        )
         self._key: int = (
             sum(CRYPT_SEQ[int(c, 16)] for c in (f"{int(self.name[10:]):0>4X}"))
             if self._type in "AB"
@@ -123,8 +128,10 @@ class BMS(BaseBMS):
         return "fff6"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {ATTR_CYCLE_CAP, ATTR_POWER, ATTR_BATTERY_CHARGING, ATTR_DELTA_VOLTAGE}
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {ATTR_CYCLE_CAP, ATTR_POWER, ATTR_BATTERY_CHARGING, ATTR_DELTA_VOLTAGE}
+        )
 
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""

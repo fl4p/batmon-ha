@@ -25,5 +25,21 @@
     "missing_unique_id": {
       "message": "Eindeutige ID für Gerät fehlt."
     }
+  },
+  "entity": {
+    "sensor": {
+      "cycles": {
+        "name": "Zyklen"
+      },
+      "delta_voltage": {
+        "name": "Differenzspannung"
+      },
+      "link_quality": {
+        "name": "Verbindungsqualität"
+      },
+      "runtime": {
+        "name": "Laufzeit"
+      }
+    }
   }
 }

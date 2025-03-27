@@ -59,7 +59,7 @@ class BMS(BaseBMS):
                 "service_uuid": BMS.uuid_services()[0],
                 "connectable": True,
             }
-            for pattern in ["$PFLAC*", "NWJ20*", "ZM20*"]
+            for pattern in ("$PFLAC*", "NWJ20*", "ZM20*")
         ]
 
     @staticmethod
@@ -83,15 +83,17 @@ class BMS(BaseBMS):
         raise NotImplementedError
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_CYCLE_CHRG,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_RUNTIME,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_CYCLE_CHRG,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_RUNTIME,
+            }
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -161,7 +163,7 @@ class BMS(BaseBMS):
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""
 
-        await asyncio.wait_for(self._wait_event(), timeout=self.BAT_TIMEOUT)
+        await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
         return {
             key: func(BMS._conv_int(self._data_final[idx : idx + size], sign))
             for key, idx, size, sign, func in BMS._FIELDS

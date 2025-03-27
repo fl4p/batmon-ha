@@ -96,7 +96,7 @@ class BMS(BaseBMS):
                 "service_uuid": BMS.uuid_services()[0],
                 "connectable": True,
             }
-            for pattern in ("SP0*", "SP1*", "SP4*", "SP5*", "SP6*")
+            for pattern in ("SP0*", "SP1*", "SP4*", "SP5*", "SP6*", "CSY*")
         ]
 
     @staticmethod
@@ -124,8 +124,10 @@ class BMS(BaseBMS):
         return "fff2"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {ATTR_POWER, ATTR_BATTERY_CHARGING, ATTR_CYCLE_CAP, ATTR_RUNTIME}
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {ATTR_POWER, ATTR_BATTERY_CHARGING, ATTR_CYCLE_CAP, ATTR_RUNTIME}
+        )
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray

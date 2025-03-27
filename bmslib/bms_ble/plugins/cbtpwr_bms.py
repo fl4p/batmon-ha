@@ -31,7 +31,7 @@ from .basebms import BaseBMS, BMSsample, crc_sum, _HRS_TO_SECS
 class BMS(BaseBMS):
     """CBT Power Smart BMS class implementation."""
 
-    BAT_TIMEOUT = 1
+    TIMEOUT = 1
     HEAD: Final[bytes] = bytes([0xAA, 0x55])
     TAIL_RX: Final[bytes] = bytes([0x0D, 0x0A])
     TAIL_TX: Final[bytes] = bytes([0x0A, 0x0D])
@@ -96,14 +96,16 @@ class BMS(BaseBMS):
         return "ffe9"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_POWER,
-            ATTR_BATTERY_CHARGING,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_CYCLE_CAP,
-            ATTR_TEMPERATURE,
-        }
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_POWER,
+                ATTR_BATTERY_CHARGING,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_CYCLE_CAP,
+                ATTR_TEMPERATURE,
+            }
+        )
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray

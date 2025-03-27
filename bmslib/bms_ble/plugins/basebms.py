@@ -53,7 +53,7 @@ type BMSsample = dict[str, int | float | bool]
 class BaseBMS(metaclass=ABCMeta):
     """Base class for battery management system."""
 
-    BAT_TIMEOUT = 10
+    TIMEOUT = 10
     MAX_CELL_VOLTAGE: Final[float] = 5.906  # max cell potential
 
     def __init__(
@@ -135,15 +135,15 @@ class BaseBMS(metaclass=ABCMeta):
         """Return 16-bit UUID of characteristic that provides write property."""
 
     @staticmethod
-    def _calc_values() -> set[str]:
+    def _calc_values() -> frozenset[str]:
         """Return values that the BMS cannot provide and need to be calculated.
 
         See calc_values() function for the required input to actually do so.
         """
-        return set()
+        return frozenset()
 
     @staticmethod
-    def _add_missing_values(data: BMSsample, values: set[str]) -> None:
+    def _add_missing_values(data: BMSsample, values: frozenset[str]) -> None:
         """Calculate missing BMS values from existing ones.
 
         data: data dictionary from BMS
@@ -272,7 +272,7 @@ class BaseBMS(metaclass=ABCMeta):
         self._data_event.clear()  # clear event before requesting new data
         await self._client.write_gatt_char(normalize_uuid_str(char or self.uuid_tx()), data)
         if wait_for_notify:
-            await asyncio.wait_for(self._wait_event(), timeout=self.BAT_TIMEOUT)
+            await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
 
     async def disconnect(self) -> None:
         """Disconnect the BMS, includes stoping notifications."""

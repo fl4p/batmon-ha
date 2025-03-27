@@ -54,11 +54,10 @@ class BMS(BaseBMS):
         return "#changeme"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_POWER,
-            ATTR_BATTERY_CHARGING,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {ATTR_POWER, ATTR_BATTERY_CHARGING}
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray

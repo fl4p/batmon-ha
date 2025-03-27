@@ -32,7 +32,7 @@ from .basebms import BaseBMS, BMSsample, crc8
 class BMS(BaseBMS):
     """ABC battery class implementation."""
 
-    BAT_TIMEOUT = 1
+    TIMEOUT = 1
     _HEAD_CMD: Final[int] = 0xEE
     _HEAD_RESP: Final[bytes] = b"\xCC"
     _INFO_LEN: Final[int] = 0x14
@@ -81,7 +81,7 @@ class BMS(BaseBMS):
                 "service_uuid": normalize_uuid_str("fff0"),
                 "connectable": True,
             }
-            for pattern in ("SOK-*", "ABC-*")  # "NB-*", "Hoover",
+            for pattern in ("ABC-*", "SOK-*")  # "NB-*", "Hoover",
         ]
 
     @staticmethod
@@ -105,15 +105,17 @@ class BMS(BaseBMS):
         return "ffe2"
 
     @staticmethod
-    def _calc_values() -> set[str]:
-        return {
-            ATTR_BATTERY_CHARGING,
-            ATTR_CYCLE_CAP,
-            ATTR_DELTA_VOLTAGE,
-            ATTR_POWER,
-            ATTR_RUNTIME,
-            ATTR_TEMPERATURE,
-        }  # calculate further values from BMS provided set ones
+    def _calc_values() -> frozenset[str]:
+        return frozenset(
+            {
+                ATTR_BATTERY_CHARGING,
+                ATTR_CYCLE_CAP,
+                ATTR_DELTA_VOLTAGE,
+                ATTR_POWER,
+                ATTR_RUNTIME,
+                ATTR_TEMPERATURE,
+            }
+        )  # calculate further values from BMS provided set ones
 
     def _notification_handler(
         self, _sender: BleakGATTCharacteristic, data: bytearray
