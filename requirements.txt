@@ -1,9 +1,12 @@
 
 bleak==0.20.2 # see Dockerfile
+#bleak-retry-connector
 
 paho-mqtt==2.1.0
 backoff
 crcmod
+
+pyserial
 
 #influxdb # see Dockerfile
 # the influxdb package appears to be not available from some platforms, so install it only if needed
