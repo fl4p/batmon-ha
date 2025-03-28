@@ -4,13 +4,13 @@ from abc import ABCMeta, abstractmethod
 import asyncio
 import logging
 from statistics import fmean
-from typing import Final, Literal
+from typing import Final, Literal, Dict, Union
 
 from bleak import BleakClient, normalize_uuid_str
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
-from bleak_retry_connector import establish_connection
+#from bleak_retry_connector import establish_connection
 
 from bmslib.bms_ble.const import (
     ATTR_BATTERY_CHARGING,
@@ -47,7 +47,8 @@ _HRS_TO_SECS = 3600
 #from homeassistant.loader import BluetoothMatcherOptional
 #from homeassistant.util.unit_conversion import _HRS_TO_SECS
 
-type BMSsample = dict[str, int | float | bool]
+#type BMSsample = dict[str, int | float | bool]
+BMSsample = Dict[str, Union[int, float, bool]]
 
 
 class BaseBMS(metaclass=ABCMeta):
@@ -243,13 +244,16 @@ class BaseBMS(metaclass=ABCMeta):
             return
 
         self._log.debug("connecting BMS")
-        self._client = await establish_connection(
-            client_class=BleakClient,
-            device=self._ble_device,
-            name=self._ble_device.address,
-            disconnected_callback=self._on_disconnect,
-            services=[*self.uuid_services()],
-        )
+        self._client = BleakClient(self._ble_device, self._on_disconnect,
+                                   services=[*self.uuid_services()])
+        await self._client.connect()
+        #self._client = await establish_connection(
+        #    client_class=BleakClient,
+       #     device=self._ble_device,
+       #     name=self._ble_device.address,
+        #    disconnected_callback=self._on_disconnect,
+        #    services=[*self.uuid_services()],
+        #)
 
         try:
             await self._init_connection()
