@@ -9,7 +9,7 @@ class SerialBleakClientWrapper(object):
     def __init__(self, address, **kwargs):
         self.address = address
         self.t = SerialTransport(address.split(':')[-1])
-        self.t = StdioTransport()
+        # self.t = StdioTransport()
         self.callback = {}
         self.services = []
         self._rx_thread = threading.Thread(target=self._on_receive)
