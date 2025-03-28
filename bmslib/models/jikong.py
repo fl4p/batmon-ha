@@ -190,7 +190,7 @@ class JKBt(BtBms):
                         name=read_str(buf, 6 + 16 + 8 + 16),
                         sn=read_str(buf, 6 + 16 + 8 + 16 + 40),
                         )
-        self._has_float_charger = 'PB2A16S' in di.model
+        self._has_float_charger = ('PB2A16S' in di.model) or ('PB1A16S' in di.model)
         return di
 
     async def has_float_charger(self):
