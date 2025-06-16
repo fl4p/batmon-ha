@@ -222,7 +222,7 @@ class JKBt(BtBms):
 
         return BmsSample(
             voltage=f32u(118 + offset),
-            current=-f32s(126 + offset),
+            current=f32s(126 + offset),
             soc=buf[141 + offset],
 
             cycle_capacity=f32u(154 + offset),  # total charge TODO rename cycle charge
