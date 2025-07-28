@@ -4,6 +4,7 @@ import time
 from typing import Dict, Tuple
 
 from bleak import BLEDevice
+from bmslib.bt import ProxyBleakScanner
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bms_ble.const import ATTR_BATTERY_LEVEL, KEY_CELL_COUNT
@@ -24,9 +25,13 @@ class BLEDeviceResolver:
 
         import bleak
         scanner_kw = {}
-        if adapter:
-            scanner_kw['adapter'] = adapter
-        scanner = bleak.BleakScanner(**scanner_kw)
+        if adapter and str(adapter).startswith("proxy:"):
+            proxy_addr = str(adapter).split(":",1)[1]
+            scanner = ProxyBleakScanner(proxy_addr)
+        else:
+            if adapter:
+                scanner_kw['adapter'] = adapter
+            scanner = bleak.BleakScanner(**scanner_kw)
 
         await scanner.start()
 

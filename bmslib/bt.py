@@ -95,7 +95,6 @@ class BtBms:
                 except ImportError:
                     self.logger.warn(
                         "Installed bleak version %s has no pairing agent, pairing with a pin will likely fail! "
-                        # "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`"
                         , bleak_version())
 
             self._adapter = adapter
@@ -105,15 +104,24 @@ class BtBms:
                 assert adapter, "You need to specify a serial device (adapter)"
                 self.client = SerialBleakClientWrapper(adapter)
             else:
-                if adapter:  # hci0, hci1 (BT adapter hardware)
+                if adapter and str(adapter).startswith("proxy:"):
+                    proxy_addr = str(adapter).split(":",1)[1]
+                    self.logger.info('Using proxy adapter %s', proxy_addr)
+                    self.client = ProxyBleakClient(address, proxy_addr=proxy_addr)
+                elif adapter:
                     self.logger.info('Using adapter %s', adapter)
                     kwargs['adapter'] = adapter
-
-                self.client = BleakClient(address,
-                                          handle_pairing=bool(psk),
-                                          disconnected_callback=self._on_disconnect,
-                                          **kwargs
-                                          )
+                    self.client = BleakClient(address,
+                                              handle_pairing=bool(psk),
+                                              disconnected_callback=self._on_disconnect,
+                                              **kwargs
+                                              )
+                else:
+                    self.client = BleakClient(address,
+                                              handle_pairing=bool(psk),
+                                              disconnected_callback=self._on_disconnect,
+                                              **kwargs
+                                              )
 
             self._in_disconnect = False
 
@@ -408,3 +416,43 @@ async def enumerate_services(client: BleakClient, logger):
                     logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
                 except Exception as e:
                     logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
+
+
+# ==== 代理实现区 ====
+import aiohttp
+class ProxyBleakScanner:
+    def __init__(self, proxy_addr):
+        self.proxy_addr = proxy_addr
+        self.discovered_devices = []
+        self._session = None
+    async def start(self):
+        self._session = aiohttp.ClientSession()
+        # 这里可实现与代理的发现协议，简化为直接获取设备列表
+        async with self._session.get(f"http://{self.proxy_addr}/devices") as resp:
+            devices = await resp.json()
+            self.discovered_devices = [type('BLEDevice', (), d) for d in devices]
+    async def stop(self):
+        if self._session:
+            await self._session.close()
+
+class ProxyBleakClient:
+    def __init__(self, address, **kwargs):
+        self.address = address
+        self.proxy_addr = kwargs.get('proxy_addr')
+        self._session = None
+        self.is_connected = False
+    async def connect(self, timeout=10):
+        self._session = aiohttp.ClientSession()
+        # 这里可实现与代理的连接协议
+        async with self._session.post(f"http://{self.proxy_addr}/connect", json={"address": self.address}) as resp:
+            self.is_connected = resp.status == 200
+    async def disconnect(self):
+        if self._session:
+            await self._session.post(f"http://{self.proxy_addr}/disconnect", json={"address": self.address})
+            await self._session.close()
+            self.is_connected = False
+    async def start_notify(self, char, callback, **kwargs):
+        # 代理通知实现略
+        pass
+    async def stop_notify(self, char):
+        pass
