@@ -15,7 +15,7 @@ MQTT_HOST=$(bashio::services mqtt "host" || true)
 MQTT_USER=$(bashio::services mqtt "username" || true)
 MQTT_PASSWORD=$(bashio::services mqtt "password" || true)
 
-/app/venv/bin/python3 main.py pair-only
+/app/venv_bleak_pairing/bin/python3 main.py pair-only
 
 
 MQTT_HOST=$MQTT_HOST MQTT_USER=$MQTT_USER MQTT_PASSWORD=$MQTT_PASSWORD \
