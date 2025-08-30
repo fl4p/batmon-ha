@@ -33,7 +33,10 @@ class SerialTransport(Transport):
     def open(self):
         port = self.port
         if '*' in port:
-            port = glob.glob(port)[0]
+            files = glob.glob(port)
+            if not files:
+                raise FileNotFoundError('Serial port device not found: {}'.format(port))
+            port =files[0]
         logger.info(f'opening serial port {port}')
         self.ser = serial.Serial(port, baudrate=115200)
 

@@ -22,7 +22,7 @@ from collections import defaultdict
 from typing import List, Callable, Dict, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.bt import BtBms, enumerate_services
 from bmslib.util import to_hex_str
 
 
@@ -126,13 +126,17 @@ class JKBt(BtBms):
         """
 
         try:
-            await super().connect(timeout=6)
+            await super().connect(timeout=timeout/2)
         except Exception as e:
             self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         service = self.get_service(self.SERVICE_UUID)
         self.char_handle_write = self.find_char(self.CHAR_UUID, 'write', service=service)
+
+        if self.char_handle_write is None:
+            self.logger.warning("%s Write Characteristic %s not found, enumerating services:", self.name, self.CHAR_UUID)
+            await enumerate_services(self.client, self.logger)
 
         if self.char_handle_write and hasattr(self.char_handle_write,
                                               'handle') and self.char_handle_write.handle == 0x03:

@@ -1,13 +1,14 @@
 import asyncio
-import backoff
-import bleak.exc
 import re
 import subprocess
 import time
 import uuid
+from typing import Callable, List, Union
+
+import backoff
+import bleak.exc
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
-from typing import Callable, List, Union, Iterable
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
@@ -138,8 +139,13 @@ class BtBms:
         :param kwargs:
         :return: the accepeted char_specifier
         """
+
+        if not char_specifier:
+            raise ValueError('char_specifier is required')
+
         if not isinstance(char_specifier, list):
             char_specifier = [char_specifier]
+
         exception = None
         for cs in char_specifier:
             try:
@@ -273,10 +279,12 @@ class BtBms:
         while True:
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
+                ad = f' using adapter {self._adapter}' if self._adapter else ''
                 if self.client.address not in discovered:
                     raise BleakDeviceNotFoundError(
-                        self.client.address, 'Device %s not discovered. Make sure it in range and is not being '
-                                             'accessed by another app. (found %s)' % (self.client.address, discovered))
+                        self.client.address, 'Device %s%s not discovered. Make sure it in range and is not being '
+                                             'accessed by another app. (found %s)' % (
+                                             self.client.address, ad, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout / 2)
