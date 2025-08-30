@@ -52,7 +52,7 @@ class JKBt(BtBms):
     SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb"
     CHAR_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
-    TIMEOUT = 8
+    TIMEOUT = 12
 
     SOC_NOT_FULL_YET = 99.0  # when the gauge reaches 100% but no OV yet
     TEMPERATURE_STEP = 0.1
