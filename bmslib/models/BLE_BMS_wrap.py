@@ -6,7 +6,7 @@ from typing import Dict, Tuple
 from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bms_ble.const import ATTR_BATTERY_LEVEL, KEY_CELL_COUNT
+from bmslib.bms_ble.plugins.basebms import BMSsample
 from bmslib.bt import BtBms
 
 
@@ -52,7 +52,7 @@ class BLEDeviceResolver:
 
 class BMS():
 
-    def __init__(self, address,  type, module=None, keep_alive=False, adapter=None, name=None, **kwargs):
+    def __init__(self, address, type, module=None, keep_alive=False, adapter=None, name=None, **kwargs):
         self.address = address
         self.adapter = adapter
         self.name = name
@@ -60,7 +60,7 @@ class BMS():
         self._blebms_module = module
         self._keep_alive = keep_alive
 
-        self._last_sample = None
+        self._last_sample: BMSsample = None
 
         self.is_virtual = False
         self.verbose_log = False
@@ -101,7 +101,6 @@ class BMS():
         if ble_device is None:
             raise RuntimeError("device %s not found" % self.address)
 
-
         self.ble_bms: bmslib.bms_ble.plugins.basebms.BaseBMS = self._blebms_module.BMS(
             ble_device=ble_device,
             reconnect=not self._keep_alive
@@ -135,27 +134,22 @@ class BMS():
 
     async def fetch(self) -> BmsSample:
         from bmslib.bms_ble.const import (
-            ATTR_CURRENT,
-            ATTR_CYCLE_CAP,
-            ATTR_CYCLE_CHRG,
-            ATTR_POWER,
-            ATTR_TEMPERATURE,
-            ATTR_VOLTAGE,
             ATTR_CYCLES,
             ATTR_BALANCE_CUR,
         )
 
-        sample = await self.ble_bms.async_update()
+        sample: BMSsample = await self.ble_bms.async_update()
         self._last_sample = sample
         return BmsSample(
-            soc=sample[ATTR_BATTERY_LEVEL],
-            voltage=sample[ATTR_VOLTAGE],
-            current=sample[ATTR_CURRENT], power=sample.get(ATTR_POWER, math.nan),
-            capacity=sample.get(ATTR_CYCLE_CHRG, math.nan),  # todo ?
-            cycle_capacity=sample.get(ATTR_CYCLE_CAP, math.nan),  # todo ?
+            soc=sample['battery_level'],
+            voltage=sample['voltage'],
+            current=sample['current'],
+            power=sample.get('power', math.nan),
+            capacity=sample.get('cycle_charge', math.nan),  # todo ?
+            cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
             num_cycles=sample.get(ATTR_CYCLES, math.nan),
             balance_current=sample.get(ATTR_BALANCE_CUR, math.nan),
-            temperatures=[sample.get(ATTR_TEMPERATURE)],  # todo?
+            temperatures=[sample.get('temperature')],  # todo?
             # mos_temperature=
 
         )
@@ -164,7 +158,7 @@ class BMS():
         s = self._last_sample
         if s is None:
             return []
-        v = [self._last_sample[f'cell#{i}'] for i in range(s[KEY_CELL_COUNT])]
+        v = [s['cell_voltages'][i] for i in range(s['cell_count'])]
         return v
 
     def debug_data(self):

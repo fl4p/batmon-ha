@@ -5,16 +5,16 @@
       "no_devices_found": "No supported devices found via Bluetooth.",
       "not_supported": "Device is not supported."
     },
-    "flow_title": "Setup {name}",
+    "flow_title": "Setup {name} ({id}) as {model}",
     "step": {
       "user": {
         "description": "Choose a device to set up:",
         "data": {
-          "address": "Bluetooth name (MAC address)"
+          "address": "Bluetooth name (MAC address) - Model"
         }
       },
       "bluetooth_confirm": {
-        "description": "Do you want to set up {name}?"
+        "description": "Do you want to set up {name} ({id})?"
       }
     }
   },

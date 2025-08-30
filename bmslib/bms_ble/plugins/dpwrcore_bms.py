@@ -1,6 +1,5 @@
 """Module to support D-powercore Smart BMS."""
 
-from collections.abc import Callable
 from enum import IntEnum
 from string import hexdigits
 from typing import Final
@@ -9,24 +8,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from bmslib.bms_ble.const import (
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_CURRENT,
-    ATTR_CYCLE_CAP,
-    ATTR_CYCLE_CHRG,
-    ATTR_CYCLES,
-    ATTR_DELTA_VOLTAGE,
-    ATTR_POWER,
-    ATTR_RUNTIME,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-    KEY_CELL_COUNT,
-    KEY_CELL_VOLTAGE,
-    KEY_PROBLEM,
-)
-
-from .basebms import BaseBMS, BMSsample
+from .basebms import AdvertisementPattern, BaseBMS, BMSdp, BMSsample, BMSvalue
 
 
 class Cmd(IntEnum):
@@ -47,31 +29,35 @@ class BMS(BaseBMS):
 
     _PAGE_LEN: Final[int] = 20
     _MAX_CELLS: Final[int] = 32
-    _FIELDS: Final[list[tuple[str, Cmd, int, int, Callable[[int], int | float]]]] = [
-        (ATTR_VOLTAGE, Cmd.LEGINFO1, 6, 2, lambda x: float(x) / 10),
-        (ATTR_CURRENT, Cmd.LEGINFO1, 8, 2, lambda x: x),
-        (ATTR_BATTERY_LEVEL, Cmd.LEGINFO1, 14, 1, lambda x: x),
-        (ATTR_CYCLE_CHRG, Cmd.LEGINFO1, 12, 2, lambda x: float(x) / 1000),
-        (
-            ATTR_TEMPERATURE,
-            Cmd.LEGINFO2,
+    _FIELDS: Final[tuple[BMSdp, ...]] = (
+        BMSdp("voltage", 6, 2, False, lambda x: x / 10, Cmd.LEGINFO1),
+        BMSdp("current", 8, 2, True, lambda x: x, Cmd.LEGINFO1),
+        BMSdp("battery_level", 14, 1, False, lambda x: x, Cmd.LEGINFO1),
+        BMSdp("cycle_charge", 12, 2, False, lambda x: x / 1000, Cmd.LEGINFO1),
+        BMSdp(
+            "temperature",
             12,
             2,
-            lambda x: round(float(x) * 0.1 - 273.15, 1),
+            False,
+            lambda x: round(x * 0.1 - 273.15, 1),
+            Cmd.LEGINFO2,
         ),
-        (KEY_CELL_COUNT, Cmd.CELLVOLT, 6, 1, lambda x: min(x, BMS._MAX_CELLS)),
-        (ATTR_CYCLES, Cmd.LEGINFO2, 8, 2, lambda x: x),
-        (KEY_PROBLEM, Cmd.LEGINFO1, 15, 1, lambda x: x & 0xFF),
-    ]
+        BMSdp(
+            "cell_count", 6, 1, False, lambda x: min(x, BMS._MAX_CELLS), Cmd.CELLVOLT
+        ),
+        BMSdp("cycles", 8, 2, False, lambda x: x, Cmd.LEGINFO2),
+        BMSdp("problem_code", 15, 1, False, lambda x: x & 0xFF, Cmd.LEGINFO1),
+    )
+    _CMDS: Final[set[Cmd]] = {Cmd(field.idx) for field in _FIELDS}
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Intialize private BMS members."""
-        super().__init__(__name__, ble_device, reconnect)
+        super().__init__(ble_device, reconnect)
         assert self._ble_device.name is not None  # required for unlock
-        self._data_final: bytearray = bytearray()
+        self._data_final: dict[int, bytearray] = {}
 
     @staticmethod
-    def matcher_dict_list() -> list[dict]:
+    def matcher_dict_list() -> list[AdvertisementPattern]:
         """Provide BluetoothMatcher definition."""
         return [
             {
@@ -103,14 +89,14 @@ class BMS(BaseBMS):
         return "fff3"
 
     @staticmethod
-    def _calc_values() -> frozenset[str]:
+    def _calc_values() -> frozenset[BMSvalue]:
         return frozenset(
             {
-                ATTR_BATTERY_CHARGING,
-                ATTR_CYCLE_CAP,
-                ATTR_DELTA_VOLTAGE,
-                ATTR_POWER,
-                ATTR_RUNTIME,
+                "battery_charging",
+                "cycle_capacity",
+                "delta_voltage",
+                "power",
+                "runtime",
             }
         )
 
@@ -130,15 +116,15 @@ class BMS(BaseBMS):
 
         # acknowledge received frame
         await self._await_reply(
-            bytearray([data[0] | 0x80]) + data[1:], wait_for_notify=False
+            bytes([data[0] | 0x80]) + data[1:], wait_for_notify=False
         )
 
-        size: Final[int] = int(data[0])
-        page: Final[int] = int(data[1] >> 4)
-        maxpg: Final[int] = int(data[1] & 0xF)
+        size: Final[int] = data[0]
+        page: Final[int] = data[1] >> 4
+        maxpg: Final[int] = data[1] & 0xF
 
         if page == 1:
-            self._data = bytearray()
+            self._data.clear()
 
         self._data += data[2 : size + 2]
 
@@ -153,32 +139,34 @@ class BMS(BaseBMS):
                     int.from_bytes(self._data[-4:-2], byteorder="big"),
                     crc,
                 )
-                self._data = bytearray()
-                self._data_final = bytearray()  # reset invalid data
+                self._data.clear()
+                self._data_final = {}  # reset invalid data
                 return
 
-            self._data_final = self._data
+            self._data_final[self._data[3]] = self._data.copy()
             self._data_event.set()
 
     @staticmethod
-    def _crc(data: bytes) -> int:
+    def _crc(data: bytearray) -> int:
         return sum(data) + 8
 
     @staticmethod
-    def _cmd_frame(cmd: Cmd, data: bytes) -> bytes:
-        frame: bytes = bytes([cmd.value, 0x00, 0x00]) + data
+    def _cmd(cmd: Cmd, data: bytes) -> bytes:
+        frame: bytearray = bytearray([cmd.value, 0x00, 0x00]) + data
         checksum: Final[int] = BMS._crc(frame)
         frame = (
-            bytes([0x3A, 0x03, 0x05])
+            bytearray([0x3A, 0x03, 0x05])
             + frame
             + bytes([(checksum >> 8) & 0xFF, checksum & 0xFF, 0x0D, 0x0A])
         )
-        frame = bytes([len(frame) + 2, 0x11]) + frame
+        frame = bytearray([len(frame) + 2, 0x11]) + frame
         frame += bytes(BMS._PAGE_LEN - len(frame))
 
-        return frame
+        return bytes(frame)
 
-    async def _init_connection(self) -> None:
+    async def _init_connection(
+        self, char_notify: BleakGATTCharacteristic | int | str | None = None
+    ) -> None:
         """Connect to the BMS and setup notification if not connected."""
         await super()._init_connection()
 
@@ -192,42 +180,27 @@ class BMS(BaseBMS):
 
         pwd = int(self.name[-4:], 16)
         await self._await_reply(
-            BMS._cmd_frame(
+            BMS._cmd(
                 Cmd.UNLOCK,
                 bytes([(pwd >> 8) & 0xFF, pwd & 0xFF]),
             ),
             wait_for_notify=False,
         )
 
-    @staticmethod
-    def _cell_voltages(data: bytearray, cells: int) -> dict[str, float]:
-        """Return cell voltages from status message."""
-        return {
-            f"{KEY_CELL_VOLTAGE}{idx}": int.from_bytes(
-                data[7 + 2 * idx : 7 + 2 * idx + 2], byteorder="big"
-            )
-            / 1000
-            for idx in range(cells)
-        }
-
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""
-        data: BMSsample = {}
-        for request in (Cmd.LEGINFO1, Cmd.LEGINFO2, Cmd.CELLVOLT):
-            await self._await_reply(self._cmd_frame(request, b""))
+        for request in BMS._CMDS:
+            await self._await_reply(self._cmd(request, b""))
 
-            data |= {
-                key: func(
-                    int.from_bytes(
-                        self._data[idx : idx + size], byteorder="big", signed=True
-                    )
-                )
-                for key, cmd, idx, size, func in BMS._FIELDS
-                if cmd == request
-            }
-            if request == Cmd.CELLVOLT and data.get(KEY_CELL_COUNT):
-                data.update(
-                    BMS._cell_voltages(self._data_final, int(data[KEY_CELL_COUNT]))
-                )
+        if not BMS._CMDS.issubset(set(self._data_final.keys())):
+            raise ValueError("incomplete response set")
 
-        return data
+        result: BMSsample = BMS._decode_data(BMS._FIELDS, self._data_final)
+        result["cell_voltages"] = BMS._cell_voltages(
+            self._data_final[Cmd.CELLVOLT],
+            cells=result.get("cell_count", 0),
+            start=7,
+        )
+
+        self._data_final.clear()
+        return result

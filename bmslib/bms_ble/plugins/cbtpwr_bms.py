@@ -1,37 +1,19 @@
 """Module to support CBT Power Smart BMS."""
 
-from collections.abc import Callable
 from typing import Final
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from bmslib.bms_ble.const import (
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_CURRENT,
-    ATTR_CYCLE_CAP,
-    ATTR_CYCLE_CHRG,
-    ATTR_CYCLES,
-    ATTR_DELTA_VOLTAGE,
-    ATTR_POWER,
-    ATTR_RUNTIME,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-    KEY_CELL_VOLTAGE,
-    KEY_DESIGN_CAP,
-    KEY_PROBLEM,
-)
 #from homeassistant.util.unit_conversion import _HRS_TO_SECS
 
-from .basebms import BaseBMS, BMSsample, crc_sum, _HRS_TO_SECS
+from .basebms import AdvertisementPattern, BaseBMS, BMSdp, BMSsample, BMSvalue, crc_sum, _HRS_TO_SECS
 
 
 class BMS(BaseBMS):
     """CBT Power Smart BMS class implementation."""
 
-    TIMEOUT = 1
     HEAD: Final[bytes] = bytes([0xAA, 0x55])
     TAIL_RX: Final[bytes] = bytes([0x0D, 0x0A])
     TAIL_TX: Final[bytes] = bytes([0x0A, 0x0D])
@@ -40,26 +22,24 @@ class BMS(BaseBMS):
     LEN_POS: Final[int] = 3
     CMD_POS: Final[int] = 2
     CELL_VOLTAGE_CMDS: Final[list[int]] = [0x5, 0x6, 0x7, 0x8]
-    _FIELDS: Final[
-        list[tuple[str, int, int, int, bool, Callable[[int], int | float]]]
-    ] = [
-        (ATTR_VOLTAGE, 0x0B, 4, 4, False, lambda x: float(x / 1000)),
-        (ATTR_CURRENT, 0x0B, 8, 4, True, lambda x: float(x / 1000)),
-        (ATTR_TEMPERATURE, 0x09, 4, 2, True, lambda x: x),
-        (ATTR_BATTERY_LEVEL, 0x0A, 4, 1, False, lambda x: x),
-        (KEY_DESIGN_CAP, 0x15, 4, 2, False, lambda x: x),
-        (ATTR_CYCLES, 0x15, 6, 2, False, lambda x: x),
-        (ATTR_RUNTIME, 0x0C, 14, 2, False, lambda x: float(x * _HRS_TO_SECS / 100)),
-        (KEY_PROBLEM, 0x21, 4, 4, False, lambda x: x),
-    ]
-    _CMDS: Final[list[int]] = list({field[1] for field in _FIELDS})
+    _FIELDS: Final[tuple[BMSdp, ...]] = (
+        BMSdp("voltage", 4, 4, False, lambda x: x / 1000, 0x0B),
+        BMSdp("current", 8, 4, True, lambda x: x / 1000, 0x0B),
+        BMSdp("temperature", 4, 2, True, lambda x: x, 0x09),
+        BMSdp("battery_level", 4, 1, False, lambda x: x, 0x0A),
+        BMSdp("design_capacity", 4, 2, False, lambda x: x, 0x15),
+        BMSdp("cycles", 6, 2, False, lambda x: x, 0x15),
+        BMSdp("runtime", 14, 2, False, lambda x: x * _HRS_TO_SECS / 100, 0x0C),
+        BMSdp("problem_code", 4, 4, False, lambda x: x, 0x21),
+    )
+    _CMDS: Final[list[int]] = list({field.idx for field in _FIELDS})
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Intialize private BMS members."""
-        super().__init__(__name__, ble_device, reconnect)
+        super().__init__(ble_device, reconnect)
 
     @staticmethod
-    def matcher_dict_list() -> list[dict]:
+    def matcher_dict_list() -> list[AdvertisementPattern]:
         """Provide BluetoothMatcher definition."""
         return [
             {"service_uuid": BMS.uuid_services()[0], "connectable": True},
@@ -96,14 +76,14 @@ class BMS(BaseBMS):
         return "ffe9"
 
     @staticmethod
-    def _calc_values() -> frozenset[str]:
+    def _calc_values() -> frozenset[BMSvalue]:
         return frozenset(
             {
-                ATTR_POWER,
-                ATTR_BATTERY_CHARGING,
-                ATTR_DELTA_VOLTAGE,
-                ATTR_CYCLE_CAP,
-                ATTR_TEMPERATURE,
+                "power",
+                "battery_charging",
+                "delta_voltage",
+                "cycle_capacity",
+                "temperature",
             }
         )
 
@@ -136,38 +116,14 @@ class BMS(BaseBMS):
         self._data_event.set()
 
     @staticmethod
-    def _gen_frame(cmd: bytes, value: list[int] | None = None) -> bytes:
+    def _cmd(cmd: bytes, value: list[int] | None = None) -> bytes:
         """Assemble a CBT Power BMS command."""
         value = [] if value is None else value
         assert len(value) <= 255
-        frame = bytes([*BMS.HEAD, cmd[0]])
-        frame += bytes([len(value), *value])
-        frame += bytes([crc_sum(frame[len(BMS.HEAD) :])])
-        frame += bytes([*BMS.TAIL_TX])
-        return frame
-
-    @staticmethod
-    def _cell_voltages(data: bytearray) -> dict[str, float]:
-        """Return cell voltages from status message."""
-        return {
-            f"{KEY_CELL_VOLTAGE}{idx+(data[BMS.CMD_POS]-5)*5}": int.from_bytes(
-                data[4 + 2 * idx : 6 + 2 * idx],
-                byteorder="little",
-                signed=True,
-            )
-            / 1000
-            for idx in range(5)
-        }
-
-    @staticmethod
-    def _decode_data(cache: dict[int, bytearray]) -> BMSsample:
-        data: BMSsample = {}
-        for field, cmd, pos, size, sign, fct in BMS._FIELDS:
-            if cmd in cache:
-                data[field] = fct(
-                    int.from_bytes(cache[cmd][pos : pos + size], "little", signed=sign)
-                )
-        return data
+        frame = bytearray([*BMS.HEAD, cmd[0], len(value), *value])
+        frame.append(crc_sum(frame[len(BMS.HEAD) :]))
+        frame.extend(BMS.TAIL_TX)
+        return bytes(frame)
 
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""
@@ -175,7 +131,7 @@ class BMS(BaseBMS):
         for cmd in BMS._CMDS:
             self._log.debug("request command 0x%X.", cmd)
             try:
-                await self._await_reply(BMS._gen_frame(cmd.to_bytes(1)))
+                await self._await_reply(BMS._cmd(cmd.to_bytes(1)))
             except TimeoutError:
                 continue
             if cmd != self._data[BMS.CMD_POS]:
@@ -186,27 +142,28 @@ class BMS(BaseBMS):
                 )
             resp_cache[self._data[BMS.CMD_POS]] = self._data.copy()
 
-        voltages: dict[str, float] = {}
+        voltages: list[float] = []
         for cmd in BMS.CELL_VOLTAGE_CMDS:
             try:
-                await self._await_reply(BMS._gen_frame(cmd.to_bytes(1)))
+                await self._await_reply(BMS._cmd(cmd.to_bytes(1)))
             except TimeoutError:
                 break
-            voltages |= BMS._cell_voltages(self._data)
-            if invalid := [k for k, v in voltages.items() if v == 0]:
-                for k in invalid:
-                    voltages.pop(k)
+            cells: list[float] = BMS._cell_voltages(
+                self._data, cells=5, start=4, byteorder="little"
+            )
+            voltages.extend(cells)
+            if len(voltages) % 5 or len(cells) == 0:
                 break
 
-        data: BMSsample = BMS._decode_data(resp_cache)
+        data: BMSsample = BMS._decode_data(BMS._FIELDS, resp_cache, byteorder="little")
 
         # get cycle charge from design capacity and SoC
-        if data.get(KEY_DESIGN_CAP) and data.get(ATTR_BATTERY_LEVEL):
-            data[ATTR_CYCLE_CHRG] = (
-                data[KEY_DESIGN_CAP] * data[ATTR_BATTERY_LEVEL] / 100
+        if data.get("design_capacity") and data.get("battery_level"):
+            data["cycle_charge"] = (
+                data.get("design_capacity", 0) * data.get("battery_level", 0) / 100
             )
         # remove runtime if not discharging
-        if data.get(ATTR_CURRENT, 0) >= 0:
-            data.pop(ATTR_RUNTIME, None)
+        if data.get("current", 0) >= 0:
+            data.pop("runtime", None)
 
-        return data | voltages
+        return data | {"cell_voltages": voltages}

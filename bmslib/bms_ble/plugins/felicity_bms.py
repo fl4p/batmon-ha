@@ -2,34 +2,17 @@
 
 from collections.abc import Callable
 from json import JSONDecodeError, loads
-from typing import Final
+from typing import Any, Final
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from bmslib.bms_ble.const import (
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_CURRENT,
-    ATTR_CYCLE_CAP,
-    ATTR_CYCLE_CHRG,
-    # ATTR_CYCLES,
-    ATTR_DELTA_VOLTAGE,
-    ATTR_POWER,
-    ATTR_RUNTIME,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-    KEY_CELL_VOLTAGE,
-    KEY_PROBLEM,
-    KEY_TEMP_VALUE,
-)
-
-from .basebms import BaseBMS, BMSsample
+from .basebms import AdvertisementPattern, BaseBMS, BMSsample, BMSvalue
 
 
 class BMS(BaseBMS):
-    """Felicity battery class implementation."""
+    """Felicity BMS implementation."""
 
     _HEAD: Final[bytes] = b"{"
     _TAIL: Final[bytes] = b"}"
@@ -37,26 +20,28 @@ class BMS(BaseBMS):
     _CMD_BI: Final[bytes] = b"get dev basice infor"
     _CMD_DT: Final[bytes] = b"get Date"
     _CMD_RT: Final[bytes] = b"get dev real infor"
-    _FIELDS: Final[list[tuple[str, str, Callable[[list], int | float]]]] = [
-        (ATTR_VOLTAGE, "Batt", lambda x: float(x[0][0] / 1000)),
-        (ATTR_CURRENT, "Batt", lambda x: float(x[1][0] / 10)),
+    _FIELDS: Final[list[tuple[BMSvalue, str, Callable[[list], Any]]]] = [
+        ("voltage", "Batt", lambda x: x[0][0] / 1000),
+        ("current", "Batt", lambda x: x[1][0] / 10),
         (
-            ATTR_CYCLE_CHRG,
+            "cycle_charge",
             "BatsocList",
             lambda x: (int(x[0][0]) * int(x[0][2])) / 1e7,
         ),
-        (ATTR_BATTERY_LEVEL, "BatsocList", lambda x: float(x[0][0] / 100)),
+        ("battery_level", "BatsocList", lambda x: x[0][0] / 100),
     ]
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Initialize BMS."""
-        super().__init__(__name__, ble_device, reconnect)
+        super().__init__(ble_device, reconnect)
         self._data_final: dict = {}
 
     @staticmethod
-    def matcher_dict_list() -> list[dict]:
+    def matcher_dict_list() -> list[AdvertisementPattern]:
         """Provide BluetoothMatcher definition."""
-        return [{"local_name": "F10*", "connectable": True}]
+        return [
+            {"local_name": pattern, "connectable": True} for pattern in ("F07*", "F10*")
+        ]
 
     @staticmethod
     def device_info() -> dict[str, str]:
@@ -79,15 +64,15 @@ class BMS(BaseBMS):
         return "49535258-184d-4bd9-bc61-20c647249616"
 
     @staticmethod
-    def _calc_values() -> frozenset[str]:
+    def _calc_values() -> frozenset[BMSvalue]:
         return frozenset(
             {
-                ATTR_BATTERY_CHARGING,
-                ATTR_CYCLE_CAP,
-                ATTR_DELTA_VOLTAGE,
-                ATTR_POWER,
-                ATTR_RUNTIME,
-                ATTR_TEMPERATURE,
+                "battery_charging",
+                "cycle_capacity",
+                "delta_voltage",
+                "power",
+                "runtime",
+                "temperature",
             }
         )  # calculate further values from BMS provided set ones
 
@@ -120,23 +105,21 @@ class BMS(BaseBMS):
         self._data_event.set()
 
     @staticmethod
-    def _decode_data(data: dict) -> dict[str, int | float]:
-        return {key: func(data.get(itm, [])) for key, itm, func in BMS._FIELDS}
+    def _conv_data(data: dict) -> BMSsample:
+        result: BMSsample = {}
+        for key, itm, func in BMS._FIELDS:
+            result[key] = func(data.get(itm, []))
+        return result
 
     @staticmethod
-    def _cell_voltages(data: dict) -> dict[str, float]:
-        return {
-            f"{KEY_CELL_VOLTAGE}{idx}": value / 1000
-            for idx, value in enumerate(data.get("BatcelList", [])[0])
-        }
+    def _conv_cells(data: dict) -> list[float]:
+        return [(value / 1000) for value in data.get("BatcelList", [])[0]]
 
     @staticmethod
-    def _temp_sensors(data: dict) -> dict[str, float]:
-        return {
-            f"{KEY_TEMP_VALUE}{idx}": value / 10
-            for idx, value in enumerate(data.get("BtemList", [])[0])
-            if value != 0x7FFF
-        }
+    def _conv_temp(data: dict) -> list[float]:
+        return [
+            (value / 10) for value in data.get("BtemList", [])[0] if value != 0x7FFF
+        ]
 
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""
@@ -144,11 +127,12 @@ class BMS(BaseBMS):
         await self._await_reply(BMS._CMD_PRE + BMS._CMD_RT)
 
         return (
-            BMS._decode_data(self._data_final)
-            | BMS._temp_sensors(self._data_final)
-            | BMS._cell_voltages(self._data_final)
+            BMS._conv_data(self._data_final)
+            | {"temp_values": BMS._conv_temp(self._data_final)}
+            | {"cell_voltages": BMS._conv_cells(self._data_final)}
             | {
-                KEY_PROBLEM: self._data_final.get("Bwarn", 0)
-                + self._data_final.get("Bfault", 0)
+                "problem_code": int(
+                    self._data_final.get("Bwarn", 0) + self._data_final.get("Bfault", 0)
+                )
             }
         )

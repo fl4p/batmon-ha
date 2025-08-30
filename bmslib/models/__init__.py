@@ -5,7 +5,10 @@ from bmslib.util import get_logger
 logger = get_logger()
 
 
+# noinspection PyUnresolvedReferences
 def get_bms_model_class(name):
+    # the noinspection PyUnresolvedReferences prevents PyCharm from removing the ` bmslib.bms_ble.plugins.*` imports below
+    
     import bmslib.models.ant
     import bmslib.models.daly
     import bmslib.models.daly2
@@ -22,8 +25,9 @@ def get_bms_model_class(name):
     from bmslib import models
 
     from bmslib.bms_ble import plugins
+
     import bmslib.bms_ble.plugins.seplos_bms
-    import  bmslib.bms_ble.plugins.seplos_v2_bms
+    import bmslib.bms_ble.plugins.seplos_v2_bms
     import bmslib.bms_ble.plugins.daly_bms
     import bmslib.bms_ble.plugins.tdt_bms
     import bmslib.bms_ble.plugins.ej_bms
@@ -36,8 +40,14 @@ def get_bms_model_class(name):
     import bmslib.bms_ble.plugins.ogt_bms
     import bmslib.bms_ble.plugins.redodo_bms
     import bmslib.bms_ble.plugins.roypow_bms
+    import bmslib.bms_ble.plugins.braunpwr_bms
+    import bmslib.bms_ble.plugins.neey_bms
+    import bmslib.bms_ble.plugins.pro_bms
+    import bmslib.bms_ble.plugins.renogy_bms
+    import bmslib.bms_ble.plugins.renogy_pro_bms
+    import bmslib.bms_ble.plugins.tianpwr_bms
 
-    #for k in dir(plugins):
+    # for k in dir(plugins):
     #    print(k)
 
     bms_registry = dict(

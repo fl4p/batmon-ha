@@ -5,16 +5,16 @@
       "no_devices_found": "Nenhum dispositivo suportado encontrado via Bluetooth.",
       "not_supported": "O dispositivo não é suportado."
     },
-    "flow_title": "Configuração de {name}",
+    "flow_title": "Configuração de {name} ({id}) como {model}",
     "step": {
       "user": {
         "description": "Escolha um dispositivo para configurar:",
         "data": {
-          "address": "Nome Bluetooth (endereço MAC)"
+          "address": "Nome Bluetooth (endereço MAC) - modelo"
         }
       },
       "bluetooth_confirm": {
-        "description": "Pretende configurar {name}?"
+        "description": "Pretende configurar {name} ({id})?"
       }
     }
   },

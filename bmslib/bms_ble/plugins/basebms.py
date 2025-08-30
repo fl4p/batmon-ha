@@ -1,84 +1,274 @@
 """Base class defintion for battery management systems (BMS)."""
-
-from abc import ABCMeta, abstractmethod
 import asyncio
 import logging
+import re
+from abc import ABC, abstractmethod
+from collections.abc import Callable, MutableMapping
+from enum import IntEnum
+from functools import lru_cache
 from statistics import fmean
-from typing import Final, Literal, Dict, Union
+from typing import Any, Final, Literal, NamedTuple, TypedDict
 
-from bleak import BleakClient, normalize_uuid_str
+from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
-#from bleak_retry_connector import establish_connection
 
-from bmslib.bms_ble.const import (
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_CURRENT,
-    ATTR_CYCLE_CAP,
-    ATTR_CYCLE_CHRG,
-    ATTR_DELTA_VOLTAGE,
-    ATTR_POWER,
-    ATTR_PROBLEM,
-    ATTR_RUNTIME,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-    KEY_CELL_VOLTAGE,
-    KEY_DESIGN_CAP,
-    KEY_PROBLEM,
-    KEY_TEMP_VALUE,
-)
-
-class BluetoothServiceInfoBleak():
-    pass
-
-def ble_device_matches(*args, **kwargs):
-    pass
-
-class BluetoothMatcherOptional():
-    def __init__(self, **kwargs):
-        pass
-
-_HRS_TO_SECS = 3600
-
-#from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
-#from homeassistant.components.bluetooth.match import ble_device_matches
-#from homeassistant.loader import BluetoothMatcherOptional
-#from homeassistant.util.unit_conversion import _HRS_TO_SECS
-
-#type BMSsample = dict[str, int | float | bool]
-BMSsample = Dict[str, Union[int, float, bool]]
+# from bleak_retry_connector import establish_connection
+BLEAK_TIMEOUT = 20.0
 
 
-class BaseBMS(metaclass=ABCMeta):
-    """Base class for battery management system."""
+async def establish_connection(client_class,
+                               device,
+                               name,
+                               disconnected_callback,
+                               services):
+    assert name == device.address
+    client = client_class(device, disconnected_callback, services=services)
+    await client.connect()
+    return client
 
-    TIMEOUT = 10
-    MAX_CELL_VOLTAGE: Final[float] = 5.906  # max cell potential
+_HRS_TO_SECS = 60 * 60  # 1 hr = 3600 seconds
+
+# from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+# from homeassistant.components.bluetooth.match import ble_device_matches
+# from homeassistant.loader import BluetoothMatcherOptional
+
+class BluetoothMatcherOptional(TypedDict, total=False):
+    """Matcher for the bluetooth integration for optional fields."""
+
+    local_name: str
+    service_uuid: str
+    service_data_uuid: str
+    manufacturer_id: int
+    manufacturer_data_start: list[int]
+    connectable: bool
+
+type BMSvalue = Literal[
+    "battery_charging",
+    "battery_mode",
+    "battery_level",
+    "current",
+    "power",
+    "temperature",
+    "voltage",
+    "cycles",
+    "cycle_capacity",
+    "cycle_charge",
+    "delta_voltage",
+    "problem",
+    "runtime",
+    "balance_current",
+    "cell_count",
+    "cell_voltages",
+    "design_capacity",
+    "pack_count",
+    "temp_sensors",
+    "temp_values",
+    "problem_code",
+]
+
+type BMSpackvalue = Literal[
+    "pack_voltages",
+    "pack_currents",
+    "pack_battery_levels",
+    "pack_cycles",
+]
+
+
+class BMSmode(IntEnum):
+    """Enumeration of BMS modes."""
+
+    UNKNOWN = -1
+    BULK = 0x00
+    ABSORPTION = 0x01
+    FLOAT = 0x02
+
+
+class BMSsample(TypedDict, total=False):
+    """Dictionary representing a sample of battery management system (BMS) data."""
+
+    battery_charging: bool  # True: battery charging
+    battery_mode: BMSmode  # BMS charging mode
+    battery_level: int | float  # [%]
+    current: float  # [A] (positive: charging)
+    power: float  # [W] (positive: charging)
+    temperature: int | float  # [°C]
+    voltage: float  # [V]
+    cycle_capacity: int | float  # [Wh]
+    cycles: int  # [#]
+    delta_voltage: float  # [V]
+    problem: bool  # True: problem detected
+    runtime: int  # [s]
+    # detailed information
+    balance_current: float  # [A]
+    cell_count: int  # [#]
+    cell_voltages: list[float]  # [V]
+    cycle_charge: int | float  # [Ah]
+    design_capacity: int  # [Ah]
+    pack_count: int  # [#]
+    temp_sensors: int  # [#]
+    temp_values: list[int | float]  # [°C]
+    problem_code: int  # BMS specific code, 0 no problem, max. 64bit
+    # battery pack data
+    pack_voltages: list[float]  # [V]
+    pack_currents: list[float]  # [A]
+    pack_battery_levels: list[int | float]  # [%]
+    pack_cycles: list[int]  # [#]
+
+
+class BMSdp(NamedTuple):
+    """Representation of one BMS data point."""
+
+    key: BMSvalue  # the key of the value to be parsed
+    pos: int  # position within the message
+    size: int  # size in bytes
+    signed: bool  # signed value
+    fct: Callable[[int], Any] = lambda x: x  # conversion function (default do nothing)
+    idx: int = -1  # array index containing the message to be parsed
+
+
+class AdvertisementPattern(TypedDict, total=False):
+    """Optional patterns that can match Bleak advertisement data."""
+
+    local_name: str  # name pattern that supports Unix shell-style wildcards
+    service_uuid: str  # 128-bit UUID that the device must advertise
+    service_data_uuid: str  # service data for the service UUID
+    manufacturer_id: int  # required manufacturer ID
+    manufacturer_data_start: list[int]  # required starting bytes of manufacturer data
+    connectable: bool  # True if active connections to the device are required
+
+
+CALLBACK: Final = "callback"
+DOMAIN: Final = "domain"
+ADDRESS: Final = "address"
+CONNECTABLE: Final = "connectable"
+LOCAL_NAME: Final = "local_name"
+SERVICE_UUID: Final = "service_uuid"
+SERVICE_DATA_UUID: Final = "service_data_uuid"
+MANUFACTURER_ID: Final = "manufacturer_id"
+MANUFACTURER_DATA_START: Final = "manufacturer_data_start"
+
+from fnmatch import translate
+
+
+@lru_cache(maxsize=4096, typed=True)
+def _compile_fnmatch(pattern: str) -> re.Pattern:
+    """Compile a fnmatch pattern."""
+    return re.compile(translate(pattern))
+
+
+@lru_cache(maxsize=1024, typed=True)
+def _memorized_fnmatch(name: str, pattern: str) -> bool:
+    """Memorized version of fnmatch that has a larger lru_cache.
+
+    The default version of fnmatch only has a lru_cache of 256 entries.
+    With many devices we quickly reach that limit and end up compiling
+    the same pattern over and over again.
+
+    Bluetooth has its own memorized fnmatch with its own lru_cache
+    since the data is going to be relatively the same
+    since the devices will not change frequently.
+    """
+    return bool(_compile_fnmatch(pattern).match(name))
+
+
+def ble_device_matches(
+        matcher,
+        service_info,
+) -> bool:
+    """Check if a ble device and advertisement_data matches the matcher."""
+    # Don't check address here since all callers already
+    # check the address and we don't want to double check
+    # since it would result in an unreachable reject case.
+    if matcher.get(CONNECTABLE, True) and not service_info.connectable:
+        return False
+
+    advertisement_data = service_info.advertisement
+    if (
+            service_uuid := matcher.get(SERVICE_UUID)
+    ) and service_uuid not in advertisement_data.service_uuids:
+        return False
+
+    if (
+            service_data_uuid := matcher.get(SERVICE_DATA_UUID)
+    ) and service_data_uuid not in advertisement_data.service_data:
+        return False
+
+    if manfacturer_id := matcher.get(MANUFACTURER_ID):
+        if manfacturer_id not in advertisement_data.manufacturer_data:
+            return False
+        if manufacturer_data_start := matcher.get(MANUFACTURER_DATA_START):
+            manufacturer_data_start_bytes = bytearray(manufacturer_data_start)
+            if not any(
+                    manufacturer_data.startswith(manufacturer_data_start_bytes)
+                    for manufacturer_data in advertisement_data.manufacturer_data.values()
+            ):
+                return False
+
+    if (local_name := matcher.get(LOCAL_NAME)) and (
+            (device_name := advertisement_data.local_name or service_info.device.name)
+            is None
+            or not _memorized_fnmatch(
+        device_name,
+        local_name,
+    )
+    ):
+        return False
+
+    return True
+
+
+class BaseBMS(ABC):
+    """Abstract base class for battery management system."""
+
+    MAX_RETRY: Final[int] = 3  # max number of retries for data requests
+    TIMEOUT: Final[float] = BLEAK_TIMEOUT / 4  # default timeout for BMS operations
+    # calculate time between retries to complete all retries (2 modes) in TIMEOUT seconds
+    _RETRY_TIMEOUT: Final[float] = TIMEOUT / (2 ** MAX_RETRY - 1)
+    _MAX_TIMEOUT_FACTOR: Final[int] = 8  # limit timout increase to 8x
+    _MAX_CELL_VOLT: Final[float] = 5.906  # max cell potential
+    _HRS_TO_SECS: Final[int] = 60 * 60  # seconds in an hour
+
+    class PrefixAdapter(logging.LoggerAdapter):
+        """Logging adpater to add instance ID to each log message."""
+
+        def process(
+                self, msg: str, kwargs: MutableMapping[str, Any]
+        ) -> tuple[str, MutableMapping[str, Any]]:
+            """Process the logging message."""
+            prefix: str = str(self.extra.get("prefix") if self.extra else "")
+            return (f"{prefix} {msg}", kwargs)
 
     def __init__(
-        self,
-        logger_name: str,
-        ble_device: BLEDevice,
-        reconnect: bool = False,
+            self,
+            ble_device: BLEDevice,
+            reconnect: bool = False,
+            logger_name: str = "",
     ) -> None:
         """Intialize the BMS.
 
-        logger_name: name of the logger for the BMS instance (usually file name)
-        notification_handler: the callback used for notifications from 'uuid_rx()' characteristics
-        ble_device: the Bleak device to connect to
-        reconnect: if true, the connection will be closed after each update
+        notification_handler: the callback function used for notifications from 'uuid_rx()'
+            characteristic. Not defined as abstract in this base class, as it can be both,
+            a normal or async function
+
+        Args:
+            logger_name (str): name of the logger for the BMS instance (usually file name)
+            ble_device (BLEDevice): the Bleak device to connect to
+            reconnect (bool): if true, the connection will be closed after each update
+
         """
         assert (
-            getattr(self, "_notification_handler", None) is not None
+                getattr(self, "_notification_handler", None) is not None
         ), "BMS class must define _notification_handler method"
         self._ble_device: Final[BLEDevice] = ble_device
         self._reconnect: Final[bool] = reconnect
         self.name: Final[str] = self._ble_device.name or "undefined"
-        self._log: Final[logging.Logger] = logging.getLogger(
-            f"{logger_name.replace('.plugins', '')}::{self.name}:"
-            f"{self._ble_device.address[-5:].replace(':','')})"
+        self._inv_wr_mode: bool | None = None  # invert write mode (WNR <-> W)
+        logger_name = logger_name or self.__class__.__module__
+        self._log: Final[BaseBMS.PrefixAdapter] = BaseBMS.PrefixAdapter(
+            logging.getLogger(f"{logger_name.replace('.plugins', '')}"),
+            {"prefix": f"{self.name}|{self._ble_device.address[-5:].replace(':', '')}:"},
         )
 
         self._log.debug(
@@ -94,8 +284,8 @@ class BaseBMS(metaclass=ABCMeta):
 
     @staticmethod
     @abstractmethod
-    def matcher_dict_list() -> list[dict]:
-        """Return a list of Bluetooth matchers."""
+    def matcher_dict_list() -> list[AdvertisementPattern]:
+        """Return a list of Bluetooth advertisement matchers."""
 
     @staticmethod
     @abstractmethod
@@ -111,11 +301,11 @@ class BaseBMS(metaclass=ABCMeta):
         return " ".join(cls.device_info().values())
 
     @classmethod
-    def supported(cls, discovery_info: BluetoothServiceInfoBleak) -> bool:
+    def supported(cls, discovery_info) -> bool:
         """Return true if service_info matches BMS type."""
         for matcher_dict in cls.matcher_dict_list():
             if ble_device_matches(
-                BluetoothMatcherOptional(**matcher_dict), discovery_info
+                    BluetoothMatcherOptional(**matcher_dict), discovery_info
             ):
                 return True
         return False
@@ -136,90 +326,107 @@ class BaseBMS(metaclass=ABCMeta):
         """Return 16-bit UUID of characteristic that provides write property."""
 
     @staticmethod
-    def _calc_values() -> frozenset[str]:
+    def _calc_values() -> frozenset[BMSvalue]:
         """Return values that the BMS cannot provide and need to be calculated.
 
-        See calc_values() function for the required input to actually do so.
+        See _add_missing_values() function for the required input to actually do so.
         """
         return frozenset()
 
     @staticmethod
-    def _add_missing_values(data: BMSsample, values: frozenset[str]) -> None:
+    def _add_missing_values(data: BMSsample, values: frozenset[BMSvalue]) -> None:
         """Calculate missing BMS values from existing ones.
 
-        data: data dictionary from BMS
-        values: list of values to add to the dictionary
+        Args:
+            data: data dictionary with values received from BMS
+            values: list of values to calculate and add to the dictionary
+
+        Returns:
+            None
+
         """
         if not values or not data:
             return
 
-        def can_calc(value: str, using: frozenset[str]) -> bool:
+        def can_calc(value: BMSvalue, using: frozenset[BMSvalue]) -> bool:
             """Check value to add does not exist, is requested, and needed data is available."""
             return (value in values) and (value not in data) and using.issubset(data)
 
-        # calculate total voltage (sum of all cell voltages)
-        cell_voltages: list[float]
-        if can_calc(ATTR_VOLTAGE, frozenset({f"{KEY_CELL_VOLTAGE}0"})):
-            cell_voltages = [
-                float(v) for k, v in data.items() if k.startswith(KEY_CELL_VOLTAGE)
-            ]
-            data[ATTR_VOLTAGE] = round(sum(cell_voltages), 3)
+        cell_voltages: Final[list[float]] = data.get("cell_voltages", [])
+        battery_level: Final[int | float] = data.get("battery_level", 0)
+        current: Final[float] = data.get("current", 0)
 
-        # calculate delta voltage (maximum cell voltage difference)
-        if can_calc(ATTR_DELTA_VOLTAGE, frozenset({f"{KEY_CELL_VOLTAGE}1"})):
-            cell_voltages = [
-                float(v) for k, v in data.items() if k.startswith(KEY_CELL_VOLTAGE)
-            ]
-            data[ATTR_DELTA_VOLTAGE] = round(max(cell_voltages) - min(cell_voltages), 3)
+        calculations: dict[BMSvalue, tuple[set[BMSvalue], Callable[[], Any]]] = {
+            "voltage": ({"cell_voltages"}, lambda: round(sum(cell_voltages), 3)),
+            "delta_voltage": (
+                {"cell_voltages"},
+                lambda: (
+                    round(max(cell_voltages) - min(cell_voltages), 3)
+                    if len(cell_voltages)
+                    else None
+                ),
+            ),
+            "cycle_charge": (
+                {"design_capacity", "battery_level"},
+                lambda: (data.get("design_capacity", 0) * battery_level) / 100,
+            ),
+            "battery_level": (
+                {"design_capacity", "cycle_charge"},
+                lambda: round(
+                    data.get("cycle_charge", 0) / data.get("design_capacity", 0) * 100,
+                    1,
+                ),
+            ),
+            "cycle_capacity": (
+                {"voltage", "cycle_charge"},
+                lambda: round(data.get("voltage", 0) * data.get("cycle_charge", 0), 3),
+            ),
+            "power": (
+                {"voltage", "current"},
+                lambda: round(data.get("voltage", 0) * current, 3),
+            ),
+            "battery_charging": ({"current"}, lambda: current > 0),
+            "runtime": (
+                {"current", "cycle_charge"},
+                lambda: (
+                    int(
+                        data.get("cycle_charge", 0)
+                        / abs(current)
+                        * BaseBMS._HRS_TO_SECS
+                    )
+                    if current < 0
+                    else None
+                ),
+            ),
+            "temperature": (
+                {"temp_values"},
+                lambda: (
+                    round(fmean(data.get("temp_values", [])), 3)
+                    if data.get("temp_values")
+                    else None
+                ),
+            ),
+        }
 
-        # calculate cycle charge from design capacity and SoC
-        if can_calc(ATTR_CYCLE_CHRG, frozenset({KEY_DESIGN_CAP, ATTR_BATTERY_LEVEL})):
-            data[ATTR_CYCLE_CHRG] = (
-                data[KEY_DESIGN_CAP] * data[ATTR_BATTERY_LEVEL]
-            ) / 100
-
-        # calculate cycle capacity from voltage and cycle charge
-        if can_calc(ATTR_CYCLE_CAP, frozenset({ATTR_VOLTAGE, ATTR_CYCLE_CHRG})):
-            data[ATTR_CYCLE_CAP] = round(data[ATTR_VOLTAGE] * data[ATTR_CYCLE_CHRG], 3)
-
-        # calculate current power from voltage and current
-        if can_calc(ATTR_POWER, frozenset({ATTR_VOLTAGE, ATTR_CURRENT})):
-            data[ATTR_POWER] = round(data[ATTR_VOLTAGE] * data[ATTR_CURRENT], 3)
-
-        # calculate charge indicator from current
-        if can_calc(ATTR_BATTERY_CHARGING, frozenset({ATTR_CURRENT})):
-            data[ATTR_BATTERY_CHARGING] = data[ATTR_CURRENT] > 0
-
-        # calculate runtime from current and cycle charge
-        if (
-            can_calc(ATTR_RUNTIME, frozenset({ATTR_CURRENT, ATTR_CYCLE_CHRG}))
-            and data[ATTR_CURRENT] < 0
-        ):
-            data[ATTR_RUNTIME] = int(
-                data[ATTR_CYCLE_CHRG] / abs(data[ATTR_CURRENT]) * _HRS_TO_SECS
-            )
-        # calculate temperature (average of all sensors)
-        if can_calc(ATTR_TEMPERATURE, frozenset({f"{KEY_TEMP_VALUE}0"})):
-            data[ATTR_TEMPERATURE] = round(
-                fmean([v for k, v in data.items() if k.startswith(KEY_TEMP_VALUE)]),
-                3,
-            )
+        for attr, (required, calc_func) in calculations.items():
+            if (
+                    can_calc(attr, frozenset(required))
+                    and (value := calc_func()) is not None
+            ):
+                data[attr] = value
 
         # do sanity check on values to set problem state
-        data[ATTR_PROBLEM] = (
-            data.get(ATTR_PROBLEM, False)
-            or bool(data.get(KEY_PROBLEM, False))
-            or (
-                data.get(ATTR_VOLTAGE, 1) <= 0
-                or any(
-                    v <= 0 or v > BaseBMS.MAX_CELL_VOLTAGE
-                    for k, v in data.items()
-                    if k.startswith(KEY_CELL_VOLTAGE)
-                )
-                or data.get(ATTR_DELTA_VOLTAGE, 0) > BaseBMS.MAX_CELL_VOLTAGE
-                or data.get(ATTR_CYCLE_CHRG, 1) <= 0
-                or data.get(ATTR_BATTERY_LEVEL, 0) > 100
-            )
+        data["problem"] = any(
+            [
+                data.get("problem", False),
+                data.get("problem_code", False),
+                data.get("voltage") is not None and data.get("voltage", 0) <= 0,
+                any(v <= 0 or v > BaseBMS._MAX_CELL_VOLT for v in cell_voltages),
+                data.get("delta_voltage", 0) > BaseBMS._MAX_CELL_VOLT,
+                data.get("cycle_charge") is not None
+                and data.get("cycle_charge", 0.0) <= 0.0,
+                battery_level > 100,
+            ]
         )
 
     def _on_disconnect(self, _client: BleakClient) -> None:
@@ -227,13 +434,15 @@ class BaseBMS(metaclass=ABCMeta):
 
         self._log.debug("disconnected from BMS")
 
-    async def _init_connection(self) -> None:
+    async def _init_connection(
+            self, char_notify: BleakGATTCharacteristic | int | str | None = None
+    ) -> None:
         # reset any stale data from BMS
         self._data.clear()
         self._data_event.clear()
 
         await self._client.start_notify(
-            normalize_uuid_str(self.uuid_rx()), getattr(self, "_notification_handler")
+            char_notify or self.uuid_rx(), getattr(self, "_notification_handler")
         )
 
     async def _connect(self) -> None:
@@ -243,51 +452,116 @@ class BaseBMS(metaclass=ABCMeta):
             self._log.debug("BMS already connected")
             return
 
+        try:
+            await self._client.disconnect()  # ensure no stale connection exists
+        except (BleakError, TimeoutError) as exc:
+            self._log.debug(
+                "failed to disconnect stale connection (%s)", type(exc).__name__
+            )
+
         self._log.debug("connecting BMS")
-        self._client = BleakClient(self._ble_device, self._on_disconnect,
-                                   services=[*self.uuid_services()])
-        await self._client.connect()
-        #self._client = await establish_connection(
-        #    client_class=BleakClient,
-       #     device=self._ble_device,
-       #     name=self._ble_device.address,
-        #    disconnected_callback=self._on_disconnect,
-        #    services=[*self.uuid_services()],
-        #)
+        self._client = await establish_connection(
+            client_class=BleakClient,
+            device=self._ble_device,
+            name=self._ble_device.address,
+            disconnected_callback=self._on_disconnect,
+            services=[*self.uuid_services()],
+        )
 
         try:
             await self._init_connection()
-        except Exception as err:
+        except Exception as exc:
             self._log.info(
-                "failed to initialize BMS connection (%s)", type(err).__name__
+                "failed to initialize BMS connection (%s)", type(exc).__name__
             )
             await self.disconnect()
             raise
 
+    def _wr_response(self, char: int | str) -> bool:
+        char_tx: Final[BleakGATTCharacteristic | None] = (
+            self._client.services.get_characteristic(char)
+        )
+        return bool(char_tx and "write" in getattr(char_tx, "properties", []))
+
+    async def _send_msg(
+            self,
+            data: bytes,
+            max_size: int,
+            char: int | str,
+            attempt: int,
+            inv_wr_mode: bool = False,
+    ) -> None:
+        """Send message to the bms in chunks if needed."""
+        chunk_size: Final[int] = max_size or len(data)
+
+        for i in range(0, len(data), chunk_size):
+            chunk: bytes = data[i: i + chunk_size]
+            self._log.debug(
+                "TX BLE req #%i (%s%s%s): %s",
+                attempt + 1,
+                "!" if inv_wr_mode else "",
+                "W" if self._wr_response(char) else "WNR",
+                "." if self._inv_wr_mode is not None else "",
+                chunk.hex(" "),
+            )
+            await self._client.write_gatt_char(
+                char,
+                chunk,
+                response=(self._wr_response(char) != inv_wr_mode),
+            )
+
     async def _await_reply(
-        self,
-        data: bytes,
-        char: BleakGATTCharacteristic | int | str | None = None,
-        wait_for_notify: bool = True,
+            self,
+            data: bytes,
+            char: int | str | None = None,
+            wait_for_notify: bool = True,
+            max_size: int = 0,
     ) -> None:
         """Send data to the BMS and wait for valid reply notification."""
 
-        self._log.debug("TX BLE data: %s", data.hex(" "))
-        self._data_event.clear()  # clear event before requesting new data
-        await self._client.write_gatt_char(normalize_uuid_str(char or self.uuid_tx()), data)
-        if wait_for_notify:
-            await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
+        for inv_wr_mode in (
+                [False, True] if self._inv_wr_mode is None else [self._inv_wr_mode]
+        ):
+            try:
+                self._data_event.clear()  # clear event before requesting new data
+                for attempt in range(BaseBMS.MAX_RETRY):
+                    await self._send_msg(
+                        data, max_size, char or self.uuid_tx(), attempt, inv_wr_mode
+                    )
+                    if not wait_for_notify:
+                        return  # write without wait for response selected
+                    try:
+                        await asyncio.wait_for(
+                            self._wait_event(),
+                            BaseBMS._RETRY_TIMEOUT
+                            * min(2 ** attempt, BaseBMS._MAX_TIMEOUT_FACTOR),
+                        )
+                    except TimeoutError:
+                        self._log.debug("TX BLE request timed out.")
+                        continue  # retry sending data
 
-    async def disconnect(self) -> None:
+                    self._inv_wr_mode = inv_wr_mode
+                    return  # leave loop if no exception
+            except BleakError as exc:
+                # reconnect on communication errors
+                self._log.warning(
+                    "TX BLE request error, retrying connection (%s)", type(exc).__name__
+                )
+                await self.disconnect()
+                await self._connect()
+        raise TimeoutError
+
+    async def disconnect(self, reset: bool = False) -> None:
         """Disconnect the BMS, includes stoping notifications."""
 
-        if self._client.is_connected:
-            self._log.debug("disconnecting BMS")
-            try:
-                self._data_event.clear()
-                await self._client.disconnect()
-            except BleakError:
-                self._log.warning("disconnect failed!")
+        self._log.debug("disconnecting BMS (%s)", str(self._client.is_connected))
+        try:
+            self._data_event.clear()
+            if reset:
+                self._inv_wr_mode = None  # reset write mode
+            await self._client.disconnect()
+        except BleakError:
+            self._log.warning("disconnect failed!")
 
     async def _wait_event(self) -> None:
         """Wait for data event and clear it."""
@@ -299,11 +573,19 @@ class BaseBMS(metaclass=ABCMeta):
         """Return a dictionary of BMS values (keys need to come from the SENSOR_TYPES list)."""
 
     async def async_update(self) -> BMSsample:
-        """Retrieve updated values from the BMS using method of the subclass."""
+        """Retrieve updated values from the BMS using method of the subclass.
+
+        Args:
+            raw (bool): if true, the raw data from the BMS is returned without
+                any calculations or missing values added
+
+        Returns:
+            BMSsample: dictionary with BMS values
+
+        """
         await self._connect()
 
-        data = await self._async_update()
-
+        data: BMSsample = await self._async_update()
         self._add_missing_values(data, self._calc_values())
 
         if self._reconnect:
@@ -311,6 +593,107 @@ class BaseBMS(metaclass=ABCMeta):
             await self.disconnect()
 
         return data
+
+    @staticmethod
+    def _decode_data(
+            fields: tuple[BMSdp, ...],
+            data: bytearray | dict[int, bytearray],
+            *,
+            byteorder: Literal["little", "big"] = "big",
+            offset: int = 0,
+    ) -> BMSsample:
+        result: BMSsample = {}
+        for field in fields:
+            if isinstance(data, dict) and field.idx not in data:
+                continue
+            msg: bytearray = data[field.idx] if isinstance(data, dict) else data
+            result[field.key] = field.fct(
+                int.from_bytes(
+                    msg[offset + field.pos: offset + field.pos + field.size],
+                    byteorder=byteorder,
+                    signed=field.signed,
+                )
+            )
+        return result
+
+    @staticmethod
+    def _cell_voltages(
+            data: bytearray,
+            *,
+            cells: int,
+            start: int,
+            size: int = 2,
+            byteorder: Literal["little", "big"] = "big",
+            divider: int = 1000,
+    ) -> list[float]:
+        """Return cell voltages from BMS message.
+
+        Args:
+            data: Raw data from BMS
+            cells: Number of cells to read
+            start: Start position in data array
+            size: Number of bytes per cell value (defaults 2)
+            byteorder: Byte order ("big"/"little" endian)
+            divider: Value to divide raw value by, defaults to 1000 (mv to V)
+
+        Returns:
+            list[float]: List of cell voltages in volts
+
+        """
+        return [
+            value / divider
+            for idx in range(cells)
+            if (len(data) >= start + (idx + 1) * size)
+            and (
+                value := int.from_bytes(
+                    data[start + idx * size: start + (idx + 1) * size],
+                    byteorder=byteorder,
+                    signed=False,
+                )
+            )
+        ]
+
+    @staticmethod
+    def _temp_values(
+            data: bytearray,
+            *,
+            values: int,
+            start: int,
+            size: int = 2,
+            byteorder: Literal["little", "big"] = "big",
+            signed: bool = True,
+            offset: float = 0,
+            divider: int = 1,
+    ) -> list[int | float]:
+        """Return temperature values from BMS message.
+
+        Args:
+            data: Raw data from BMS
+            values: Number of values to read
+            start: Start position in data array
+            size: Number of bytes per cell value (defaults 2)
+            byteorder: Byte order ("big"/"little" endian)
+            signed: Indicates whether two's complement is used to represent the integer.
+            offset: The offset read values are shifted by (for Kelvin use 273.15)
+            divider: Value to divide raw value by, defaults to 1000 (mv to V)
+
+        Returns:
+            list[int | float]: List of temperature values
+
+        """
+        return [
+            value / divider if divider != 1 else value
+            for idx in range(values)
+            if (len(data) >= start + (idx + 1) * size)
+               and (
+                   value := int.from_bytes(
+                       data[start + idx * size: start + (idx + 1) * size],
+                       byteorder=byteorder,
+                       signed=signed,
+                   )
+                            - offset
+               )
+        ]
 
 
 def crc_modbus(data: bytearray) -> int:
@@ -321,6 +704,11 @@ def crc_modbus(data: bytearray) -> int:
         for _ in range(8):
             crc = (crc >> 1) ^ 0xA001 if crc % 2 else (crc >> 1)
     return crc & 0xFFFF
+
+
+def lrc_modbus(data: bytearray) -> int:
+    """Calculate MODBUS LRC."""
+    return ((sum(data) ^ 0xFFFF) + 1) & 0xFFFF
 
 
 def crc_xmodem(data: bytearray) -> int:
@@ -345,6 +733,10 @@ def crc8(data: bytearray) -> int:
     return crc & 0xFF
 
 
-def crc_sum(frame: bytes) -> int:
-    """Calculate frame CRC."""
-    return sum(frame) & 0xFF
+def crc_sum(frame: bytearray, size: int = 1) -> int:
+    """Calculate the checksum of a frame using a specified size.
+
+    size : int, optional
+        The size of the checksum in bytes (default is 1).
+    """
+    return sum(frame) & ((1 << (8 * size)) - 1)

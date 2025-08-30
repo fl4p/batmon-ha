@@ -1,70 +1,70 @@
 """Module to support ECO-WORTHY BMS."""
 
 import asyncio
-from collections.abc import Callable
 from typing import Final
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from bmslib.bms_ble.const import (
-    ATTR_BATTERY_CHARGING,
-    ATTR_BATTERY_LEVEL,
-    ATTR_CURRENT,
-    ATTR_CYCLE_CAP,
-    ATTR_CYCLE_CHRG,
-    # ATTR_CYCLES,
-    ATTR_DELTA_VOLTAGE,
-    ATTR_POWER,
-    ATTR_RUNTIME,
-    ATTR_TEMPERATURE,
-    ATTR_VOLTAGE,
-    KEY_CELL_COUNT,
-    KEY_CELL_VOLTAGE,
-    KEY_DESIGN_CAP,
-    KEY_PROBLEM,
-    KEY_TEMP_SENS,
-    KEY_TEMP_VALUE,
+from .basebms import (
+    AdvertisementPattern,
+    BaseBMS,
+    BMSdp,
+    BMSsample,
+    BMSvalue,
+    crc_modbus,
 )
-
-from .basebms import BaseBMS, BMSsample, crc_modbus
 
 
 class BMS(BaseBMS):
-    """ECO-WORTHY battery class implementation."""
+    """ECO-WORTHY BMS implementation."""
 
     _HEAD: Final[tuple] = (b"\xa1", b"\xa2")
     _CELL_POS: Final[int] = 14
     _TEMP_POS: Final[int] = 80
-    _FIELDS: Final[
-        list[tuple[str, int, int, int, bool, Callable[[int], int | float]]]
-    ] = [
-        (ATTR_BATTERY_LEVEL, 0xA1, 16, 2, False, lambda x: x),
-        (ATTR_VOLTAGE, 0xA1, 20, 2, False, lambda x: float(x / 100)),
-        (ATTR_CURRENT, 0xA1, 22, 2, True, lambda x: float(x / 100)),
-        (KEY_PROBLEM, 0xA1, 51, 2, False, lambda x: x),
-        (KEY_DESIGN_CAP, 0xA1, 26, 2, False, lambda x: float(x / 100)),
-        (KEY_CELL_COUNT, 0xA2, _CELL_POS, 2, False, lambda x: x),
-        (KEY_TEMP_SENS, 0xA2, _TEMP_POS, 2, False, lambda x: x),
-        # (ATTR_CYCLES, 0xA1, 8, 2, False, lambda x: x),
-    ]
-    _CMDS: Final[set[int]] = set({field[1] for field in _FIELDS})
+    _FIELDS_V1: Final[tuple[BMSdp, ...]] = (
+        BMSdp("battery_level", 16, 2, False, lambda x: x, 0xA1),
+        BMSdp("voltage", 20, 2, False, lambda x: x / 100, 0xA1),
+        BMSdp("current", 22, 2, True, lambda x: x / 100, 0xA1),
+        BMSdp("problem_code", 51, 2, False, lambda x: x, 0xA1),
+        BMSdp("design_capacity", 26, 2, False, lambda x: x // 100, 0xA1),
+        BMSdp("cell_count", _CELL_POS, 2, False, lambda x: x, 0xA2),
+        BMSdp("temp_sensors", _TEMP_POS, 2, False, lambda x: x, 0xA2),
+        # ("cycles", 0xA1, 8, 2, False, lambda x: x),
+    )
+    _FIELDS_V2: Final[tuple[BMSdp, ...]] = tuple(
+        BMSdp(
+            *field[:-2],
+            (lambda x: x / 10) if field.key == "current" else field.fct,
+            field.idx,
+        )
+        for field in _FIELDS_V1
+    )
+
+    _CMDS: Final[set[int]] = set({field.idx for field in _FIELDS_V1})
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Initialize BMS."""
-        super().__init__(__name__, ble_device, reconnect)
+        super().__init__(ble_device, reconnect)
+        self._mac_head: Final[tuple] = tuple(
+            int(self._ble_device.address.replace(":", ""), 16).to_bytes(6) + head
+            for head in BMS._HEAD
+        )
         self._data_final: dict[int, bytearray] = {}
 
     @staticmethod
-    def matcher_dict_list() -> list[dict]:
+    def matcher_dict_list() -> list[AdvertisementPattern]:
         """Provide BluetoothMatcher definition."""
         return [
-            {
-                "local_name": "ECO-WORTHY*",
-                "manufacturer_id": 0xC2B4,
-                "connectable": True,
-            }
+            AdvertisementPattern(local_name="ECO-WORTHY 02_*", connectable=True)
+        ] + [
+            AdvertisementPattern(
+                local_name=pattern,
+                service_uuid=BMS.uuid_services()[0],
+                connectable=True,
+            )
+            for pattern in ("DCHOUSE*", "ECO-WORTHY*")
         ]
 
     @staticmethod
@@ -88,16 +88,16 @@ class BMS(BaseBMS):
         raise NotImplementedError
 
     @staticmethod
-    def _calc_values() -> frozenset[str]:
+    def _calc_values() -> frozenset[BMSvalue]:
         return frozenset(
             {
-                ATTR_BATTERY_CHARGING,
-                ATTR_CYCLE_CHRG,
-                ATTR_CYCLE_CAP,
-                ATTR_DELTA_VOLTAGE,
-                ATTR_POWER,
-                ATTR_RUNTIME,
-                ATTR_TEMPERATURE,
+                "battery_charging",
+                "cycle_charge",
+                "cycle_capacity",
+                "delta_voltage",
+                "power",
+                "runtime",
+                "temperature",
             }
         )  # calculate further values from BMS provided set ones
 
@@ -107,7 +107,7 @@ class BMS(BaseBMS):
         """Handle the RX characteristics notify event (new data arrives)."""
         self._log.debug("RX BLE data: %s", data)
 
-        if not data.startswith(BMS._HEAD):
+        if not data.startswith(BMS._HEAD + self._mac_head):
             self._log.debug("invalid frame type: '%s'", data[0:1].hex())
             return
 
@@ -120,65 +120,40 @@ class BMS(BaseBMS):
             self._data = bytearray()
             return
 
-        self._data_final[data[0]] = data.copy()
+        # copy final data without message type and adapt to protocol type
+        shift: Final[bool] = data.startswith(self._mac_head)
+        self._data_final[data[6 if shift else 0]] = (
+            bytearray(2 if shift else 0) + data.copy()
+        )
         if BMS._CMDS.issubset(self._data_final.keys()):
             self._data_event.set()
-
-    @staticmethod
-    def _decode_data(data: dict[int, bytearray]) -> dict[str, int | float]:
-        return {
-            key: func(
-                int.from_bytes(
-                    data[cmd][idx : idx + size], byteorder="big", signed=sign
-                )
-            )
-            for key, cmd, idx, size, sign, func in BMS._FIELDS
-        }
-
-    @staticmethod
-    def _cell_voltages(data: bytearray, cells: int, offs: int) -> dict[str, float]:
-        return {KEY_CELL_COUNT: cells} | {
-            f"{KEY_CELL_VOLTAGE}{idx}": float(
-                int.from_bytes(
-                    data[offs + idx * 2 : offs + idx * 2 + 2],
-                    byteorder="big",
-                    signed=False,
-                )
-            )
-            / 1000
-            for idx in range(cells)
-        }
-
-    @staticmethod
-    def _temp_sensors(data: bytearray, sensors: int, offs: int) -> dict[str, float]:
-        return {
-            f"{KEY_TEMP_VALUE}{idx}": (
-                int.from_bytes(
-                    data[offs + idx * 2 : offs + (idx + 1) * 2],
-                    byteorder="big",
-                    signed=True,
-                )
-            )
-            / 10
-            for idx in range(sensors)
-        }
 
     async def _async_update(self) -> BMSsample:
         """Update battery status information."""
 
         self._data_final.clear()
         self._data_event.clear()  # clear event to ensure new data is acquired
-        await asyncio.wait_for(self._wait_event(), timeout=self.TIMEOUT)
+        await asyncio.wait_for(self._wait_event(), timeout=BMS.TIMEOUT)
 
-        result: BMSsample = BMS._decode_data(self._data_final)
-
-        result |= BMS._cell_voltages(
-            self._data_final[0xA2],
-            int(result.get(KEY_CELL_COUNT, 0)),
-            BMS._CELL_POS + 2,
+        result: BMSsample = BMS._decode_data(
+            (
+                BMS._FIELDS_V1
+                if self._data_final[0xA1].startswith(BMS._HEAD)
+                else BMS._FIELDS_V2
+            ),
+            self._data_final,
         )
-        result |= BMS._temp_sensors(
-            self._data_final[0xA2], int(result.get(KEY_TEMP_SENS, 0)), BMS._TEMP_POS + 2
+
+        result["cell_voltages"] = BMS._cell_voltages(
+            self._data_final[0xA2],
+            cells=result.get("cell_count", 0),
+            start=BMS._CELL_POS + 2,
+        )
+        result["temp_values"] = BMS._temp_values(
+            self._data_final[0xA2],
+            values=result.get("temp_sensors", 0),
+            start=BMS._TEMP_POS + 2,
+            divider=10,
         )
 
         return result
