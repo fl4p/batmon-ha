@@ -126,16 +126,17 @@ class JKBt(BtBms):
         """
 
         try:
-            await super().connect(timeout=timeout/2)
+            await super().connect(timeout=timeout / 2)
         except Exception as e:
             self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
             await self._connect_with_scanner(timeout=timeout)
 
         service = self.get_service(self.SERVICE_UUID)
-        self.char_handle_write = self.find_char(self.CHAR_UUID, 'write', service=service)
+        self.char_handle_write = (self.find_char(self.CHAR_UUID, 'write', service=service) or
+                                  self.find_char(self.CHAR_UUID, 'write-without-response', service=service))
 
         if self.char_handle_write is None:
-            self.logger.warning("%s Write Characteristic %s not found, enumerating services:", self.name, self.CHAR_UUID)
+            self.logger.warning("%s Write Characteristic %s not found, enum services:", self.name, self.CHAR_UUID)
             await enumerate_services(self.client, self.logger)
 
         if self.char_handle_write and hasattr(self.char_handle_write,
@@ -202,7 +203,7 @@ class JKBt(BtBms):
             await self.fetch_device_info()
         return self._has_float_charger
 
-    def _decode_sample(self, buf: bytearray, t_buf: float, has_float_charger:bool) -> BmsSample:
+    def _decode_sample(self, buf: bytearray, t_buf: float, has_float_charger: bool) -> BmsSample:
         buf_set, t_set = self._resp_table[0x01]
 
         offset = 0
