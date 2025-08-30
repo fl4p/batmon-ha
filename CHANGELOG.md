@@ -1,8 +1,15 @@
 # Changelog
 
 ## [1.83]
-* Add Seplos BMS ([BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) wrapper)
+* Fix supervolt characteristic specifiers
+* JK-PB2A16S20: add float_charge switch
+* Add wrapper for ([BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) wrapper) to enable support for Seplos, CBT BMS and many more
 * Ignore influxdb setup error
+* Ignore pip return code when installing special pairing version of bleak
+* Fix add-on start-up bashio script if supervisor API is not reachable
+* Improved logging output on BLE connection issues
+* Pin python to version 3.12 in Dockerfile
+
 ## [1.82]
 * Rollback bleak version to 0.20.2 (https://github.com/fl4p/batmon-ha/issues/275)
 * Fix JK frame version detection
