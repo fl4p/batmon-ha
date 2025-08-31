@@ -43,6 +43,7 @@ async def fetch_loop(fn, period, max_errors):
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
+            await asyncio.sleep(min(1.1 ** num_errors_row, 60))
         await asyncio.sleep(period)
     logger.info("fetch_loop %s ends", fn)
 
