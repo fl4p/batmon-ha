@@ -18,6 +18,8 @@
           <excludedPaths>
             <excludedPath path="tools" />
             <excludedPath local="true" path="$PROJECT_DIR$/tools" />
+            <excludedPath path="options.json" />
+            <excludedPath path=".github" />
           </excludedPaths>
         </serverdata>
       </paths>
@@ -29,6 +31,7 @@
           <excludedPaths>
             <excludedPath path="tools" />
             <excludedPath local="true" path="$PROJECT_DIR$/tools" />
+            <excludedPath path="options.json" />
           </excludedPaths>
         </serverdata>
       </paths>

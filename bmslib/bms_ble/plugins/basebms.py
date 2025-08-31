@@ -9,7 +9,7 @@ from functools import lru_cache
 from statistics import fmean
 from typing import Any, Final, Literal, NamedTuple, TypedDict
 
-from bleak import BleakClient
+from bleak import BleakClient, normalize_uuid_str
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
@@ -442,7 +442,7 @@ class BaseBMS(ABC):
         self._data_event.clear()
 
         await self._client.start_notify(
-            char_notify or self.uuid_rx(), getattr(self, "_notification_handler")
+            normalize_uuid_str(self.uuid_rx()), getattr(self, "_notification_handler")
         )
 
     async def _connect(self) -> None:
@@ -505,7 +505,7 @@ class BaseBMS(ABC):
                 chunk.hex(" "),
             )
             await self._client.write_gatt_char(
-                char,
+                normalize_uuid_str(char),
                 chunk,
                 response=(self._wr_response(char) != inv_wr_mode),
             )
