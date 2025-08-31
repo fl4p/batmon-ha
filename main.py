@@ -149,7 +149,13 @@ async def main():
         import logging
         logger.setLevel(logging.DEBUG)
 
-    logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
+    ver = '?'
+    with open(os.path.dirname(__file__) + '/config.yaml') as f:
+        for line in f:
+            if line.strip().startswith('version:'):
+                ver = line.strip().split(':')[1].strip().strip('"')
+                break
+    logger.info('Batmon version %s, Bleak version %s, BtBackend version %s', ver, bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
     names = set()
     dev_args: Dict[str, dict] = {}

@@ -128,7 +128,7 @@ class JKBt(BtBms):
         try:
             await super().connect(timeout=timeout / 2)
         except Exception as e:
-            self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
+            self.logger.info("%s normal connect failed (%s), connecting with scanner (adapter: %s)", self.name, str(e) or type(e), self._adapter or 'default')
             await self._connect_with_scanner(timeout=timeout)
 
         service = self.get_service(self.SERVICE_UUID)

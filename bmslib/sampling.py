@@ -412,7 +412,7 @@ class BmsSampler:
         dt_fetch = t_disc - t_fetch
         dt_max = max(dt_conn, dt_fetch)
         if bms.verbose_log or (  # or dt_max > 1
-                dt_max > 0.01 and random.random() < (0.05 if sample.num_samples < 1e3 else 0.01)
+                dt_max > 0.01 and random.random() < (0.05 if sample.num_samples < 1e3 else 0.01) * (dt_conn + dt_fetch)
                 and not bms.is_virtual and log_data):
             if (dt_conn > 1e-2 or dt_fetch > 1e-2):
                 logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)

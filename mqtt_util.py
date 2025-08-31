@@ -33,7 +33,7 @@ def json_dumps_with_round_n(some_object, n=7):
     def inner(*args, **kwargs):
         args = list(args)
         # fifth argument is float formater which will we replace
-        args[4] = lambda o: round_to_n(o, n)
+        args[4] = lambda o: str(round_to_n(o, n))
         return of(*args, **kwargs)
 
     with patch('json.encoder._make_iterencode', wraps=inner):
