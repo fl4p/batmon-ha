@@ -1,14 +1,14 @@
-from collections import defaultdict
-
 import asyncio
 import math
-import paho.mqtt.client
 import random
 import re
 import sys
 import time
+from collections import defaultdict
 from copy import copy
 from typing import Optional, List, Dict
+
+import paho.mqtt.client
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
@@ -158,7 +158,7 @@ class BmsSampler:
             return s
         except bmslib.bt.BleakDeviceNotFoundError as e:
             t_wait = 1.5 ** min(self._num_errors, 12)
-            logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, e )
+            logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, e)
             self._time_next_retry = time.time() + t_wait
             return None
 
@@ -343,7 +343,7 @@ class BmsSampler:
             #    logger.info('%s Power z_score %.1f (avg=%.0f std=%.2f last=%.0f)', bms.name, z_score, self.power_stats.avg.value, self.power_stats.stddev, sample.power)
 
             PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
-            PWR_CHG_HOLD = 4
+            PWR_CHG_HOLD = 4  # time in seconds to keep high frequency sampling after a power jump. this helps capture power transients and noise wave form
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
             if not bms.is_virtual and abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
                 if bms.verbose_log or (
@@ -414,7 +414,8 @@ class BmsSampler:
         if bms.verbose_log or (  # or dt_max > 1
                 dt_max > 0.01 and random.random() < (0.05 if sample.num_samples < 1e3 else 0.01)
                 and not bms.is_virtual and log_data):
-            logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
+            if (dt_conn > 1e-2 or dt_fetch > 1e-2):
+                logger.info('%s times: connect=%.2fs fetch=%.2fs', bms, dt_conn, dt_fetch)
 
         # pass "light" errors to the caller to trigger a re-connect after too many
         return sample if not err else None

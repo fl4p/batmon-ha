@@ -11,6 +11,7 @@ import queue
 import statistics
 import time
 import traceback
+from unittest.mock import patch
 
 import paho.mqtt.client as paho
 
@@ -23,7 +24,24 @@ logger = get_logger()
 no_publish_fail_warn = False
 
 
+# We need to ensure that c encoder will not be launched
+@patch('json.encoder.c_make_encoder', None)
+def json_dumps_with_round_n(some_object, n=7):
+    # saving original method
+    of = json.encoder._make_iterencode
+
+    def inner(*args, **kwargs):
+        args = list(args)
+        # fifth argument is float formater which will we replace
+        args[4] = lambda o: round_to_n(o, n)
+        return of(*args, **kwargs)
+
+    with patch('json.encoder._make_iterencode', wraps=inner):
+        return json.dumps(some_object)
+
+
 def round_to_n(x, n):
+    # todo compare to np.format_float_positional
     if isinstance(x, str) or not math.isfinite(x) or not x:
         return x
 

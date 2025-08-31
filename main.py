@@ -145,6 +145,8 @@ async def main():
     verbose_log = user_config.get('verbose_log', False)
     if verbose_log:
         logger.info('Verbose logging enabled')
+        import logging
+        logger.setLevel(logging.DEBUG)
 
     logger.info('Bleak version %s, BtBackend version %s', bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
 
@@ -185,7 +187,7 @@ async def main():
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,
                                     groups_by_bms[member_name], group_bms)
-                
+
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(bms_by_name[member_ref])
 
@@ -223,6 +225,7 @@ async def main():
     from bmslib.store import load_meter_states
     try:
         meter_states = load_meter_states()
+        logger.debug('meter states: %s', mqtt_util.json_dumps_with_round_n(meter_states))
     except FileNotFoundError:
         logger.info("Initialize meter states file")
         meter_states = {}
