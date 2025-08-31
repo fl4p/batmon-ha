@@ -1,5 +1,6 @@
 
-bleak==0.20.2 # see Dockerfile
+bleak==1.1.0 # see Dockerfile
+#      ^ https://github.com/fl4p/batmon-ha/issues/275
 #bleak-retry-connector
 
 paho-mqtt==2.1.0
