@@ -155,7 +155,8 @@ async def main():
             if line.strip().startswith('version:'):
                 ver = line.strip().split(':')[1].strip().strip('"')
                 break
-    logger.info('Batmon version %s, Bleak version %s, BtBackend version %s', ver, bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
+    logger.info('Batmon ver %s, Bleak ver %s, BtBackend ver %s', ver, bmslib.bt.bleak_version(),
+                bmslib.bt.bt_stack_version())
 
     names = set()
     dev_args: Dict[str, dict] = {}
@@ -199,7 +200,8 @@ async def main():
                 bms.add_member(bms_by_name[member_ref])
 
     # import env vars from addon_main.sh
-    for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_user='MQTT_USER', mqtt_password='MQTT_PASSWORD').items():
+    for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_port='MQTT_PORT', mqtt_user='MQTT_USER',
+                      mqtt_password='MQTT_PASSWORD').items():
         if not user_config.get(k) and os.environ.get(en):
             user_config[k] = os.environ[en]
 
@@ -208,8 +210,8 @@ async def main():
         if port_idx > 0:
             user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
             user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
-
-        logger.info('connecting mqtt %s@%s', user_config.mqtt_user, user_config.mqtt_broker)
+        mqtt_port = int(user_config.get('mqtt_port', None) or 1883)
+        logger.info('connecting mqtt %s@%s:%s', user_config.mqtt_user, user_config.mqtt_broker, mqtt_port)
         # paho_monkey_patch()
         mqtt_client = paho.mqtt.client.Client(CallbackAPIVersion.VERSION2)
         mqtt_client.enable_logger(logger)
@@ -219,7 +221,7 @@ async def main():
         mqtt_client.on_message = mqtt_message_handler
 
         try:
-            mqtt_client.connect(user_config.mqtt_broker, port=user_config.get('mqtt_port', 1883))
+            mqtt_client.connect(user_config.mqtt_broker, port=mqtt_port)
             mqtt_client.loop_start()
         except Exception as ex:
             logger.error('mqtt connection error %s', ex)
