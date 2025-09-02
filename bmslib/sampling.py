@@ -157,7 +157,7 @@ class BmsSampler:
                 self._num_errors = 0
             return s
         except bmslib.bt.BleakDeviceNotFoundError as e:
-            t_wait = 1.5 ** min(self._num_errors, 14)
+            t_wait = 1.5 ** min(self._num_errors + 4, 14)
             logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, e)
             self._time_next_retry = time.time() + t_wait
             return None
@@ -347,8 +347,8 @@ class BmsSampler:
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
             if not bms.is_virtual and abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
                 if bms.verbose_log or (
-                        not self.period_pub and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD):
-                    logger.info('%s Power jump %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
+                        not self.period_pub and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD * 10):
+                    logger.info('%s Power jump/noise %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
                 self._t_last_power_jump = t_now
             self._last_power = sample.power
