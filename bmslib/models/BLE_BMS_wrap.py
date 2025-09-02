@@ -155,10 +155,11 @@ class BMS():
         )
 
     async def fetch_voltages(self):
+        # return voltages in mV
         s = self._last_sample
         if s is None:
             return []
-        v = [s['cell_voltages'][i] for i in range(s['cell_count'])]
+        v = [s['cell_voltages'][i] * 1000 for i in range(s['cell_count'])]
         return v
 
     def debug_data(self):
