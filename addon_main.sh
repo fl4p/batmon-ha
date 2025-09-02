@@ -17,18 +17,19 @@ fi
 
 # query MQTT details from supervisor API
 # see e.g. https://github.com/zigbee2mqtt/hassio-zigbee2mqtt/blob/master/common/rootfs/docker-entrypoint.sh
-MQTT_HOST="$(bashio::services 'mqtt' 'host')"
-MQTT_PORT="$(bashio::services 'mqtt' 'port')"
-MQTT_USER="$(bashio::services 'mqtt' 'username')"
-MQTT_PASSWORD="$(bashio::services 'mqtt' 'password')"
+# also https://github.com/wmbusmeters/wmbusmeters-ha-addon/blob/main/wmbusmeters-ha-addon%2Frun.sh
 
-bashio::log.blue "MQTT broker:     $MQTT_USER@$MQTT_HOST:$MQTT_PORT"
-# bashio::log.blue "SUPERVISOR_TOKEN:     $SUPERVISOR_TOKEN"
-
+if bashio::services.available 'mqtt'; then
+  MQTT_HOST="$(bashio::services 'mqtt' 'host')"
+  MQTT_PORT="$(bashio::services 'mqtt' 'port')"
+  MQTT_USER="$(bashio::services 'mqtt' 'username')"
+  MQTT_PASSWORD="$(bashio::services 'mqtt' 'password')"
+  bashio::log.blue "MQTT broker:     $MQTT_USER@$MQTT_HOST:$MQTT_PORT"
+else
+  bashio::log.blue "MQTT service not configured in HA. Using broker credentials from add-on configuration."
+fi
 
 /app/venv_bleak_pairing/bin/python3 main.py pair-only
 
-
 MQTT_HOST="$MQTT_HOST" MQTT_PORT="$MQTT_PORT" MQTT_USER="$MQTT_USER" MQTT_PASSWORD="$MQTT_PASSWORD" \
   /app/venv/bin/python3 main.py
-
