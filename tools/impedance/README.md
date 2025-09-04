@@ -113,3 +113,21 @@ here)
 
 * examine the way the BMSes measure cell voltage. with increasing cell index, cell resistance appears to increase.
   measurement of higher cells might contain more noise (ant24_23_11_12_fry)
+
+
+
+# Implementing ImpTrack
+
+we want to find R, Q_max
+
+Inspect data:
+- try to build a DOD(OCV, T) table
+- lifepo4 OCV is rather constant between 20%-80% DOD (3.3V)
+- can we extract information from OCV ~ 3.3V ?
+- compare DOD with SOC reported by BMS (DOD = 1 - SOC)
+
+
+- find blind (aka mask) voltage range, chemistry specific. OCV(DOD) is too flat here. for lifepo4 its 3.2~3.4 ? 
+- daly bms: crappy current sensor, smallest current is 300mA (chg&dch), then 100mA steps
+  - my data has a lot of noise because of noisy china inverter and bad wiring (high inductance causes high noise at charger and regulation is bad)
+  - temperature sensor is crappy too. no 20°C.  ![img.png](img.png)

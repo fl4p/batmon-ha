@@ -1,15 +1,9 @@
 #!/usr/bin/with-contenv bashio
 
-# !/usr/bin/env bashio
-# !/usr/bin/with-contenv bashio
 # https://community.home-assistant.io/t/cannot-find-supervisor-token-environment-variable/543209/6
-# https://github.com/hassio-addons/bashio/
+# https://github.com/hassio-addons/bashio/blob/main/lib/addons.sh
 
 # set +e # continue script on error
-
-# bashio::addon.option
-# bashio::config.exists
-# see https://github.com/hassio-addons/bashio/blob/main/lib/addons.sh
 
 if bashio::config.exists "install_newer_bleak"; then
   bashio::addon.option "install_newer_bleak" # delete

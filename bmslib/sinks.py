@@ -78,7 +78,7 @@ class InfluxDBSink(BmsSampleSink):
 
         last_volt = self._last_volt[bms_name]
 
-        pub_anyway = random.random() < (1/100)
+        pub_anyway = random.random() < (1 / 100)
 
         fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
                   voltages[i] != last_volt[i] or pub_anyway}
@@ -123,7 +123,7 @@ class InfluxDBSink(BmsSampleSink):
             elif isinstance(v, float):
                 fields[k] = round(v, 3)
         fields1 = dict(fields)
-        if random.random() > (1/200):
+        if random.random() > (1 / 200):
             remove_equal_values(fields, self._prev_fields.get(bms_name))
         self._prev_fields[bms_name] = fields1
 
@@ -245,7 +245,7 @@ v1 api https://community.influxdata.com/t/unable-to-connect-v1-clients-to-influx
 influx config create \
   -n open_pe \
   -u http://tm.fabi.me:8086 \
-  -p fab:pw \
+  -p usr:pw \
   -o openpe
   
 influx bucket create --org openpe --name batmon_tele -r 0
