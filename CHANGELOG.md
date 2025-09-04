@@ -1,5 +1,15 @@
 # Changelog
 
+
+## [1.84]
+* Upgrade Bleak version 1.1.0
+* Fix MQTT port not being queried from Supervisor API
+* Fix cell voltages for BMS connected through BMS_BLE
+* Fix add-on startup with older versions of `bashio` (https://github.com/fl4p/batmon-ha/issues/296) 
+* JK: increase timeout to 12 seconds
+* JK: fix char specifier for newer version (https://github.com/fl4p/batmon-ha/issues/310)
+* Add exponential wait on sampling error
+
 ## [1.83]
 * Fix supervolt characteristic specifiers
 * JK-PB2A16S20: add float_charge switch
