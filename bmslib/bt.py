@@ -390,7 +390,10 @@ async def enumerate_services(client: BleakClient, logger):
         services = client.services
         assert services
     except:
-        services = await client.get_services()
+        if hasattr(client, 'get_services'):
+            services = await client.get_services()
+        else:
+            raise
     for service in services:
         logger.info(f"[Service] {service}")
         for char in service.characteristics:
