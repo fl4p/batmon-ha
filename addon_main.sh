@@ -20,6 +20,10 @@ if bashio::services.available 'mqtt'; then
   MQTT_PASSWORD="$(bashio::services 'mqtt' 'password')"
   bashio::log.blue "MQTT broker:     $MQTT_USER@$MQTT_HOST:$MQTT_PORT"
 else
+  MQTT_HOST=""
+  MQTT_PORT=""
+  MQTT_USER=""
+  MQTT_PASSWORD=""
   bashio::log.blue "MQTT service not configured in HA. Using broker credentials from add-on configuration."
 fi
 
