@@ -68,7 +68,7 @@ class SmartShuntBt(BtBms):
             await asyncio.sleep(interval / 1000 / 2)
 
     async def _fetch_value(self, key: str, reload_services=False):
-        if reload_services:
+        if reload_services and hasattr(self.client, 'get_services'):
             await self.client.get_services()
         char = VICTRON_CHARACTERISTICS[key]
         data = await asyncio.wait_for(self.client.read_gatt_char(char['uuid']), timeout=self.TIMEOUT)
