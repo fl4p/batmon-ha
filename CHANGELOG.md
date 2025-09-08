@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.85]
+* Fix `'BleakClient' object has no attribute 'get_services'` 
+* Fix `MQTT_HOST: unbound variable` (https://github.com/fl4p/batmon-ha/issues/314)
 
 ## [1.84]
 * Upgrade Bleak version 1.1.0

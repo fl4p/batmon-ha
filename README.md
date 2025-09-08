@@ -39,7 +39,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app)
-* all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) supports 
+* all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA?tab=readme-ov-file#supported-devices) supports 
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 

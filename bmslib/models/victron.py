@@ -107,7 +107,7 @@ class SmartShuntBt(BtBms):
         t_expire = time.time() - 10
         for k, t in self._values_t.items():
             if t < t_expire and not math.isnan(self._values.get(k, 0)):
-                # check if value actually changed before re-subscription
+                # check if the value actually changed before re-subscription
                 val = await self._fetch_value(k, reload_services=True)
                 if val != self._values.get(k):
                     self.logger.warning('value for %s expired %s, re-sub', k, t)

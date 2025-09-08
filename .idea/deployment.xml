@@ -10,6 +10,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="ha-dev">
+        <serverdata>
+          <mappings>
+            <mapping deploy="batmon-ha" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="homeassistant.local (project level)">
         <serverdata>
           <mappings>
