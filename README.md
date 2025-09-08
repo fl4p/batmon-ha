@@ -27,18 +27,32 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 
 ### Supported Devices (bluetooth low energy)
 
-* JK BMS / jikong (JK02 protocol)
+* JK BMS / jikong with JK02 protocol (`jk`)
 * Daly BMS (`daly`, `daly2`)
-* JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS
+* JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * CBT Power / Creabest BMS (`cbtpwr`)
 * Seplos BMS (`seplos`, `seplos_v2`)
 * Supervolt BMS (`supervolt`)
-* SOK BMS
+* SOK BMS (`sok`)
 * Tian-Power BMS (`tianpwr`)
 * Victron SmartShunt (make sure to update to the latest firmware
-  and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
-  in the VictronConnect app)
+  and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html) 
+  in the VictronConnect app) (`victron`)
+* `tdt`
+* `ej`
+* `abc`
+* `dpwrcore`
+* `ecoworthy`
+* `ective`
+* `felicity`
+* `ogt`
+* `redodo`
+* `roypow`
+* `braunpwr`
+* `neey`
+* `pro`
+* `renogy`, `renogy_pro`
 * all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA?tab=readme-ov-file#supported-devices) supports 
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.

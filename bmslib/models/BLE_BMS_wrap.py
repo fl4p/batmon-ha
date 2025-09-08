@@ -1,7 +1,7 @@
 import asyncio
 import math
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 from bleak import BLEDevice
 
@@ -60,7 +60,7 @@ class BMS():
         self._blebms_module = module
         self._keep_alive = keep_alive
 
-        self._last_sample: BMSsample = None
+        self._last_sample: Optional[BMSsample] = None
 
         self.is_virtual = False
         self.verbose_log = False
@@ -69,7 +69,7 @@ class BMS():
 
         import bmslib.bms_ble.plugins.basebms
 
-        self.ble_bms: bmslib.bms_ble.plugins.basebms.BaseBMS = None
+        self.ble_bms: Optional[bmslib.bms_ble.plugins.basebms.BaseBMS] = None
 
     def _notification_handler(self, sender, data: bytes):
         pass
@@ -133,10 +133,6 @@ class BMS():
         )
 
     async def fetch(self) -> BmsSample:
-        from bmslib.bms_ble.const import (
-            ATTR_CYCLES,
-            ATTR_BALANCE_CUR,
-        )
 
         sample: BMSsample = await self.ble_bms.async_update()
         self._last_sample = sample
@@ -147,8 +143,8 @@ class BMS():
             power=sample.get('power', math.nan),
             capacity=sample.get('cycle_charge', math.nan),  # todo ?
             cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
-            num_cycles=sample.get(ATTR_CYCLES, math.nan),
-            balance_current=sample.get(ATTR_BALANCE_CUR, math.nan),
+            num_cycles=sample.get('cycles', math.nan),
+            balance_current=sample.get('balance_current', math.nan),
             temperatures=[sample.get('temperature')],  # todo?
             # mos_temperature=
 
@@ -160,6 +156,9 @@ class BMS():
         if s is None:
             return []
         v = [s['cell_voltages'][i] * 1000 for i in range(s['cell_count'])]
+        for i in range(len(v)):
+            if v[i] == int(v[i]):
+                v[i] = int(v[i])
         return v
 
     def debug_data(self):
