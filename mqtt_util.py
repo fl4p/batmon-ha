@@ -84,54 +84,6 @@ def remove_equal_values(fields: dict, other: dict):
             del fields[k]
 
 
-def build_mqtt_hass_config_discovery(base, topic):
-    # Instead of daly_bms should be here added a proper name (unique), like serial or something
-    # At this point it can be used only one daly_bms system with hass discovery
-
-    hass_config_topic = f'homeassistant/sensor/{topic}/{base.replace("/", "_")}/config'
-    hass_config_data = {}
-
-    hass_config_data["unique_id"] = f'{topic}_{base.replace("/", "_")}'
-    hass_config_data["name"] = f'{topic} {base.replace("/", " ")}'
-
-    # see https://www.home-assistant.io/integrations/sensor/
-
-    if 'soc_percent' in base or base.endswith('/soc'):
-        hass_config_data["device_class"] = 'battery'
-        hass_config_data["unit_of_measurement"] = '%'
-    elif 'voltage' in base:
-        hass_config_data["device_class"] = 'voltage'
-        hass_config_data["unit_of_measurement"] = 'V'
-    elif 'current' in base:
-        hass_config_data["device_class"] = 'current'
-        hass_config_data["unit_of_measurement"] = 'A'
-    elif 'power' in base:
-        hass_config_data["device_class"] = 'power'
-        hass_config_data["unit_of_measurement"] = 'W'
-    elif 'capacity' in base or base.endswith('/charge'):
-        # hass_config_data["device_class"] = ''
-        hass_config_data["unit_of_measurement"] = 'Ah'
-    elif 'temperatures' in base:
-        hass_config_data["device_class"] = 'temperature'
-        hass_config_data["unit_of_measurement"] = '°C'
-    else:
-        pass
-
-    # hass_config_data["json_attributes_topic"] = f'{topic}{base}'
-    hass_config_data["state_topic"] = f'{topic}{base}'
-
-    hass_device = {
-        "identifiers": [topic],  # daly_bms
-        "manufacturer": topic,  # Daly
-        "model": 'Currently not available',
-        "name": topic,  # Daly BMS
-        "sw_version": 'Currently not available'
-    }
-    hass_config_data["device"] = hass_device
-
-    return hass_config_topic, json.dumps(hass_config_data)
-
-
 _last_values = {}
 _last_publish_time = 0.
 
@@ -140,7 +92,9 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
     # print('mqtt: ' + topic, data)
     # return
+    
     if client is None:
+        # print('mqtt: ' + topic, data)
         return
 
     lv = _last_values.get(topic, None)
@@ -180,34 +134,40 @@ sample_desc = {
         "device_class": "voltage",
         "state_class": "measurement",
         "unit_of_measurement": "V",
-        "precision": 4,
+        "precision": 2,
+        "significant_digits": 4,
         "icon": "meter-electric"},
     "soc/current": {
         "field": "current",
         "device_class": "current",
         "state_class": "measurement",
         "unit_of_measurement": "A",
-        "precision": 4},
+        "precision": 2,
+        "significant_digits": 4,
+    },
     "soc/balance_current": {
         "field": "balance_current",
         "device_class": "current",
         "state_class": "measurement",
         "unit_of_measurement": "A",
-        "precision": 4,
+        "precision": 2,
+        "significant_digits": 4,
         "icon": "scale-unbalanced"},
     "soc/soc_percent": {
         "field": "soc",
         "device_class": "battery",
         "state_class": None,
         "unit_of_measurement": "%",
-        "precision": 4,
+        "precision": 2,
+        "significant_digits": 4,
         "icon": "battery"},
     "soc/power": {
         "field": "power",
         "device_class": "power",
         "state_class": "measurement",
         "unit_of_measurement": "W",
-        "precision": 4,
+        "precision": 3,
+        "significant_digits": 4,
         "icon": "flash"},
     "soc/capacity": {
         "field": "capacity",
@@ -256,7 +216,7 @@ sample_desc = {
 def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
-        s = round_to_n(getattr(sample, v['field']), v.get('precision', 5))
+        s = round_to_n(getattr(sample, v['field']), v.get('significant_digits', 5))
         if not is_none_or_nan(s):
             mqtt_single_out(client, topic, s)
 
@@ -314,7 +274,8 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
-    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False, precision=None):
+    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
+                        precision=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": name or k.replace('/', ' '),
@@ -338,18 +299,18 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
             _hass_discovery(k, d["device_class"], state_class=d["state_class"], unit=d["unit_of_measurement"],
-                            icon=d.get('icon', None), name=d["field"], precision=d.get("precision", None))
+                            icon=d.get('icon', None), name=d["field"], precision=d.get("significant_digits", None))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
         n = 'Cell Volt %0*d' % (1 + int(math.log10(num_cells)), i + 1)
-        _hass_discovery(k, "voltage", name=n, unit="V")
+        _hass_discovery(k, "voltage", name=n, unit="V", precision=3)
 
     if num_cells > 1:
         statistic_fields = ["min", "max", "average", "median", "delta"]
         for f in statistic_fields:
             k = 'cell_voltages/%s' % f
-            _hass_discovery(k, name="Cell Volt %s" % f, device_class="voltage", unit="V")
+            _hass_discovery(k, name="Cell Volt %s" % f, device_class="voltage", unit="V", precision=3)
 
         for f in ["min_index", "max_index"]:
             k = 'cell_voltages/%s' % f
@@ -358,7 +319,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, len(temperatures)):
         k = 'temperatures/%d' % (i + 1)
         if not is_none_or_nan(temperatures[i]):
-            _hass_discovery(k, "temperature", unit="°C")
+            _hass_discovery(k, "temperature", unit="°C", precision=1)
 
     meters = {
         # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics
@@ -372,7 +333,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         'total_cycles': dict(device_class=None, unit="N", icon="battery-sync"),
     }
     for name, m in meters.items():
-        _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter", long_expiry=True)
+        _hass_discovery('meter/%s' % name, **m, name=name.replace('_', ' ') + " meter", long_expiry=True, precision=3)
 
     switches = (sample.switches and sample.switches.keys())
     if switches:
