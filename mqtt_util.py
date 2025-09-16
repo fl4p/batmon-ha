@@ -92,7 +92,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     # logger.debug(f'Send data: {data} on topic: {topic}, retain flag: {retain}')
     # print('mqtt: ' + topic, data)
     # return
-    
+
     if client is None:
         # print('mqtt: ' + topic, data)
         return

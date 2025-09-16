@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.86]
+* Fix display precision in HA (you might need to remove the device from MQTT integration and restart batmon)
+
+
 ## [1.85]
 * Fix `'BleakClient' object has no attribute 'get_services'` 
 * Fix `MQTT_HOST: unbound variable` (https://github.com/fl4p/batmon-ha/issues/314)
