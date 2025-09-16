@@ -231,7 +231,7 @@ class BtBms:
             self.logger.debug("Pairing %s using psk '%s'...", self.name, self._psk)
             res = await self.client.pair(callback=get_passkey)
             if not res:
-                self.logger.error("Pairing failed!")
+                self.logger.error("Pairing %s failed!", self)
 
     @property
     def is_connected(self):

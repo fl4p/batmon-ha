@@ -314,13 +314,16 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
-    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False):
+    def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False, precision=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": name or k.replace('/', ' '),
             "device_class": device_class or None,
             "state_class": state_class or None,
             "unit_of_measurement": unit,
+            "native_unit_of_measurement": unit,
+            "suggested_unit_of_measurement": unit,
+            "suggested_display_precision": precision,
             # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
             "expire_after": max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds,
@@ -335,7 +338,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
             _hass_discovery(k, d["device_class"], state_class=d["state_class"], unit=d["unit_of_measurement"],
-                            icon=d.get('icon', None), name=d["field"])
+                            icon=d.get('icon', None), name=d["field"], precision=d.get("precision", None))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
