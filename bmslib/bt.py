@@ -25,6 +25,8 @@ async def bt_discovery(logger):
     devices = await BleakScanner.discover()
     if not devices:
         logger.info(' - no devices found - ')
+    else:
+        logger.info("BT %18s %26s", 'addr', 'name')
     for d in devices:
         logger.info("BT %s %26s", d.address, d.name)
     return devices

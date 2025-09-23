@@ -60,7 +60,7 @@ class JKBt(BtBms):
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
-        if kwargs.get('psk'):
+        if kwargs.get('pin'):
             self.logger.warning('JK usually does not use a pairing PIN')
         self._buffer = bytearray()
         self._resp_table: Dict[int, Tuple[bytearray, float]] = {}

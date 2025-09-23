@@ -117,7 +117,7 @@ async def main():
     pair_only = len(sys.argv) > 1 and sys.argv[1] == "pair-only"
     if pair_only:
         logger.info('Started in pair-only mode (bleak %s)', bmslib.bt.bleak_version())
-        psks = set(dev.get('psk', None) for dev in user_config.get('devices', []) if dev.get('psk', None))
+        psks = set(dev.get('pin', None) for dev in user_config.get('devices', []) if dev.get('pin', None))
         if not psks:
             logger.info('No PSK, nothing to pair')
             sys.exit(0)

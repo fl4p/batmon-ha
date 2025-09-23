@@ -62,7 +62,7 @@ class DalyBt(BtBms):
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
-        if kwargs.get('psk'):
+        if kwargs.get('pin'):
             self.logger.warning('Daly usually does not use a pairing PIN')
         self.UUID_RX = None
         self.UUID_TX = None
