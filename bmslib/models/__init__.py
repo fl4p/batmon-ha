@@ -19,6 +19,7 @@ def get_bms_model_class(name):
     import bmslib.models.supervolt
     import bmslib.models.victron
     import bmslib.models.BLE_BMS_wrap
+    import bmslib.models.litime
 
     import bmslib.group
 
@@ -64,6 +65,7 @@ def get_bms_model_class(name):
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
         daly_ble=partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble'),
+        litime=models.litime.LitimeBt,
         dummy=models.dummy.DummyBt,
     )
 
