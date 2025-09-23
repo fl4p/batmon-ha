@@ -13,7 +13,7 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
 
-def _jbd_command(command: int):
+def _litime_command(command: int):
     return bytes([0x00, 0x00, 0x04, 0x01, 0x13, 0x55, 0xAA, 0x17])
 
 
@@ -49,7 +49,7 @@ class LitimeBt(BtBms):
 
     async def _q(self, cmd):
         with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
+            await self.client.write_gatt_char(self.UUID_TX, data=_litime_command(cmd))
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
