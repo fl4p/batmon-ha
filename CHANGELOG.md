@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.87]
+* Fix PSK (pin) pairing (victron)
+
 ## [1.86]
 * Fix display precision in HA (you might need to remove the device from MQTT integration and restart batmon)
 
