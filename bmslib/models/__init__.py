@@ -18,35 +18,10 @@ def get_bms_model_class(name):
     import bmslib.models.sok
     import bmslib.models.supervolt
     import bmslib.models.victron
-    import bmslib.models.BLE_BMS_wrap
     import bmslib.models.litime
 
     import bmslib.group
-
     from bmslib import models
-
-    from bmslib.bms_ble import plugins
-
-    import bmslib.bms_ble.plugins.seplos_bms
-    import bmslib.bms_ble.plugins.seplos_v2_bms
-    import bmslib.bms_ble.plugins.daly_bms
-    import bmslib.bms_ble.plugins.tdt_bms
-    import bmslib.bms_ble.plugins.ej_bms
-    import bmslib.bms_ble.plugins.abc_bms
-    import bmslib.bms_ble.plugins.cbtpwr_bms
-    import bmslib.bms_ble.plugins.dpwrcore_bms
-    import bmslib.bms_ble.plugins.ecoworthy_bms
-    import bmslib.bms_ble.plugins.ective_bms
-    import bmslib.bms_ble.plugins.felicity_bms
-    import bmslib.bms_ble.plugins.ogt_bms
-    import bmslib.bms_ble.plugins.redodo_bms
-    import bmslib.bms_ble.plugins.roypow_bms
-    import bmslib.bms_ble.plugins.braunpwr_bms
-    import bmslib.bms_ble.plugins.neey_bms
-    import bmslib.bms_ble.plugins.pro_bms
-    import bmslib.bms_ble.plugins.renogy_bms
-    import bmslib.bms_ble.plugins.renogy_pro_bms
-    import bmslib.bms_ble.plugins.tianpwr_bms
 
     # for k in dir(plugins):
     #    print(k)
@@ -64,18 +39,49 @@ def get_bms_model_class(name):
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
-        daly_ble=partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble'),
         litime=models.litime.LitimeBt,
         dummy=models.dummy.DummyBt,
     )
 
-    for k in dir(plugins):
-        if k.startswith('_') or not k.endswith('_bms'):
-            continue
-        if k[:-4] in bms_registry:
-            continue
-        # print(k)
-        bms_registry[k[:-4]] = partial(models.BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
+    try:
+        import bmslib.models.BLE_BMS_wrap
+
+
+        from bmslib.bms_ble import plugins
+
+        import bmslib.bms_ble.plugins.seplos_bms
+        import bmslib.bms_ble.plugins.seplos_v2_bms
+        import bmslib.bms_ble.plugins.daly_bms
+        import bmslib.bms_ble.plugins.tdt_bms
+        import bmslib.bms_ble.plugins.ej_bms
+        import bmslib.bms_ble.plugins.abc_bms
+        import bmslib.bms_ble.plugins.cbtpwr_bms
+        import bmslib.bms_ble.plugins.dpwrcore_bms
+        import bmslib.bms_ble.plugins.ecoworthy_bms
+        import bmslib.bms_ble.plugins.ective_bms
+        import bmslib.bms_ble.plugins.felicity_bms
+        import bmslib.bms_ble.plugins.ogt_bms
+        import bmslib.bms_ble.plugins.redodo_bms
+        import bmslib.bms_ble.plugins.roypow_bms
+        import bmslib.bms_ble.plugins.braunpwr_bms
+        import bmslib.bms_ble.plugins.neey_bms
+        import bmslib.bms_ble.plugins.pro_bms
+        import bmslib.bms_ble.plugins.renogy_bms
+        import bmslib.bms_ble.plugins.renogy_pro_bms
+        import bmslib.bms_ble.plugins.tianpwr_bms
+
+        bms_registry['daly_ble'] = partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble')
+
+        for k in dir(plugins):
+            if k.startswith('_') or not k.endswith('_bms'):
+                continue
+            if k[:-4] in bms_registry:
+                continue
+            # print(k)
+            bms_registry[k[:-4]] = partial(models.BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
+
+    except:
+        logger.exception('Import bms_ble error', exc_info=True)
 
     return bms_registry.get(name)
 
