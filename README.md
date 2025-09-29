@@ -36,6 +36,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Supervolt BMS (`supervolt`)
 * SOK BMS (`sok`)
 * Tian-Power BMS (`tianpwr`)
+* LiTime BMS (`litime`) [@KOSSOII](https://github.com/fl4p/batmon-ha/pull/322)
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html) 
   in the VictronConnect app) (`victron`)

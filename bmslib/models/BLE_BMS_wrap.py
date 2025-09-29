@@ -96,10 +96,10 @@ class BMS():
     async def connect(self, timeout=20, **kwargs):
         import bmslib.bms_ble.plugins.basebms
 
-        ble_device = await BLEDeviceResolver.resolve(self.address, adapter=self.adapter)
+        ble_device = await BLEDeviceResolver.resolve(self.address, adapter=self.adapter or None)
 
         if ble_device is None:
-            raise RuntimeError("device %s not found" % self.address)
+            raise RuntimeError("device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
 
         self.ble_bms: bmslib.bms_ble.plugins.basebms.BaseBMS = self._blebms_module.BMS(
             ble_device=ble_device,

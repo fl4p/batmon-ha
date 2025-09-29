@@ -45,10 +45,14 @@ async def fetch_loop(fn, period, max_errors):
                 break
             await asyncio.sleep(min(1.1 ** num_errors_row, 60))
         await asyncio.sleep(period)
+
     logger.info("fetch_loop %s ends", fn)
+    if isinstance(fn, BmsSampler):
+        logger.info('Disconnecting %s', fn.bms)
+        await fn.bms.disconnect()
 
 
-def store_states(samplers: List[BmsSampler]):
+def store_states(samplers: list[BmsSampler]):
     meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
     from bmslib.store import store_meter_states
     store_meter_states(meter_states)
@@ -64,7 +68,7 @@ def bg_checks(sampler_list, timeout, t_start):
         pdt = now - (mqtt_last_publish_time() or t_start)
         if pdt > timeout:
             if mqtt_last_publish_time():
-                logger.error("MQTT message publish timeout (last %.0fs ago), exit", pdt)
+                logger.error("Watchdog: MQTT message publish timeout (last %.0fs ago), exit", pdt)
             else:
                 logger.error("MQTT never published a message after %.0fs, exit", timeout)
             shutdown = True
@@ -117,12 +121,13 @@ async def main():
     pair_only = len(sys.argv) > 1 and sys.argv[1] == "pair-only"
     if pair_only:
         logger.info('Started in pair-only mode (bleak %s)', bmslib.bt.bleak_version())
-        psks = set(dev.get('pin', None) for dev in user_config.get('devices', []) if dev.get('pin', None))
+        psks = set(
+            dev.get('pin') for dev in user_config.get('devices', []) if dev.get('pin') and dev['address'][0] != '#')
         if not psks:
             logger.info('No PSK, nothing to pair')
             sys.exit(0)
 
-    bms_list: List[bmslib.bt.BtBms] = []
+    bms_list: list[bmslib.bt.BtBms] = []
     extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
 
     if user_config.get('bt_power_cycle'):
@@ -176,10 +181,9 @@ async def main():
         names.add(name)
         dev_args[name] = dev
 
-    bms_by_name: Dict[str, bmslib.bt.BtBms] = {
-        **{bms.address: bms for bms in bms_list if not bms.is_virtual},
-        **{bms.name: bms for bms in bms_list}}
-    groups_by_bms: Dict[str, BmsGroup] = {}
+    bms_by_name: dict[str, bmslib.bt.BtBms] = {bms.address: bms for bms in bms_list if not bms.is_virtual}
+    bms_by_name.update({bms.name: bms for bms in bms_list})
+    groups_by_bms: dict[str, BmsGroup] = {}
 
     for bms in bms_list:
         bms.set_keep_alive(user_config.get('keep_alive', False))
@@ -346,8 +350,12 @@ async def main():
                     raise exceptions[0]
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
+        for t in tasks:
+            if isinstance(t, BmsSampler):
+                await t.bms.disconnect()
 
     logger.info('All fetch loops ended. shutdown is already %s', shutdown)
+
     shutdown = True
 
     store_states(sampler_list)
@@ -376,16 +384,21 @@ def on_exit(*args, **kwargs):
         sys.exit(1)
 
 
-atexit.register(on_exit)
-# noinspection PyTypeChecker
-signal.signal(signal.SIGTERM, on_exit)
-# noinspection PyTypeChecker
-signal.signal(signal.SIGINT, on_exit)
+try:
+    import atexit
+
+    atexit.register(on_exit)
+except ImportError:
+    pass
 
 try:
-    asyncio.run(main())
-except Exception as e:
-    logger.error("Main loop exception: %s", e)
-    logger.error("Stack: %s", traceback.format_exc())
+    import signal
+
+    signal.signal(signal.SIGTERM, on_exit)
+    signal.signal(signal.SIGINT, on_exit)
+except ImportError:
+    pass
+
+asyncio.run(main())
 
 sys.exit(1)

@@ -111,10 +111,8 @@ Small modifications are needed to run this inside Docker, see https://github.com
   "devices": [
     {
       "address": "",
-      "type": "jk",
-      "alias": "jk1"
+      "type": "jk"
     }    
-  ],
-  "keep_alive": true
+  ]
 }
 ```

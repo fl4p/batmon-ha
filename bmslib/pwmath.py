@@ -38,13 +38,13 @@ class LHQ:
         self.inp_q = inp_q
 
     def add(self, x):
+        if math.isnan(x):
+            return
+        if math.isnan(self.last):
+            self.last = x
         self.ewma.add(x)
         # quantize(mean((last,x,x))
         m = (self.last + 2 * self.ewma.value) / 3
-        if math.isnan(m):
-            if math.isnan(self.last):
-                self.last = x
-            return math.nan
         self.last = round(m * 2 / self.inp_q) * .5 * self.inp_q
         return self.last
 
