@@ -98,7 +98,10 @@ def mem_cache_deco(ttl, touch=False, ignore_kwargs=None, synchronized=False, exp
         def invalidate(*args, **kwargs):
             del _mem_cache[_cache_key_obj(args, kwargs)]
 
-        setattr(target, "invalidate", invalidate)
+        try:
+            setattr(target, "invalidate", invalidate)
+        except AttributeError:
+            pass
 
         is_coro = inspect.iscoroutinefunction(target)
 

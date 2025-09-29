@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import random
 import string
@@ -25,7 +26,7 @@ def get_logger(verbose=False):
     else:
         level = logging.INFO
 
-    logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
+    #logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
@@ -57,5 +58,15 @@ def _id_generator(size=6, chars=string.ascii_uppercase + string.ascii_lowercase 
 
 def sid_generator(n=2):
     assert n >= 2
-    return _id_generator(n-1, string.ascii_lowercase + string.ascii_uppercase) + _id_generator(1, string.digits)
+    return _id_generator(n - 1, string.ascii_lowercase + string.ascii_uppercase) + _id_generator(1, string.digits)
+
+
+def median(a):
+    return sorted(a)[int(len(a) / 2)]
+
+
+def mean(a):
+    if not a:
+        return math.nan
+    return sum(a) / len(a)
 

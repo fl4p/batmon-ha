@@ -199,3 +199,22 @@ See [doc/Standalone.md](doc/Standalone.md)
 
 
 [install-shield]: https://img.shields.io/badge/dynamic/json?style=for-the-badge&color=green&label=Analytics&suffix=%20Installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/addons.json&query=$.2af0a32d_batmon.total
+
+
+# micropython
+install threading
+traceback
+github:josverl/micropython-stubs/mip/typing.json
+logging
+operator
+functools
+warnings
+datetime
+copy
+string
+collections-defaultdict
+inspect
+os-path
+
+non-mp:
+backoff

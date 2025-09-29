@@ -92,7 +92,9 @@ class BmsSample:
         return (self.voltage * self.current) if math.isnan(self._power) else self._power
 
     def values(self):
-        return {**self.__dict__, "power": self.power}
+        d = dict(self.__dict__)
+        d["power"] = self.power
+        return d
 
     def __str__(self):
         # noinspection PyStringFormat

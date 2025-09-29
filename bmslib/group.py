@@ -1,12 +1,11 @@
 import asyncio
 import math
-import statistics
 from copy import copy
 from typing import Dict, Iterable, List
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
-from bmslib.util import get_logger
+from bmslib.util import get_logger, median
 
 
 class BmsGroup:
@@ -41,7 +40,6 @@ class BmsGroup:
 class GroupNotReady(Exception):
     pass
     # TODO rename GroupMissingData ?
-
 
 
 class VirtualGroupBms:
@@ -133,13 +131,13 @@ def finite_or_fallback(x, fallback):
 
 def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
     return BmsSample(
-        voltage=statistics.mean(s.voltage for s in samples),
+        voltage=mean(s.voltage for s in samples),
         current=sum(s.current for s in samples),
         power=sum(s.power for s in samples),
         charge=sum(s.charge for s in samples),
         capacity=sum(s.capacity for s in samples),
         cycle_capacity=sum(s.cycle_capacity for s in samples),
-        num_cycles=statistics.mean(s.num_cycles for s in samples),
+        num_cycles=mean(s.num_cycles for s in samples),
         soc=sum(s.soc * s.capacity for s in samples) / sum(s.capacity for s in samples),
         temperatures=sum(((s.temperatures or []) for s in samples), []),
         mos_temperature=max((s.mos_temperature for s in samples if is_finite(s.mos_temperature)), default=math.nan),

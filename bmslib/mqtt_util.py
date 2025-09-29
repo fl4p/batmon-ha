@@ -5,15 +5,15 @@ HA mdi: icons https://pictogrammers.com/library/mdi/
 
 """
 import asyncio
+import collections
 import json
 import math
-import queue
-import statistics
+#import statistics
 import time
 import traceback
-from unittest.mock import patch
+#from unittest.mock import patch
 
-import paho.mqtt.client as paho
+#import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
 from bmslib.bt import BtBms
@@ -25,7 +25,7 @@ no_publish_fail_warn = False
 
 
 # We need to ensure that c encoder will not be launched
-@patch('json.encoder.c_make_encoder', None)
+#@patch('json.encoder.c_make_encoder', None)
 def json_dumps_with_round_n(some_object, n=7):
     # saving original method
     of = json.encoder._make_iterencode
@@ -227,6 +227,7 @@ def publish_sample(client, device_topic, sample: BmsSample):
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
 
+
 def publish_cell_voltages(client, device_topic, voltages):
     # "highest_voltage": parts[0] / 1000,
     # "highest_cell": parts[1],
@@ -250,7 +251,7 @@ def publish_cell_voltages(client, device_topic, voltages):
         mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i + 1)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
         mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", median(voltages) / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -367,12 +368,12 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
 
 _switch_callbacks = {}
-_message_queue = queue.Queue()
+_message_queue = collections.deque([], 100)
 
 
 async def mqtt_process_action_queue():
-    while not _message_queue.empty():
-        callback, arg = _message_queue.get(block=False)
+    while _message_queue:
+        callback, arg = _message_queue.popleft()
         try:
             await callback(arg)
         except Exception as e:
@@ -402,7 +403,7 @@ def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     logger.info("received msg %s: %s", message.topic, payload)
     callback = _switch_callbacks.get(message.topic, None)
     if callback:
-        _message_queue.put((callback, payload))
+        _message_queue.append((callback, payload))
     else:
         logger.warning("No callback for topic %s (payload %s)", message.topic, payload)
 
