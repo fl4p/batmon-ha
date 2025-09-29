@@ -20,7 +20,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
 * Can write data to [InfluxDB](doc/InfluxDB.md)
-* Battery Groups, see [doc/Groups.md](doc/Groups.md)
+* Battery Groups for parallel batteries, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 * Short delays for responsive automation (fast load shedding)
 * Experimental serial communication (e.g. using USB-UART adapter)

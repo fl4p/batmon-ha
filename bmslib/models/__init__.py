@@ -18,6 +18,7 @@ def get_bms_model_class(name):
     import bmslib.models.sok
     import bmslib.models.supervolt
     import bmslib.models.victron
+    import bmslib.models.litime
 
     import bmslib.group
     from bmslib import models
@@ -38,6 +39,7 @@ def get_bms_model_class(name):
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt=models.supervolt.SuperVoltBt,
         sok=models.sok.SokBt,
+        litime=models.litime.LitimeBt,
         dummy=models.dummy.DummyBt,
     )
 
