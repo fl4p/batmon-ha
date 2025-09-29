@@ -20,7 +20,7 @@ from bmslib.models import construct_bms
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
-from mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
+from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
 
