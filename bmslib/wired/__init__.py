@@ -34,7 +34,7 @@ class SerialBleakClientWrapper(object):
             if data:
                 for callback in self.callback.values():
                     callback(self, data)
-            time.sleep(0.1)
+            time.sleep(0.1) # todo block
 
     async def start_notify(self, char, callback):
         self.callback[char] = callback
@@ -45,3 +45,14 @@ class SerialBleakClientWrapper(object):
 
     async def write_gatt_char(self, _char, data):
         self.t.write(data)
+
+
+
+class SerialServiceStub():
+    def __init__(self, uuid):
+        self.uuid = uuid
+
+class SerialCharStub():
+    def __init__(self, uuid_or_handle, property_name):
+        self.uuid_or_handle = uuid_or_handle
+        self.property_name = property_name

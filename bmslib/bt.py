@@ -13,6 +13,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .util import get_logger
+from .wired import SerialServiceStub, SerialCharStub
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
@@ -163,7 +164,9 @@ class BtBms:
         raise exception
 
     def find_char(self, uuid_or_handle: Union[str, int], property_name: str, service=None) -> Union[
-        None, BleakGATTCharacteristic]:
+        None, BleakGATTCharacteristic, SerialCharStub]:
+        if self.address == 'serial':
+            return SerialCharStub(uuid_or_handle, property_name)
         for service in ((service,) if service else self.client.services):
             for char in service.characteristics:
                 if (char.uuid == uuid_or_handle or char.handle == uuid_or_handle) and property_name in char.properties:
@@ -171,6 +174,8 @@ class BtBms:
         return None
 
     def get_service(self, uuid):
+        if self.address == 'serial':
+            return SerialServiceStub(uuid)
         for s in self.client.services:
             if s.uuid.startswith(uuid):
                 return s

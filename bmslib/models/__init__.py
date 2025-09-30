@@ -110,6 +110,8 @@ def construct_bms(dev, verbose_log, bt_discovered_devices):
             raise Exception("Can't resolve device name %s, not discovered" % address)
         return dev
 
+    if addr == "serial" and not dev.get('alias'):
+        raise ValueError('with `address=serial` you need to specify `alias`')
     addr = name2addr(addr)
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
