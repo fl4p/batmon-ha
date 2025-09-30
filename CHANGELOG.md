@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.88]
+* Add litime BMS (thanks @KOSSOII)
+* Fix temperature reading on first sample
+* Fix: add `adapter` to options schema
+
+
 ## [1.87]
 * Fix PSK (pin) pairing (victron)
 

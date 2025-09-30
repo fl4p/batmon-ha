@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "1.87"
+version: "1.88"
 slug: "batmon"
 init: false
 host_dbus: true

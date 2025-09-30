@@ -13,7 +13,7 @@ import paho.mqtt.client
 from paho.mqtt.enums import CallbackAPIVersion
 
 import bmslib.bt
-import mqtt_util
+import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, VirtualGroupBms
 from bmslib.models import construct_bms
