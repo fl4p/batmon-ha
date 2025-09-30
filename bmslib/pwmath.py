@@ -39,7 +39,7 @@ class LHQ:
 
     def add(self, x):
         if math.isnan(x):
-            return
+            return self.last
         if math.isnan(self.last):
             self.last = x
         self.ewma.add(x)
