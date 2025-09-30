@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.89]
+* fix `NoneType doesn't define round method`
+
 ## [1.88]
 * Add litime BMS (thanks @KOSSOII)
 * Fix temperature reading on first sample
