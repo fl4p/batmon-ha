@@ -48,6 +48,7 @@ schema:
       alias: "str?"
       debug: "bool?"
       pin: "str?"
+      adapter: "str?"
       algorithm: "str?"
       current_calibration: "float?"
 

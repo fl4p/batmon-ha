@@ -6,7 +6,7 @@
 
 Monitor and control various Battery management systems (BMS) over Bluetooth. This add-on reads the BMS and sends sensor
 data through MQTT to Home Assistant. Using bluetooth on the Home Assistant host system, it does not need any additional
-hardware (no USB, Serial, RS485 or ESP32).
+hardware (no USB, Serial, RS485 or ESP32). It can also run without HA on Linux, macOS and Windows.
 
 I created this to compare BMS readings for a detailed evaluation of BMS reliability and accuracy.
 
