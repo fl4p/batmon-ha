@@ -58,8 +58,8 @@ class JKBt(BtBms):
     TEMPERATURE_STEP = 0.1
     TEMPERATURE_SMOOTH = 30
 
-    def __init__(self, address, **kwargs):
-        super().__init__(address, **kwargs)
+    def __init__(self, address, keep_alive=True, **kwargs):
+        super().__init__(address, keep_alive=keep_alive, **kwargs)
         if kwargs.get('pin'):
             self.logger.warning('JK usually does not use a pairing PIN')
         self._buffer = bytearray()
@@ -128,7 +128,8 @@ class JKBt(BtBms):
         try:
             await super().connect(timeout=timeout / 2)
         except Exception as e:
-            self.logger.info("%s normal connect failed (%s), connecting with scanner (adapter: %s)", self.name, str(e) or type(e), self._adapter or 'default')
+            self.logger.info("%s normal connect failed (%s), connecting with scanner (adapter: %s)", self.name,
+                             str(e) or type(e), self._adapter or 'default')
             await self._connect_with_scanner(timeout=timeout)
 
         service = self.get_service(self.SERVICE_UUID)
