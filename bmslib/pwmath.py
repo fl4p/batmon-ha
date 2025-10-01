@@ -37,7 +37,7 @@ class LHQ:
         self.last = math.nan
         self.inp_q = inp_q
 
-    def add(self, x):
+    def add(self, x) -> float:
         if math.isnan(x):
             return self.last
         if math.isnan(self.last):

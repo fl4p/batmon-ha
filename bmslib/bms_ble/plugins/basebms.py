@@ -44,7 +44,7 @@ class BluetoothMatcherOptional(TypedDict, total=False):
     manufacturer_data_start: list[int]
     connectable: bool
 
-type BMSvalue = Literal[
+BMSvalue = Literal[
     "battery_charging",
     "battery_mode",
     "battery_level",

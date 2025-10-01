@@ -110,7 +110,7 @@ class BtBms:
                 self.client = SerialBleakClientWrapper(adapter)
             else:
                 if adapter:  # hci0, hci1 (BT adapter hardware)
-                    self.logger.info('Using adapter %s', adapter)
+                    self.logger.info('Using adapter %s to connect to %s (%s)', adapter, address, name)
                     kwargs['adapter'] = adapter
 
                 self.client = BleakClient(address,

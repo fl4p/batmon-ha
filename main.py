@@ -1,8 +1,6 @@
 import asyncio
-import atexit
 import os
 import random
-import signal
 import sys
 import threading
 import time
@@ -17,10 +15,10 @@ import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, VirtualGroupBms
 from bmslib.models import construct_bms
+from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
-from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 
 logger = get_logger(verbose=False)
 
@@ -231,14 +229,14 @@ async def main():
             logger.error('mqtt connection error %s', ex)
 
         if not user_config.mqtt_broker:
-            mqtt_util.disable_warnings()
+            bmslib.mqtt_util.disable_warnings()
     else:
         mqtt_client = None
 
     from bmslib.store import load_meter_states
     try:
         meter_states = load_meter_states()
-        logger.debug('meter states: %s', mqtt_util.json_dumps_with_round_n(meter_states))
+        logger.debug('meter states: %s', bmslib.mqtt_util.json_dumps_with_round_n(meter_states))
     except FileNotFoundError:
         logger.info("Initialize meter states file")
         meter_states = {}
