@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import subprocess
 import time
@@ -56,17 +57,36 @@ def bt_stack_version():
         return '? (%s)' % BleakClient.__name__
 
 
-def bt_power(on):
-    # sudo rfkill block bluetooth
-
-    # sudo rfkill unblock bluetooth
-    # sudo systemctl start bluetooth
-    cmd = ["bluetoothctl", "power", "on" if on else "off"]
+def _run_cmd(cmd):
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out, err = p.communicate()
     if p.returncode != 0:
         print(p, out, err)
         raise Exception('error with cmd %s: %s' % (cmd, bytes.decode(err or out, 'utf-8')))
+    return out
+
+
+def bt_controllers():
+    controllers = []
+    for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
+        s = lin.split()
+        controllers.append(dict(addr=s[1], name=s[2]))
+    return controllers
+
+
+def bt_power(on):
+    # sudo rfkill block bluetooth
+    # sudo rfkill unblock bluetooth
+    # sudo systemctl start bluetooth
+    addr = None
+    try:
+        for addr, name in bt_controllers():
+            logging.info('Powering %s controller %s (%s)', 'on' if on else 'off', name, addr)
+            _run_cmd(["bluetoothctl", "select", addr])
+            _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
+    except Exception as e:
+        logging.error('Failed set power state of controller %s: %s', addr, e)
+        _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
 
 
 class BtBms:
@@ -294,7 +314,7 @@ class BtBms:
                     raise BleakDeviceNotFoundError(
                         self.client.address, 'Device %s%s not discovered. Make sure it in range and is not being '
                                              'accessed by another app. (found %s)' % (
-                                             self.client.address, ad, discovered))
+                                                 self.client.address, ad, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout / 2)

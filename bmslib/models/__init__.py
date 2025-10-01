@@ -43,10 +43,8 @@ def get_bms_model_class(name):
         if mod_class.startswith('models'):
             mod_class = 'bmslib.' + mod_class
         ss = mod_class.split('.')
-        mod = importlib.import_module('.'.join(ss[:-1]))
+        mod = importlib.import_module('.'.join(ss[:-1]))  # __import__ is discouraged
         return getattr(mod, ss[-1])
-
-
 
     try:
         # TODO lazy import
