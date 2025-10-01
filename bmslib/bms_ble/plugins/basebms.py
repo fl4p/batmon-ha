@@ -68,7 +68,7 @@ BMSvalue = Literal[
     "problem_code",
 ]
 
-type BMSpackvalue = Literal[
+BMSpackvalue = Literal[
     "pack_voltages",
     "pack_currents",
     "pack_battery_levels",

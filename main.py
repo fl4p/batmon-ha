@@ -184,7 +184,8 @@ async def main():
     groups_by_bms: dict[str, BmsGroup] = {}
 
     for bms in bms_list:
-        bms.set_keep_alive(user_config.get('keep_alive', False))
+        if 'keep_alive' in user_config:
+            bms.set_keep_alive(user_config['keep_alive'])
 
         if isinstance(bms, VirtualGroupBms):
             group_bms = bms
