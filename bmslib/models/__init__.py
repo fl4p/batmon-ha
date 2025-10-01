@@ -1,3 +1,4 @@
+import importlib
 from functools import partial
 
 from bmslib.util import get_logger
@@ -5,47 +6,51 @@ from bmslib.util import get_logger
 logger = get_logger()
 
 
-# noinspection PyUnresolvedReferences
 def get_bms_model_class(name):
-    # the noinspection PyUnresolvedReferences prevents PyCharm from removing the ` bmslib.bms_ble.plugins.*` imports below
-    
-    import bmslib.models.ant
-    import bmslib.models.daly
-    import bmslib.models.daly2
-    import bmslib.models.dummy
-    import bmslib.models.jbd
-    import bmslib.models.jikong
-    import bmslib.models.sok
-    import bmslib.models.supervolt
-    import bmslib.models.victron
-    import bmslib.models.litime
+    #
 
-    import bmslib.group
-    from bmslib import models
-
-    # for k in dir(plugins):
-    #    print(k)
+    if False:
+        import bmslib.models.ant
+        import bmslib.models.daly
+        import bmslib.models.daly2
+        import bmslib.models.dummy
+        import bmslib.models.jbd
+        import bmslib.models.jikong
+        import bmslib.models.sok
+        import bmslib.models.supervolt
+        import bmslib.models.victron
+        import bmslib.models.litime
 
     bms_registry = dict(
-        daly=models.daly.DalyBt,
-        daly2=models.daly2.Daly2Bt,
-        jbd=models.jbd.JbdBt,
-        jk=models.jikong.JKBt,  # auto detect
-        jk_24s=models.jikong.JKBt_24s,  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
-        jk_32s=models.jikong.JKBt_32s,
-        ant=models.ant.AntBt,
-        victron=models.victron.SmartShuntBt,
-        group_parallel=bmslib.group.VirtualGroupBms,
+        daly='models.daly.DalyBt',
+        daly2='models.daly2.Daly2Bt',
+        jbd='models.jbd.JbdBt',
+        jk='models.jikong.JKBt',  # auto detect
+        jk_24s='models.jikong.JKBt_24s',  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
+        jk_32s='models.jikong.JKBt_32s',
+        ant='models.ant.AntBt',
+        victron='models.victron.SmartShuntBt',
+        group_parallel='bmslib.group.VirtualGroupBms',
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
-        supervolt=models.supervolt.SuperVoltBt,
-        sok=models.sok.SokBt,
-        litime=models.litime.LitimeBt,
-        dummy=models.dummy.DummyBt,
+        supervolt='models.supervolt.SuperVoltBt',
+        sok='models.sok.SokBt',
+        litime='models.litime.LitimeBt',
+        dummy='models.dummy.DummyBt',
     )
 
-    try:
-        import bmslib.models.BLE_BMS_wrap
+    mod_class = bms_registry.get(name)
+    if bms_registry.get(name):
+        if mod_class.startswith('models'):
+            mod_class = 'bmslib.' + mod_class
+        ss = mod_class.split('.')
+        mod = importlib.import_module('.'.join(ss[:-1]))
+        return getattr(mod, ss[-1])
 
+
+
+    try:
+        # TODO lazy import
+        import bmslib.models.BLE_BMS_wrap
 
         from bmslib.bms_ble import plugins
 
@@ -70,20 +75,20 @@ def get_bms_model_class(name):
         import bmslib.bms_ble.plugins.renogy_pro_bms
         import bmslib.bms_ble.plugins.tianpwr_bms
 
-        bms_registry['daly_ble'] = partial(models.BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble')
-
+        plugin_registry = {}
+        plugin_registry['daly_ble'] = partial(BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble')
         for k in dir(plugins):
             if k.startswith('_') or not k.endswith('_bms'):
                 continue
-            if k[:-4] in bms_registry:
+            if k[:-4] in plugin_registry:
                 continue
-            # print(k)
-            bms_registry[k[:-4]] = partial(models.BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
+            plugin_registry[k[:-4]] = partial(BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
+
+        return plugin_registry.get(name)
 
     except:
         logger.exception('Import bms_ble error', exc_info=True)
-
-    return bms_registry.get(name)
+        return None
 
 
 def construct_bms(dev, verbose_log, bt_discovered_devices):

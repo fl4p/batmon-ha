@@ -69,7 +69,7 @@ class JKBt(BtBms):
         self.char_handle_notify = None
         self.char_handle_write = None
         self.is_new_11fw_32s = None  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
-        self._has_float_charger = None
+        self._has_float_charger = None # used for the `float_charge` switch
 
     def _buffer_crc_check(self):
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
@@ -186,7 +186,7 @@ class JKBt(BtBms):
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1152
         buf, _ = self._resp_table[0x03]
         psk = read_str(buf, 6 + 16 + 8 + 16 + 40 + 11)
-        if psk:
+        if psk and self._has_float_charger is None:
             self.logger.info("PSK = '%s' (Note that anyone within BLE range can read this!)", psk)
 
         di = DeviceInfo(mnf="JK",
