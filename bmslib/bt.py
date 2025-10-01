@@ -69,8 +69,8 @@ def _run_cmd(cmd):
 def bt_controllers():
     controllers = []
     for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
-        s = lin.split()
-        controllers.append(dict(addr=s[1], name=s[2]))
+        s = lin.decode('utf-8').split()
+        controllers.append((s[1], ' '.join(s[2:])))
     return controllers
 
 
@@ -78,14 +78,16 @@ def bt_power(on):
     # sudo rfkill block bluetooth
     # sudo rfkill unblock bluetooth
     # sudo systemctl start bluetooth
-    addr = None
     try:
         for addr, name in bt_controllers():
             logging.info('Powering %s controller %s (%s)', 'on' if on else 'off', name, addr)
-            _run_cmd(["bluetoothctl", "select", addr])
-            _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
+            try:
+                _run_cmd(["bluetoothctl", "select", addr])
+                _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
+            except Exception as e:
+                logging.error('failed to set power state for controller %s (%s): %s', name, addr, e)
     except Exception as e:
-        logging.error('Failed set power state of controller %s: %s', addr, e)
+        logging.error('Failed to list controllers %s', e)
         _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
 
 
