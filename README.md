@@ -38,7 +38,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Tian-Power BMS (`tianpwr`)
 * LiTime BMS (`litime`) [@KOSSOII](https://github.com/fl4p/batmon-ha/pull/322)
 * Victron SmartShunt (make sure to update to the latest firmware
-  and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html) 
+  and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app) (`victron`)
 * `tdt`
 * `ej`
@@ -54,7 +54,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * `neey`
 * `pro`
 * `renogy`, `renogy_pro`
-* all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA?tab=readme-ov-file#supported-devices) supports 
+* all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA?tab=readme-ov-file#supported-devices) supports
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 
@@ -85,7 +85,9 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `cbtpwr`, `seplos`, `seplos_v2`, `supervolt`, `sok`, `tianpwr`, `victron` or `dummy`.
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `cbtpwr`, `seplos`, `seplos_v2`, `supervolt`,
+`sok`, `tianpwr`, `victron` or any tag listed under [Supported Devices](#supported-devices-bluetooth-low-energy).
+For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.
@@ -195,7 +197,5 @@ See [doc/Standalone.md](doc/Standalone.md)
 * [Daly_RS485_UART_Protocol.pdf](https://github.com/jblance/mpp-solar/blob/master/docs/protocols/DALY-Daly_RS485_UART_Protocol.pdf)
 * [JK-bms esphome](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336)
 * [JK02 protocol](https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py)
-
-
 
 [install-shield]: https://img.shields.io/badge/dynamic/json?style=for-the-badge&color=green&label=Analytics&suffix=%20Installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/addons.json&query=$.2af0a32d_batmon.total

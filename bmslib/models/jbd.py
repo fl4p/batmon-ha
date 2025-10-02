@@ -58,7 +58,7 @@ class JbdBt(BtBms):
         await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
-        await self.client.stop_notify(self.UUID_RX)
+        await self.stop_notify(self.UUID_RX)
         await super().disconnect()
 
     async def _q(self, cmd):

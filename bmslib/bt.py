@@ -185,6 +185,15 @@ class BtBms:
         await enumerate_services(self.client, self.logger)
         raise exception
 
+    async def stop_notify(self, char_specifier: Union[CharSpec, List[CharSpec]]):
+        try:
+            # only stop notify if we already discovered services
+            # otherwise client.stop_notify() might try to resolve the char_specifier, even if we are not/never connected
+            if self.client.services:
+                await self.client.stop_notify(char_specifier)
+        except bleak.BleakError:
+            pass  # "Service Discovery has not been performed yet"
+
     def find_char(self, uuid_or_handle: Union[str, int], property_name: str, service=None) -> Union[
         None, BleakGATTCharacteristic, SerialCharStub]:
         if self.address == 'serial':
@@ -232,6 +241,8 @@ class BtBms:
         try:
             await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
         except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
+            if BtBms.shutdown:
+                raise
             self.logger.error("%s, starting scanner", exc)
             await bt_discovery(self.logger)
             raise
