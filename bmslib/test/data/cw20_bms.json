@@ -1,0 +1,16 @@
+{
+  "frames": [
+    {
+      "hex": "ff5501020d440df700208d00000b2f000064000000000020003b1c1d3c0000000023",
+      "expected": {
+        "voltage": 339.6,
+        "current": 3.575,
+        "capacity": 8.333,
+        "energy": 28.63,
+        "temperature": 59.0,
+        "power": 1214.0
+      }
+    }
+   
+  ]
+}
