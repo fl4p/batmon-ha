@@ -28,7 +28,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 ### Supported Devices (bluetooth low energy)
 
 * JK BMS / jikong with JK02 protocol (`jk`)
-* Daly BMS (`daly`, `daly2`)
+* Daly BMS (`daly`, `daly2`, `daly_ble`)
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * CBT Power / Creabest BMS (`cbtpwr`)

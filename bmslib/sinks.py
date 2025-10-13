@@ -15,7 +15,7 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 from bmslib.sampling import BmsSampleSink
 from bmslib.util import get_logger, sid_generator
-from mqtt_util import remove_none_values, remove_equal_values
+from bmslib.mqtt_util import remove_none_values, remove_equal_values
 
 logger = get_logger()
 
