@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.90]
+* fix `mqtt_util` import
+
 ## [1.89]
 * fix `NoneType doesn't define round method`
 
