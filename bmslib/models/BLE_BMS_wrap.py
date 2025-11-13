@@ -52,12 +52,12 @@ class BLEDeviceResolver:
 
 class BMS():
 
-    def __init__(self, address, type, module=None, keep_alive=False, adapter=None, name=None, **kwargs):
+    def __init__(self, address, type, blebms_class=None, keep_alive=False, adapter=None, name=None, **kwargs):
         self.address = address
         self.adapter = adapter
         self.name = name
         self._type = type
-        self._blebms_module = module
+        self._blebms_class = blebms_class
         self._keep_alive = keep_alive
 
         self._last_sample: Optional[BMSsample] = None
@@ -101,7 +101,8 @@ class BMS():
         if ble_device is None:
             raise RuntimeError("device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
 
-        self.ble_bms: bmslib.bms_ble.plugins.basebms.BaseBMS = self._blebms_module.BMS(
+        from aiobmsble.basebms import BaseBMS
+        self.ble_bms: BaseBMS = self._blebms_class(
             ble_device=ble_device,
             reconnect=not self._keep_alive
         )
