@@ -102,7 +102,7 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
     t_start = time.time()
 
     if timeout:
-        logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
+        logger.debug("mqtt watchdog loop started with timeout %.1fs", timeout)
 
     while not shutdown:
 

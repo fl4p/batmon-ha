@@ -224,7 +224,7 @@ class BmsSampler:
             return None
 
         if not was_connected and not bms.is_virtual:
-            logger.info('connecting bms %s', bms)
+            logger.debug('connecting bms %s', bms)
 
         async with bms:
             if not was_connected:

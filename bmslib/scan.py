@@ -12,7 +12,7 @@ _stop_task: asyncio.Task = None
 lock = asyncio.Lock()
 
 
-async def get_shared_scanner(adapter=None, **kwargs):
+async def get_shared_scanner(adapter=None, **kwargs) ->BleakScanner:
     global _stop_task
     async with lock:
         if adapter not in _scanners:
@@ -29,7 +29,7 @@ async def get_shared_scanner(adapter=None, **kwargs):
             if _stop_task is None or _stop_task.done():
                 _stop_task = asyncio.create_task(_stop_loop())
         _scanners[adapter] = _scanners[adapter][0], time.time()
-        return _scanners[adapter]
+        return _scanners[adapter][0]
 
 
 async def _stop_loop():

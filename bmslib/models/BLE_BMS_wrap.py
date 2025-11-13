@@ -98,7 +98,7 @@ class BMS():
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: BaseBMS = self._blebms_class(
             ble_device=ble_device,
-            reconnect=not self._keep_alive
+            keep_alive=self._keep_alive,
         )
 
         await self.ble_bms._connect()
