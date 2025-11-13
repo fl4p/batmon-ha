@@ -7,7 +7,8 @@ from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bms_ble.plugins.basebms import BMSsample
-from bmslib.bt import BtBms
+from bmslib.bt import BtBms, BleakDeviceNotFoundError
+from bmslib.scan import get_shared_scanner
 
 
 class BLEDeviceResolver:
@@ -22,13 +23,7 @@ class BLEDeviceResolver:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        import bleak
-        scanner_kw = {}
-        if adapter:
-            scanner_kw['adapter'] = adapter
-        scanner = bleak.BleakScanner(**scanner_kw)
-
-        await scanner.start()
+        scanner = await get_shared_scanner(adapter)
 
         t0 = time.time()
         while time.time() - t0 < 5:
@@ -46,7 +41,6 @@ class BLEDeviceResolver:
 
             await asyncio.sleep(.1)
 
-        await scanner.stop()
         return BLEDeviceResolver.devices.get(key, None)
 
 
@@ -99,7 +93,7 @@ class BMS():
         ble_device = await BLEDeviceResolver.resolve(self.address, adapter=self.adapter or None)
 
         if ble_device is None:
-            raise RuntimeError("device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
+            raise BleakDeviceNotFoundError("device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
 
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: BaseBMS = self._blebms_class(

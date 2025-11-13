@@ -8,7 +8,7 @@ from typing import Callable, List, Union
 
 import backoff
 import bleak.exc
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from . import FuturesPool
@@ -24,7 +24,8 @@ CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
 async def bt_discovery(logger):
     logger.info('BT Discovery:')
-    devices = await BleakScanner.discover()
+    from bmslib.scan import get_shared_scanner
+    devices = await get_shared_scanner()
     if not devices:
         logger.info(' - no devices found - ')
     else:
@@ -310,13 +311,8 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        import bleak
-        scanner_kw = {}
-        if self._adapter:
-            scanner_kw['adapter'] = self._adapter
-        scanner = bleak.BleakScanner(**scanner_kw)
-        self.logger.debug("starting scan")
-        await scanner.start()
+        from bmslib.scan import get_shared_scanner
+        scanner = await get_shared_scanner(self._adapter)
 
         attempt = 1
         while True:
@@ -339,10 +335,7 @@ class BtBms:
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
-                    await scanner.stop()
                     raise
-
-        await scanner.stop()
 
     async def disconnect(self):
         self._in_disconnect = True
