@@ -19,11 +19,12 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Integrates with Home Assistant Energy dashboard and [Utility Meter](doc/HA%20Energy%20Dashboard.md) sensor helper
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
-* Can write data to [InfluxDB](doc/InfluxDB.md)
+* Can run as stand-alone app without Home-Assistant an directly write to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups for parallel batteries, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 * Short delays for responsive automation (fast load shedding)
 * Experimental serial communication (e.g. using USB-UART adapter)
+* Current sensor gain calibration
 
 ### Supported Devices (bluetooth low energy)
 

@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.9 (venv)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="batmon-ha" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.14 (batmon-ha)" project-jdk-type="Python SDK" />
 </project>

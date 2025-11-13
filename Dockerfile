@@ -7,7 +7,7 @@ WORKDIR /app
 # (alpine image)
 # RUN apk add --no-cache python3 bluez py-pip git
 
-RUN apk add python3~3.12 || apk add python3
+RUN apk add python3~3.13 || apk add python3~3.12 || apk add python3
 RUN apk add bluez
 #RUN apk add bluez < 5.66-r4"
 # https://pkgs.alpinelinux.org/packages?name=bluez&branch=v3.16&repo=&arch=aarch64&maintainer=
@@ -27,6 +27,7 @@ RUN venv_bleak_pairing/bin/pip3 install 'git+https://github.com/jpeters-ml/bleak
 RUN python3 -m venv venv
 RUN venv/bin/pip3 install -r requirements.txt
 RUN venv/bin/pip3 install influxdb || true
+RUN venv/bin/pip3 install aiobmsble || true
 RUN . venv/bin/activate
 
 RUN chmod a+x addon_main.sh
