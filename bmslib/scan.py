@@ -12,7 +12,7 @@ _stop_task: asyncio.Task = None
 lock = asyncio.Lock()
 
 
-async def get_shared_scanner(adapter=None, **kwargs) ->BleakScanner:
+async def get_shared_scanner(adapter=None, **kwargs) -> BleakScanner:
     global _stop_task
     async with lock:
         if adapter not in _scanners:

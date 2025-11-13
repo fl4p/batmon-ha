@@ -37,7 +37,8 @@ async def fetch_loop(fn, period, max_errors):
         except Exception as e:
             num_errors_row += 1
             logger.error('Error (num %d, max %d) reading BMS: %s', num_errors_row, max_errors, e)
-            logger.error('Stack: %s', traceback.format_exc())
+            if not isinstance(e, bmslib.bt.BleakCharacteristicNotFoundError):
+                logger.error('Stack: %s', traceback.format_exc())
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break

@@ -9,6 +9,7 @@ from copy import copy
 from typing import Optional, List, Dict
 
 import paho.mqtt.client
+from bleak import BleakCharacteristicNotFoundError
 
 import bmslib.bt
 from bmslib.algorithm import create_algorithm, BatterySwitches
@@ -174,7 +175,8 @@ class BmsSampler:
             return None
 
         except Exception as ex:
-            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)), exc_info=1)
+            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)),
+                         exc_info=not isinstance(ex, bmslib.bt.BleakCharacteristicNotFoundError))
             dd = self.bms.debug_data()
             dd and logger.info("%s bms debug data: %s", self.bms.name, dd)
             self.device_info and logger.info('%s device info: %s', self.bms.name, self.device_info)

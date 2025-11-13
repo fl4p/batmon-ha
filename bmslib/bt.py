@@ -18,6 +18,8 @@ from .wired import SerialServiceStub, SerialCharStub
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
+BleakCharacteristicNotFoundError = getattr(bleak.exc, 'BleakCharacteristicNotFoundError', None)
+
 CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 
 

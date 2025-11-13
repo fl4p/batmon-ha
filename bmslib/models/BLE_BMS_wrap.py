@@ -65,6 +65,10 @@ class BMS():
 
         self.ble_bms: Optional[bmslib.bms_ble.plugins.basebms.BaseBMS] = None
 
+    @property
+    def client(self):
+        return self.ble_bms._client if self.ble_bms else None
+
     def _notification_handler(self, sender, data: bytes):
         pass
 
@@ -88,12 +92,12 @@ class BMS():
         return self.__aexit__().__await__()
 
     async def connect(self, timeout=20, **kwargs):
-        import bmslib.bms_ble.plugins.basebms
 
         ble_device = await BLEDeviceResolver.resolve(self.address, adapter=self.adapter or None)
 
         if ble_device is None:
-            raise BleakDeviceNotFoundError("device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
+            raise BleakDeviceNotFoundError(
+                "device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
 
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: BaseBMS = self._blebms_class(
@@ -101,7 +105,14 @@ class BMS():
             keep_alive=self._keep_alive,
         )
 
+        # try:
         await self.ble_bms._connect()
+        # except BleakCharacteristicNotFoundError as e:
+        #    from bmslib.util import get_logger
+        #    logger = get_logger()
+        #    from bmslib.bt import enumerate_services
+        #    logger.error('%s Error: %s', self, e)
+        #    await enumerate_services(self.client, logger)
 
         # await super().connect(**kwargs)
         # try:
