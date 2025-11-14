@@ -142,9 +142,9 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger), 30)
+        ble_devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger, timeout=5), 30)
     except Exception as e:
-        devices = []
+        ble_devices = []
         logger.error('Error discovering devices: %s', e)
 
     verbose_log = user_config.get('verbose_log', False)
@@ -167,7 +167,7 @@ async def main():
 
     for dev in user_config.get('devices', []):
 
-        bms = construct_bms(dev, verbose_log, devices)
+        bms = construct_bms(dev, verbose_log, ble_devices)
 
         if bms is None:
             logger.info("Skip %s", dev.get('address') or str(dev))

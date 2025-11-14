@@ -1,6 +1,9 @@
 import importlib
 from functools import partial
 
+import bleak
+
+import bmslib.bt
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -61,8 +64,8 @@ def get_bms_model_class(name):
         return None
 
 
-def construct_bms(dev, verbose_log, bt_discovered_devices):
-    addr: str = dev['address']
+def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list[bleak.BLEDevice]):
+    addr: str = str(dev['address'] or '').strip()
 
     if not addr or addr.startswith('#'):
         return None
@@ -91,9 +94,13 @@ def construct_bms(dev, verbose_log, bt_discovered_devices):
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
-    return bms_class(address=addr,
-                     name=name,
-                     verbose_log=verbose_log or dev.get('debug'),
-                     psk=dev.get('pin'),
-                     adapter=dev.get('adapter'),
-                     )
+    bms: bmslib.bt.BtBms = bms_class(
+        address=addr,
+        name=name,
+        verbose_log=verbose_log or dev.get('debug'),
+        psk=dev.get('pin'),
+        adapter=dev.get('adapter'),
+        keep_alive=dev.get('keep_alive'),
+    )
+
+    return bms
