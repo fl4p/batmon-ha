@@ -7,7 +7,7 @@ from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bms_ble.plugins.basebms import BMSsample
-from bmslib.bt import BtBms, BleakDeviceNotFoundError
+from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock
 from bmslib.scan import get_shared_scanner
 
 
@@ -82,7 +82,8 @@ class BMS():
 
     async def __aenter__(self):
         if not self._keep_alive or not self.is_connected:
-            await self.connect()
+            async with ConnectLock:
+                await self.connect()
 
     async def __aexit__(self, *args):
         if not self._keep_alive and self.is_connected:
@@ -123,7 +124,8 @@ class BMS():
         # await self.start_notify(self.CHAR_UUID, self._notification_handler)
 
     async def disconnect(self):
-        await self.ble_bms.disconnect()
+        if self.ble_bms is not None:
+            await self.ble_bms.disconnect()
         # await self.client.stop_notify(self.CHAR_UUID)
         # await super().disconnect()
 

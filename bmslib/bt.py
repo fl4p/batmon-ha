@@ -22,6 +22,7 @@ BleakCharacteristicNotFoundError = getattr(bleak.exc, 'BleakCharacteristicNotFou
 
 CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 
+ConnectLock = asyncio.Lock()
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
 async def bt_discovery(logger, timeout: int = 5):
@@ -399,7 +400,8 @@ class BtBms:
         # print("enter")
         if self.keep_alive and self.is_connected:
             return
-        await self.connect()
+        async with ConnectLock:
+            await self.connect()
 
     async def __aexit__(self, *args):
         # print("exit")
