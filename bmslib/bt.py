@@ -25,7 +25,7 @@ CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 ConnectLock = asyncio.Lock()
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
-async def bt_discovery(logger, timeout: int = 5):
+async def bt_discovery(logger, timeout: int = 5) -> list[bleak.BLEDevice]:
     logger.info('BT Discovery (%d seconds):', timeout)
     from bmslib.scan import get_shared_scanner
     scanner = await get_shared_scanner()
@@ -317,7 +317,7 @@ class BtBms:
             raise RuntimeError("in shutdown")
 
         from bmslib.scan import get_shared_scanner
-        scanner = await get_shared_scanner(self._adapter)
+        scanner = await get_shared_scanner(self._adapter, restart=True)
 
         attempt = 1
         while True:
