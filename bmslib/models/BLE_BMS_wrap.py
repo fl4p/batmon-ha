@@ -21,14 +21,14 @@ class BLEDeviceResolver:
             return BLEDeviceResolver.devices[key]
 
         if BtBms.shutdown:
-            raise RuntimeError("in shutdown")
+            raise KeyboardInterrupt("in shutdown")
 
         scanner = await get_shared_scanner(adapter)
 
         t0 = time.time()
         while time.time() - t0 < 5:
             if BtBms.shutdown:
-                raise RuntimeError("in shutdown")
+                raise KeyboardInterrupt("in shutdown")
 
             try:
                 for d in scanner.discovered_devices:

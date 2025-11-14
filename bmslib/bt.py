@@ -24,6 +24,12 @@ CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
 
 ConnectLock = asyncio.Lock()
 
+try:
+    from bleak_retry_connector import BleakNotFoundError
+except ImportError:
+    BleakNotFoundError = None
+
+
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
 async def bt_discovery(logger, timeout: int = 5) -> list[bleak.BLEDevice]:
     logger.info('BT Discovery (%d seconds):', timeout)

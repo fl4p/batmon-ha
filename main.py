@@ -45,7 +45,7 @@ async def fetch_loop(fn, period, max_errors):
             await asyncio.sleep(min(1.1 ** num_errors_row, 60))
         await asyncio.sleep(period)
 
-    logger.info("fetch_loop %s ends", fn)
+    logger.debug("fetch_loop %s ends", fn)
     if isinstance(fn, BmsSampler):
         logger.info('Disconnecting %s', fn.bms)
         await fn.bms.disconnect()
@@ -91,7 +91,7 @@ def background_thread(timeout: float, sampler_list: List[BmsSampler]):
         if not bg_checks(sampler_list, timeout, t_start):
             break
         time.sleep(4)
-    logger.info("Background thread ends. shutdown=%s", shutdown)
+    logger.debug("Background thread ends. shutdown=%s", shutdown)
     time.sleep(10)
     logger.info("Process still alive, suicide")
     exit_process(True, True)
@@ -170,7 +170,7 @@ async def main():
         bms = construct_bms(dev, verbose_log, devices)
 
         if bms is None:
-            logger.info("Skip %s", dev)
+            logger.info("Skip %s", dev.get('address') or str(dev))
             continue
 
         name = bms.name
@@ -354,7 +354,7 @@ async def main():
             if isinstance(t, BmsSampler):
                 await t.bms.disconnect()
 
-    logger.info('All fetch loops ended. shutdown is already %s', shutdown)
+    logger.debug('All fetch loops ended. shutdown is already %s', shutdown)
 
     shutdown = True
 
@@ -377,7 +377,7 @@ async def main():
 
 def on_exit(*args, **kwargs):
     global shutdown
-    logger.info('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
+    logger.debug('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
     shutdown += 1
     bmslib.bt.BtBms.shutdown = True
     if shutdown == 5:
