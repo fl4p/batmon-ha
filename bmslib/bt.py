@@ -31,7 +31,7 @@ except ImportError:
 
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
-async def bt_discovery(logger, timeout: int = 5) -> list[bleak.BLEDevice]:
+async def bt_discovery(logger, timeout: int = 5):
     logger.info('BT Discovery (%d seconds):', timeout)
     from bmslib.scan import get_shared_scanner
     scanner = await get_shared_scanner()

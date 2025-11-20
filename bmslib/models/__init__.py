@@ -64,7 +64,7 @@ def get_bms_model_class(name):
         return None
 
 
-def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list[bleak.BLEDevice]):
+def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     addr: str = str(dev['address'] or '').strip()
 
     if not addr or addr.startswith('#'):
