@@ -2,11 +2,12 @@
 
 from typing import Final
 
+from aiobmsble import MatcherPattern, BMSDp, BMSSample, BMSValue, BMSInfo
+from aiobmsble.basebms import BaseBMS
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
-from .basebms import AdvertisementPattern, BaseBMS, BMSdp, BMSsample, BMSvalue
 
 
 class BMS(BaseBMS):
@@ -18,22 +19,22 @@ class BMS(BaseBMS):
     MIN_FRAME_LEN: Final[int] = 28
 
     # Макет А: "zero-padded" (3-байтові voltage/current/capacity + 4-байт energy)
-    _FIELDS_A: Final[tuple[BMSdp, ...]] = (
-        BMSdp("voltage",   4, 3, False, lambda x: x / 10.0),      # 0.1 V
-        BMSdp("current",   7, 3, True,  lambda x: x / 1000.0),    # 0.001 A (signed)
-        BMSdp("capacity", 10, 3, False, lambda x: x / 1000.0),    # 0.001 Ah
-        BMSdp("energy",   13, 4, False, lambda x: x / 100.0),     # 0.01 kWh
-        BMSdp("temperature", 24, 2, False, lambda x: x),          # °C
+    _FIELDS_A: Final[tuple[BMSDp, ...]] = (
+        BMSDp("voltage",   4, 3, False, lambda x: x / 10.0),      # 0.1 V
+        BMSDp("current",   7, 3, True,  lambda x: x / 1000.0),    # 0.001 A (signed)
+        BMSDp("cycle_capacity", 10, 3, False, lambda x: x / 1000.0),    # 0.001 Ah
+        BMSDp("energy",   13, 4, False, lambda x: x / 100.0),     # 0.01 kWh
+        BMSDp("temperature", 24, 2, False, lambda x: x),          # °C
     )
 
     # Макет B: "compact"
     # Напруга/струм = 2 байти; ємність = 3 байти; енергія = 4 байти, починаючи з offset 11
-    _FIELDS_B: Final[tuple[BMSdp, ...]] = (
-        BMSdp("voltage",   4, 2, False, lambda x: x / 10.0),      # 0.1 V
-        BMSdp("current",   6, 2, True,  lambda x: x / 1000.0),    # 0.001 A (signed)
-        BMSdp("capacity",  8, 3, False, lambda x: x / 1000.0),    # 0.001 Ah
-        BMSdp("energy",   11, 4, False, lambda x: x / 100.0),     # 0.01 kWh (big-endian)
-        BMSdp("temperature", 24, 2, False, lambda x: x),          # °C
+    _FIELDS_B: Final[tuple[BMSDp, ...]] = (
+        BMSDp("voltage",   4, 2, False, lambda x: x / 10.0),      # 0.1 V
+        BMSDp("current",   6, 2, True,  lambda x: x / 1000.0),    # 0.001 A (signed)
+        BMSDp("cycle_capacity",  8, 3, False, lambda x: x / 1000.0),    # 0.001 Ah
+        BMSDp("energy",   11, 4, False, lambda x: x / 100.0),     # 0.01 kWh (big-endian)
+        BMSDp("temperature", 24, 2, False, lambda x: x),          # °C
     )
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
@@ -41,7 +42,7 @@ class BMS(BaseBMS):
         super().__init__(ble_device, reconnect)
 
     @staticmethod
-    def matcher_dict_list() -> list[AdvertisementPattern]:
+    def matcher_dict_list() -> list[MatcherPattern]:
         """Provide matcher for advertisement."""
         return [
             {
@@ -51,8 +52,8 @@ class BMS(BaseBMS):
             }
         ]
 
-    @staticmethod
-    def device_info() -> dict[str, str]:
+
+    def _fetch_device_info(self) -> BMSInfo:
         """Return CW20 device information."""
         return {"manufacturer": "ATORCH", "model": "CW20 DC Meter"}
 
@@ -72,7 +73,7 @@ class BMS(BaseBMS):
         return "ffe2"
 
     @staticmethod
-    def _calc_values() -> frozenset[BMSvalue]:
+    def _calc_values() -> frozenset[BMSValue]:
         """Derived values from raw fields."""
         return frozenset({"power", "battery_charging"})
 
@@ -90,11 +91,11 @@ class BMS(BaseBMS):
         self._data_event.set()
 
     @staticmethod
-    def _within_physical_limits(sample: BMSsample) -> bool:
+    def _within_physical_limits(sample: BMSSample) -> bool:
         """Basic sanity checks to choose between layouts."""
         v = sample.get("voltage")
         i = sample.get("current")
-        c = sample.get("capacity")
+        c = sample.get("cycle_capacity")
         e = sample.get("energy")
         return (
             isinstance(v, (int, float)) and 0.1 <= v <= 1000.0 and
@@ -103,7 +104,7 @@ class BMS(BaseBMS):
             (e is None or isinstance(e, (int, float)) and 0.0 <= e <= 1e6)
         )
 
-    async def _async_update(self) -> BMSsample:
+    async def _async_update(self) -> BMSSample:
         """Parse stored frame into BMSsample."""
         if not self._data:
             return {}

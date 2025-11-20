@@ -3,13 +3,15 @@ import math
 import time
 from typing import Dict, Tuple, Optional
 
+from aiobmsble import BMSSample
 from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bms_ble.plugins.basebms import BMSsample
 from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock
 from bmslib.scan import get_shared_scanner
+from bmslib.util import get_logger
 
+logger = get_logger()
 
 class BLEDeviceResolver:
     devices: Dict[Tuple[str, str], BLEDevice] = {}
@@ -54,16 +56,15 @@ class BMS():
         self._blebms_class = blebms_class
         self._keep_alive = keep_alive
 
-        self._last_sample: Optional[BMSsample] = None
+        self._last_sample: Optional[BMSSample] = None
 
         self.is_virtual = False
         self.verbose_log = False
 
         self.connect_time = time.time()
 
-        import bmslib.bms_ble.plugins.basebms
-
-        self.ble_bms: Optional[bmslib.bms_ble.plugins.basebms.BaseBMS] = None
+        from aiobmsble.basebms import BaseBMS
+        self.ble_bms: Optional[BaseBMS] = None
 
     @property
     def client(self):
@@ -130,7 +131,7 @@ class BMS():
         # await super().disconnect()
 
     async def fetch_device_info(self) -> DeviceInfo:
-        di = self.ble_bms.device_info()
+        di = await self.ble_bms.device_info()
         return DeviceInfo(
             mnf=di.get("manufacturer"),
             model=di.get("model"),
@@ -142,21 +143,23 @@ class BMS():
 
     async def fetch(self) -> BmsSample:
 
-        sample: BMSsample = await self.ble_bms.async_update()
+        sample: BMSSample = await self.ble_bms.async_update()
         self._last_sample = sample
-        return BmsSample(
-            soc=sample['battery_level'],
-            voltage=sample['voltage'],
-            current=sample['current'],
-            power=sample.get('power', math.nan),
-            capacity=sample.get('cycle_charge', math.nan),  # todo ?
-            cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
-            num_cycles=sample.get('cycles', math.nan),
-            balance_current=sample.get('balance_current', math.nan),
-            temperatures=[sample.get('temperature')],  # todo?
-            # mos_temperature=
-
-        )
+        try:
+            return BmsSample(
+                soc=sample['battery_level'],
+                voltage=sample['voltage'],
+                current=sample['current'],
+                power=sample.get('power', math.nan),
+                capacity=sample.get('cycle_charge', math.nan),  # todo ?
+                cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
+                num_cycles=sample.get('cycles', math.nan),
+                balance_current=sample.get('balance_current', math.nan),
+                temperatures=[sample.get('temperature')],  # todo?
+                # mos_temperature=
+            )
+        except Exception as e:
+            raise ValueError('invalid ble_bms sample %r' % sample) from e
 
     async def fetch_voltages(self):
         # return voltages in mV
