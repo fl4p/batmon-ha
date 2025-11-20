@@ -83,7 +83,7 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list[blea
         return next((d.address for d in bt_discovered_devices if (d.name or "").strip() == name.strip()), name)
 
     def dev_by_addr(address: str):
-        dev = next((d for d in bt_discovered_devices if d.address == address), None)
+        dev = next((d for d in bt_discovered_devices if d.address.lower() == address.strip().lower()), None)
         if not dev:
             raise Exception("Can't resolve device name %s, not discovered" % address)
         return dev
