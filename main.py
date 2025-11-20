@@ -18,6 +18,7 @@ from bmslib.group import BmsGroup, VirtualGroupBms
 from bmslib.models import construct_bms
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler
+from bmslib.scan import stop_all_scanners
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
 
@@ -380,6 +381,8 @@ async def main():
             # await asyncio.sleep(2)
         except:
             pass
+
+    await stop_all_scanners()
 
 
 def on_exit(*args, **kwargs):

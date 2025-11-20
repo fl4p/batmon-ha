@@ -59,3 +59,9 @@ async def _stop_loop():
                     _scanners.pop(adapter)
 
         await asyncio.sleep(1)
+
+
+async def stop_all_scanners():
+    async with lock:
+        for adapter, (sc, t_last_use) in _scanners.copy().items():
+            await sc.stop()
