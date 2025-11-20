@@ -27,7 +27,8 @@ ConnectLock = asyncio.Lock()
 try:
     from bleak_retry_connector import BleakNotFoundError
 except ImportError:
-    BleakNotFoundError = None
+    class BleakNotFoundError(Exception):
+        pass
 
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)

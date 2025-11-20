@@ -13,6 +13,8 @@ from bleak.uuids import normalize_uuid_str
 class BMS(BaseBMS):
     """ATORCH CW20 Smart Shunt class implementation."""
 
+    INFO: BMSInfo ={"default_manufacturer": "ATORCH", "default_model": "CW20 DC Meter"}
+
     HEAD: Final[bytes] = bytes([0xFF, 0x55])  # frame header
     # фактична довжина кадру може різнитись; візьмемо мінімум,
     # але не будемо відсікати довші
@@ -37,9 +39,9 @@ class BMS(BaseBMS):
         BMSDp("temperature", 24, 2, False, lambda x: x),          # °C
     )
 
-    def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
+    def __init__(self, ble_device: BLEDevice, keep_alive: bool = True) -> None:
         """Initialize CW20 BMS."""
-        super().__init__(ble_device, reconnect)
+        super().__init__(ble_device, keep_alive)
 
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:

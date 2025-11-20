@@ -135,7 +135,7 @@ sample_desc = {
         "state_class": "measurement",
         "unit_of_measurement": "V",
         "precision": 2,
-        "significant_digits": 4,
+        "significant_digits": 4, # round_to_n
         "icon": "meter-electric"},
     "soc/current": {
         "field": "current",

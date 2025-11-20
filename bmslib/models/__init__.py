@@ -56,7 +56,14 @@ def get_bms_model_class(name):
         if name.endswith('_ble'):
             name = name[:-4]
         type_ = name + '_bms'
-        mod = importlib.import_module(f'aiobmsble.bms.{type_}')
+        try:
+            mod = importlib.import_module(f'aiobmsble.bms.{type_}')
+        except ImportError as e:
+            try:
+                mod = importlib.import_module(f'bmslib.bms_ble.plugins.{type_}')
+            except ImportError:
+                raise e
+
         from bmslib.models import BLE_BMS_wrap
         return partial(BLE_BMS_wrap.BMS, type=type_, blebms_class=mod.BMS)
     except:

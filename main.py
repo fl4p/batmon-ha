@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import traceback
+from importlib.metadata import PackageNotFoundError
 from typing import List, Dict
 
 import paho.mqtt.client
@@ -159,7 +160,13 @@ async def main():
             if line.strip().startswith('version:'):
                 ver = line.strip().split(':')[1].strip().strip('"')
                 break
-    logger.info('Batmon ver %s, Bleak ver %s, BtBackend ver %s', ver, bmslib.bt.bleak_version(),
+    try:
+        from importlib.metadata import version
+        aiobmsble_ver = version('aiobmsble')
+    except PackageNotFoundError:
+        aiobmsble_ver = '<not-found>'
+    logger.info('Batmon ver %s, aiobmsble ver %s, Bleak ver %s, BtBackend ver %s', ver, aiobmsble_ver,
+                bmslib.bt.bleak_version(),
                 bmslib.bt.bt_stack_version())
 
     names = set()
