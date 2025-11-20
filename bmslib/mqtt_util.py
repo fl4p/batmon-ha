@@ -299,7 +299,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
             _hass_discovery(k, d["device_class"], state_class=d["state_class"], unit=d["unit_of_measurement"],
-                            icon=d.get('icon', None), name=d["field"], precision=d.get("significant_digits", None))
+                            icon=d.get('icon', None), name=d["field"], precision=d.get("precision", None))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
