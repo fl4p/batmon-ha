@@ -1,6 +1,9 @@
 import importlib
 from functools import partial
 
+import bleak
+
+import bmslib.bt
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -47,50 +50,29 @@ def get_bms_model_class(name):
         return getattr(mod, ss[-1])
 
     try:
-        # TODO lazy import
-        import bmslib.models.BLE_BMS_wrap
+        if 0:
+            from aiobmsble.basebms import BaseBMS
+            from typing import Type
+        if name.endswith('_ble'):
+            name = name[:-4]
+        type_ = name + '_bms'
+        try:
+            mod = importlib.import_module(f'aiobmsble.bms.{type_}')
+        except ImportError as e:
+            try:
+                mod = importlib.import_module(f'bmslib.bms_ble.plugins.{type_}')
+            except ImportError:
+                raise e
 
-        from bmslib.bms_ble import plugins
-
-        import bmslib.bms_ble.plugins.seplos_bms
-        import bmslib.bms_ble.plugins.seplos_v2_bms
-        import bmslib.bms_ble.plugins.daly_bms
-        import bmslib.bms_ble.plugins.tdt_bms
-        import bmslib.bms_ble.plugins.ej_bms
-        import bmslib.bms_ble.plugins.abc_bms
-        import bmslib.bms_ble.plugins.cbtpwr_bms
-        import bmslib.bms_ble.plugins.dpwrcore_bms
-        import bmslib.bms_ble.plugins.ecoworthy_bms
-        import bmslib.bms_ble.plugins.ective_bms
-        import bmslib.bms_ble.plugins.felicity_bms
-        import bmslib.bms_ble.plugins.ogt_bms
-        import bmslib.bms_ble.plugins.redodo_bms
-        import bmslib.bms_ble.plugins.roypow_bms
-        import bmslib.bms_ble.plugins.braunpwr_bms
-        import bmslib.bms_ble.plugins.neey_bms
-        import bmslib.bms_ble.plugins.pro_bms
-        import bmslib.bms_ble.plugins.renogy_bms
-        import bmslib.bms_ble.plugins.renogy_pro_bms
-        import bmslib.bms_ble.plugins.tianpwr_bms
-
-        plugin_registry = {}
-        plugin_registry['daly_ble'] = partial(BLE_BMS_wrap.BMS, module=plugins.daly_bms, type='daly_ble')
-        for k in dir(plugins):
-            if k.startswith('_') or not k.endswith('_bms'):
-                continue
-            if k[:-4] in plugin_registry:
-                continue
-            plugin_registry[k[:-4]] = partial(BLE_BMS_wrap.BMS, type=k, module=getattr(plugins, k))
-
-        return plugin_registry.get(name)
-
+        from bmslib.models import BLE_BMS_wrap
+        return partial(BLE_BMS_wrap.BMS, type=type_, blebms_class=mod.BMS)
     except:
-        logger.exception('Import bms_ble error', exc_info=True)
+        logger.exception('aiobmsble error', exc_info=True)
         return None
 
 
-def construct_bms(dev, verbose_log, bt_discovered_devices):
-    addr: str = dev['address']
+def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
+    addr: str = str(dev['address'] or '').strip()
 
     if not addr or addr.startswith('#'):
         return None
@@ -119,9 +101,13 @@ def construct_bms(dev, verbose_log, bt_discovered_devices):
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
-    return bms_class(address=addr,
-                     name=name,
-                     verbose_log=verbose_log or dev.get('debug'),
-                     psk=dev.get('pin'),
-                     adapter=dev.get('adapter'),
-                     )
+    bms: bmslib.bt.BtBms = bms_class(
+        address=addr,
+        name=name,
+        verbose_log=verbose_log or dev.get('debug'),
+        psk=dev.get('pin'),
+        adapter=dev.get('adapter'),
+        keep_alive=dev.get('keep_alive'),
+    )
+
+    return bms

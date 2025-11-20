@@ -41,6 +41,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app) (`victron`)
+* ATORCH CW20 DC (`cw20`)
 * `tdt`
 * `ej`
 * `abc`
@@ -55,7 +56,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * `neey`
 * `pro`
 * `renogy`, `renogy_pro`
-* all devices [BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA?tab=readme-ov-file#supported-devices) supports
+* all devices [aiobmsble](https://github.com/patman15/aiobmsble/?tab=readme-ov-file#supported-devices) supports
 
 I tested the add-on on a Raspberry Pi 4 using Home Assistant Operating System.
 

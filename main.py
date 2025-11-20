@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import traceback
+from importlib.metadata import PackageNotFoundError
 from typing import List, Dict
 
 import paho.mqtt.client
@@ -17,6 +18,7 @@ from bmslib.group import BmsGroup, VirtualGroupBms
 from bmslib.models import construct_bms
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler
+from bmslib.scan import stop_all_scanners
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
 
@@ -37,14 +39,15 @@ async def fetch_loop(fn, period, max_errors):
         except Exception as e:
             num_errors_row += 1
             logger.error('Error (num %d, max %d) reading BMS: %s', num_errors_row, max_errors, e)
-            logger.error('Stack: %s', traceback.format_exc())
+            if not isinstance(e, bmslib.bt.BleakCharacteristicNotFoundError):
+                logger.error('Stack: %s', traceback.format_exc())
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
             await asyncio.sleep(min(1.1 ** num_errors_row, 60))
         await asyncio.sleep(period)
 
-    logger.info("fetch_loop %s ends", fn)
+    logger.debug("fetch_loop %s ends", fn)
     if isinstance(fn, BmsSampler):
         logger.info('Disconnecting %s', fn.bms)
         await fn.bms.disconnect()
@@ -90,7 +93,7 @@ def background_thread(timeout: float, sampler_list: List[BmsSampler]):
         if not bg_checks(sampler_list, timeout, t_start):
             break
         time.sleep(4)
-    logger.info("Background thread ends. shutdown=%s", shutdown)
+    logger.debug("Background thread ends. shutdown=%s", shutdown)
     time.sleep(10)
     logger.info("Process still alive, suicide")
     exit_process(True, True)
@@ -102,7 +105,7 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
     t_start = time.time()
 
     if timeout:
-        logger.info("mqtt watchdog loop started with timeout %.1fs", timeout)
+        logger.debug("mqtt watchdog loop started with timeout %.1fs", timeout)
 
     while not shutdown:
 
@@ -141,9 +144,9 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger), 30)
+        ble_devices = await asyncio.wait_for(bmslib.bt.bt_discovery(logger, timeout=5), 30)
     except Exception as e:
-        devices = []
+        ble_devices = []
         logger.error('Error discovering devices: %s', e)
 
     verbose_log = user_config.get('verbose_log', False)
@@ -158,7 +161,13 @@ async def main():
             if line.strip().startswith('version:'):
                 ver = line.strip().split(':')[1].strip().strip('"')
                 break
-    logger.info('Batmon ver %s, Bleak ver %s, BtBackend ver %s', ver, bmslib.bt.bleak_version(),
+    try:
+        from importlib.metadata import version
+        aiobmsble_ver = version('aiobmsble')
+    except PackageNotFoundError:
+        aiobmsble_ver = '<not-found>'
+    logger.info('Batmon ver %s, aiobmsble ver %s, Bleak ver %s, BtBackend ver %s', ver, aiobmsble_ver,
+                bmslib.bt.bleak_version(),
                 bmslib.bt.bt_stack_version())
 
     names = set()
@@ -166,10 +175,10 @@ async def main():
 
     for dev in user_config.get('devices', []):
 
-        bms = construct_bms(dev, verbose_log, devices)
+        bms = construct_bms(dev, verbose_log, ble_devices)
 
         if bms is None:
-            logger.info("Skip %s", dev)
+            logger.info("Skip %s", dev.get('address') or str(dev))
             continue
 
         name = bms.name
@@ -353,7 +362,7 @@ async def main():
             if isinstance(t, BmsSampler):
                 await t.bms.disconnect()
 
-    logger.info('All fetch loops ended. shutdown is already %s', shutdown)
+    logger.debug('All fetch loops ended. shutdown is already %s', shutdown)
 
     shutdown = True
 
@@ -373,10 +382,12 @@ async def main():
         except:
             pass
 
+    await stop_all_scanners()
+
 
 def on_exit(*args, **kwargs):
     global shutdown
-    logger.info('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
+    logger.debug('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
     shutdown += 1
     bmslib.bt.BtBms.shutdown = True
     if shutdown == 5:

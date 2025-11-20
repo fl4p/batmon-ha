@@ -1,5 +1,5 @@
 
-bleak==1.1.0 # see Dockerfile
+bleak==1.1.1 # see Dockerfile
 #      ^ https://github.com/fl4p/batmon-ha/issues/275
 #bleak-retry-connector
 

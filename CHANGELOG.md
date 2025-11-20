@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.91]
+* `aioblebms` v0.12
+* fix numeric precision
+* implement shared scanners and connect lock
+* bleak v1.1.1
+* Add Atorch CW20
+* strip whitespaces from device addresses
+* reduce logging verbosity
+* lazy imports of bms specific code
+
 ## [1.90]
 * fix `mqtt_util` import
 

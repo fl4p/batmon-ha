@@ -15,10 +15,10 @@ from bmslib.algorithm import create_algorithm, BatterySwitches
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
-from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
-from bmslib.util import get_logger
 from bmslib.mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, mqtt_single_out
+from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
+from bmslib.util import get_logger
 
 logger = get_logger(verbose=False)
 
@@ -156,9 +156,9 @@ class BmsSampler:
             if s:
                 self._num_errors = 0
             return s
-        except bmslib.bt.BleakDeviceNotFoundError as e:
+        except (bmslib.bt.BleakDeviceNotFoundError, bmslib.bt.BleakNotFoundError) as e:
             t_wait = 1.5 ** min(self._num_errors + 4, 14)
-            logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, e)
+            logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, str(e) or type(e).__name__)
             self._time_next_retry = time.time() + t_wait
             return None
 
@@ -174,11 +174,12 @@ class BmsSampler:
             return None
 
         except Exception as ex:
-            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)), exc_info=1)
+            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)),
+                         exc_info=not isinstance(ex, bmslib.bt.BleakCharacteristicNotFoundError))
             dd = self.bms.debug_data()
             dd and logger.info("%s bms debug data: %s", self.bms.name, dd)
             self.device_info and logger.info('%s device info: %s', self.bms.name, self.device_info)
-            logger.info('Bleak version %s', bmslib.bt.bleak_version())
+            # logger.info('Bleak version %s', bmslib.bt.bleak_version())
 
             bms = self.bms
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
@@ -224,7 +225,7 @@ class BmsSampler:
             return None
 
         if not was_connected and not bms.is_virtual:
-            logger.info('connecting bms %s', bms)
+            logger.debug('connecting bms %s', bms)
 
         async with bms:
             if not was_connected:
@@ -348,7 +349,8 @@ class BmsSampler:
             if not bms.is_virtual and abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
                 if bms.verbose_log or (
                         not self.period_pub and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD * 10):
-                    logger.info('%s Power jump/noise %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name, power_chg * 100,
+                    logger.info('%s Power jump/noise %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name,
+                                power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
                 self._t_last_power_jump = t_now
             self._last_power = sample.power

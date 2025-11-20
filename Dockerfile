@@ -27,7 +27,8 @@ RUN venv_bleak_pairing/bin/pip3 install 'git+https://github.com/jpeters-ml/bleak
 RUN python3 -m venv venv
 RUN venv/bin/pip3 install -r requirements.txt
 RUN venv/bin/pip3 install influxdb || true
-RUN venv/bin/pip3 install aiobmsble || true
+#RUN venv/bin/pip3 install "aiobmsble==0.11.0" || true
+RUN venv/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' || true
 RUN . venv/bin/activate
 
 RUN chmod a+x addon_main.sh

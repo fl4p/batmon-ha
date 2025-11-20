@@ -8,7 +8,7 @@ from typing import Callable, List, Union
 
 import backoff
 import bleak.exc
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from . import FuturesPool
@@ -18,13 +18,26 @@ from .wired import SerialServiceStub, SerialCharStub
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
+BleakCharacteristicNotFoundError = getattr(bleak.exc, 'BleakCharacteristicNotFoundError', None)
+
 CharSpec = Union[BleakGATTCharacteristic, int, str, uuid.UUID]
+
+ConnectLock = asyncio.Lock()
+
+try:
+    from bleak_retry_connector import BleakNotFoundError
+except ImportError:
+    class BleakNotFoundError(Exception):
+        pass
 
 
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=None)
-async def bt_discovery(logger):
-    logger.info('BT Discovery:')
-    devices = await BleakScanner.discover()
+async def bt_discovery(logger, timeout: int = 5):
+    logger.info('BT Discovery (%d seconds):', timeout)
+    from bmslib.scan import get_shared_scanner
+    scanner = await get_shared_scanner()
+    await asyncio.sleep(timeout)
+    devices = scanner.discovered_devices
     if not devices:
         logger.info(' - no devices found - ')
     else:
@@ -310,13 +323,8 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        import bleak
-        scanner_kw = {}
-        if self._adapter:
-            scanner_kw['adapter'] = self._adapter
-        scanner = bleak.BleakScanner(**scanner_kw)
-        self.logger.debug("starting scan")
-        await scanner.start()
+        from bmslib.scan import get_shared_scanner
+        scanner = await get_shared_scanner(self._adapter, restart=True)
 
         attempt = 1
         while True:
@@ -339,10 +347,7 @@ class BtBms:
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
-                    await scanner.stop()
                     raise
-
-        await scanner.stop()
 
     async def disconnect(self):
         self._in_disconnect = True
@@ -402,7 +407,8 @@ class BtBms:
         # print("enter")
         if self.keep_alive and self.is_connected:
             return
-        await self.connect()
+        async with ConnectLock:
+            await self.connect()
 
     async def __aexit__(self, *args):
         # print("exit")
