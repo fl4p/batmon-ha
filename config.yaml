@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/joagonca/batmon-ha
-version: "1.92"
+version: "1.93"
 slug: "batmon"
 init: false
 host_dbus: true
