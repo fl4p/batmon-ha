@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.93]
+* Add support for latest versions of Home Assistant
+
 ## [1.92]
 * Connecting logic using shared scanner
 * Rename meters sensor names
