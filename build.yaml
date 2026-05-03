@@ -1,0 +1,6 @@
+build_from:
+  aarch64: "ghcr.io/home-assistant/aarch64-base:latest"
+  amd64: "ghcr.io/home-assistant/amd64-base:latest"
+  armhf: "ghcr.io/home-assistant/armhf-base:latest"
+  armv7: "ghcr.io/home-assistant/armv7-base:latest"
+  i386: "ghcr.io/home-assistant/i386-base:latest"
