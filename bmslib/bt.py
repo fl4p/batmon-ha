@@ -1,11 +1,15 @@
 import asyncio
+import fcntl
 import logging
 import os
 import re
+import socket
+import struct
 import subprocess
+import sys
 import time
 import uuid
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import backoff
 import bleak.exc
@@ -72,13 +76,25 @@ def bleak_version() -> str:
 
 def bt_stack_version():
     # noinspection PyPep8
+    # When the `bleak` shadow (bumble-bleak) is active there is no BlueZ in the
+    # path, so report the bumble stack instead of shelling out to bluetoothctl.
+    mod = BleakClient.__module__
+    if mod.startswith('bumble_bleak'):
+        try:
+            import bumble
+            return 'bumble-v%s' % bumble.__version__
+        except Exception:
+            return 'bumble (%s)' % BleakClient.__name__
     try:
         # get BlueZ version
         p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
         out, _ = p.communicate()
         s = re.search(b"(\\d+).(\\d+)", out.strip(b"'"))
         bluez_version = tuple(map(int, s.groups()))
-        return 'bluez-v%i.%i' % bluez_version
+        ver = 'bluez-v%i.%i' % bluez_version
+        # bluek (ble_stack: bluek) talks to this same kernel BlueZ stack over
+        # sockets, so the BlueZ version is meaningful — just tag it.
+        return ('bluek/' + ver) if mod.startswith('bluek') else ver
     except:
         # get_platform_client_backend_type
         return '? (%s)' % BleakClient.__name__
@@ -94,23 +110,140 @@ def _run_cmd(cmd):
 
 
 def bt_controllers():
-    controllers = []
-    for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
-        s = lin.decode('utf-8').split()
-        controllers.append((s[1], ' '.join(s[2:])))
-    return controllers
+    # Prefer bluetoothctl (gives MAC + friendly name), but fall back to the
+    # kernel's /sys list when BlueZ isn't available (e.g. the bumble-bleak stack
+    # owns the adapter via an HCI socket and bluetoothd is stopped).
+    try:
+        controllers = []
+        for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
+            s = lin.decode('utf-8').split()
+            controllers.append((s[1], ' '.join(s[2:])))
+        return controllers
+    except Exception as e:
+        logging.debug('bluetoothctl list unavailable (%s), using /sys/class/bluetooth', e)
+        return [(hci, hci) for hci in bt_controllers_hci()]
 
 def bt_controllers_hci():
     try:
-        return os.listdir('/sys/class/bluetooth')
+        # /sys/class/bluetooth also lists per-connection child nodes (e.g.
+        # "hci0:16" for an active LE connection); keep only real controllers
+        # ("hci0", "hci1", ...) so callers don't try to scan a connection node.
+        return [n for n in os.listdir('/sys/class/bluetooth')
+                if re.fullmatch(r'hci\d+', n)]
     except:
         return []
+
+
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+_HCIGETDEVINFO = 0x800448D3  # _IOR('H', 211, int)
+# struct hci_dev_info.type low nibble -> bus name (matches `hciconfig`)
+_HCI_BUS = {0: 'VIRTUAL', 1: 'USB', 2: 'PCCARD', 3: 'UART', 4: 'RS232',
+            5: 'PCI', 6: 'SDIO', 7: 'SPI', 8: 'I2C', 9: 'SMD'}
+
+
+def _hci_dev_info(dev_id: int) -> Optional[dict]:
+    """Query controller `dev_id` via the HCIGETDEVINFO ioctl.
+
+    Returns {index, name, mac, bus} or None if the controller doesn't exist.
+    Uses the ioctl rather than /sys/class/bluetooth/hciN/* (sysfs is sparse on
+    some kernels, e.g. the Raspberry Pi has no `address`). Needs CAP_NET_RAW.
+
+    struct hci_dev_info layout: dev_id u16 @0, name[8] @2, bdaddr @10, flags @16,
+    type u8 @20 (low nibble = bus).
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    if not hasattr(socket, 'AF_BLUETOOTH'):
+        socket.AF_BLUETOOTH = 31  # type: ignore[attr-defined]
+    if not hasattr(socket, 'BTPROTO_HCI'):
+        socket.BTPROTO_HCI = 1  # type: ignore[attr-defined]
+    try:
+        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
+    except OSError:
+        return None
+    try:
+        buf = bytearray(96)
+        struct.pack_into('H', buf, 0, dev_id)
+        try:
+            fcntl.ioctl(sock.fileno(), _HCIGETDEVINFO, buf)
+        except OSError:
+            return None
+        name = buf[2:10].split(b'\x00', 1)[0].decode('ascii', 'replace') or ('hci%d' % dev_id)
+        mac = ':'.join('%02X' % b for b in reversed(buf[10:16]))
+        bus = _HCI_BUS.get(buf[20] & 0x0F, 'unknown')
+        return dict(index=dev_id, name=name, mac=mac, bus=bus)
+    finally:
+        sock.close()
+
+
+def _hci_addr_for_index(dev_id: int) -> Optional[str]:
+    """Uppercase MAC of controller `dev_id`, or None."""
+    info = _hci_dev_info(dev_id)
+    return info['mac'] if info else None
+
+
+def _hci_candidate_indices() -> List[int]:
+    indices = set(range(8))
+    for n in bt_controllers_hci():
+        indices.add(int(n[3:]))
+    return sorted(indices)
+
+
+def bt_adapters_info() -> List[dict]:
+    """List every present controller as {index, name, mac, bus} (USB/UART/...)."""
+    out = []
+    for i in _hci_candidate_indices():
+        info = _hci_dev_info(i)
+        if info:
+            out.append(info)
+    return out
+
+
+def _hci_index_for_mac(mac: str) -> Optional[int]:
+    """Resolve a controller MAC to its current hci index, or None if not found.
+
+    Re-resolved on demand so the index can change (USB re-enumeration) without
+    breaking a MAC-based `adapter:` setting.
+    """
+    target = mac.upper()
+    for dev_id in _hci_candidate_indices():
+        if _hci_addr_for_index(dev_id) == target:
+            return dev_id
+    return None
+
+
+def normalize_adapter(adapter):
+    """Resolve an `adapter:` value to the controller name the BLE stacks use.
+
+    A controller MAC (e.g. "0C:EF:15:47:4A:46") is resolved to its current
+    `hciN` via the HCIGETDEVINFO ioctl, for *every* stack: this gives one
+    canonical name to display, scan and connect with, and lets a MAC dedupe
+    against the same controller's `hciN` in the discovery sweep. (A MAC in config
+    is still convenient — a stable identity that re-resolves at startup if the
+    index moved.) Non-MAC values (None, "hciN", a serial path) pass through.
+    """
+    if not adapter or not _MAC_RE.match(adapter):
+        return adapter
+    index = _hci_index_for_mac(adapter)
+    if index is None:
+        logging.warning('adapter %s: no Bluetooth controller with that MAC found, '
+                        'using as-is', adapter)
+        return adapter
+    hci = 'hci%d' % index
+    logging.info('adapter %s resolved to %s', adapter, hci)
+    return hci
 
 
 def bt_power(on):
     # sudo rfkill block bluetooth
     # sudo rfkill unblock bluetooth
     # sudo systemctl start bluetooth
+    # Best-effort: this drives BlueZ via bluetoothctl. With the bumble-bleak
+    # stack the adapter is powered by bumble itself, and bluetoothctl is absent,
+    # so never let failures here crash the caller.
+    if BleakClient.__module__.startswith('bumble_bleak'):
+        logging.debug('bt_power(%s) skipped: bumble-bleak manages adapter power', on)
+        return
     try:
         for addr, name in bt_controllers():
             logging.info('Powering %s controller %s (%s)', 'on' if on else 'off', name, addr)
@@ -120,8 +253,7 @@ def bt_power(on):
             except Exception as e:
                 logging.error('failed to set power state for controller %s (%s): %s', name, addr, e)
     except Exception as e:
-        logging.error('Failed to list controllers %s', e)
-        _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
+        logging.error('Failed to power controllers via bluetoothctl: %s', e)
 
 
 class BtBms:
@@ -157,7 +289,7 @@ class BtBms:
                         # "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`"
                         , bleak_version())
 
-            self._adapter = adapter
+            self._adapter = normalize_adapter(adapter)
 
             if address == 'serial':
                 from bmslib.wired import SerialBleakClientWrapper

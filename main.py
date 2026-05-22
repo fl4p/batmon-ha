@@ -144,8 +144,12 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
+        for a in bmslib.bt.bt_adapters_info():
+            logger.info('Adapter %s  %s  %s', a['name'], a['mac'], a['bus'])
         bl_ctrls = set(bmslib.bt.bt_controllers_hci() or [None])
-        bl_ctrls |= {dev.get('adapter') for dev in user_config.get('devices', []) if dev.get('adapter')}
+        # normalize so a device referenced by controller MAC dedupes against its hciN
+        bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
+                     for dev in user_config.get('devices', []) if dev.get('adapter')}
         g = asyncio.gather(*[bmslib.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
         ble_devices = (await asyncio.wait_for(g, 30))[0]
     except Exception as e:

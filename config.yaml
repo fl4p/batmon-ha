@@ -7,6 +7,22 @@ init: false
 host_dbus: true
 apparmor: true
 
+# Runtime access for the non-D-Bus BLE stacks (ble_stack: bumble | bluek):
+#  - host_network: REQUIRED. AF_BLUETOOTH/HCI/L2CAP sockets are bound to the host
+#    network namespace; without it the container gets EAFNOSUPPORT. (Verified in
+#    an addon container: the supervisor/core API and MQTT still work with it on.)
+#  - privileged NET_ADMIN (mgmt control channel / HCI User Channel) and
+#    NET_RAW (raw HCI + L2CAP sockets).
+# All harmless when ble_stack: bleak (default); host_dbus stays for the BlueZ
+# pairing pre-step (and bluek's bluetoothctl pairing). NOTE: "bumble" takes the
+# adapter EXCLUSIVELY (brings it down), removing it from the HA Bluetooth pool —
+# dedicate an adapter to it. "bluek" talks to the kernel BlueZ stack over
+# sockets and does NOT take the adapter down, so it coexists with bluetoothd/HA.
+host_network: true
+privileged:
+  - NET_ADMIN
+  - NET_RAW
+
 homeassistant_api: true # http://supervisor/core/api
 hassio_api: true        # http://supervisor
 
@@ -40,6 +56,7 @@ options:
   watchdog: true
   expire_values_after: 20
   bt_power_cycle: false
+  ble_stack: bleak
 
 schema:
   devices:
@@ -69,6 +86,13 @@ schema:
   verbose_log: "bool"
 
   bt_power_cycle: "bool?"
+
+  # "bleak" = stock BlueZ/D-Bus stack (default); "bumble" = bumble-bleak
+  # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
+  # adapter(s) it uses (brings them down), so they leave the HA Bluetooth pool;
+  # "bluek" talks to the kernel BlueZ stack over L2CAP/mgmt sockets (no D-Bus)
+  # and coexists with bluetoothd — the adapter stays in the HA pool.
+  ble_stack: "list(bleak|bumble|bluek)?"
 
   influxdb_host: "str?"
   influxdb_username: "str?"
