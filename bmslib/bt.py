@@ -136,13 +136,20 @@ def bt_controllers_hci():
 
 _MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 _HCIGETDEVINFO = 0x800448D3  # _IOR('H', 211, int)
+# struct hci_dev_info.type low nibble -> bus name (matches `hciconfig`)
+_HCI_BUS = {0: 'VIRTUAL', 1: 'USB', 2: 'PCCARD', 3: 'UART', 4: 'RS232',
+            5: 'PCI', 6: 'SDIO', 7: 'SPI', 8: 'I2C', 9: 'SMD'}
 
 
-def _hci_addr_for_index(dev_id: int) -> Optional[str]:
-    """Uppercase MAC of controller `dev_id` via the HCIGETDEVINFO ioctl, or None.
+def _hci_dev_info(dev_id: int) -> Optional[dict]:
+    """Query controller `dev_id` via the HCIGETDEVINFO ioctl.
 
-    Uses the ioctl rather than /sys/class/bluetooth/hciN/address (absent on some
-    kernels, e.g. the Raspberry Pi). Needs CAP_NET_RAW to open the HCI socket.
+    Returns {index, name, mac, bus} or None if the controller doesn't exist.
+    Uses the ioctl rather than /sys/class/bluetooth/hciN/* (sysfs is sparse on
+    some kernels, e.g. the Raspberry Pi has no `address`). Needs CAP_NET_RAW.
+
+    struct hci_dev_info layout: dev_id u16 @0, name[8] @2, bdaddr @10, flags @16,
+    type u8 @20 (low nibble = bus).
     """
     if not sys.platform.startswith('linux'):
         return None
@@ -155,15 +162,41 @@ def _hci_addr_for_index(dev_id: int) -> Optional[str]:
     except OSError:
         return None
     try:
-        buf = bytearray(96)  # struct hci_dev_info (~90 bytes); bdaddr@offset 10
+        buf = bytearray(96)
         struct.pack_into('H', buf, 0, dev_id)
         try:
             fcntl.ioctl(sock.fileno(), _HCIGETDEVINFO, buf)
         except OSError:
             return None
-        return ':'.join('%02X' % b for b in reversed(buf[10:16]))
+        name = buf[2:10].split(b'\x00', 1)[0].decode('ascii', 'replace') or ('hci%d' % dev_id)
+        mac = ':'.join('%02X' % b for b in reversed(buf[10:16]))
+        bus = _HCI_BUS.get(buf[20] & 0x0F, 'unknown')
+        return dict(index=dev_id, name=name, mac=mac, bus=bus)
     finally:
         sock.close()
+
+
+def _hci_addr_for_index(dev_id: int) -> Optional[str]:
+    """Uppercase MAC of controller `dev_id`, or None."""
+    info = _hci_dev_info(dev_id)
+    return info['mac'] if info else None
+
+
+def _hci_candidate_indices() -> List[int]:
+    indices = set(range(8))
+    for n in bt_controllers_hci():
+        indices.add(int(n[3:]))
+    return sorted(indices)
+
+
+def bt_adapters_info() -> List[dict]:
+    """List every present controller as {index, name, mac, bus} (USB/UART/...)."""
+    out = []
+    for i in _hci_candidate_indices():
+        info = _hci_dev_info(i)
+        if info:
+            out.append(info)
+    return out
 
 
 def _hci_index_for_mac(mac: str) -> Optional[int]:
@@ -173,37 +206,31 @@ def _hci_index_for_mac(mac: str) -> Optional[int]:
     breaking a MAC-based `adapter:` setting.
     """
     target = mac.upper()
-    indices = set(range(8))
-    for n in bt_controllers_hci():
-        indices.add(int(n[3:]))
-    for dev_id in sorted(indices):
+    for dev_id in _hci_candidate_indices():
         if _hci_addr_for_index(dev_id) == target:
             return dev_id
     return None
 
 
 def normalize_adapter(adapter):
-    """Make an `adapter:` value usable by the active BLE stack.
+    """Resolve an `adapter:` value to the controller name the BLE stacks use.
 
-    A controller MAC (e.g. "0C:EF:15:47:4A:46") is accepted for every stack:
-      * bumble-bleak / bluek resolve a MAC themselves (and re-resolve it on each
-        connect, surviving USB re-enumeration), so pass it through unchanged.
-      * stock bleak's BlueZ backend expects an adapter NAME ("hciN") and would
-        choke on a MAC, so resolve it to the current hciN here.
-    Non-MAC values (None, "hciN", a serial device path) are returned unchanged.
+    A controller MAC (e.g. "0C:EF:15:47:4A:46") is resolved to its current
+    `hciN` via the HCIGETDEVINFO ioctl, for *every* stack: this gives one
+    canonical name to display, scan and connect with, and lets a MAC dedupe
+    against the same controller's `hciN` in the discovery sweep. (A MAC in config
+    is still convenient — a stable identity that re-resolves at startup if the
+    index moved.) Non-MAC values (None, "hciN", a serial path) pass through.
     """
     if not adapter or not _MAC_RE.match(adapter):
         return adapter
-    mod = (getattr(BleakClient, '__module__', '') or '')
-    if mod.startswith('bumble_bleak') or mod.startswith('bluek'):
-        return adapter  # custom stack resolves the MAC itself
     index = _hci_index_for_mac(adapter)
     if index is None:
         logging.warning('adapter %s: no Bluetooth controller with that MAC found, '
-                        'passing through to bleak as-is', adapter)
+                        'using as-is', adapter)
         return adapter
     hci = 'hci%d' % index
-    logging.info('adapter %s resolved to %s for the bleak stack', adapter, hci)
+    logging.info('adapter %s resolved to %s', adapter, hci)
     return hci
 
 
