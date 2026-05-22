@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.95-daly356] (test build)
+
+* DALY: support newer firmware (DL/JHB prefix) GATT layout — service 0000ff00 with
+  ff01=notify / ff02=write, used when the legacy fff1 notify is NotPermitted (#356)
+
 ## [1.94]
 
 * Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)

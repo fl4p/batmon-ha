@@ -130,6 +130,11 @@ class DalyBt(BtBms):
             (17, 15, 48),  # TODO these should be replaced with the actual UUIDs to avoid conflicts with other BMS
             ('0000fff1-0000-1000-8000-00805f9b34fb', '0000fff2-0000-1000-8000-00805f9b34fb',
              '02f00000-0000-0000-0000-00000000ff01'),  # (15,19,31)
+            # Newer DALY firmware (DL/JHB prefix, #356) exposes service 0000ff00 with
+            # ff01=notify(rx) / ff02=write(tx). On these devices the legacy fff1 notify
+            # returns org.bluez.Error.NotPermitted, so we fall through to this layout.
+            ('0000ff01-0000-1000-8000-00805f9b34fb', '0000ff02-0000-1000-8000-00805f9b34fb',
+             '0000ff02-0000-1000-8000-00805f9b34fb'),
         ]
 
         for rx, tx, sx in CHARACTERISTIC_UUIDS:
