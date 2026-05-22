@@ -1,11 +1,15 @@
 import asyncio
+import fcntl
 import logging
 import os
 import re
+import socket
+import struct
 import subprocess
+import sys
 import time
 import uuid
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import backoff
 import bleak.exc
@@ -130,6 +134,79 @@ def bt_controllers_hci():
         return []
 
 
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+_HCIGETDEVINFO = 0x800448D3  # _IOR('H', 211, int)
+
+
+def _hci_addr_for_index(dev_id: int) -> Optional[str]:
+    """Uppercase MAC of controller `dev_id` via the HCIGETDEVINFO ioctl, or None.
+
+    Uses the ioctl rather than /sys/class/bluetooth/hciN/address (absent on some
+    kernels, e.g. the Raspberry Pi). Needs CAP_NET_RAW to open the HCI socket.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    if not hasattr(socket, 'AF_BLUETOOTH'):
+        socket.AF_BLUETOOTH = 31  # type: ignore[attr-defined]
+    if not hasattr(socket, 'BTPROTO_HCI'):
+        socket.BTPROTO_HCI = 1  # type: ignore[attr-defined]
+    try:
+        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
+    except OSError:
+        return None
+    try:
+        buf = bytearray(96)  # struct hci_dev_info (~90 bytes); bdaddr@offset 10
+        struct.pack_into('H', buf, 0, dev_id)
+        try:
+            fcntl.ioctl(sock.fileno(), _HCIGETDEVINFO, buf)
+        except OSError:
+            return None
+        return ':'.join('%02X' % b for b in reversed(buf[10:16]))
+    finally:
+        sock.close()
+
+
+def _hci_index_for_mac(mac: str) -> Optional[int]:
+    """Resolve a controller MAC to its current hci index, or None if not found.
+
+    Re-resolved on demand so the index can change (USB re-enumeration) without
+    breaking a MAC-based `adapter:` setting.
+    """
+    target = mac.upper()
+    indices = set(range(8))
+    for n in bt_controllers_hci():
+        indices.add(int(n[3:]))
+    for dev_id in sorted(indices):
+        if _hci_addr_for_index(dev_id) == target:
+            return dev_id
+    return None
+
+
+def normalize_adapter(adapter):
+    """Make an `adapter:` value usable by the active BLE stack.
+
+    A controller MAC (e.g. "0C:EF:15:47:4A:46") is accepted for every stack:
+      * bumble-bleak / bluek resolve a MAC themselves (and re-resolve it on each
+        connect, surviving USB re-enumeration), so pass it through unchanged.
+      * stock bleak's BlueZ backend expects an adapter NAME ("hciN") and would
+        choke on a MAC, so resolve it to the current hciN here.
+    Non-MAC values (None, "hciN", a serial device path) are returned unchanged.
+    """
+    if not adapter or not _MAC_RE.match(adapter):
+        return adapter
+    mod = (getattr(BleakClient, '__module__', '') or '')
+    if mod.startswith('bumble_bleak') or mod.startswith('bluek'):
+        return adapter  # custom stack resolves the MAC itself
+    index = _hci_index_for_mac(adapter)
+    if index is None:
+        logging.warning('adapter %s: no Bluetooth controller with that MAC found, '
+                        'passing through to bleak as-is', adapter)
+        return adapter
+    hci = 'hci%d' % index
+    logging.info('adapter %s resolved to %s for the bleak stack', adapter, hci)
+    return hci
+
+
 def bt_power(on):
     # sudo rfkill block bluetooth
     # sudo rfkill unblock bluetooth
@@ -185,7 +262,7 @@ class BtBms:
                         # "Disable `install_newer_bleak` option or run `pip3 -r requirements.txt`"
                         , bleak_version())
 
-            self._adapter = adapter
+            self._adapter = normalize_adapter(adapter)
 
             if address == 'serial':
                 from bmslib.wired import SerialBleakClientWrapper
