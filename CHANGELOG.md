@@ -4,6 +4,7 @@
 
 * Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
 * Fix `UnicodeDecodeError` crash on JK BMS device info with non-UTF8 bytes (#349)
+* Harden ANT BMS device-info decode against non-UTF8 bytes
 
 ## [1.93]
 

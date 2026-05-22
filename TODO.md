@@ -1,3 +1,5 @@
+* inspector bms: subscribes to all chars, read all chars and logs their values
+  * then feed this to LLM or so to find the pattern
 * track emptiest cell
 * always install newer bleak. if need to pair, install old bleak
 * Batmon show pw in logs
