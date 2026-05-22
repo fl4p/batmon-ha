@@ -171,6 +171,9 @@ class InfluxDBSink(BmsSampleSink):
             pass
 
     def flush(self):
+        """Drain the queue and attempt one write. Always attempts regardless of
+        the circuit breaker (callers like shutdown want a final flush);
+        _maybe_flush is the backoff-gated periodic entry point."""
         now = time.time()
         batch = []
         while not self.Q.empty() and len(batch) < 20_000:
@@ -189,7 +192,7 @@ class InfluxDBSink(BmsSampleSink):
                 self.cb.on_failure(now)
                 if self.cb.keep_batch_on_failure:
                     for point in batch:
-                        self._enqueue(point)  # replay after backoff
+                        self._enqueue(point)  # re-queue for retry after backoff window
                 elif self.cb.enabled:
                     self._drain_queue()  # never succeeded: drop, stay flat
             self.time_last_flush = now
