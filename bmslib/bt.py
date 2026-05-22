@@ -13,12 +13,11 @@ from typing import Callable, List, Optional, Union
 
 import backoff
 import bleak.exc
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
-from .scan import resolve_address, get_shared_scanner
 from .util import get_logger
 from .wired import SerialServiceStub, SerialCharStub
 
@@ -41,28 +40,31 @@ except ImportError:
 async def bt_discovery(logger, timeout: int = 5, adapter=None):
     ad = adapter or 'default'
     logger.info('BT Discovery (%d seconds, adapter=%s):', timeout, adapter or 'default')
-    from bmslib.scan import get_shared_scanner
-    scanner = await get_shared_scanner(adapter=adapter)
-    await asyncio.sleep(timeout)
-    if hasattr(scanner, 'discovered_devices_and_advertisement_data'):
-        devices = scanner.discovered_devices_and_advertisement_data
-        addr_len = (max(len(d.address) for d, a in devices.values()) + 1) if devices else 20
-        if not devices:
-            logger.info(' - no devices found - ')
+    scanner = BleakScanner(adapter=adapter) if adapter else BleakScanner()
+    await scanner.start()
+    try:
+        await asyncio.sleep(timeout)
+        if hasattr(scanner, 'discovered_devices_and_advertisement_data'):
+            devices = scanner.discovered_devices_and_advertisement_data
+            addr_len = (max(len(d.address) for d, a in devices.values()) + 1) if devices else 20
+            if not devices:
+                logger.info(' - no devices found - ')
+            else:
+                logger.info("%s %*s %26s %4s", ad, addr_len, 'addr', 'name', 'rssi')
+            for d, a in sorted(devices.values(), key=lambda t: t[0].address):
+                logger.info("%s %*s %26s %4s", ad, addr_len, d.address, d.name, a.rssi)
+            return [d for d, a in devices.values()]
         else:
-            logger.info("%s %*s %26s %4s", ad, addr_len, 'addr', 'name', 'rssi')
-        for d, a in sorted(devices.values(), key=lambda t: t[0].address):
-            logger.info("%s %*s %26s %4s", ad, addr_len, d.address, d.name, a.rssi)
-        return [d for d, a in devices.values()]
-    else:
-        devices = scanner.discovered_devices
-        if not devices:
-            logger.info(' - no devices found - ')
-        else:
-            logger.info("BT %18s %26s", 'addr', 'name')
-        for d in devices:
-            logger.info("BT %s %26s", d.address, d.name)
-        return devices
+            devices = scanner.discovered_devices
+            if not devices:
+                logger.info(' - no devices found - ')
+            else:
+                logger.info("BT %18s %26s", 'addr', 'name')
+            for d in devices:
+                logger.info("BT %s %26s", d.address, d.name)
+            return devices
+    finally:
+        await scanner.stop()
 
 
 def bleak_version() -> str:
@@ -407,21 +409,9 @@ class BtBms:
             self.logger.info('connecting %s (%s) adapter=%s timeout=%d', self.name, self.address,
                              self._adapter or "default", timeout)
 
-        # re-create the client because we use our own addr-to-device resolving (with the shared scanner)
-        dev = await resolve_address(self.address, adapter=self._adapter, timeout=timeout)
-        if dev is None:
-            self.logger.warning('%s: device %s not discovered from adapter %r, trying to connect anyway', self.name, self.address,
-                                self._adapter or "default")
-            await (await get_shared_scanner(self._adapter)).stop()
-            # ^ stop scanner to prevent
-            # ^ `bleak.exc.BleakDBusError: [org.bluez.Error.InProgress] Operation already in progress`
-
-        self.client = self._create_client(self.address if dev is None else dev)
-
         try:
             # bleak's connect timeout is buggy (on macOS), so we wrap another timeout
-            # dev = await resolve_address(self.address, self._adapter, timeout=timeout)
-            await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 2)
+            await asyncio.wait_for(self.client.connect(timeout=timeout), timeout=timeout + 1)
         except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
             if BtBms.shutdown:
                 raise
@@ -492,9 +482,9 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        from bmslib.scan import get_shared_scanner
-        scanner = await get_shared_scanner(self._adapter, restart=True)
-        await asyncio.sleep(1)
+        scanner = BleakScanner(adapter=self._adapter) if self._adapter else BleakScanner()
+        self.logger.debug("starting scan")
+        await scanner.start()
 
         attempt = 1
         while True:
@@ -517,7 +507,10 @@ class BtBms:
                     await asyncio.sleep(0.2 * (1.5 ** attempt))
                     attempt += 1
                 else:
+                    await scanner.stop()
                     raise
+
+        await scanner.stop()
 
     async def disconnect(self):
         self._in_disconnect = True
