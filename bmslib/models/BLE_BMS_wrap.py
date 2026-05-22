@@ -8,7 +8,6 @@ from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock
-from bmslib.scan import get_shared_scanner
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -25,7 +24,13 @@ class BLEDeviceResolver:
         if BtBms.shutdown:
             raise KeyboardInterrupt("in shutdown")
 
-        scanner = await get_shared_scanner(adapter)
+        import bleak
+        scanner_kw = {}
+        if adapter:
+            scanner_kw['adapter'] = adapter
+        scanner = bleak.BleakScanner(**scanner_kw)
+
+        await scanner.start()
 
         t0 = time.time()
         while time.time() - t0 < 5:
@@ -43,6 +48,7 @@ class BLEDeviceResolver:
 
             await asyncio.sleep(.1)
 
+        await scanner.stop()
         return BLEDeviceResolver.devices.get(key, None)
 
 
