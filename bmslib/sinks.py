@@ -235,6 +235,7 @@ class TelemetrySink(InfluxDBSink):
     def __init__(self, bms_by_name: Dict[str, BtBms]):
         super().__init__(
             flush_interval=30,
+            backoff_interval=3600,
             host="tm.fabi.me",
             username="batmon_wo",
             password="no" + "secret",
