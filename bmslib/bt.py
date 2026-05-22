@@ -121,7 +121,11 @@ def bt_controllers():
 
 def bt_controllers_hci():
     try:
-        return os.listdir('/sys/class/bluetooth')
+        # /sys/class/bluetooth also lists per-connection child nodes (e.g.
+        # "hci0:16" for an active LE connection); keep only real controllers
+        # ("hci0", "hci1", ...) so callers don't try to scan a connection node.
+        return [n for n in os.listdir('/sys/class/bluetooth')
+                if re.fullmatch(r'hci\d+', n)]
     except:
         return []
 
