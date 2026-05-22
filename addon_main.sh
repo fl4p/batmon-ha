@@ -28,25 +28,35 @@ else
 fi
 
 # Select the BLE stack. "bumble" routes `import bleak` (incl. inside aiobmsble)
-# to bumble-bleak by prepending its bundled shadow dir to PYTHONPATH — no BlueZ
-# or D-Bus, and the adapter is taken via an HCI User Channel. SMP pairing is done
-# inline by bumble-bleak, so the BlueZ pair-only pre-step is skipped. Default
-# "bleak" keeps the stock BlueZ/D-Bus stack (and the forked-bleak pairing step).
+# to a drop-in by prepending that package's bundled shadow dir to PYTHONPATH:
+#   "bumble" -> bumble-bleak (pure-Python HCI, no BlueZ/D-Bus; takes the adapter
+#               via an HCI User Channel; SMP pairing done inline).
+#   "bluek"  -> bluek (talks to the kernel BlueZ stack over L2CAP/mgmt sockets,
+#               no D-Bus; coexists with bluetoothd; pairing via bluetoothctl).
+# Both skip the forked-bleak BlueZ pair-only pre-step. Default "bleak" keeps the
+# stock BlueZ/D-Bus stack (and the forked-bleak pairing step).
 BLE_STACK="$(bashio::config 'ble_stack')"
 SHADOW_PYTHONPATH=""
 
-if [ "$BLE_STACK" = "bumble" ]; then
-  SHADOW_DIR="$(/app/venv/bin/python3 -c 'import bumble_bleak, os; print(os.path.join(os.path.dirname(bumble_bleak.__file__), "_shadow"))' 2>/dev/null)"
+# Map the selected stack to its shadow python package.
+SHADOW_PKG=""
+case "$BLE_STACK" in
+  bumble) SHADOW_PKG="bumble_bleak"; STACK_LABEL="bumble-bleak (no BlueZ/D-Bus, exclusive HCI)" ;;
+  bluek)  SHADOW_PKG="bluek";        STACK_LABEL="bluek (kernel BlueZ sockets, no D-Bus, coexists)" ;;
+esac
+
+if [ -n "$SHADOW_PKG" ]; then
+  SHADOW_DIR="$(/app/venv/bin/python3 -c "import ${SHADOW_PKG} as m, os; print(os.path.join(os.path.dirname(m.__file__), '_shadow'))" 2>/dev/null)"
   if [ -n "$SHADOW_DIR" ] && [ -d "$SHADOW_DIR" ]; then
     SHADOW_PYTHONPATH="$SHADOW_DIR"
-    bashio::log.blue "BLE stack: bumble-bleak (no BlueZ/D-Bus), shadow=$SHADOW_DIR"
+    bashio::log.blue "BLE stack: $STACK_LABEL, shadow=$SHADOW_DIR"
   else
-    bashio::log.warning "ble_stack=bumble but bumble-bleak is not installed; falling back to bleak"
+    bashio::log.warning "ble_stack=$BLE_STACK but $SHADOW_PKG is not installed; falling back to bleak"
     BLE_STACK="bleak"
   fi
 fi
 
-if [ "$BLE_STACK" != "bumble" ]; then
+if [ "$BLE_STACK" = "bleak" ]; then
   bashio::log.blue "BLE stack: bleak (BlueZ/D-Bus)"
   /app/venv_bleak_pairing/bin/python3 main.py pair-only
 fi

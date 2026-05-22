@@ -35,6 +35,12 @@ RUN venv/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' || true
 # (incl. inside aiobmsble) to bumble-bleak. Best-effort install; if it fails the
 # addon simply runs on real bleak.
 RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak' || true
+# bluek (ble_stack: bluek): bleak-compatible stack over the kernel BlueZ stack
+# via L2CAP/mgmt sockets — no D-Bus, no exclusive HCI, coexists with bluetoothd.
+# Pure-Python, no deps. Activated at runtime via PYTHONPATH (addon_main.sh), same
+# as bumble-bleak. Best-effort: if the install fails, ble_stack=bluek warns and
+# falls back to bleak.
+RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek' || true
 RUN . venv/bin/activate
 
 RUN chmod a+x addon_main.sh

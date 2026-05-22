@@ -74,7 +74,8 @@ def bt_stack_version():
     # noinspection PyPep8
     # When the `bleak` shadow (bumble-bleak) is active there is no BlueZ in the
     # path, so report the bumble stack instead of shelling out to bluetoothctl.
-    if BleakClient.__module__.startswith('bumble_bleak'):
+    mod = BleakClient.__module__
+    if mod.startswith('bumble_bleak'):
         try:
             import bumble
             return 'bumble-v%s' % bumble.__version__
@@ -86,7 +87,10 @@ def bt_stack_version():
         out, _ = p.communicate()
         s = re.search(b"(\\d+).(\\d+)", out.strip(b"'"))
         bluez_version = tuple(map(int, s.groups()))
-        return 'bluez-v%i.%i' % bluez_version
+        ver = 'bluez-v%i.%i' % bluez_version
+        # bluek (ble_stack: bluek) talks to this same kernel BlueZ stack over
+        # sockets, so the BlueZ version is meaningful — just tag it.
+        return ('bluek/' + ver) if mod.startswith('bluek') else ver
     except:
         # get_platform_client_backend_type
         return '? (%s)' % BleakClient.__name__
