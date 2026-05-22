@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.94]
+
+* Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
+* Fix `UnicodeDecodeError` crash on JK BMS device info with non-UTF8 bytes (#349)
+
 ## [1.93]
 
 * Fixd Dockerfile BUILD_ARGS
