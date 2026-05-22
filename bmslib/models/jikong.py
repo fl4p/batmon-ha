@@ -31,7 +31,9 @@ def calc_crc(message_bytes):
 
 
 def read_str(buf, offset, encoding='utf-8'):
-    return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding)
+    # errors='replace': some JK firmwares put non-UTF8 bytes in the device-info
+    # block (#349: 0xbf), which must not crash the sampling loop over a version string.
+    return buf[offset:buf.index(0x00, offset)].decode(encoding=encoding, errors='replace')
 
 
 def _jk_command(address, value: list = ()):

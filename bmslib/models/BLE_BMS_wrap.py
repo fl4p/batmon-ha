@@ -153,9 +153,11 @@ class BMS():
         self._last_sample = sample
         try:
             return BmsSample(
-                soc=sample['battery_level'],
-                voltage=sample['voltage'],
-                current=sample['current'],
+                # Active balancers and meters (e.g. EK-24S4EB #357, CW20 #338) report no
+                # battery_level/current. Use nan defaults so they don't crash the sampling loop.
+                soc=sample.get('battery_level', math.nan),
+                voltage=sample.get('voltage', math.nan),
+                current=sample.get('current', math.nan),
                 power=sample.get('power', math.nan),
                 capacity=sample.get('cycle_charge', math.nan),  # todo ?
                 cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
