@@ -280,6 +280,14 @@ async def main():
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
         except:
             logger.warning("failed to init telemetry", exc_info=True)
+    else:
+        logger.info(
+            "Anonymous telemetry is OFF. If enabled, batmon sends battery "
+            "samples plus anonymized identifiers (hashed device address, random "
+            "user id, hashed disk id) to help improve the addon - no MAC "
+            "address, no location, no personal data. Enable with "
+            "'telemetry: true' in the addon options."
+        )
 
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
