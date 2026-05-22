@@ -1,12 +1,21 @@
 # Changelog
 
+## [1.93]
+
+* Fixd Dockerfile BUILD_ARGS
+* Add new bluetooth backend `bumble` for exclusive adapter access (use a dedicated ble adapter)
+* Add new bluetooth backend `bluek` for direct BlueZ access (Linux only, bypass DBus)
+* Reverted connection logic back to v1.90 (most stable)
+
 ## [1.92]
+
 * Connecting logic using shared scanner
 * Rename meters sensor names
 * Changed order of options schema so BMS alias is now visible in visual editor
 * Show RSSI during ble scanﬂ
 
 ## [1.91]
+
 * `aioblebms` v0.12
 * fix numeric precision
 * implement shared scanners and connect lock
@@ -17,41 +26,48 @@
 * lazy imports of bms specific code
 
 ## [1.90]
+
 * fix `mqtt_util` import
 
 ## [1.89]
+
 * fix `NoneType doesn't define round method`
 
 ## [1.88]
+
 * Add litime BMS (thanks @KOSSOII)
 * Fix temperature reading on first sample
 * Fix: add `adapter` to options schema
 
-
 ## [1.87]
+
 * Fix PSK (pin) pairing (victron)
 
 ## [1.86]
+
 * Fix display precision in HA (you might need to remove the device from MQTT integration and restart batmon)
 
-
 ## [1.85]
-* Fix `'BleakClient' object has no attribute 'get_services'` 
+
+* Fix `'BleakClient' object has no attribute 'get_services'`
 * Fix `MQTT_HOST: unbound variable` (https://github.com/fl4p/batmon-ha/issues/314)
 
 ## [1.84]
+
 * Upgrade Bleak version 1.1.0
 * Fix MQTT port not being queried from Supervisor API
 * Fix cell voltages for BMS connected through BMS_BLE
-* Fix add-on startup with older versions of `bashio` (https://github.com/fl4p/batmon-ha/issues/296) 
+* Fix add-on startup with older versions of `bashio` (https://github.com/fl4p/batmon-ha/issues/296)
 * JK: increase timeout to 12 seconds
 * JK: fix char specifier for newer version (https://github.com/fl4p/batmon-ha/issues/310)
 * Add exponential wait on sampling error
 
 ## [1.83]
+
 * Fix supervolt characteristic specifiers
 * JK-PB2A16S20: add float_charge switch
-* Add wrapper for ([BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) wrapper) to enable support for Seplos, CBT BMS and many more
+* Add wrapper for ([BMS_BLE-HA](https://github.com/patman15/BMS_BLE-HA) wrapper) to enable support for Seplos, CBT BMS
+  and many more
 * Ignore influxdb setup error
 * Ignore pip return code when installing special pairing version of bleak
 * Fix add-on start-up bashio script if supervisor API is not reachable
@@ -59,11 +75,13 @@
 * Pin python to version 3.12 in Dockerfile
 
 ## [1.82]
+
 * Rollback bleak version to 0.20.2 (https://github.com/fl4p/batmon-ha/issues/275)
 * Fix JK frame version detection
 * Supervolt: add char UUIDs for newer version
 
 ## [1.81]
+
 * Create separate venv with a modified bleak version for pairing.
   Speeds up start-up and doesn't break with lost internet connection
 * Pin bleak version to  `0.22.3`
