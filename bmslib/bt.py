@@ -72,6 +72,14 @@ def bleak_version() -> str:
 
 def bt_stack_version():
     # noinspection PyPep8
+    # When the `bleak` shadow (bumble-bleak) is active there is no BlueZ in the
+    # path, so report the bumble stack instead of shelling out to bluetoothctl.
+    if BleakClient.__module__.startswith('bumble_bleak'):
+        try:
+            import bumble
+            return 'bumble-v%s' % bumble.__version__
+        except Exception:
+            return 'bumble (%s)' % BleakClient.__name__
     try:
         # get BlueZ version
         p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
@@ -94,11 +102,18 @@ def _run_cmd(cmd):
 
 
 def bt_controllers():
-    controllers = []
-    for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
-        s = lin.decode('utf-8').split()
-        controllers.append((s[1], ' '.join(s[2:])))
-    return controllers
+    # Prefer bluetoothctl (gives MAC + friendly name), but fall back to the
+    # kernel's /sys list when BlueZ isn't available (e.g. the bumble-bleak stack
+    # owns the adapter via an HCI socket and bluetoothd is stopped).
+    try:
+        controllers = []
+        for lin in _run_cmd(["bluetoothctl", "list"]).splitlines(keepends=False):
+            s = lin.decode('utf-8').split()
+            controllers.append((s[1], ' '.join(s[2:])))
+        return controllers
+    except Exception as e:
+        logging.debug('bluetoothctl list unavailable (%s), using /sys/class/bluetooth', e)
+        return [(hci, hci) for hci in bt_controllers_hci()]
 
 def bt_controllers_hci():
     try:
@@ -111,6 +126,12 @@ def bt_power(on):
     # sudo rfkill block bluetooth
     # sudo rfkill unblock bluetooth
     # sudo systemctl start bluetooth
+    # Best-effort: this drives BlueZ via bluetoothctl. With the bumble-bleak
+    # stack the adapter is powered by bumble itself, and bluetoothctl is absent,
+    # so never let failures here crash the caller.
+    if BleakClient.__module__.startswith('bumble_bleak'):
+        logging.debug('bt_power(%s) skipped: bumble-bleak manages adapter power', on)
+        return
     try:
         for addr, name in bt_controllers():
             logging.info('Powering %s controller %s (%s)', 'on' if on else 'off', name, addr)
@@ -120,8 +141,7 @@ def bt_power(on):
             except Exception as e:
                 logging.error('failed to set power state for controller %s (%s): %s', name, addr, e)
     except Exception as e:
-        logging.error('Failed to list controllers %s', e)
-        _run_cmd(["bluetoothctl", "power", "on" if on else "off"])
+        logging.error('Failed to power controllers via bluetoothctl: %s', e)
 
 
 class BtBms:

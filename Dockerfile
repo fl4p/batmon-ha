@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM ghcr.io/home-assistant/base:latest
 
 WORKDIR /app
 
@@ -29,6 +28,13 @@ RUN venv/bin/pip3 install -r requirements.txt
 RUN venv/bin/pip3 install influxdb || true
 #RUN venv/bin/pip3 install "aiobmsble==0.11.0" || true
 RUN venv/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' || true
+# bumble-bleak: bleak-compatible BLE stack without BlueZ/D-Bus. Installed only in
+# the main `venv` (NOT venv_bleak_pairing, which keeps forked bleak for PSK
+# pairing). Activation is opt-in at runtime: addon_main.sh prepends the shadow
+# dir to PYTHONPATH when `ble_stack: bumble`, which redirects `import bleak`
+# (incl. inside aiobmsble) to bumble-bleak. Best-effort install; if it fails the
+# addon simply runs on real bleak.
+RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak' || true
 RUN . venv/bin/activate
 
 RUN chmod a+x addon_main.sh
