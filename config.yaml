@@ -57,6 +57,7 @@ options:
   expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
+  telemetry: false
 
 schema:
   devices:
