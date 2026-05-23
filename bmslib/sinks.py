@@ -263,7 +263,10 @@ class TelemetrySink(InfluxDBSink):
 
     def publish_voltages(self, bms_name, voltages: List[int], short=True):
         # tags_ = dict(uid=self.uid, did=self.did)
-        super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
+        try:
+            super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
+        except Exception:
+            pass
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
         raise NotImplementedError()

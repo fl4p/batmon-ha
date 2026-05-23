@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("influxdb")
 
-from bmslib.sinks import InfluxDBSink
+from bmslib.sinks import InfluxDBSink, TelemetrySink
 
 
 def _make_sink(backoff_interval):
@@ -48,6 +48,18 @@ def test_buffers_and_replays_after_a_success():
     sink._enqueue({"measurement": "m", "fields": {"v": 2.0}})
     sink.flush()                      # fails, but batch is re-enqueued
     assert sink.Q.qsize() == 1        # buffered for replay
+
+
+def test_telemetry_publish_voltages_swallows_unknown_bms():
+    # publish_sample and publish_voltages should both be safe against a bms_name
+    # not registered in addrh_by_name (e.g., a BMS created after sink init).
+    t = TelemetrySink(bms_by_name={})  # empty -> any name lookup will KeyError
+    t.silent = True
+    # Neither should raise:
+    t.publish_voltages("not_registered", [3300, 3301, 3302])
+    # Symmetric: publish_sample already had try/except, verify both stay quiet
+    from bmslib.bms import BmsSample
+    t.publish_sample("not_registered", BmsSample(voltage=26.6, current=-0.1))
 
 
 def test_disabled_breaker_preserves_drop_on_failure():
