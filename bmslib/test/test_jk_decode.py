@@ -70,6 +70,40 @@ def test_jk_issue365_capacity_from_settings_frame():
     assert sample.aged_capacity == pytest.approx(exp["aged_capacity"], abs=0.005)
 
 
+def test_jk_syssi_ble_16s():
+    """16-cell pack frame harvested from syssi's ``jk_bms_ble.cpp`` annotated
+    examples (lines 430-432). This is a JK02_24S frame variant — every field
+    here cross-checks batmon-ha's decoder against syssi's per-byte annotations.
+    """
+    fx = jk_fixtures.SYSSI_BLE_16S
+    bms = _make_jk(fx)
+    sample = bms._decode_sample(
+        bytearray(fx["status_frame"]), t_buf=time.time(), has_float_charger=False
+    )
+    exp = fx["expected"]
+
+    assert sample.voltage == pytest.approx(exp["voltage"], abs=0.005)
+    assert sample.current == pytest.approx(exp["current"], abs=0.005)
+    assert sample.soc == pytest.approx(exp["soc"], abs=0.05)
+    assert sample.charge == pytest.approx(exp["charge"], abs=0.005)
+    assert sample.capacity == pytest.approx(exp["capacity"], abs=0.005)
+    assert sample.total_charge_throughput == pytest.approx(
+        exp["total_charge_throughput"], abs=0.005
+    )
+    assert sample.num_cycles == exp["num_cycles"]
+    assert list(sample.temperatures) == pytest.approx(exp["temperatures"], abs=0.05)
+    assert sample.mos_temperature == pytest.approx(exp["mos_temperature"], abs=0.05)
+    assert sample.balance_current == pytest.approx(exp["balance_current"], abs=0.001)
+    assert sample.switches == exp["switches"]
+    assert sample.uptime == pytest.approx(exp["uptime"], abs=1.0)
+
+    status = fx["status_frame"]
+    voltages = [
+        int.from_bytes(status[6 + i * 2: 6 + i * 2 + 2], "little") for i in range(16)
+    ]
+    assert voltages == exp["voltages_mv"]
+
+
 def test_jk_new11_16s_cell_voltages():
     """11.x firmware 16-cell frame: validate the cell-voltage block layout.
 
