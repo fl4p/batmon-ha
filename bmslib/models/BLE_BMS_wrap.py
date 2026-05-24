@@ -161,14 +161,19 @@ class BMS():
             #   cycle_capacity  [Wh] energy throughput (UNIT MISMATCH — batmon's
             #                        total_charge_throughput is Ah; only some
             #                        plugins like cw20 misuse this key for Ah)
+            # Sign convention: aiobmsble is positive=charging; batmon's BmsSample
+            # is negative=charging (Current out of the battery). Negate current
+            # and power on the way in.
             # Active balancers and meters (e.g. EK-24S4EB #357, CW20 #338) report
             # no battery_level/current; nan defaults keep the sampling loop alive.
+            current = sample.get('current', math.nan)
+            power = sample.get('power', math.nan)
             return BmsSample(
                 soc=sample.get('battery_level', math.nan),
                 soh=sample.get('battery_health', math.nan),
                 voltage=sample.get('voltage', math.nan),
-                current=sample.get('current', math.nan),
-                power=sample.get('power', math.nan),
+                current=-current if not math.isnan(current) else math.nan,
+                power=-power if not math.isnan(power) else math.nan,
                 charge=sample.get('cycle_charge', math.nan),
                 capacity=sample.get('design_capacity', math.nan),
                 total_charge_throughput=sample.get('cycle_capacity', math.nan),
