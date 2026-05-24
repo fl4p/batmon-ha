@@ -90,7 +90,10 @@ class BMS(BaseBMS):
             self._log.debug("Frame too short: %s", len(data))
             return
         self._frame = bytearray(data)
-        self._msg_event.set()
+        # aiobmsble renamed _data_event → _msg_event; support both
+        event = getattr(self, "_msg_event", None) or getattr(self, "_data_event", None)
+        if event is not None:
+            event.set()
 
     @staticmethod
     def _within_physical_limits(sample: BMSSample) -> bool:
