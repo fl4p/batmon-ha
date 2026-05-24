@@ -56,6 +56,23 @@ concatenate them before replaying.
 
 ---
 
+## JK / Jikong UART (`4E 57 …` TLV, separate from BLE) — `jk_uart_fixtures.py`
+
+| Fixture | Type | Source |
+|---|---|---|
+| `MPP_SOLAR_14S` | harvested | [`jblance/mpp-solar` — `mppsolar/protocols/jkserial.py`](https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkserial.py) `COMMANDS["getBalancerData"]["test_responses"][1]`. Real 285-byte capture from a "JK_B1A20S15P" 14S pack on firmware 11.XW_S11.261, fully charged (SOC 100%, current 4.53 A charging). CRC byte `0x51D6` matches `sum-mod-65536` of the preceding 283 bytes. Apache-2.0. |
+
+Protocol references:
+[`syssi/esphome-jk-bms` — `components/jk_bms/jk_bms.cpp`](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms/jk_bms.cpp) (per-register annotations, 0x79 cell array + 0x80-0xC0 tagged registers),
+[`components/jk_modbus/jk_modbus.cpp`](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_modbus/jk_modbus.cpp) (framing + CRC algorithm),
+[`Louisvdw/dbus-serialbattery` — `etc/dbus-serialbattery/bms/jkbms.py`](https://github.com/Louisvdw/dbus-serialbattery/blob/master/etc/dbus-serialbattery/bms/jkbms.py) (tag-search decoder pattern + the `0x84` current sign convention: high-bit set = charging).
+
+This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
+300-byte frames in `jk_fixtures.py`). batmon-ha's `JKUart` class in
+`bmslib/models/jikong_uart.py` is independent of `JKBt`.
+
+---
+
 ## Daly (legacy `A5 80 …` protocol) — `daly_fixtures.py`
 
 | Fixture | Type | Source |
