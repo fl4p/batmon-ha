@@ -10,6 +10,13 @@ from bmslib.test.data import daly_uart_fixtures as fx
 
 # === Request builder ========================================================
 
+def test_baudrate_is_9600():
+    """maland16/daly-bms-uart and the Daly v1.2 protocol PDF both specify
+    9600 8N1 for the UART link. JK UART uses 115200 — these must not get
+    confused by sharing the same transport class."""
+    assert du.DalyUart.BAUDRATE == 9600
+
+
 def test_build_command_uses_address_4():
     """UART path must set the host-address byte to 4 (USB/RS485)."""
     msg = du.build_command(0x90)

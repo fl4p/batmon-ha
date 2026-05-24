@@ -93,10 +93,16 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 
 The decisive on-wire difference between BLE and UART is the host-address
 byte at frame position 1 — **4** for USB / RS485, **8** for BLE. Verified
-in three independent references:
-- [`dreadnought/python-daly-bms` ``dalybms/daly_bms.py``](https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py) (``"4 for RS485, 8 for UART/Bluetooth"``)
+in four independent references:
+- [`maland16/daly-bms-uart`](https://github.com/maland16/daly-bms-uart) — Arduino library; init sets ``my_txBuffer[1] = 0x40`` (host=4) and runs the link at ``9600 8N1`` (this is also where the baud rate comes from — `DalyUart.BAUDRATE = 9600`).
+- [`dreadnought/python-daly-bms`](https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py) (``"4 for RS485, 8 for UART/Bluetooth"``)
 - [`syssi/esphome-daly-bms`](https://github.com/syssi/esphome-daly-bms) (README + component header)
 - ``bmslib/models/daly.py`` inline comment (``# 4 = USB, 8 = Bluetooth``)
+
+Payload offsets (voltage at bytes 0-1, current at 4-5, SOC at 6-7,
+checksum = sum-mod-256 over the first 12 bytes) match maland16's
+``getPackMeasurements()`` byte-for-byte, so the assumption that response
+framing is identical between BLE and UART is no longer just an assumption.
 
 Because the response format is byte-identical, ``DalyUart`` re-uses every
 ``DalyBt`` decoder (``_fetch_status``, ``fetch_states``, ``fetch_voltages``,

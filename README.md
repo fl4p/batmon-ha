@@ -146,10 +146,12 @@ Currently supported:
   (`55 AA EB 90 …`). Cross-referenced against `syssi/esphome-jk-bms`,
   `jblance/mpp-solar`, and `Louisvdw/dbus-serialbattery`.
 
-* `daly_uart` — Daly BMS over RS485 / USB-UART. Same `A5 …` 13-byte frame
+* `daly_uart` — Daly BMS over RS485 / USB-UART (**9600 8N1**, per the Daly
+  protocol PDF + `maland16/daly-bms-uart`). Same `A5 …` 13-byte frame
   format as Daly BLE; the only on-wire difference is the host-address byte
   (4 = USB/RS485, 8 = BLE). Cross-referenced against
-  `dreadnought/python-daly-bms` and `syssi/esphome-daly-bms`.
+  `maland16/daly-bms-uart`, `dreadnought/python-daly-bms`, and
+  `syssi/esphome-daly-bms`.
 
 Example config:
 
@@ -165,7 +167,8 @@ Notes:
 * `address: serial` tells batmon to use the wired transport instead of
   Bluetooth. `adapter` is then the serial port path (`/dev/ttyUSB0`,
   `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
-* The serial port runs at 115200 baud, which matches the JK default.
+* The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`
+  uses 9600 8N1 (both match the respective vendor protocol docs).
 * On Linux you may need to add your user to the `dialout` group or run the
   HA add-on with privileged access to read `/dev/ttyUSB*`.
 * This path is independent of the BLE backend selected by `ble_stack`, so

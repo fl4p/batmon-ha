@@ -6,9 +6,9 @@ from bmslib.wired.transport import SerialTransport, StdioTransport
 
 class SerialBleakClientWrapper(object):
 
-    def __init__(self, address, **kwargs):
+    def __init__(self, address, baudrate: int = 115200, **kwargs):
         self.address = address
-        self.t = SerialTransport(address.split(':')[-1])
+        self.t = SerialTransport(address.split(':')[-1], baudrate=baudrate)
         # self.t = StdioTransport()
         self.callback = {}
         self.services = []

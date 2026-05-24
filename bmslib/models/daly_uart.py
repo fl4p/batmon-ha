@@ -22,6 +22,11 @@ Two practical UART quirks the BLE class doesn't need to handle:
      a serial char stub and call it a day.
 
 References cross-checked against:
+- maland16/daly-bms-uart — Arduino library; UART-only, so the closest
+  authoritative source for the wire details. Init sets ``my_txBuffer[1] =
+  0x40`` (host=4); link runs at ``9600 8N1``; checksum = sum-mod-256 over
+  the first 12 bytes; cmd 0x90 reads voltage at payload bytes 0-1,
+  current at 4-5, SOC at 6-7 — identical to the BLE path in ``daly.py``.
 - syssi/esphome-daly-bms (RS485 framing + addressing)
 - dreadnought/python-daly-bms (cmd 0x90/0x93/0x94/0x95 layouts)
 - Daly UART v1.2 PDF (forums.ni.com mirror)
@@ -87,6 +92,9 @@ class DalyUart(DalyBt):
     """
 
     WIRE_ADDRESS = 4  # USB / RS485
+    # Daly UART is 9600 8N1 per the protocol PDF + maland16/daly-bms-uart.
+    # The JK UART path uses 115200 (BtBms default).
+    BAUDRATE = 9600
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)

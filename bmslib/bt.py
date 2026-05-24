@@ -296,7 +296,8 @@ class BtBms:
             if address == 'serial':
                 from bmslib.wired import SerialBleakClientWrapper
                 assert adapter, "You need to specify a serial device (adapter)"
-                self.client = SerialBleakClientWrapper(adapter)
+                self.client = SerialBleakClientWrapper(
+                    adapter, baudrate=getattr(self, 'BAUDRATE', 115200))
             else:
                 self.client = self._create_client(address)
 
@@ -307,6 +308,10 @@ class BtBms:
             otherwise start_notify will fail on re-connect
             """
             self._pending_disconnect_call = False
+
+    @property
+    def slug(self):
+        return type(self).__name__.lower()
 
     def _create_client(self, addr_or_device):
         kwargs = {}
