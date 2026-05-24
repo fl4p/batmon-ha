@@ -160,7 +160,11 @@ class BMS():
                 current=sample.get('current', math.nan),
                 power=sample.get('power', math.nan),
                 capacity=sample.get('cycle_charge', math.nan),  # todo ?
-                cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
+                # aiobmsble's 'cycle_capacity' is documented as Wh, but batmon's
+                # field is Ah — leaving the mapping as-is (matches pre-rename
+                # behavior); upstream decoders that need accurate throughput
+                # should populate this from an Ah source.
+                total_charge_throughput=sample.get('cycle_capacity', math.nan),
                 num_cycles=sample.get('cycles', math.nan),
                 balance_current=sample.get('balance_current', math.nan),
                 temperatures=[sample.get('temperature')],  # todo?

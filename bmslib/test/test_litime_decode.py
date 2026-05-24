@@ -23,7 +23,7 @@ def test_litime_decode(fx):
     assert sample.charge == pytest.approx(exp["charge"], abs=0.01)
     assert sample.capacity == pytest.approx(exp["capacity"], abs=0.01)
     assert sample.num_cycles == exp["num_cycles"]
-    assert sample.cycle_capacity == exp["cycle_capacity"]
+    assert sample.total_charge_throughput == exp["total_charge_throughput"]
     assert list(sample.temperatures) == exp["temperatures"]
     assert sample.mos_temperature == exp["mos_temperature"]
 

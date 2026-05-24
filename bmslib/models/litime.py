@@ -68,7 +68,7 @@ class LitimeBt(BtBms):
             num_cycles=int.from_bytes(buf[96:100], byteorder='little'),
             temperatures= [cels_temperature],
             mos_temperature = int.from_bytes(buf[54:56], byteorder='little'),
-            cycle_capacity = int.from_bytes(buf[100:104], byteorder='little'),
+            total_charge_throughput = int.from_bytes(buf[100:104], byteorder='little'),
             switches= None
         )
 

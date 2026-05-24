@@ -30,7 +30,7 @@ def test_jk_legacy_8s_fw_pre11():
     assert sample.soc == pytest.approx(exp["soc"], abs=0.05)
     assert sample.charge == pytest.approx(exp["charge"], abs=0.005)
     assert sample.capacity == pytest.approx(exp["capacity"], abs=0.005)
-    assert sample.cycle_capacity == pytest.approx(exp["cycle_capacity"], abs=0.005)
+    assert sample.total_charge_throughput == pytest.approx(exp["total_charge_throughput"], abs=0.005)
     assert sample.num_cycles == exp["num_cycles"]
     assert list(sample.temperatures) == pytest.approx(exp["temperatures"], abs=0.05)
     assert sample.mos_temperature == pytest.approx(exp["mos_temperature"], abs=0.05)
@@ -64,7 +64,7 @@ def test_jk_issue365_capacity_from_settings_frame():
     assert sample.soc == exp["soc"]
     assert sample.charge == pytest.approx(exp["charge"], abs=0.005)
     assert sample.capacity == pytest.approx(exp["capacity"], abs=0.005)
-    assert sample.cycle_capacity == pytest.approx(exp["cycle_capacity"], abs=0.005)
+    assert sample.total_charge_throughput == pytest.approx(exp["total_charge_throughput"], abs=0.005)
     assert sample.num_cycles == exp["num_cycles"]
 
 

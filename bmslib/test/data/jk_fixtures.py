@@ -40,7 +40,7 @@ LEGACY_8S = dict(
         soc=65.0,
         charge=181.036,
         capacity=275.0,
-        cycle_capacity=22.173,
+        total_charge_throughput=22.173,
         num_cycles=0,
         temperatures=[26.8, 24.8],
         mos_temperature=28.3,
@@ -74,7 +74,7 @@ ISSUE_365_B2A8S20P = dict(
         soc=66,
         charge=165.5,
         capacity=320.0,  # the fix: was 251.235 before
-        cycle_capacity=107478.918,  # lifetime cumulative, 427 cycles × ~250-320 Ah
+        total_charge_throughput=107478.918,  # lifetime ∫|I|dt, 427 cycles × ~250-320 Ah
         num_cycles=427,
     ),
 )

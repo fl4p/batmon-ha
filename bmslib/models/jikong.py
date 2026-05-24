@@ -235,7 +235,7 @@ class JKBt(BtBms):
             # aged capacity, while ours is the user-configured nominal (#365).
             soc=float(buf[141 + offset]),
 
-            cycle_capacity=f32u(154 + offset),  # total charge TODO rename cycle charge
+            total_charge_throughput=f32u(154 + offset),  # lifetime ∫|I|dt, Ah
             # capacity: user-configured pack capacity from the settings frame.
             # The cell-info frame at offset 146+offset is an internal BMS-aged
             # value that diverges from the configured Ah on 11.x firmware (#365).

@@ -217,7 +217,7 @@ class AntBt(BtBms):
             # power=
             charge=charge,
             capacity=capacity,
-            cycle_capacity=cycle_charge,
+            total_charge_throughput=cycle_charge,
             # num_cycles=0,
             soc=soc,
 

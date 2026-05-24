@@ -22,7 +22,7 @@ INLINE_8S = dict(
         current=0.0,
         charge=100.0,
         capacity=100.0,
-        cycle_capacity=12.965,
+        total_charge_throughput=12.965,
         soc=100.0,
         mos_temperature=28,
         switches=dict(charge=False, discharge=True),

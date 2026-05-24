@@ -138,7 +138,7 @@ def sum_parallel(samples: Iterable[BmsSample]) -> BmsSample:
         power=sum(s.power for s in samples),
         charge=sum(s.charge for s in samples),
         capacity=sum(s.capacity for s in samples),
-        cycle_capacity=sum(s.cycle_capacity for s in samples),
+        total_charge_throughput=sum(s.total_charge_throughput for s in samples),
         num_cycles=statistics.mean(s.num_cycles for s in samples),
         soc=sum(s.soc * s.capacity for s in samples) / sum(s.capacity for s in samples),
         temperatures=sum(((s.temperatures or []) for s in samples), []),
