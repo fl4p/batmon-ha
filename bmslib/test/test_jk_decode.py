@@ -47,6 +47,27 @@ def test_jk_legacy_8s_fw_pre11():
     assert voltages == exp["voltages_mv"]
 
 
+def test_jk_issue365_capacity_from_settings_frame():
+    """Issue #365: ``capacity`` must come from the settings frame (user-set Ah),
+    not the cell-info frame, which on 11.x firmware holds a BMS-aged value
+    that drifts away from what the official JK app displays.
+    """
+    fx = jk_fixtures.ISSUE_365_B2A8S20P
+    bms = _make_jk(fx)
+    sample = bms._decode_sample(
+        bytearray(fx["status_frame"]), t_buf=time.time(), has_float_charger=False
+    )
+    exp = fx["expected"]
+
+    assert sample.voltage == pytest.approx(exp["voltage"], abs=0.005)
+    assert sample.current == pytest.approx(exp["current"], abs=0.005)
+    assert sample.soc == exp["soc"]
+    assert sample.charge == pytest.approx(exp["charge"], abs=0.005)
+    assert sample.capacity == pytest.approx(exp["capacity"], abs=0.005)
+    assert sample.cycle_capacity == pytest.approx(exp["cycle_capacity"], abs=0.005)
+    assert sample.num_cycles == exp["num_cycles"]
+
+
 def test_jk_new11_16s_cell_voltages():
     """11.x firmware 16-cell frame: validate the cell-voltage block layout.
 

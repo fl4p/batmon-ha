@@ -42,6 +42,7 @@ Other promising JBD captures I logged but didn't bake in yet:
 |---|---|---|
 | `LEGACY_8S` | inline | `bmslib/models/dummy.py:128` — `JKDummy.MSGS[1]` (the `not is_new_11x` branch). 300-byte cell-info frame for an 8S LFP pack; settings frame from `MSGS[0]`. |
 | `NEW11_16S` | inline | `bmslib/models/dummy.py:131` — `JKDummy.MSGS[1]` (the `is_new_11x` branch). 16S 11.x firmware. Only cell voltages are pinned because the dummy's settings frame is the 8-cell one. |
+| `ISSUE_365_B2A8S20P` | harvested | [#365 comment](https://github.com/fl4p/batmon-ha/issues/365#issuecomment-4528134871) — albertdb's JK_B2A8S20P fw 11.50 capture. BLE notifications stitched into 300-byte 0x01 and 0x02 frames (`jk_issue365_settings.bin`, `jk_issue365_status.bin`); both CRC-verified. Pins the fix: cell-info offset 178 reports a BMS-aged 251 Ah while settings offset 130 holds the user-set 320 Ah. SOH=79%, SOC=66%, 427 cycles. |
 
 Higher-quality JK fixtures I noted for future work (assembled 300-byte frames
 posted by real users):

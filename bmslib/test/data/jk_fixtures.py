@@ -4,12 +4,19 @@ Two real captures from ``bmslib/models/dummy.py``'s ``JKDummy.MSGS``:
   - 8s firmware < 11.x (legacy 24-cell offset layout)
   - 16s firmware 11.x (32-cell offset layout, the JK11_32S protocol variant)
 
+Plus one real BLE capture from a JK_B2A8S20P (fw 11.50) posted in issue #365,
+used to lock in the "capacity = settings-frame value, not cell-info value" fix.
+
 The dummy bytes are baked into batmon-ha to simulate a real device; the
 expected values here are what ``JKBt._decode_sample`` actually produces, pinning
 the current behavior of the decoder against accidental regressions.
 """
 
+from pathlib import Path
+
 from bmslib.models.dummy import JKDummy
+
+_DATA_DIR = Path(__file__).parent
 
 _LEGACY = JKDummy(is_new_11x=False).MSGS
 _NEW11 = JKDummy(is_new_11x=True).MSGS
@@ -26,7 +33,11 @@ LEGACY_8S = dict(
     expected=dict(
         voltage=26.911,
         current=-12.219,
-        soc=65.83,
+        # BMS-authoritative integer SOC; previously this fixture pinned 65.83
+        # (the value BmsSample re-derived from charge/capacity for higher
+        # precision), but the JK BMS reports SOC against its internal aged
+        # capacity, so we now trust the raw byte (#365).
+        soc=65.0,
         charge=181.036,
         capacity=275.0,
         cycle_capacity=22.173,
@@ -50,5 +61,23 @@ NEW11_16S = dict(
     ],
 )
 
+ISSUE_365_B2A8S20P = dict(
+    name="jk_issue365_b2a8s20p_fw_11_50",
+    settings_frame=bytes((_DATA_DIR / "jk_issue365_settings.bin").read_bytes()),
+    status_frame=bytes((_DATA_DIR / "jk_issue365_status.bin").read_bytes()),
+    is_new_11fw_32s=True,
+    # User-set 320 Ah, but cell-info offset 178 holds a BMS-aged 251.235 Ah
+    # (~ SOH 79% × 320). The decoder must read capacity from the settings frame.
+    expected=dict(
+        voltage=13.405,
+        current=-33.292,
+        soc=66,
+        charge=165.5,
+        capacity=320.0,  # the fix: was 251.235 before
+        cycle_capacity=107478.918,  # lifetime cumulative, 427 cycles × ~250-320 Ah
+        num_cycles=427,
+    ),
+)
 
-ALL = [LEGACY_8S]
+
+ALL = [LEGACY_8S, ISSUE_365_B2A8S20P]
