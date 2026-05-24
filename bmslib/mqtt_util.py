@@ -179,6 +179,20 @@ sample_desc = {
         "state_class": None,
         "unit_of_measurement": "Ah"
     },
+    "soc/aged_capacity": {
+        "field": "aged_capacity",
+        "device_class": None,
+        "state_class": None,
+        "unit_of_measurement": "Ah",
+        "precision": 2,
+        "icon": "battery-heart-variant"},
+    "soc/soh": {
+        "field": "soh",
+        "device_class": None,
+        "state_class": "measurement",
+        "unit_of_measurement": "%",
+        "precision": 1,
+        "icon": "battery-heart-variant"},
     # Topic key kept as ``soc/cycle_capacity`` (and therefore HA's unique_id /
     # entity_id) so existing user automations and long-term statistics keep
     # working across the rename. The HA display name is auto-derived from

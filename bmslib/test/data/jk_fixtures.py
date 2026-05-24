@@ -76,6 +76,8 @@ ISSUE_365_B2A8S20P = dict(
         capacity=320.0,  # the fix: was 251.235 before
         total_charge_throughput=107478.918,  # lifetime ∫|I|dt, 427 cycles × ~250-320 Ah
         num_cycles=427,
+        soh=79.0,
+        aged_capacity=251.235,  # BMS-reported (offset 178); ≈ capacity × soh/100 = 252.8
     ),
 )
 

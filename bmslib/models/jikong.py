@@ -227,6 +227,15 @@ class JKBt(BtBms):
         if self.is_new_11fw_32s:
             temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
 
+        # SOH and BMS-internal aged capacity only meaningful on 11.x firmware.
+        # On legacy 24s firmware, offset 146 just mirrors the nominal capacity
+        # and there's no SOH byte, so leave both fields nan.
+        soh = float('nan')
+        aged_capacity = float('nan')
+        if self.is_new_11fw_32s:
+            soh = float(buf[158 + offset])  # SOH at 158+offset = 190, 1 byte, %
+            aged_capacity = f32u(146 + offset)  # BMS-computed effective Ah
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
@@ -241,6 +250,8 @@ class JKBt(BtBms):
             # value that diverges from the configured Ah on 11.x firmware (#365).
             capacity=int.from_bytes(buf_set[130:134], byteorder='little', signed=False) * 1e-3,
             charge=f32u(142 + offset),  # "remaining capacity"
+            soh=soh,
+            aged_capacity=aged_capacity,
 
             temperatures=temperatures,
             mos_temperature=i16((112 if self.is_new_11fw_32s else 134) + offset) / 10,
