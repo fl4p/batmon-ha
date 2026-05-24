@@ -29,19 +29,20 @@ def calc_crc(message_bytes):
     return sum(message_bytes) & 0xFF
 
 
-def daly_command_message(command: int, extra=""):
+def daly_command_message(command: int, extra="", address: int = 8):
     """
     Takes the command ID and formats a request message
 
     :param command: Command ID ("90" - "98")
     :param extra:
+    :param address: Daly host-address byte. 4 = USB / RS485, 8 = Bluetooth.
+        Defaults to 8 (BLE) for backward compatibility.
     :return: Request message as bytes
     """
     # 95 -> a58095080000000000000000c2
 
     assert isinstance(command, int)
-
-    address = 8  # 4 = USB, 8 = Bluetooth
+    assert address in (4, 8), "Daly host address must be 4 (USB) or 8 (BLE)"
 
     message = "a5%i0%02x08%s" % (address, command, extra)
     #          "a5%i0%s  08%s"
@@ -59,6 +60,9 @@ class DalyBt(BtBms):
 
     TEMPERATURE_STEP = 1
     TEMPERATURE_SMOOTH = 40
+
+    # Daly host-address byte (4 = USB / RS485, 8 = BLE). DalyUart overrides.
+    WIRE_ADDRESS = 8
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
@@ -162,7 +166,7 @@ class DalyBt(BtBms):
         await super().disconnect()
 
     async def _q(self, command: int, num_responses: int = 1):
-        msg = daly_command_message(command)
+        msg = daly_command_message(command, address=self.WIRE_ADDRESS)
         if num_responses > 1:
             self._fetch_nr[command] = [None] * num_responses
         else:

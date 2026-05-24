@@ -34,7 +34,7 @@ read-only access.
 batmon device connectors:
 
 * JK BMS / jikong with JK02 protocol (`jk` over BLE, `jk_uart` over RS485 — see [Serial / RS485](#serial--rs485))
-* Daly BMS (`daly`, `daly2`, `daly_ble`)
+* Daly BMS (`daly`, `daly2`, `daly_ble` over BLE, `daly_uart` over RS485 — see [Serial / RS485](#serial--rs485))
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * CBT Power / Creabest BMS (`cbtpwr`)
@@ -146,6 +146,11 @@ Currently supported:
   (`55 AA EB 90 …`). Cross-referenced against `syssi/esphome-jk-bms`,
   `jblance/mpp-solar`, and `Louisvdw/dbus-serialbattery`.
 
+* `daly_uart` — Daly BMS over RS485 / USB-UART. Same `A5 …` 13-byte frame
+  format as Daly BLE; the only on-wire difference is the host-address byte
+  (4 = USB/RS485, 8 = BLE). Cross-referenced against
+  `dreadnought/python-daly-bms` and `syssi/esphome-daly-bms`.
+
 Example config:
 
 ```yaml
@@ -250,7 +255,7 @@ peaks, leading to even greater error.
 * use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
 * Implement BMS data push (JK)
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
-* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK is done (`jk_uart`); JBD, Daly, ANT still TODO
+* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK (`jk_uart`) and Daly (`daly_uart`) are done; JBD, ANT still TODO
 * Implement old JK04?
 * web interface (export, import bms meter data)
 

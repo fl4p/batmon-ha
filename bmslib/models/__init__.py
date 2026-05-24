@@ -32,6 +32,7 @@ def get_bms_model_class(name):
         jk_24s='models.jikong.JKBt_24s',  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
         jk_32s='models.jikong.JKBt_32s',
         jk_uart='models.jikong_uart.JKUart',  # RS485/UART TLV protocol; use with address=serial
+        daly_uart='models.daly_uart.DalyUart',  # RS485/USB-UART; same A5/04 frames as BLE
         ant='models.ant.AntBt',
         victron='models.victron.SmartShuntBt',
         group_parallel='bmslib.group.VirtualGroupBms',
@@ -82,7 +83,8 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     if not addr or addr.startswith('#'):
         return None
 
-    bms_class = get_bms_model_class(dev['type'])
+    slug = dev['type']
+    bms_class = get_bms_model_class(slug)
 
     if bms_class is None:
         logger.warning('Unknown device type %s', dev)

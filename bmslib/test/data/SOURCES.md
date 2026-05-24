@@ -84,6 +84,27 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 
 ---
 
+## Daly UART / RS485 (`A5 04 …` requests, `A5 01 …` responses) — `daly_uart_fixtures.py`
+
+| Fixture | Type | Source |
+|---|---|---|
+| `SOC_26V4`, `STATUS_CHARGING`, `STATES_8S` | wrapped-inline | Same 8-byte payloads as the BLE fixtures (`STATUS_DSG_ON`, `STATES_8CELL`, `SOC_SYNTHETIC_…`), wrapped in the full 13-byte ``A5 01 cmd 08 <payload> <crc>`` envelope the BMS sends on the wire. The wire format is identical between BLE and UART. |
+| `REQUEST_FRAMES` | derived | The four 13-byte read commands (`0x90`, `0x93`, `0x94`, `0x95`) produced by ``daly_command_message(cmd, address=4)``. |
+
+The decisive on-wire difference between BLE and UART is the host-address
+byte at frame position 1 — **4** for USB / RS485, **8** for BLE. Verified
+in three independent references:
+- [`dreadnought/python-daly-bms` ``dalybms/daly_bms.py``](https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py) (``"4 for RS485, 8 for UART/Bluetooth"``)
+- [`syssi/esphome-daly-bms`](https://github.com/syssi/esphome-daly-bms) (README + component header)
+- ``bmslib/models/daly.py`` inline comment (``# 4 = USB, 8 = Bluetooth``)
+
+Because the response format is byte-identical, ``DalyUart`` re-uses every
+``DalyBt`` decoder (``_fetch_status``, ``fetch_states``, ``fetch_voltages``,
+``fetch_temperatures``, ``fetch_soc``) via subclassing; only the
+request-builder address byte and the BLE connect/notify glue change.
+
+---
+
 ## Daly v2 (Modbus over BLE, `D2 03 …`) — `daly2_fixtures.py`
 
 | Fixture | Type | Source |
