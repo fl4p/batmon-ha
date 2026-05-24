@@ -21,6 +21,7 @@ def test_ant_decode(fx):
     assert sample.capacity == pytest.approx(exp["capacity"], abs=0.05)
     assert sample.total_charge_throughput == pytest.approx(exp["total_charge_throughput"], abs=0.01)
     assert sample.soc == pytest.approx(exp["soc"], abs=0.5)
+    assert sample.soh == pytest.approx(exp["soh"], abs=0.5)
     assert sample.mos_temperature == exp["mos_temperature"]
     assert sample.switches == exp["switches"]
 

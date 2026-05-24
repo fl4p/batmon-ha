@@ -409,7 +409,11 @@ class SuperVoltBt(BtBms):
             soc=self.soc,
 
             charge=self.remainingAh,
-            capacity=self.completeAh,
+            # completeAh is the BMS's learned/aged effective capacity; designedAh
+            # is the user-configured nominal. Match JK convention (#365): capacity
+            # = nominal, aged_capacity = aged. BmsSample derives soh from the ratio.
+            capacity=self.designedAh,
+            aged_capacity=self.completeAh,
 
             num_cycles=self.dischargeNumber,
 

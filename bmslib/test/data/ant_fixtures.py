@@ -24,6 +24,7 @@ INLINE_8S = dict(
         capacity=100.0,
         total_charge_throughput=12.965,
         soc=100.0,
+        soh=100.0,  # fresh battery in this capture; raw u16 at SOC+2 = 100
         mos_temperature=28,
         switches=dict(charge=False, discharge=True),
         cell_voltages_mv=[3540, 3541, 3541, 3541, 3541, 3540, 3541, 3541],

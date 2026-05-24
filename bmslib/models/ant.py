@@ -182,7 +182,10 @@ class AntBt(BtBms):
         soc = u16(offset)
         offset += 2
 
-        # soh = u16(offset)  # state of health
+        # SOH lives directly after SOC (matches aiobmsble ant_bms layout and
+        # the prior commented-out hint here). Verified against ant_8s_2temp
+        # fixture: byte at this offset reads 100, matching a fresh-battery SOH.
+        soh = u16(offset)
         offset += 2
 
         # dsg mos state
@@ -220,6 +223,7 @@ class AntBt(BtBms):
             total_charge_throughput=cycle_charge,
             # num_cycles=0,
             soc=soc,
+            soh=soh,
 
             temperatures=temperatures,
             mos_temperature=mos_temp,
