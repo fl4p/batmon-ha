@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "1.94"
+version: "1.95-daly356"
 slug: "batmon"
 init: false
 host_dbus: true
@@ -57,6 +57,7 @@ options:
   expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
+#  telemetry: false
 
 schema:
   devices:

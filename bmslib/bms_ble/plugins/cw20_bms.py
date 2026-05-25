@@ -89,8 +89,11 @@ class BMS(BaseBMS):
         if len(data) < BMS.MIN_FRAME_LEN:
             self._log.debug("Frame too short: %s", len(data))
             return
-        self._data = bytearray(data)
-        self._data_event.set()
+        self._frame = bytearray(data)
+        # aiobmsble renamed _data_event → _msg_event; support both
+        event = getattr(self, "_msg_event", None) or getattr(self, "_data_event", None)
+        if event is not None:
+            event.set()
 
     @staticmethod
     def _within_physical_limits(sample: BMSSample) -> bool:
@@ -108,14 +111,14 @@ class BMS(BaseBMS):
 
     async def _async_update(self) -> BMSSample:
         """Parse stored frame into BMSsample."""
-        if not self._data:
+        if not self._frame:
             return {}
 
         # спершу пробуємо макет B (2b V/I, 3b capacity, 4b energy)
-        sample = BMS._decode_data(self._FIELDS_B, self._data)
+        sample = BMS._decode_data(self._FIELDS_B, self._frame)
         if not self._within_physical_limits(sample):
             # fallback на макет A
-            sample = BMS._decode_data(self._FIELDS_A, self._data)
+            sample = BMS._decode_data(self._FIELDS_A, self._frame)
 
         v = sample.get("voltage")
         i = sample.get("current")

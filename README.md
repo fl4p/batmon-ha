@@ -33,8 +33,8 @@ read-only access.
 
 batmon device connectors:
 
-* JK BMS / jikong with JK02 protocol (`jk`)
-* Daly BMS (`daly`, `daly2`, `daly_ble`)
+* JK BMS / jikong with JK02 protocol (`jk` over BLE, `jk_uart` over RS485 — see [Serial / RS485](#serial--rs485))
+* Daly BMS (`daly`, `daly2`, `daly_ble` over BLE, `daly_uart` over RS485 — see [Serial / RS485](#serial--rs485))
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * CBT Power / Creabest BMS (`cbtpwr`)
@@ -134,6 +134,74 @@ For verbose logs of particular BMS add `debug: true`.
   =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
 * type `daly2` is for a newer Daly BMS version which is untested
 
+## Serial / RS485
+
+Some BMS expose an RS485 (or TTL UART) port in addition to BLE. Batmon can
+read those directly using a USB-to-RS485 adapter, no Bluetooth needed.
+
+Currently supported:
+
+* `jk_uart` — JK / Jikong BMS over RS485. Speaks the genuine UART TLV
+  protocol (`4E 57 …`), which is a different wire format from the BLE one
+  (`55 AA EB 90 …`). Cross-referenced against `syssi/esphome-jk-bms`,
+  `jblance/mpp-solar`, and `Louisvdw/dbus-serialbattery`.
+
+* `daly_uart` — Daly BMS over RS485 / USB-UART (**9600 8N1**, per the Daly
+  protocol PDF + `maland16/daly-bms-uart`). Same `A5 …` 13-byte frame
+  format as Daly BLE; the only on-wire difference is the host-address byte
+  (4 = USB/RS485, 8 = BLE). Cross-referenced against
+  `maland16/daly-bms-uart`, `dreadnought/python-daly-bms`, and
+  `syssi/esphome-daly-bms`.
+
+Example config:
+
+```yaml
+- address: serial
+  adapter: /dev/ttyUSB0   # serial port path; required when address=serial
+  type: jk_uart
+  alias: battery1
+```
+
+Notes:
+
+* `address: serial` tells batmon to use the wired transport instead of
+  Bluetooth. `adapter` is then the serial port path (`/dev/ttyUSB0`,
+  `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
+* The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`
+  uses 9600 8N1 (both match the respective vendor protocol docs).
+* On Linux you may need to add your user to the `dialout` group or run the
+  HA add-on with privileged access to read `/dev/ttyUSB*`.
+* This path is independent of the BLE backend selected by `ble_stack`, so
+  it works even when Bluetooth is disabled.
+
+If you'd like another BMS family added over RS485, open an issue with a
+captured frame (`tcpdump` of the USB-serial line, or a wireshark log from
+the vendor's PC tool).
+
+## BLE Stack
+
+Batmon can talk to your BMS through one of three Bluetooth backends. Pick one with the global
+`ble_stack` option:
+
+* **`bleak`** (default) — uses [bleak](https://pypi.org/project/bleak/), a cross-platform Python
+  BLE library that wraps the OS's native stack: BlueZ on Linux, CoreBluetooth on macOS, WinRT on
+  Windows. On Linux (and therefore inside the HA add-on) it talks to `bluetoothd` over D-Bus and
+  coexists with Home Assistant's Bluetooth integration — the adapter stays in the HA Bluetooth
+  pool and is shared. This is the most compatible option and what you want unless you're chasing a
+  specific problem.
+* **`bumble`** — uses [bumble](https://github.com/google/bumble), a pure-Python BLE stack that
+  talks HCI directly (no BlueZ, no D-Bus). Cross-platform (Linux/macOS/Windows via HCI socket,
+  USB dongle, or serial transports). Always needs **exclusive HCI access** to its controller —
+  on Linux that means bumble brings the BlueZ-managed adapter down, so it leaves the HA
+  Bluetooth pool. You need to dedicate one adapter to it and disable it in HA under Integrations / Bluetooh;
+  Use it for best reliability and if you have many BMS.
+* **`bluek`** — talks to the kernel BlueZ stack directly over L2CAP and `mgmt` sockets (no D-Bus).
+  Coexists with `bluetoothd`, so the adapter stays in the HA Bluetooth pool. Useful when D-Bus is
+  the bottleneck but you don't want to take the adapter away from HA. **Linux only** (BlueZ is
+  Linux-specific).
+
+`bumble` and `bluek` are experimental — try `bleak` first.
+
 ## Energy Meters
 
 Batmon implements energy metering by computing the integral of power values from the BMS with the trapezoidal rule. You
@@ -173,6 +241,8 @@ peaks, leading to even greater error.
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related
   issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* Try another `ble_stack`: `bumble` for exclusive adapter access (you need to remove it from HA Integration first), or
+  `bluez` to bypass D-Bus on Linux
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
 * to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
@@ -189,7 +259,8 @@ peaks, leading to even greater error.
 * use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
 * Implement BMS data push (JK)
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
-* Implement RS485 [#22](https://github.com/fl4p/batmon-ha/issues/22)
+* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK (`jk_uart`) and Daly (
+  `daly_uart`) are done; JBD, ANT still TODO
 * Implement old JK04?
 * web interface (export, import bms meter data)
 

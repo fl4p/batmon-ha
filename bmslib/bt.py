@@ -67,6 +67,66 @@ async def bt_discovery(logger, timeout: int = 5, adapter=None):
         await scanner.stop()
 
 
+async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: float = 3.0) -> dict:
+    """Quick scan + adapter snapshot to attach to a connect/sampling error.
+
+    Returns {address, rssi, name, seen, others, adapter, adapters}; also logs a
+    one-line summary so the error context is visible without a verbose_log dive.
+    """
+    ad = adapter or 'default'
+    adapters = bt_adapters_info()
+    target = (address or '').upper()
+    result = dict(address=address, rssi=None, name=None, seen=False,
+                  others=0, adapter=ad, adapters=adapters)
+
+    try:
+        scanner = BleakScanner(adapter=adapter) if adapter else BleakScanner()
+    except Exception as e:
+        logger.warning('bt_diagnostics: scanner init failed (%s); adapter=%s adapters=%s',
+                       str(e) or type(e).__name__, ad, adapters)
+        return result
+
+    try:
+        await scanner.start()
+    except Exception as e:
+        logger.warning('bt_diagnostics: scanner start failed (%s); adapter=%s adapters=%s',
+                       str(e) or type(e).__name__, ad, adapters)
+        return result
+
+    try:
+        await asyncio.sleep(timeout)
+        if hasattr(scanner, 'discovered_devices_and_advertisement_data'):
+            devices = scanner.discovered_devices_and_advertisement_data
+            result['others'] = len(devices)
+            for d, a in devices.values():
+                if d.address and d.address.upper() == target:
+                    result['seen'] = True
+                    result['rssi'] = a.rssi
+                    result['name'] = d.name
+                    break
+        else:
+            devices = scanner.discovered_devices
+            result['others'] = len(devices)
+            for d in devices:
+                if d.address and d.address.upper() == target:
+                    result['seen'] = True
+                    result['name'] = d.name
+                    break
+    finally:
+        try:
+            await scanner.stop()
+        except Exception:
+            pass
+
+    if result['seen']:
+        logger.info('bt_diagnostics %s: seen rssi=%s name=%r adapter=%s (%d devices in range)',
+                    address, result['rssi'], result['name'], ad, result['others'])
+    else:
+        logger.info('bt_diagnostics %s: NOT seen during %.1fs scan on adapter=%s (%d other devices in range, adapters=%s)',
+                    address, timeout, ad, result['others'], adapters)
+    return result
+
+
 def bleak_version() -> str:
     try:
         import bleak
@@ -296,7 +356,8 @@ class BtBms:
             if address == 'serial':
                 from bmslib.wired import SerialBleakClientWrapper
                 assert adapter, "You need to specify a serial device (adapter)"
-                self.client = SerialBleakClientWrapper(adapter)
+                self.client = SerialBleakClientWrapper(
+                    adapter, baudrate=getattr(self, 'BAUDRATE', 115200))
             else:
                 self.client = self._create_client(address)
 
@@ -307,6 +368,10 @@ class BtBms:
             otherwise start_notify will fail on re-connect
             """
             self._pending_disconnect_call = False
+
+    @property
+    def slug(self):
+        return type(self).__name__.lower()
 
     def _create_client(self, addr_or_device):
         kwargs = {}

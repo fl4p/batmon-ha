@@ -164,7 +164,6 @@ class JKBt(BtBms):
         buf, _ = self._resp_table[0x01]
         self.num_cells = buf[114]
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
-        # self.capacity = int.from_bytes(buf[130:134], byteorder='little', signed=False) * 0.001
 
     async def disconnect(self):
         await self.client.stop_notify(self.char_handle_notify)
@@ -228,14 +227,31 @@ class JKBt(BtBms):
         if self.is_new_11fw_32s:
             temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
 
+        # SOH and BMS-internal aged capacity only meaningful on 11.x firmware.
+        # On legacy 24s firmware, offset 146 just mirrors the nominal capacity
+        # and there's no SOH byte, so leave both fields nan.
+        soh = float('nan')
+        aged_capacity = float('nan')
+        if self.is_new_11fw_32s:
+            soh = float(buf[158 + offset])  # SOH at 158+offset = 190, 1 byte, %
+            aged_capacity = f32u(146 + offset)  # BMS-computed effective Ah
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
-            soc=buf[141 + offset],
+            # SOC: BMS-authoritative. Pass as float so BmsSample doesn't recompute
+            # it from charge/capacity — those are relative to the BMS's internal
+            # aged capacity, while ours is the user-configured nominal (#365).
+            soc=float(buf[141 + offset]),
 
-            cycle_capacity=f32u(154 + offset),  # total charge TODO rename cycle charge
-            capacity=f32u(146 + offset),  # computed capacity (starts at self.capacity, which is user-defined),
+            total_charge_throughput=f32u(154 + offset),  # lifetime ∫|I|dt, Ah
+            # capacity: user-configured pack capacity from the settings frame.
+            # The cell-info frame at offset 146+offset is an internal BMS-aged
+            # value that diverges from the configured Ah on 11.x firmware (#365).
+            capacity=int.from_bytes(buf_set[130:134], byteorder='little', signed=False) * 1e-3,
             charge=f32u(142 + offset),  # "remaining capacity"
+            soh=soh,
+            aged_capacity=aged_capacity,
 
             temperatures=temperatures,
             mos_temperature=i16((112 if self.is_new_11fw_32s else 134) + offset) / 10,

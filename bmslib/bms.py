@@ -33,8 +33,9 @@ class PowerMonitorSample:
 
 class BmsSample:
     def __init__(self, voltage, current, power=math.nan,
-                 charge=math.nan, capacity=math.nan, cycle_capacity=math.nan,
+                 charge=math.nan, capacity=math.nan, total_charge_throughput=math.nan,
                  num_cycles=math.nan, soc=math.nan,
+                 soh=math.nan, aged_capacity=math.nan,
                  balance_current=math.nan,
                  temperatures: List[float] = None,
                  mos_temperature: float = math.nan,
@@ -45,10 +46,12 @@ class BmsSample:
         :param voltage:
         :param current: Current out of the battery (negative=charging, positive=discharging)
         :param charge: The charge available in Ah, aka remaining capacity, between 0 and `capacity`
-        :param capacity: The capacity of the battery in Ah
-        :param cycle_capacity: Total absolute charge meter (coulomb counter). Increases during charge and discharge. Can tell you the battery cycles (num_cycles = cycle_capacity/2/capacity). A better name would be cycle_charge. This is not well defined.
+        :param capacity: Nominal pack capacity in Ah, as configured by the user
+        :param total_charge_throughput: Lifetime accumulated charge throughput in Ah, ``∫|I|dt`` — increases during both charge and discharge. Equivalent cycles ≈ total_charge_throughput / 2 / capacity. (Previously named ``cycle_capacity``, which was misleading: it's a charge counter in Ah, not a capacity.)
         :param num_cycles:
         :param soc: in % (0-100)
+        :param soh: State of Health in % (0-100). Ratio of present effective capacity to nominal capacity. Reported directly by most BMSes.
+        :param aged_capacity: Present effective pack capacity in Ah after aging (``capacity × soh/100``). If not provided but ``soh`` and ``capacity`` are known, it's derived; if not provided but ``capacity`` is known and ``soh`` isn't, ``soh`` is derived from this instead. The BMS may report this slightly differently from the SOH-derived value (different rounding / calibration); decoders should prefer the BMS-reported value when available.
         :param balance_current:
         :param temperatures:
         :param mos_temperature:
@@ -68,10 +71,21 @@ class BmsSample:
 
         # assert math.isfinite(soc)
 
+        # Derive SOH↔aged_capacity if only one was provided and capacity is known.
+        # Both may also be set explicitly by decoders (e.g. JK BMS exposes both
+        # separately and they don't perfectly round-trip the formula).
+        if capacity > 0:
+            if math.isnan(aged_capacity) and not math.isnan(soh):
+                aged_capacity = capacity * soh / 100
+            elif math.isnan(soh) and not math.isnan(aged_capacity):
+                soh = aged_capacity / capacity * 100
+
         self.charge: float = charge
         self.capacity: float = capacity
         self.soc: float = soc
-        self.cycle_capacity: float = cycle_capacity
+        self.soh: float = soh
+        self.aged_capacity: float = aged_capacity
+        self.total_charge_throughput: float = total_charge_throughput
         self.num_cycles: float = num_cycles
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature

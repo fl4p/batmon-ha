@@ -274,12 +274,20 @@ async def main():
         except Exception as e:
             logger.warning('Failed to load influxdb sink: %s', e)
 
-    if user_config.get("telemetry"):
+    if user_config.get("telemetry") == False:
+        logger.debug(
+            "Anonymous telemetry is OFF. If enabled, batmon sends battery "
+            "samples plus anonymized identifiers (hashed device address, random "
+            "user id, hashed disk id) to help improve the new Impedance / SoH algorithm - no MAC "
+            "address, no location, no personal data. Enable with "
+            "'telemetry: true' in the addon options."
+        )
+    else:
         try:
             from bmslib.sinks import TelemetrySink
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
         except:
-            logger.warning("failed to init telemetry", exc_info=True)
+            logger.debug("failed to init telemetry", exc_info=True)
 
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,

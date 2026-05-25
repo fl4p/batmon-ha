@@ -13,9 +13,10 @@ from typing import List, Dict
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
+from bmslib.circuit_breaker import CircuitBreaker
+from bmslib.mqtt_util import remove_none_values, remove_equal_values
 from bmslib.sampling import BmsSampleSink
 from bmslib.util import get_logger, sid_generator
-from bmslib.mqtt_util import remove_none_values, remove_equal_values
 
 logger = get_logger()
 
@@ -36,7 +37,7 @@ def flatten(dictionary, parent_key='', separator='_'):
 
 
 class InfluxDBSink(BmsSampleSink):
-    def __init__(self, flush_interval=2, **kwargs):
+    def __init__(self, flush_interval=2, backoff_interval=0, **kwargs):
         import influxdb
         self.influxdb_client = influxdb.InfluxDBClient(**kwargs)
 
@@ -62,6 +63,7 @@ class InfluxDBSink(BmsSampleSink):
         self._last_volt: Dict[str, List[int]] = {}
         self.flush_interval = flush_interval
         self.silent = False
+        self.cb = CircuitBreaker(backoff_interval)
 
         self._prev_fields = {}
 
@@ -96,7 +98,7 @@ class InfluxDBSink(BmsSampleSink):
                 "fields": fields,
                 "tags": dict(device=bms_name)
             }
-            self.Q.put(point)
+            self._enqueue(point)
 
         for i in range(len(voltages)):
             if voltages[i] == last_volt[i] and not pub_anyway:
@@ -110,7 +112,7 @@ class InfluxDBSink(BmsSampleSink):
                     "fields": dict(voltage=int(round(voltages[i]))),
                     "tags": dict(device=bms_name, cell_index=i),
                 }
-                self.Q.put(point)
+                self._enqueue(point)
 
         self._maybe_flush()
 
@@ -137,7 +139,7 @@ class InfluxDBSink(BmsSampleSink):
         }
         if tags:
             point['tags'].update(tags)
-        self.Q.put(point)
+        self._enqueue(point)
         self._maybe_flush()
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
@@ -148,26 +150,56 @@ class InfluxDBSink(BmsSampleSink):
             "fields": {(f"meter_%s" % name): round(value, 5) for name, value in readings.items()},
             "tags": dict(device=bms_name)
         }
-        self.Q.put(point)
+        self._enqueue(point)
+
+    def _enqueue(self, point):
+        # During an outage backoff with no prior success, drop new points so
+        # memory stays flat (the server may be unreachable for this user).
+        if self.cb.enabled and not self.cb.keep_batch_on_failure \
+                and not self.cb.should_attempt():
+            return
+        try:
+            self.Q.put_nowait(point)
+        except queue.Full:
+            pass  # bounded memory: drop the newest point
+
+    def _drain_queue(self):
+        try:
+            while True:
+                self.Q.get_nowait()
+        except queue.Empty:
+            pass
 
     def flush(self):
+        """Drain the queue and attempt one write. Always attempts regardless of
+        the circuit breaker (callers like shutdown want a final flush);
+        _maybe_flush is the backoff-gated periodic entry point."""
+        now = time.time()
         batch = []
         while not self.Q.empty() and len(batch) < 20_000:
             batch.append(self.Q.get())
-        # self.influxdb_client.write_points(batch, time_precision='ms')
         if batch:
             try:
                 res = self.influxdb_client.write_points(batch, time_precision='ms')
             except:
                 res = False
                 not self.silent and logger.error(sys.exc_info(), exc_info=True)
-            if not res and not self.silent:
-                logger.error('Failed to write points to influxdb')
-            self.time_last_flush = time.time()
+            if res:
+                self.cb.on_success(now)
+            else:
+                if not self.silent:
+                    logger.error('Failed to write points to influxdb')
+                self.cb.on_failure(now)
+                if self.cb.keep_batch_on_failure:
+                    for point in batch:
+                        self._enqueue(point)  # re-queue for retry after backoff window
+                elif self.cb.enabled:
+                    self._drain_queue()  # never succeeded: drop, stay flat
+            self.time_last_flush = now
 
     def _maybe_flush(self):
         now = time.time()
-        if now - self.time_last_flush > self.flush_interval:
+        if now - self.time_last_flush > self.flush_interval and self.cb.should_attempt(now):
             self.flush()
 
 
@@ -203,6 +235,7 @@ class TelemetrySink(InfluxDBSink):
     def __init__(self, bms_by_name: Dict[str, BtBms]):
         super().__init__(
             flush_interval=30,
+            backoff_interval=3600,
             host="tm.fabi.me",
             username="batmon_wo",
             password="no" + "secret",
@@ -216,21 +249,27 @@ class TelemetrySink(InfluxDBSink):
             self.did = None
 
         self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
+        self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
         logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.addrh_by_name)
         self.silent = True
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        tags_ = dict(uid=self.uid, did=self.did)
+        tags_ = dict(uid=self.uid, did=self.did, nameh=self.addrh_by_name[bms_name])
         tags and tags_.update(tags)
         try:
-            super().publish_sample(self.addrh_by_name[bms_name], sample, tags=tags_)
-        except:
+            InfluxDBSink.publish_sample(self,
+                self.slug_by_name[bms_name],
+                sample, tags=tags_)
+        except Exception as e:
             pass
 
     def publish_voltages(self, bms_name, voltages: List[int], short=True):
         # tags_ = dict(uid=self.uid, did=self.did)
-        super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
+        try:
+            super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
+        except Exception:
+            pass
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
         raise NotImplementedError()

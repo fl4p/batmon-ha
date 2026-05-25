@@ -26,8 +26,9 @@ class Transport(object):
 
 class SerialTransport(Transport):
 
-    def __init__(self, port):
+    def __init__(self, port, baudrate: int = 115200):
         self.port = port
+        self.baudrate = baudrate
         self.ser: Optional[serial.Serial] = None
 
     def open(self):
@@ -37,8 +38,8 @@ class SerialTransport(Transport):
             if not files:
                 raise FileNotFoundError('Serial port device not found: {}'.format(port))
             port =files[0]
-        logger.info(f'opening serial port {port}')
-        self.ser = serial.Serial(port, baudrate=115200)
+        logger.info(f'opening serial port {port} @ {self.baudrate} baud')
+        self.ser = serial.Serial(port, baudrate=self.baudrate)
 
     def close(self):
         if self.ser is not None:

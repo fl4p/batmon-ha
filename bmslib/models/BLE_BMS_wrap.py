@@ -84,6 +84,10 @@ class BMS():
         # self.ble_bms._reconnect = not keep
 
     @property
+    def slug(self):
+        return self._type
+
+    @property
     def is_connected(self):
         return self.ble_bms and self.ble_bms._client.is_connected
 
@@ -152,19 +156,34 @@ class BMS():
         sample: BMSSample = await self.ble_bms.async_update()
         self._last_sample = sample
         try:
+            # aiobmsble BMSSample → batmon BmsSample mapping. Field semantics
+            # per aiobmsble/__init__.py (BMSValue / BMSSample TypedDict):
+            #   battery_level   [%]  SoC
+            #   battery_health  [%]  SoH
+            #   cycle_charge    [Ah] remaining charge in pack (NOT a capacity)
+            #   design_capacity [Ah] nominal pack capacity
+            #   cycle_capacity  [Wh] energy throughput (UNIT MISMATCH — batmon's
+            #                        total_charge_throughput is Ah; only some
+            #                        plugins like cw20 misuse this key for Ah)
+            # Sign convention: aiobmsble is positive=charging; batmon's BmsSample
+            # is negative=charging (Current out of the battery). Negate current
+            # and power on the way in.
+            # Active balancers and meters (e.g. EK-24S4EB #357, CW20 #338) report
+            # no battery_level/current; nan defaults keep the sampling loop alive.
+            current = sample.get('current', math.nan)
+            power = sample.get('power', math.nan)
             return BmsSample(
-                # Active balancers and meters (e.g. EK-24S4EB #357, CW20 #338) report no
-                # battery_level/current. Use nan defaults so they don't crash the sampling loop.
                 soc=sample.get('battery_level', math.nan),
+                soh=sample.get('battery_health', math.nan),
                 voltage=sample.get('voltage', math.nan),
-                current=sample.get('current', math.nan),
-                power=sample.get('power', math.nan),
-                capacity=sample.get('cycle_charge', math.nan),  # todo ?
-                cycle_capacity=sample.get('cycle_capacity', math.nan),  # todo ?
+                current=-current if not math.isnan(current) else math.nan,
+                power=-power if not math.isnan(power) else math.nan,
+                charge=sample.get('cycle_charge', math.nan),
+                capacity=sample.get('design_capacity', math.nan),
+                total_charge_throughput=sample.get('cycle_capacity', math.nan),
                 num_cycles=sample.get('cycles', math.nan),
                 balance_current=sample.get('balance_current', math.nan),
-                temperatures=[sample.get('temperature')],  # todo?
-                # mos_temperature=
+                temperatures=[sample.get('temperature')],
             )
         except Exception as e:
             raise ValueError('invalid ble_bms sample %r' % sample) from e
