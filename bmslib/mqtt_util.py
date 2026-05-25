@@ -287,6 +287,10 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                            device_info: DeviceInfo = None):
     discovery_msg = {}
 
+    # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
+    # any '/' in the alias. State topics below keep the original slashes.
+    node_id = device_topic.replace('/', '_')
+
     device_json = {
         "identifiers": [(device_info and device_info.sn) or device_topic],
         "manufacturer": (device_info and device_info.mnf) or None,
@@ -316,7 +320,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             dm['icon'] = 'mdi:' + icon
         remove_none_values(dm)
         remove_none_values(dm['device'])
-        discovery_msg[f"homeassistant/sensor/{device_topic}/_{k.replace('/', '_')}/config"] = dm
+        discovery_msg[f"homeassistant/sensor/{node_id}/_{k.replace('/', '_')}/config"] = dm
 
     for k, d in sample_desc.items():
         if not is_none_or_nan(getattr(sample, d["field"])):
@@ -366,7 +370,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     switches = (sample.switches and sample.switches.keys())
     if switches:
         for switch_name in switches:
-            discovery_msg[f"homeassistant/switch/{device_topic}/{switch_name}/config"] = {
+            discovery_msg[f"homeassistant/switch/{node_id}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{switch_name}",
                 "device_class": 'outlet',
@@ -374,10 +378,10 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "state_topic": f"{device_topic}/switch/{switch_name}",
                 "expire_after": expire_after_seconds,
                 "device": device_json,
-                "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
+                "command_topic": f"homeassistant/switch/{node_id}/{switch_name}/set",
             }
 
-            discovery_msg[f"homeassistant/binary_sensor/{device_topic}/{switch_name}/config"] = {
+            discovery_msg[f"homeassistant/binary_sensor/{node_id}/{switch_name}/config"] = {
                 "unique_id": f"{device_topic}__switch_{switch_name}",
                 "name": f"{switch_name} switch",
                 "device_class": 'power',
@@ -385,7 +389,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "expire_after": expire_after_seconds,
                 "device": device_json,
                 "state_topic": f"{device_topic}/switch/{switch_name}",
-                "command_topic": f"homeassistant/switch/{device_topic}/{switch_name}/set",
+                "command_topic": f"homeassistant/switch/{node_id}/{switch_name}/set",
             }
 
     for topic, data in discovery_msg.items():
@@ -417,8 +421,9 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
         topic = f"{device_topic}/switch/{switch_name}"
         mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
 
+    node_id = device_topic.replace('/', '_')
     for switch_name in switches:
-        state_topic = f"homeassistant/switch/{device_topic}/{switch_name}/set"
+        state_topic = f"homeassistant/switch/{node_id}/{switch_name}/set"
         logger.debug("subscribe %s", state_topic)
         mqtt_client.subscribe(state_topic, qos=2)
         _switch_callbacks[state_topic] = \

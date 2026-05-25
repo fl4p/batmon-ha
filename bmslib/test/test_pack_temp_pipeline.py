@@ -159,7 +159,7 @@ def test_hass_discovery_payload_shape():
     cache = AmbientCache(); pub = _PublishStub()
     p = PackTempRCPublisher("bat/test", cache, pub)
     topic, payload = p.hass_discovery_payload(expire_after_seconds=120)
-    assert topic == "homeassistant/sensor/bat/test/_pack_temp_est/config"
+    assert topic == "homeassistant/sensor/bat_test/_pack_temp_est/config"
     assert payload["device_class"] == "temperature"
     assert payload["unit_of_measurement"] == "°C"
     assert payload["state_topic"] == "bat/test/pack_temp_est"

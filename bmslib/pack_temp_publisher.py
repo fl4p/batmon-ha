@@ -68,7 +68,8 @@ class PackTempRCPublisher:
     def hass_discovery_payload(self, expire_after_seconds: int) -> dict:
         """Returns the (topic, payload) HA-discovery entry to publish once on
         startup. Mirrors the pattern in mqtt_util.publish_hass_discovery."""
-        topic = (f"homeassistant/sensor/{self.device_topic}"
+        node_id = self.device_topic.replace('/', '_')
+        topic = (f"homeassistant/sensor/{node_id}"
                  f"/_{self.sensor_name}/config")
         payload = dict(
             device_class="temperature",
