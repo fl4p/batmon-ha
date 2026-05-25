@@ -13,10 +13,10 @@ from typing import List, Dict
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
+from bmslib.circuit_breaker import CircuitBreaker
+from bmslib.mqtt_util import remove_none_values, remove_equal_values
 from bmslib.sampling import BmsSampleSink
 from bmslib.util import get_logger, sid_generator
-from bmslib.mqtt_util import remove_none_values, remove_equal_values
-from bmslib.circuit_breaker import CircuitBreaker
 
 logger = get_logger()
 
@@ -249,16 +249,19 @@ class TelemetrySink(InfluxDBSink):
             self.did = None
 
         self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
+        self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
         logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.addrh_by_name)
         self.silent = True
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        tags_ = dict(uid=self.uid, did=self.did)
+        tags_ = dict(uid=self.uid, did=self.did, nameh=self.addrh_by_name[bms_name])
         tags and tags_.update(tags)
         try:
-            super().publish_sample(self.addrh_by_name[bms_name], sample, tags=tags_)
-        except:
+            InfluxDBSink.publish_sample(self,
+                self.slug_by_name[bms_name],
+                sample, tags=tags_)
+        except Exception as e:
             pass
 
     def publish_voltages(self, bms_name, voltages: List[int], short=True):
