@@ -9,7 +9,6 @@ References
 
 """
 import asyncio
-import sys
 import time
 
 from bmslib.bms import BmsSample
@@ -137,8 +136,9 @@ class SuperVoltBt(BtBms):
 
             await self.requestCapacity()
             await self.waitForNotification(10.0)
-        except:
-            self.logger.error(sys.exc_info(), exc_info=True)
+        except Exception as e:
+            from bmslib.util import summarize_exc
+            self.logger.error('supervolt connect/fetch failed: %s', summarize_exc(e))
 
     # try to read values from data
     def parseData(self, data):
@@ -337,8 +337,9 @@ class SuperVoltBt(BtBms):
                     self.logger.warning("wrong length: " + str(len(data)))
             else:
                 self.logger.debug("no data")
-        except:
-            self.logger.error(sys.exc_info(), exc_info=True)
+        except Exception as e:
+            from bmslib.util import summarize_exc
+            self.logger.error('supervolt parseData failed: %s', summarize_exc(e))
 
     def getWorkingStateTextShort(self):
         if self.workingState is None:

@@ -38,8 +38,21 @@ async def fetch_loop(fn, period, max_errors):
                 num_errors_row = 0
         except Exception as e:
             num_errors_row += 1
-            logger.error('Error (num %d, max %d) reading BMS: %s', num_errors_row, max_errors, e)
-            if not isinstance(e, bmslib.bt.BleakCharacteristicNotFoundError):
+            # The per-sampler logger in BmsSampler.__call__ already logged a
+            # collapsed one-line trace via summarize_exc; just record the
+            # rolling count here without duplicating the multi-page traceback
+            # (see #367). Keep full trace for unexpected non-BLE exception types.
+            from bmslib.util import summarize_exc
+            import bleak.exc
+            short_types = (TimeoutError, asyncio.TimeoutError, OSError,
+                           bleak.exc.BleakError,
+                           bmslib.bt.BleakCharacteristicNotFoundError)
+            if isinstance(e, short_types):
+                logger.error('Error (num %d, max %d) reading BMS: %s',
+                             num_errors_row, max_errors, summarize_exc(e))
+            else:
+                logger.error('Error (num %d, max %d) reading BMS: %s',
+                             num_errors_row, max_errors, e)
                 logger.error('Stack: %s', traceback.format_exc())
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
@@ -287,7 +300,8 @@ async def main():
             from bmslib.sinks import TelemetrySink
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
         except:
-            logger.debug("failed to init telemetry", exc_info=True)
+            pass
+            #logger.info("failed to init telemetry", exc_info=True)
 
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,

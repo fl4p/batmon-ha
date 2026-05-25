@@ -6,7 +6,6 @@ import os
 import queue
 import random
 import statistics
-import sys
 import time
 import zlib
 from typing import List, Dict

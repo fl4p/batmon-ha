@@ -19,45 +19,13 @@ from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, mqtt_single_out
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
-from bmslib.util import get_logger
+from bmslib.util import get_logger, summarize_exc
 
 logger = get_logger(verbose=False)
 
 
 class SampleExpiredError(Exception):
     pass
-
-
-def _summarize_exc(ex) -> str:
-    """One-line chain summary: 'TypeA: msg at file:line in func() <- TypeB: ...'.
-
-    Walks __cause__/__context__ and picks the deepest non-asyncio frame from each
-    so the operator sees where in our code the failure surfaced, without the
-    multi-page asyncio.wait_for traceback that obscures issues like #367.
-    """
-    import traceback
-    parts = []
-    seen = set()
-    e = ex
-    while e is not None and id(e) not in seen and len(parts) < 4:
-        seen.add(id(e))
-        frames = traceback.extract_tb(e.__traceback__) if e.__traceback__ else []
-        chosen = None
-        for f in reversed(frames):
-            if '/asyncio/' in f.filename or f.filename.endswith('/asyncio.py'):
-                continue
-            chosen = f
-            break
-        if chosen is None and frames:
-            chosen = frames[-1]
-        loc = ''
-        if chosen:
-            fn = '/'.join(chosen.filename.rsplit('/', 2)[-2:])
-            loc = ' at %s:%d in %s()' % (fn, chosen.lineno, chosen.name)
-        msg = str(e)
-        parts.append('%s%s%s' % (type(e).__name__, ': ' + msg if msg else '', loc))
-        e = e.__cause__ or e.__context__
-    return ' <- '.join(parts)
 
 
 class PeriodicBoolSignal:
@@ -219,7 +187,7 @@ class BmsSampler:
                              str(ex) or type(ex).__name__)
             elif isinstance(ex, short_trace_types):
                 logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
-                             _summarize_exc(ex))
+                             summarize_exc(ex))
             else:
                 logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
                              str(ex) or str(type(ex)), exc_info=True)
@@ -364,8 +332,9 @@ class BmsSampler:
             for sink in self.sinks:
                 try:
                     sink.publish_sample(bms.name, sample)
-                except:
-                    logger.error(sys.exc_info(), exc_info=True)
+                except Exception as e:
+                    logger.error('sink %s publish_sample failed: %s',
+                                 type(sink).__name__, summarize_exc(e))
 
             self.downsampler += sample
 
@@ -495,8 +464,9 @@ class BmsSampler:
                     sink.publish_meters(self.bms.name, readings)
                 except NotImplementedError:
                     pass
-                except:
-                    logger.error(sys.exc_info(), exc_info=True)
+                except Exception as e:
+                    logger.error('sink %s publish_meters failed: %s',
+                                 type(sink).__name__, summarize_exc(e))
 
     async def _try_fetch_device_info(self):
         try:

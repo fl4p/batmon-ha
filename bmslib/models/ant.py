@@ -22,7 +22,6 @@ INFO:__main__:	[Characteristic] 0000ffe2-0000-1000-8000-00805f9b34fb (Handle: 18
 import asyncio
 import enum
 import math
-import sys
 
 import crcmod as crcmod
 
@@ -114,8 +113,9 @@ class AntBt(BtBms):
         try:
             await super().connect(timeout=timeout)
         except Exception as e:
-            self.logger.error(sys.exc_info(), exc_info=True)
-            self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
+            from bmslib.util import summarize_exc
+            self.logger.info("%s normal connect failed (%s), connecting with scanner",
+                             self.name, summarize_exc(e))
             await self._connect_with_scanner(timeout=timeout)
 
         self.char = self.find_char(self.CHAR_UUID, 'notify')

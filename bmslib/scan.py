@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import time
 from functools import partial
 from typing import Tuple, Dict
@@ -74,9 +73,10 @@ async def stop_all_scanners():
 
 async def resolve_address(address, adapter=None, timeout=4):
     try:
-        sc = await get_shared_scanner(adapter) # TODO try..catch
+        sc = await get_shared_scanner(adapter)
     except Exception as e:
-        logger.error(sys.exc_info(), exc_info=True)
+        from bmslib.util import summarize_exc
+        logger.error('resolve_address: get_shared_scanner failed: %s', summarize_exc(e))
         return None
     to = time.time()+timeout
     while time.time() <= to:

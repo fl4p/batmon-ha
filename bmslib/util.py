@@ -17,6 +17,42 @@ class dotdict(dict):
     # __hasattr__ = dict.__contains__
 
 
+def summarize_exc(ex) -> str:
+    """One-line chain summary: 'TypeA: msg at file:line in func() <- TypeB: ...'.
+
+    Walks __cause__/__context__ and picks the deepest non-asyncio frame from each
+    so the operator sees where in our code the failure surfaced, without the
+    multi-page asyncio.wait_for traceback that obscures issues like #367.
+
+    Accepts an exception instance, or None (returns '').
+    """
+    import traceback
+    if ex is None:
+        return ''
+    parts = []
+    seen = set()
+    e = ex
+    while e is not None and id(e) not in seen and len(parts) < 4:
+        seen.add(id(e))
+        frames = traceback.extract_tb(e.__traceback__) if e.__traceback__ else []
+        chosen = None
+        for f in reversed(frames):
+            if '/asyncio/' in f.filename or f.filename.endswith('/asyncio.py'):
+                continue
+            chosen = f
+            break
+        if chosen is None and frames:
+            chosen = frames[-1]
+        loc = ''
+        if chosen:
+            fn = '/'.join(chosen.filename.rsplit('/', 2)[-2:])
+            loc = ' at %s:%d in %s()' % (fn, chosen.lineno, chosen.name)
+        msg = str(e)
+        parts.append('%s%s%s' % (type(e).__name__, ': ' + msg if msg else '', loc))
+        e = e.__cause__ or e.__context__
+    return ' <- '.join(parts)
+
+
 def get_logger(verbose=False):
     # log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
     log_format = '%(asctime)s %(levelname)s [%(module)s] %(message)s'
