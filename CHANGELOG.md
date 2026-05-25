@@ -1,9 +1,14 @@
 # Changelog
 
-## [1.95-daly356] (test build)
+## [1.95]
 
-* DALY: support newer firmware (DL/JHB prefix) GATT layout — service 0000ff00 with
-  ff01=notify / ff02=write, used when the legacy fff1 notify is NotPermitted (#356)
+* DALY: support newer firmware GATT layout (service 0000ff00, ff01/ff02) (#356)
+* JK: read pack capacity from settings frame, not BMS-aged value (#365)
+* CW20: fix against `aiobmsble` 0.23
+* Expose `soh` and `aged_capacity` (JK, ANT, Supervolt)
+* Fix `*_ble` current/power sign (charge/discharge meters were swapped)
+* Rename `cycle_capacity` → `total_charge_throughput`
+* Document the three BLE stacks (`bleak` / `bumble` / `bluek`) in the README
 
 ## [1.94]
 
