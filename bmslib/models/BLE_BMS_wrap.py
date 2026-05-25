@@ -84,6 +84,10 @@ class BMS():
         # self.ble_bms._reconnect = not keep
 
     @property
+    def slug(self):
+        return self._type
+
+    @property
     def is_connected(self):
         return self.ble_bms and self.ble_bms._client.is_connected
 
