@@ -6,6 +6,7 @@ import os
 import queue
 import random
 import statistics
+import threading
 import time
 import zlib
 from typing import List, Dict
@@ -56,7 +57,7 @@ class InfluxDBSink(BmsSampleSink):
         self.influxdb_client._session.request_ = self.influxdb_client._session.request
         self.influxdb_client._session.request = _request_gzip
 
-        self.Q = queue.Queue(200_000)
+        self.Q = queue.Queue(50_000)
         self.db = kwargs.get('database')
         self.time_last_flush = 0
         self._last_volt: Dict[str, List[int]] = {}
@@ -69,6 +70,11 @@ class InfluxDBSink(BmsSampleSink):
         if not kwargs.get('verify_ssl', False):
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        self._stop_event = threading.Event()
+        self._flush_thread = threading.Thread(
+            target=self._flush_loop, name='InfluxDBSinkFlush', daemon=True)
+        self._flush_thread.start()
 
     def publish_voltages(self, bms_name, voltages: List[int], short=False, tags=None):
         if not voltages:
@@ -114,8 +120,6 @@ class InfluxDBSink(BmsSampleSink):
                 }
                 self._enqueue(point)
 
-        self._maybe_flush()
-
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
         fields = flatten({**sample.values(), "timestamp": None})
         remove_none_values(fields)
@@ -140,7 +144,6 @@ class InfluxDBSink(BmsSampleSink):
         if tags:
             point['tags'].update(tags)
         self._enqueue(point)
-        self._maybe_flush()
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
         now = datetime.datetime.utcnow()
@@ -200,10 +203,22 @@ class InfluxDBSink(BmsSampleSink):
                     self._drain_queue()  # never succeeded: drop, stay flat
             self.time_last_flush = now
 
-    def _maybe_flush(self):
-        now = time.time()
-        if now - self.time_last_flush > self.flush_interval and self.cb.should_attempt(now):
+    def _flush_loop(self):
+        while not self._stop_event.wait(self.flush_interval):
+            try:
+                if self.cb.should_attempt():
+                    self.flush()
+            except Exception as e:
+                if not self.silent:
+                    logger.error('flush loop error: %s', e)
+
+    def close(self):
+        self._stop_event.set()
+        self._flush_thread.join(timeout=5)
+        try:
             self.flush()
+        except Exception:
+            pass
 
 
 def hash_urlsafe(s: str):
@@ -270,6 +285,8 @@ class TelemetrySink(InfluxDBSink):
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
         if bms_name not in self.slug_by_name:
+            return
+        if 'dummy' in self.slug_by_name[bms_name]:
             return
         if not self._should_sample(bms_name):
             return
