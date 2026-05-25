@@ -58,6 +58,10 @@ class VirtualGroupBms:
         return 'VirtualGroupBms(%s,[%s])' % (self.name, self.address)
 
     @property
+    def slug(self):
+        return 'virtual'
+
+    @property
     def is_connected(self):
         return set(self.group.samples.keys()) == set(self.group.bms_names)
 

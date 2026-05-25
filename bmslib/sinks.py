@@ -70,9 +70,10 @@ class InfluxDBSink(BmsSampleSink):
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    def publish_voltages(self, bms_name, voltages: List[int], short=False):
+    def publish_voltages(self, bms_name, voltages: List[int], short=False, tags=None):
         if not voltages:
             return
+        tags = tags or {}
 
         if bms_name not in self._last_volt or len(voltages) != len(self._last_volt[bms_name]):
             self._last_volt[bms_name] = [-1] * len(voltages)
@@ -95,7 +96,7 @@ class InfluxDBSink(BmsSampleSink):
                 "measurement": 'batmon',
                 "time": datetime.datetime.utcnow(),
                 "fields": fields,
-                "tags": dict(device=bms_name)
+                "tags": dict(device=bms_name, **tags)
             }
             self._enqueue(point)
 
@@ -109,7 +110,7 @@ class InfluxDBSink(BmsSampleSink):
                     "measurement": 'cells',
                     "time": datetime.datetime.utcnow(),
                     "fields": dict(voltage=int(round(voltages[i]))),
-                    "tags": dict(device=bms_name, cell_index=i),
+                    "tags": dict(device=bms_name, cell_index=i, **tags),
                 }
                 self._enqueue(point)
 
@@ -154,6 +155,7 @@ class InfluxDBSink(BmsSampleSink):
     def _enqueue(self, point):
         # During an outage backoff with no prior success, drop new points so
         # memory stays flat (the server may be unreachable for this user).
+        remove_none_values(point['tags'])
         if self.cb.enabled and not self.cb.keep_batch_on_failure \
                 and not self.cb.should_attempt():
             return
@@ -180,9 +182,11 @@ class InfluxDBSink(BmsSampleSink):
         if batch:
             try:
                 res = self.influxdb_client.write_points(batch, time_precision='ms')
-            except:
+            except Exception as e:
                 res = False
-                not self.silent and logger.error(sys.exc_info(), exc_info=True)
+                if not self.silent:
+                    from bmslib.util import summarize_exc
+                    logger.error('influxdb write failed: %s', summarize_exc(e))
             if res:
                 self.cb.on_success(now)
             else:
@@ -226,7 +230,7 @@ def get_disk_id():
     import requests
     bearer = os.environ.get('SUPERVISOR_TOKEN')
     r = requests.get('http://supervisor/os/info', timeout=3, headers=dict(Authorization=f"Bearer {bearer}")).json()
-    return r['data']['data_disk'] or None
+    return str(r['data']['data_disk']) or None
 
 
 class TelemetrySink(InfluxDBSink):
@@ -241,6 +245,7 @@ class TelemetrySink(InfluxDBSink):
             database="batmon_tele",
             ssl=False
         )
+        bms_by_name = {n: bms for n, bms in bms_by_name.items() if not bms.is_virtual}
         self.uid = get_user_id()
         try:
             self.did = hash_urlsafe(get_disk_id())
@@ -250,23 +255,28 @@ class TelemetrySink(InfluxDBSink):
         self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
         self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
-        logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.addrh_by_name)
+        logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
         self.silent = True
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        tags_ = dict(uid=self.uid, did=self.did, nameh=self.addrh_by_name[bms_name])
+        if bms_name not in self.slug_by_name:
+            return
+        tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)
         try:
             InfluxDBSink.publish_sample(self,
-                self.slug_by_name[bms_name],
-                sample, tags=tags_)
+                                        self.slug_by_name[bms_name],
+                                        sample, tags=tags_)
         except Exception as e:
             pass
 
-    def publish_voltages(self, bms_name, voltages: List[int], short=True):
-        # tags_ = dict(uid=self.uid, did=self.did)
+    def publish_voltages(self, bms_name, voltages: List[int], short=True, tags=None):
+        if bms_name not in self.slug_by_name:
+            return
+        tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
+        tags and tags_.update(tags)
         try:
-            super().publish_voltages(self.addrh_by_name[bms_name], voltages, short=short)
+            InfluxDBSink.publish_voltages(self, self.slug_by_name[bms_name], voltages, short=short, tags=tags_)
         except Exception:
             pass
 
