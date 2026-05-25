@@ -19,14 +19,15 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Integrates with Home Assistant Energy dashboard and [Utility Meter](doc/HA%20Energy%20Dashboard.md) sensor helper
 * Control BMS charging and discharging switches
 * Home Assistant MQTT Discovery
-* Can run as stand-alone app without Home-Assistant an directly write to [InfluxDB](doc/InfluxDB.md)
+* Can run as stand-alone app without Home-Assistant and directly write to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups for parallel batteries, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
-* Short delays for responsive automation (fast load shedding)
-* Experimental serial communication (e.g. using USB-UART adapter)
+* Low latency for responsive automation (fast load shedding)
+* Experimental serial communication for JK and Daly BMS
 * Current sensor gain calibration
+* Custom bluetooth stack for increased reliability
 
-### Supported Devices (bluetooth low energy)
+### Supported BLE Devices
 
 Batmon comes with connectors for some popular BMS. It also wraps `aiobmsble`, which includes many other BMS for
 read-only access.
@@ -37,34 +38,34 @@ batmon device connectors:
 * Daly BMS (`daly`, `daly2`, `daly_ble` over BLE, `daly_uart` over RS485 — see [Serial / RS485](#serial--rs485))
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
-* CBT Power / Creabest BMS (`cbtpwr`)
-* Seplos BMS (`seplos`, `seplos_v2`)
 * Supervolt BMS (`supervolt`)
 * SOK BMS (`sok`)
-* Tian-Power BMS (`tianpwr`)
-* LiTime BMS (`litime`) [@KOSSOII](https://github.com/fl4p/batmon-ha/pull/322)
+* LiTime BMS (`litime`)
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app) (`victron`)
-* ATORCH CW20 DC (`cw20`)
 
-`aioblebms` device connectors:
+More `aiobmsble` device connectors:
 
-* `tdt`
-* `ej`
-* `abc`
-* `dpwrcore`
-* `ecoworthy`
-* `ective`
-* `felicity`
-* `ogt`
-* `redodo`
-* `roypow`
-* `braunpwr`
-* `neey`
-* `pro`
-* `renogy`, `renogy_pro`
-* all devices [aiobmsble](https://github.com/patman15/aiobmsble/?tab=readme-ov-file#supported-devices) supports
+* CBT Power / Creabest smart BMS (`cbtpwr`)
+* Seplos smart BMS V3 (`seplos`), Seplos smart BMS V2 (`seplos_v2`)
+* TianPwr smart BMS (`tianpwr`)
+* ATORCH CW20 DC Meter (`cw20`)
+* TDT smart BMS (`tdt`)
+* E&J Technology smart BMS (`ej`)
+* Chunguang Song ABC-BMS (`abc`)
+* D-powercore smart BMS (`dpwrcore`)
+* ECO-WORTHY BW02 (`ecoworthy`)
+* Ective smart BMS (`ective`)
+* Felicity Solar LiFePo4 battery (`felicity`)
+* Offgridtec LiFePo4 Smart Pro (`ogt`)
+* Redodo Bluetooth battery (`redodo`)
+* RoyPow smart BMS (`roypow`)
+* Braun Power smart BMS (`braunpwr`)
+* Neey Balancer (`neey`)
+* Pro BMS Smart Shunt (`pro`)
+* Renogy Bluetooth battery (`renogy`), Renogy BT battery pro (`renogy_pro`)
+* all other devices [aiobmsble](https://github.com/patman15/aiobmsble/?tab=readme-ov-file#supported-devices) supports
 
 You can switch from the batmon to the aiobmsble connectors, just append a `_ble` to the `type` field, e.g. instead
 of `type: daly` (batmon), write `type: daly_ble` (aiobmsble). This can help if you experience connection issues, because
@@ -78,7 +79,7 @@ I tested the add-on on a Raspberry Pi 4 and 5 using Home Assistant Operating Sys
   repository: [`https://github.com/fl4p/home-assistant-addons`](https://github.com/fl4p/home-assistant-addons)
   [![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=2af0a32d_batmon&repository_url=https%3A%2F%2Fgithub.com%2Ffl4p%2Fhome-assistant-addons)
 * Install Batmon add-on
-* Install, configure and start Mosquito MQTT broker (don't forget to configure the MQTT integration)
+* Install, configure and start Mosquitto MQTT broker (don't forget to configure the MQTT integration)
 
 ## Configuration
 
@@ -99,8 +100,8 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jbd`, `ant`, `daly`, `daly2`, `cbtpwr`, `seplos`, `seplos_v2`, `supervolt`,
-`sok`, `tianpwr`, `victron` or any tag listed under [Supported Devices](#supported-devices-bluetooth-low-energy).
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jbd`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
+`supervolt`, `sok`, `litime`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
@@ -129,7 +130,7 @@ For verbose logs of particular BMS add `debug: true`.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
-  after it exists)
+  after it exits)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
   =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
 * type `daly2` is for a newer Daly BMS version which is untested
@@ -193,14 +194,15 @@ Batmon can talk to your BMS through one of three Bluetooth backends. Pick one wi
   talks HCI directly (no BlueZ, no D-Bus). Cross-platform (Linux/macOS/Windows via HCI socket,
   USB dongle, or serial transports). Always needs **exclusive HCI access** to its controller —
   on Linux that means bumble brings the BlueZ-managed adapter down, so it leaves the HA
-  Bluetooth pool. You need to dedicate one adapter to it and disable it in HA under Integrations / Bluetooh;
+  Bluetooth pool. You need to dedicate one adapter to it and disable it in HA under Integrations / Bluetooth;
   Use it for best reliability and if you have many BMS.
 * **`bluek`** — talks to the kernel BlueZ stack directly over L2CAP and `mgmt` sockets (no D-Bus).
   Coexists with `bluetoothd`, so the adapter stays in the HA Bluetooth pool. Useful when D-Bus is
   the bottleneck but you don't want to take the adapter away from HA. **Linux only** (BlueZ is
-  Linux-specific).
+  Linux-specific). [fl4p/bluek](https://github.com/fl4p/bluek/)
 
-`bumble` and `bluek` are experimental — try `bleak` first.
+`bumble` and `bluek` are experimental — try `bleak` first. Users have already reported the `bluek` helps in case of
+connection timeouts.
 
 ## Energy Meters
 
@@ -228,6 +230,8 @@ peaks, leading to even greater error.
   on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
 * When experiencing unstable connection enable `keep_alive`
 * `TimeoutError: timeout waiting`: put BT devices closer, disable inverters and other EMI sources
+* Try another `ble_stack`: `bumble` for exclusive adapter access (you need to remove it from HA Integration first), or
+  `bluek` to bypass D-Bus on Linux (has helped with timeouts)
 * Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
   above
 * Try to find the BMS with a BLE
@@ -241,10 +245,8 @@ peaks, leading to even greater error.
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related
   issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
-* Try another `ble_stack`: `bumble` for exclusive adapter access (you need to remove it from HA Integration first), or
-  `bluez` to bypass D-Bus on Linux
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
-* [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
+* [doc/Downgrade.md](doc/Downgrade.md) to an earlier version
 * to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
   the slug in the URL of the add-on page.
 * to see logs during installation: Settings / System / Logs / Supervisor (choose from the menu at the top-right
