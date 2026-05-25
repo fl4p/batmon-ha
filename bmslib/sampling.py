@@ -8,6 +8,7 @@ from collections import defaultdict
 from copy import copy
 from typing import Optional, List, Dict
 
+import bleak.exc
 import paho.mqtt.client
 
 import bmslib.bt
@@ -25,6 +26,38 @@ logger = get_logger(verbose=False)
 
 class SampleExpiredError(Exception):
     pass
+
+
+def _summarize_exc(ex) -> str:
+    """One-line chain summary: 'TypeA: msg at file:line in func() <- TypeB: ...'.
+
+    Walks __cause__/__context__ and picks the deepest non-asyncio frame from each
+    so the operator sees where in our code the failure surfaced, without the
+    multi-page asyncio.wait_for traceback that obscures issues like #367.
+    """
+    import traceback
+    parts = []
+    seen = set()
+    e = ex
+    while e is not None and id(e) not in seen and len(parts) < 4:
+        seen.add(id(e))
+        frames = traceback.extract_tb(e.__traceback__) if e.__traceback__ else []
+        chosen = None
+        for f in reversed(frames):
+            if '/asyncio/' in f.filename or f.filename.endswith('/asyncio.py'):
+                continue
+            chosen = f
+            break
+        if chosen is None and frames:
+            chosen = frames[-1]
+        loc = ''
+        if chosen:
+            fn = '/'.join(chosen.filename.rsplit('/', 2)[-2:])
+            loc = ' at %s:%d in %s()' % (fn, chosen.lineno, chosen.name)
+        msg = str(e)
+        parts.append('%s%s%s' % (type(e).__name__, ': ' + msg if msg else '', loc))
+        e = e.__cause__ or e.__context__
+    return ' <- '.join(parts)
 
 
 class PeriodicBoolSignal:
@@ -56,7 +89,7 @@ class PeriodicBoolSignal:
 class BmsSampleSink:
     """ Interface of an arbitrary data sink of battery samples """
 
-    def publish_sample(self, bms_name: str, sample: BmsSample):
+    def publish_sample(self, bms_name: str, sample: BmsSample, tags=None):
         raise NotImplementedError()
 
     def publish_voltages(self, bms_name: str, voltages: List[int]):
@@ -113,6 +146,7 @@ class BmsSampler:
 
         self._num_errors = 0
         self._time_next_retry = 0
+        self._last_diag_t = 0
 
         self.algorithm = None
         if algorithms:
@@ -175,12 +209,36 @@ class BmsSampler:
             return None
 
         except Exception as ex:
-            logger.error('%s error (#%d): %s', self.bms.name, self._num_errors, str(ex) or str(type(ex)),
-                         exc_info=not isinstance(ex, bmslib.bt.BleakCharacteristicNotFoundError))
+            # Collapse the multi-page asyncio.wait_for traceback that masks the
+            # real cause for connect/notify timeouts (see #367, #324). Full
+            # exc_info kept for unexpected types where the trace is informative.
+            short_trace_types = (TimeoutError, asyncio.TimeoutError, OSError,
+                                 bleak.exc.BleakError)
+            if isinstance(ex, bmslib.bt.BleakCharacteristicNotFoundError):
+                logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
+                             str(ex) or type(ex).__name__)
+            elif isinstance(ex, short_trace_types):
+                logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
+                             _summarize_exc(ex))
+            else:
+                logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
+                             str(ex) or str(type(ex)), exc_info=True)
+
             dd = self.bms.debug_data()
             dd and logger.info("%s bms debug data: %s", self.bms.name, dd)
             self.device_info and logger.info('%s device info: %s', self.bms.name, self.device_info)
-            # logger.info('Bleak version %s', bmslib.bt.bleak_version())
+
+            if isinstance(ex, short_trace_types) and (t_now - self._last_diag_t) > 30:
+                self._last_diag_t = t_now
+                logger.info('%s stack: Bleak %s, %s', self.bms.name,
+                            bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
+                try:
+                    await bmslib.bt.bt_diagnostics(
+                        self.bms.address, getattr(self.bms, '_adapter', None),
+                        logger, timeout=3.0)
+                except Exception as de:
+                    logger.warning('%s bt_diagnostics failed: %s', self.bms.name,
+                                   str(de) or type(de).__name__)
 
             bms = self.bms
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
