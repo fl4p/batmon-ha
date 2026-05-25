@@ -57,7 +57,7 @@ options:
   expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
-  telemetry: false
+#  telemetry: false
 
 schema:
   devices:
@@ -102,4 +102,4 @@ schema:
   influxdb_verify_ssl: "bool?"
   influxdb_database: "str?"
 
-  telemetry: "bool?"
+#  telemetry: "bool?"
