@@ -41,8 +41,10 @@ SHADOW_PYTHONPATH=""
 # Map the selected stack to its shadow python package.
 SHADOW_PKG=""
 case "$BLE_STACK" in
-  bumble) SHADOW_PKG="bumble_bleak"; STACK_LABEL="bumble-bleak (no BlueZ/D-Bus, exclusive HCI)" ;;
-  bluek)  SHADOW_PKG="bluek";        STACK_LABEL="bluek (kernel BlueZ sockets, no D-Bus, coexists)" ;;
+  bumble)  SHADOW_PKG="bumble_bleak"; STACK_LABEL="bumble-bleak (no BlueZ/D-Bus, exclusive HCI)" ;;
+  bluek)   SHADOW_PKG="bluek";        STACK_LABEL="bluek (kernel BlueZ sockets, no D-Bus, coexists)" ;;
+  esphome) STACK_LABEL="esphome (Bluetooth Proxy via aioesphomeapi/habluetooth, no local adapter)"
+           bashio::log.blue "BLE stack: $STACK_LABEL — bootstrap runs inside main.py" ;;
 esac
 
 if [ -n "$SHADOW_PKG" ]; then

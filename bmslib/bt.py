@@ -147,6 +147,14 @@ def bt_stack_version():
             return 'bumble-v%s' % bumble.__version__
         except Exception:
             return 'bumble (%s)' % BleakClient.__name__
+    # ble_stack=esphome monkey-patches BleakClient to habluetooth's wrapper.
+    # No local BlueZ to report — surface the proxy stack version instead.
+    if mod.startswith('habluetooth'):
+        try:
+            import habluetooth
+            return 'esphome-proxy/habluetooth-v%s' % habluetooth.__version__
+        except Exception:
+            return 'esphome-proxy (%s)' % BleakClient.__name__
     try:
         # get BlueZ version
         p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
@@ -305,6 +313,12 @@ def bt_power(on):
     # so never let failures here crash the caller.
     if BleakClient.__module__.startswith('bumble_bleak'):
         logging.debug('bt_power(%s) skipped: bumble-bleak manages adapter power', on)
+        return
+    # ble_stack=esphome has no local adapter at all — power-cycling a remote
+    # ESP32 over the network would be nonsense. (Memory note: bluek is
+    # intentionally NOT included here; only bumble and esphome bypass.)
+    if BleakClient.__module__.startswith('habluetooth'):
+        logging.debug('bt_power(%s) skipped: esphome proxy stack has no local adapter', on)
         return
     try:
         for addr, name in bt_controllers():

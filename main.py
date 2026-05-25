@@ -11,6 +11,33 @@ from typing import List, Dict
 import paho.mqtt.client
 from paho.mqtt.enums import CallbackAPIVersion
 
+
+def _early_select_ble_stack():
+    """Install the ESPHome-Proxy bleak shim before bmslib.bt imports bleak.
+
+    Returns the list of configured proxies (possibly empty) if the shim was
+    installed; None otherwise. Reads options.json directly to avoid pulling
+    in bmslib modules that themselves import bleak.
+    """
+    import json
+    opt = None
+    for path in ('/data/options.json', 'options.json'):
+        try:
+            with open(path) as f:
+                opt = json.load(f)
+                break
+        except Exception:
+            continue
+    if not opt or opt.get('ble_stack') != 'esphome':
+        return None
+    from bmslib.esphome_proxy import install_bleak_shim
+    if not install_bleak_shim():
+        return None
+    return opt.get('bluetooth_proxies') or []
+
+
+_esphome_proxies = _early_select_ble_stack()
+
 import bmslib.bt
 import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
@@ -143,6 +170,13 @@ async def main():
 
     bms_list: list[bmslib.bt.BtBms] = []
     extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
+
+    if _esphome_proxies is not None:
+        # ble_stack=esphome: bring up habluetooth + connect each configured
+        # proxy. Must run before any BMS connect, since the wrappers refuse
+        # connections until at least one scanner is registered.
+        from bmslib.esphome_proxy import start_manager
+        await start_manager(_esphome_proxies)
 
     if user_config.get('bt_power_cycle'):
         try:

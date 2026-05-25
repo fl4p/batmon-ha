@@ -57,6 +57,12 @@ options:
   expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
+  # bluetooth_proxies: only consulted when ble_stack: esphome. Example:
+  #   bluetooth_proxies:
+  #     - host: 192.168.1.42
+  #       noise_psk: "base64-encoded-encryption-key"
+  #       name: "garage-proxy"
+  bluetooth_proxies: []
 #  telemetry: false
 
 schema:
@@ -92,8 +98,17 @@ schema:
   # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
   # adapter(s) it uses (brings them down), so they leave the HA Bluetooth pool;
   # "bluek" talks to the kernel BlueZ stack over L2CAP/mgmt sockets (no D-Bus)
-  # and coexists with bluetoothd — the adapter stays in the HA pool.
-  ble_stack: "list(bleak|bumble|bluek)?"
+  # and coexists with bluetoothd — the adapter stays in the HA pool;
+  # "esphome" routes GATT through one or more ESPHome Bluetooth Proxy devices
+  # (no local adapter touched — see `bluetooth_proxies:`).
+  ble_stack: "list(bleak|bumble|bluek|esphome)?"
+
+  bluetooth_proxies:
+    - host: str
+      port: "int(1,65535)?"
+      noise_psk: "str?"
+      password: "str?"
+      name: "str?"
 
   influxdb_host: "str?"
   influxdb_username: "str?"
