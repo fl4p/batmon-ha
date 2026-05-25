@@ -193,9 +193,8 @@ Batmon can talk to your BMS through one of three Bluetooth backends. Pick one wi
   talks HCI directly (no BlueZ, no D-Bus). Cross-platform (Linux/macOS/Windows via HCI socket,
   USB dongle, or serial transports). Always needs **exclusive HCI access** to its controller —
   on Linux that means bumble brings the BlueZ-managed adapter down, so it leaves the HA
-  Bluetooth pool (dedicate one adapter to it); on macOS/Windows it typically runs against a
-  separate USB BLE dongle which the OS isn't managing anyway. Use it when D-Bus/BlueZ is flaky
-  or you want to bypass it entirely.
+  Bluetooth pool. You need to dedicate one adapter to it and disable it in HA under Integrations / Bluetooh;
+  Use it for best reliability and if you have many BMS.
 * **`bluek`** — talks to the kernel BlueZ stack directly over L2CAP and `mgmt` sockets (no D-Bus).
   Coexists with `bluetoothd`, so the adapter stays in the HA Bluetooth pool. Useful when D-Bus is
   the bottleneck but you don't want to take the adapter away from HA. **Linux only** (BlueZ is
@@ -242,6 +241,8 @@ peaks, leading to even greater error.
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related
   issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* Try another `ble_stack`: `bumble` for exclusive adapter access (you need to remove it from HA Integration first), or
+  `bluez` to bypass D-Bus on Linux
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to ab earlier version
 * to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
@@ -258,7 +259,8 @@ peaks, leading to even greater error.
 * use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
 * Implement BMS data push (JK)
 * Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
-* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK (`jk_uart`) and Daly (`daly_uart`) are done; JBD, ANT still TODO
+* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK (`jk_uart`) and Daly (
+  `daly_uart`) are done; JBD, ANT still TODO
 * Implement old JK04?
 * web interface (export, import bms meter data)
 
