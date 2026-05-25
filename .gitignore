@@ -1,6 +1,8 @@
 __pycache__
 .DS_Store
 
+.env
+
 options.json
 
 bms_meter_states.json

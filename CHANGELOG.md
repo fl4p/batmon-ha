@@ -1,7 +1,11 @@
 # Changelog
 
+
 ## [1.95]
 
+* Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
+* Fix `UnicodeDecodeError` crash on JK BMS device info with non-UTF8 bytes (#349)
+* Harden ANT BMS device-info decode against non-UTF8 bytes
 * DALY: support newer firmware GATT layout (service 0000ff00, ff01/ff02) (#356)
 * JK: read pack capacity from settings frame, not BMS-aged value (#365)
 * CW20: fix against `aiobmsble` 0.23
@@ -9,12 +13,11 @@
 * Fix `*_ble` current/power sign (charge/discharge meters were swapped)
 * Rename `cycle_capacity` → `total_charge_throughput`
 * Document the three BLE stacks (`bleak` / `bumble` / `bluek`) in the README
+* Add pack-temperature RC pipeline (estimate pack temp from cell + ambient)
+* Add `bt_diagnostics` BLE health snapshot
+* Collapse multi-page asyncio tracebacks on BLE errors into a one-line cause chain (#367)
+* Pin `bluek` to a known-good commit
 
-## [1.94]
-
-* Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
-* Fix `UnicodeDecodeError` crash on JK BMS device info with non-UTF8 bytes (#349)
-* Harden ANT BMS device-info decode against non-UTF8 bytes
 
 ## [1.93]
 
