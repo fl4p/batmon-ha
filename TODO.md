@@ -38,3 +38,7 @@ DONE:
 - battery current, voltage, soc, capacity, charge
 - bms mosfet state
 - don't send discovery for nan-only data
+
+
+- test the serial comms device (wired)
+- scraper bms: just reads all chars/subscribes
