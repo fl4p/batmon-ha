@@ -255,23 +255,37 @@ class TelemetrySink(InfluxDBSink):
         self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
         self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
+        self.sample_interval = 15
+        self._last_pub: Dict[str, float] = {}
+
         logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
         self.silent = True
 
+    def _should_sample(self, bms_name) -> bool:
+        now = time.time()
+        if now - self._last_pub.get(bms_name, 0) < self.sample_interval:
+            return False
+        self._last_pub[bms_name] = now
+        return True
+
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
         if bms_name not in self.slug_by_name:
+            return
+        if not self._should_sample(bms_name):
             return
         tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)
         try:
             InfluxDBSink.publish_sample(self,
-                                        self.slug_by_name[bms_name],
+                                        self.slug_by_name[bms_name]+'_'+self.addrh_by_name[bms_name],
                                         sample, tags=tags_)
         except Exception as e:
             pass
 
     def publish_voltages(self, bms_name, voltages: List[int], short=True, tags=None):
         if bms_name not in self.slug_by_name:
+            return
+        if not self._should_sample(bms_name):
             return
         tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)
