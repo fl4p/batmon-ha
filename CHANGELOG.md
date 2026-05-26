@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [1.97]
+
+* Restore multi-arch Docker builds (aarch64/amd64/armhf/armv7/i386) — re-add `ARG BUILD_FROM` consumed by `build.yaml`, which 1.96 had dropped (#365)
+
+
 ## [1.96]
 
 * Add new bluetooth backend `esphome` for [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices — see README *BLE Stack* section for setup. Known incompatibility: ANT BMS.
