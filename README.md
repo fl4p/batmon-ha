@@ -181,7 +181,7 @@ the vendor's PC tool).
 
 ## BLE Stack
 
-Batmon can talk to your BMS through one of three Bluetooth backends. Pick one with the global
+Batmon can talk to your BMS through one of four Bluetooth backends. Pick one with the global
 `ble_stack` option:
 
 * **`bleak`** (default) — uses [bleak](https://pypi.org/project/bleak/), a cross-platform Python
@@ -200,9 +200,47 @@ Batmon can talk to your BMS through one of three Bluetooth backends. Pick one wi
   Coexists with `bluetoothd`, so the adapter stays in the HA Bluetooth pool. Useful when D-Bus is
   the bottleneck but you don't want to take the adapter away from HA. **Linux only** (BlueZ is
   Linux-specific). [fl4p/bluek](https://github.com/fl4p/bluek/)
+* **`esphome`** — routes all BLE through one or more
+  [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices
+  (typically a cheap ESP32 flashed with the upstream
+  [bluetooth-proxies](https://github.com/esphome/bluetooth-proxies) firmware). The add-on
+  doesn't touch any local Bluetooth adapter — you can extend BLE reach to wherever your BMSes
+  physically live (other rooms, outdoors) just by powering an ESP32 there. Coexists with HA's
+  Bluetooth integration; each proxy can host multiple clients but BLE connection slots are shared
+  (default 3 per proxy, see [esphome_proxy/README.md](bmslib/esphome_proxy/bootstrap.py) for
+  notes on bumping). Configure the proxies under the `bluetooth_proxies:` add-on option:
 
-`bumble` and `bluek` are experimental — try `bleak` first. Users have already reported the `bluek` helps in case of
-connection timeouts.
+  ```yaml
+  ble_stack: esphome
+  bluetooth_proxies:
+    - host: garage-proxy.local
+      noise_psk: "<base64 Noise key from the proxy's ESPHome config>"
+      name: "garage"          # diagnostic label only
+    - host: 192.168.1.43
+      noise_psk: "<another key>"
+  ```
+
+  Proxy firmware should set `bluetooth_proxy: { active: true, cache_services: false }` — see
+  [bmslib/esphome_proxy/README.md](bmslib/esphome_proxy/README.md) for the rationale and a known
+  incompatibility (ANT-BLE20PHUB BMS).
+
+`bumble`, `bluek` and `esphome` are experimental — try `bleak` first. Users have already reported
+that `bluek` helps in case of connection timeouts.
+
+### `adapter:` per BMS
+
+The per-device `adapter:` option only applies to backends that have a notion of a local Bluetooth
+adapter:
+
+| `ble_stack` | What `adapter:` accepts | If omitted |
+|---|---|---|
+| `bleak` | A BlueZ adapter name like `hci0`, `hci1`. | Uses BlueZ's `[default]` adapter |
+| `bluek` | Same as `bleak` — kernel adapter name. | Uses the first available |
+| `bumble` | Same — pick one adapter (bumble will take it exclusively). | First available |
+| `esphome` | **Leave unset.** There's no local adapter; the proxy host stack picks the best-RSSI proxy automatically per connect. | n/a — auto-routed |
+
+(For `address: serial` / RS-485 BMSes, `adapter:` is the serial port path like `/dev/ttyUSB0`,
+independent of `ble_stack`.)
 
 ## Energy Meters
 
