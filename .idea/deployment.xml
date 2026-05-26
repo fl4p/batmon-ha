@@ -3,13 +3,6 @@
   <component name="PublishConfigData" serverName="havan" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="ha os">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/batmon-ha" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="havan">
         <serverdata>
           <mappings>

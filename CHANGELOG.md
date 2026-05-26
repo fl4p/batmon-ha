@@ -1,9 +1,17 @@
 # Changelog
 
 
+## [1.96]
+
+* Add new bluetooth backend `esphome` for [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices — see README *BLE Stack* section for setup. Known incompatibility: ANT BMS.
+* Fix HA discovery topics when device alias contains `/` (#366)
+* Throttle telemetry writes to 15s and suffix InfluxDB measurement with address hash
+* InfluxDB: flush in a background task to avoid stalling the sample loop
+
+
 ## [1.95]
 
-* Fix crash when active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
+* Fix crash when   active balancers/meters report no `battery_level`/`current` (EK-24S4EB #357, CW20 #338)
 * Fix `UnicodeDecodeError` crash on JK BMS device info with non-UTF8 bytes (#349)
 * Harden ANT BMS device-info decode against non-UTF8 bytes
 * DALY: support newer firmware GATT layout (service 0000ff00, ff01/ff02) (#356)
