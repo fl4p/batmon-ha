@@ -41,6 +41,7 @@ def get_bms_model_class(name):
         sok='models.sok.SokBt',
         litime='models.litime.LitimeBt',
         dummy='models.dummy.DummyBt',
+        snoop='models.snoop.SnoopBt',  # GATT dumper for reverse-engineering new BMS
     )
 
     mod_class = bms_registry.get(name)
@@ -108,6 +109,10 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
+    extra_kwargs = {}
+    if dev.get('probe') is not None:
+        extra_kwargs['probe'] = dev['probe']
+
     bms: bmslib.bt.BtBms = bms_class(
         address=addr,
         name=name,
@@ -115,6 +120,7 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
         psk=dev.get('pin'),
         adapter=dev.get('adapter'),
         keep_alive=dev.get('keep_alive'),
+        **extra_kwargs,
     )
 
     return bms
