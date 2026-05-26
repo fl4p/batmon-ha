@@ -41,6 +41,32 @@ RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak' || t
 # as bumble-bleak. Best-effort: if the install fails, ble_stack=bluek warns and
 # falls back to bleak.
 RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek@b509ecf' || true
+# esphome (ble_stack: esphome): route BLE GATT through one or more ESPHome
+# Bluetooth Proxy devices. Uses habluetooth's BluetoothManager + bleak-esphome
+# and monkey-patches `bleak.BleakClient`/`BleakScanner` to habluetooth's
+# wrappers at boot.
+#
+# This stack requires bleak >= 3.0.2 (habluetooth's pin), which is incompatible
+# with the bleak==2.0.0 pin in requirements.txt (kept for issue #275). So this
+# stack lives in its own venv. addon_main.sh routes through venv_esphome when
+# ble_stack=esphome; all other stacks keep using `venv`.
+# Best-effort install; if the venv build fails the addon warns and falls back
+# to bleak at runtime.
+RUN python3 -m venv venv_esphome \
+ && venv_esphome/bin/pip3 install paho-mqtt==2.1.0 backoff crcmod pyserial \
+ && venv_esphome/bin/pip3 install 'bleak>=3.0.2' habluetooth bleak-esphome aioesphomeapi \
+    'bluetooth-data-tools<1.29' \
+ && venv_esphome/bin/pip3 install influxdb \
+ && venv_esphome/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' \
+ || true
+# bluetooth-data-tools<1.29: 1.29.x ships only an x86_64 wheel (upstream
+# regression as of writing). Pin to 1.28.x to keep prebuilt aarch64/armv7
+# musl wheels. Revisit when upstream restores the matrix.
+# armv7 caveat: cryptography/dbus-fast/bleak-esphome have no musl armv7
+# wheels — the install would have to compile, which needs `build-base
+# python3-dev libffi-dev openssl-dev cargo rust pkgconfig`. We don't pull
+# those in (Rust adds ~400MB to every image), so on armv7 venv_esphome
+# typically won't build; addon_main.sh falls back to bleak.
 RUN . venv/bin/activate
 
 RUN chmod a+x addon_main.sh

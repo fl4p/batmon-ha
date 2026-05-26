@@ -37,12 +37,24 @@ fi
 # stock BlueZ/D-Bus stack (and the forked-bleak pairing step).
 BLE_STACK="$(bashio::config 'ble_stack')"
 SHADOW_PYTHONPATH=""
+PYBIN="/app/venv/bin/python3"
 
-# Map the selected stack to its shadow python package.
+# Map the selected stack to its shadow python package (bumble/bluek) or to a
+# dedicated venv (esphome — needs bleak>=3 which conflicts with the bleak==2
+# pin in `venv`).
 SHADOW_PKG=""
 case "$BLE_STACK" in
-  bumble) SHADOW_PKG="bumble_bleak"; STACK_LABEL="bumble-bleak (no BlueZ/D-Bus, exclusive HCI)" ;;
-  bluek)  SHADOW_PKG="bluek";        STACK_LABEL="bluek (kernel BlueZ sockets, no D-Bus, coexists)" ;;
+  bumble)  SHADOW_PKG="bumble_bleak"; STACK_LABEL="bumble-bleak (no BlueZ/D-Bus, exclusive HCI)" ;;
+  bluek)   SHADOW_PKG="bluek";        STACK_LABEL="bluek (kernel BlueZ sockets, no D-Bus, coexists)" ;;
+  esphome) STACK_LABEL="esphome (Bluetooth Proxy via aioesphomeapi/habluetooth, no local adapter)"
+           if [ -x /app/venv_esphome/bin/python3 ] \
+              && /app/venv_esphome/bin/python3 -c "import habluetooth, bleak_esphome, aioesphomeapi" 2>/dev/null; then
+             PYBIN="/app/venv_esphome/bin/python3"
+             bashio::log.blue "BLE stack: $STACK_LABEL (venv_esphome)"
+           else
+             bashio::log.warning "ble_stack=esphome but venv_esphome is missing deps; falling back to bleak"
+             BLE_STACK="bleak"
+           fi ;;
 esac
 
 if [ -n "$SHADOW_PKG" ]; then
@@ -63,4 +75,4 @@ fi
 
 MQTT_HOST="$MQTT_HOST" MQTT_PORT="$MQTT_PORT" MQTT_USER="$MQTT_USER" MQTT_PASSWORD="$MQTT_PASSWORD" \
   PYTHONPATH="$SHADOW_PYTHONPATH" \
-  /app/venv/bin/python3 main.py
+  "$PYBIN" main.py

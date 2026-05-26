@@ -122,14 +122,26 @@ class AntBt(BtBms):
         await self.start_notify(self.char, self._notification_handler)
 
     async def disconnect(self):
-        await self.client.stop_notify(self.char)
+        if self.char is not None:
+            try:
+                await self.client.stop_notify(self.char)
+            except Exception:
+                # HaBleakClientWrapper (esphome stack) raises AttributeError
+                # on services if _backend has been torn down; ignore.
+                pass
         await super().disconnect()
         self.char = None
 
     async def _q(self, cmd: AntCommandFuncs, addr, val, resp_code):
         with await self._fetch_futures.acquire_timeout(resp_code, timeout=self.TIMEOUT/2):
             # print('writing', _ant_command(cmd, addr, val))
-            await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val))
+            # Force ATT_WRITE_CMD (no response). The char advertises both
+            # write and write-without-response. Default write-with-response
+            # triggers an auth check at ATT layer; via an ESPHome BT proxy
+            # the bond is non-trivial and we hit "Insufficient authorization
+            # (8)" before any data flows. WoR is fine because the BMS
+            # replies via notify on ffe1, not via the write-response.
+            await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val), response=False)
             return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
 
     async def fetch_device_info(self) -> DeviceInfo:
@@ -247,7 +259,7 @@ class AntBt(BtBms):
         register_onoff = dict(charge=[0x0006, 0x0004], discharge=[0x0003, 0x0001], balance=[0x000D, 0x000E],
                               buzzer=[0x001E, 0x001F])
         addr = register_onoff[switch][0 if state else 1]
-        await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0))
+        await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0), response=False)
 
     def debug_data(self):
         return self._last_response

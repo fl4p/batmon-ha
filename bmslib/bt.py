@@ -147,6 +147,14 @@ def bt_stack_version():
             return 'bumble-v%s' % bumble.__version__
         except Exception:
             return 'bumble (%s)' % BleakClient.__name__
+    # ble_stack=esphome monkey-patches BleakClient to habluetooth's wrapper.
+    # No local BlueZ to report — surface the proxy stack version instead.
+    if mod.startswith('habluetooth'):
+        try:
+            import habluetooth
+            return 'esphome-proxy/habluetooth-v%s' % habluetooth.__version__
+        except Exception:
+            return 'esphome-proxy (%s)' % BleakClient.__name__
     try:
         # get BlueZ version
         p = subprocess.Popen(["bluetoothctl", "--version"], stdout=subprocess.PIPE)
@@ -305,6 +313,12 @@ def bt_power(on):
     # so never let failures here crash the caller.
     if BleakClient.__module__.startswith('bumble_bleak'):
         logging.debug('bt_power(%s) skipped: bumble-bleak manages adapter power', on)
+        return
+    # ble_stack=esphome has no local adapter at all — power-cycling a remote
+    # ESP32 over the network would be nonsense. (Memory note: bluek is
+    # intentionally NOT included here; only bumble and esphome bypass.)
+    if BleakClient.__module__.startswith('habluetooth'):
+        logging.debug('bt_power(%s) skipped: esphome proxy stack has no local adapter', on)
         return
     try:
         for addr, name in bt_controllers():
@@ -486,6 +500,15 @@ class BtBms:
 
         self._connect_time = time.time()
 
+        # NOTE: do NOT unconditionally call client.pair() on the esphome
+        # proxy path. For BMSes that don't actually implement SMP (like
+        # the ANT BMS), the proxy's Pairing Request times out and leaves
+        # Bluedroid in "encryption pending" state, which then causes ALL
+        # subsequent ATT ops to be auto-elevated to "requires auth" and
+        # rejected by the BMS with error 8 (Insufficient Authorization).
+        # The PSK path below remains for BMSes that genuinely passkey-pair
+        # (JK with PSK, etc.) via the bleak callback.
+
         if self.verbose_log:
             try:
                 await enumerate_services(self.client, logger=self.logger)
@@ -556,11 +579,11 @@ class BtBms:
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
                 ad = f' using adapter {self._adapter}' if self._adapter else ''
-                if self.client.address not in discovered:
+                if self.address not in discovered:
                     raise BleakDeviceNotFoundError(
-                        self.client.address, 'Device %s%s not discovered. Make sure it in range and is not being '
-                                             'accessed by another app. (found %s)' % (
-                                                 self.client.address, ad, discovered))
+                        self.address, 'Device %s%s not discovered. Make sure it in range and is not being '
+                                      'accessed by another app. (found %s)' % (
+                                          self.address, ad, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout / 2)
@@ -629,7 +652,7 @@ class BtBms:
         raise NotImplementedError()
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self.client.address},{self.name})'
+        return f'{self.__class__.__name__}({self.address},{self.name})'
 
     async def __aenter__(self):
         # print("enter")
