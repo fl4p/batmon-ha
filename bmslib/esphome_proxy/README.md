@@ -2,23 +2,30 @@
 
 Routes BLE GATT through one or more ESPHome devices running the
 [Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html)
-component, so the batmon-ha addon does not need a local Bluetooth adapter.
+component, so the batmon-ha addon does not need a local Bluetooth
+adapter.
 
 ## How it boots
 
-1. `addon_main.sh` sees `ble_stack: esphome` and logs the choice — no
-   `PYTHONPATH` shadow is set (unlike `bumble`/`bluek`, this stack does
-   not replace the `bleak` package wholesale).
+1. `addon_main.sh` sees `ble_stack: esphome`, picks `/app/venv_esphome`
+   (separate venv: `habluetooth` requires `bleak>=3.0.2` which conflicts
+   with the `bleak==2.0.0` pin in the default `venv` — see issue #275).
+   No `PYTHONPATH` shadow is set; this stack does not replace `bleak`
+   wholesale.
 2. `main.py` calls `install_bleak_shim()` *before* importing
    `bmslib.bt`. The shim monkey-patches `bleak.BleakClient` and
    `bleak.BleakScanner` to `habluetooth.HaBleakClientWrapper` and
-   `HaBleakScannerWrapper`. From then on, every `from bleak import ...`
-   inside the addon (and inside `aiobmsble`) resolves to the wrappers.
-3. Inside the asyncio loop, `start_manager(proxies)` brings up the
-   `habluetooth.BluetoothManager`, opens an `aioesphomeapi.APIClient`
-   per configured proxy, fetches its `device_info`, and calls
-   `bleak_esphome.connect_scanner(...)` which registers a connectable
-   scanner per proxy with the manager.
+   `HaBleakScannerWrapper`, then constructs a `BluetoothManager` and
+   registers it with `habluetooth.set_manager`. From then on, every
+   `from bleak import ...` inside the addon (and inside `aiobmsble`)
+   resolves to the wrappers.
+3. Inside the asyncio loop, `start_proxies(proxies)` awaits
+   `manager.async_setup()` then, for each configured proxy, constructs
+   a `bleak_esphome.APIConnectionManager({"address": host, "noise_psk":
+   psk})` and awaits its `start()`. APIConnectionManager wraps
+   `APIClient` + `ReconnectLogic` + `connect_scanner` +
+   `async_register_scanner` internally, so reconnect-on-WiFi-blip is
+   handled for free.
 4. BMS connect paths (`bmslib/bt.py`, `bmslib/models/BLE_BMS_wrap.py`)
    then `BleakClient(addr_or_device).connect()` as normal. The
    `HaBleakClientWrapper` asks the manager for the best-RSSI
@@ -31,28 +38,35 @@ component, so the batmon-ha addon does not need a local Bluetooth adapter.
 ble_stack: esphome
 bluetooth_proxies:
   - host: 192.168.1.42
-    # port: 6053          # default
     noise_psk: "base64-encoded-encryption-key"   # if Noise-encrypted (default in ESPHome)
-    # password: "..."     # legacy API password (mutually exclusive with noise_psk)
-    name: "garage-proxy"  # diagnostic label only
+    name: "garage-proxy"                          # diagnostic label only
   - host: 192.168.1.43
     noise_psk: "another-key"
 ```
 
 The proxy needs ESPHome firmware with **active connections** enabled
 (`bluetooth_proxy.active: true`), otherwise scans work but GATT does
-not.
+not. `APIConnectionManager` always dials port 6053 (the ESPHome
+default) and does not use the legacy API password; only `noise_psk` is
+respected.
 
-## Dependencies
+## Dependencies (installed best-effort in Dockerfile)
 
-Installed best-effort in the Dockerfile (`pip install aioesphomeapi
-habluetooth bleak-esphome`). If any are missing at runtime, the shim
-logs a warning and the addon falls back to plain `bleak`.
+In a dedicated `venv_esphome`:
+
+- `bleak >= 3.0.2`
+- `habluetooth` (BluetoothManager + bleak wrappers)
+- `bleak-esphome` (ESPHomeClient/Scanner + APIConnectionManager)
+- `aioesphomeapi` (ESPHome transport)
+- `bluetooth-data-tools < 1.29` (upstream regression — 1.29.x ships
+  only x86_64 wheels)
+
+If `venv_esphome` is missing or importing one of those packages fails,
+`addon_main.sh` logs a warning and falls back to plain `bleak` (stock
+BlueZ stack via the regular `venv`).
 
 ## Status — not in this scaffold
 
-- **Reconnect / backoff.** A proxy losing its WiFi link is currently
-  not retried. Restart the addon.
 - **mDNS discovery of proxies.** Explicit `bluetooth_proxies:` list
   required.
 - **Connection-slot accounting.** ESP32 holds ~3 active BLE
@@ -66,17 +80,21 @@ logs a warning and the addon falls back to plain `bleak`.
 - **`bt_diagnostics`/`bt_discovery` reporting.** Will surface devices
   the proxy has heard, but the "adapter" column will show the proxy
   source MAC rather than a local `hciN`. Expected.
-- **Tests.** None — this scaffold is the smallest plausible thing that
-  could work; first validation is to run it against a real proxy.
+- **armv7 image.** `cryptography`/`dbus-fast`/`bleak-esphome` lack
+  musl-armv7 wheels — building from sdist needs Rust (~400 MB). We
+  don't pull that toolchain in; on armv7 `venv_esphome` typically
+  won't build and the addon falls back to bleak. Aarch64 and x86_64
+  install cleanly.
+- **Tests.** None yet — first validation is to run against a real proxy.
 
 ## Validation plan (next pass)
 
 1. Deploy with one proxy (`ble_stack: esphome`, single
    `bluetooth_proxies:` entry).
 2. Configure one non-PSK BMS (e.g. Daly, SOK).
-3. Watch addon log for `esphome_proxy: registered <name>` and a
+3. Watch addon log for `esphome_proxy: <name> up at <host>` and a
    subsequent BMS `connected` line.
 4. Check sample latency vs. local `bleak` baseline — expect +5–20ms
    per GATT round-trip.
 5. Pull the proxy's power; confirm addon logs reflect lost samples
-   (and decide whether explicit reconnect is needed).
+   followed by automatic recovery (APIConnectionManager reconnects).

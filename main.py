@@ -175,8 +175,8 @@ async def main():
         # ble_stack=esphome: bring up habluetooth + connect each configured
         # proxy. Must run before any BMS connect, since the wrappers refuse
         # connections until at least one scanner is registered.
-        from bmslib.esphome_proxy import start_manager
-        await start_manager(_esphome_proxies)
+        from bmslib.esphome_proxy import start_proxies
+        await start_proxies(_esphome_proxies)
 
     if user_config.get('bt_power_cycle'):
         try:
@@ -446,6 +446,10 @@ async def main():
             pass
 
     await stop_all_scanners()
+
+    if _esphome_proxies is not None:
+        from bmslib.esphome_proxy import stop_proxies
+        await stop_proxies()
 
 
 def on_exit(*args, **kwargs):

@@ -2,46 +2,41 @@
 
 Two-step contract for the caller (main.py):
 
-  1. install_bleak_shim()   - synchronous; called BEFORE `import bmslib.bt`
-                              so that `from bleak import BleakClient,
-                              BleakScanner` inside bt.py resolves to the
-                              habluetooth wrappers.
-  2. await start_manager(proxies)
-                            - asynchronous; called inside the asyncio loop.
-                              Brings up the habluetooth manager, opens an
-                              APIClient per proxy and registers each
-                              proxy's scanner with the manager.
+  1. install_bleak_shim()      - synchronous; called BEFORE `import bmslib.bt`
+                                  so that `from bleak import BleakClient,
+                                  BleakScanner` inside bt.py resolves to the
+                                  habluetooth wrappers.
+  2. await start_proxies(...)  - asynchronous; called inside the asyncio loop.
+                                  Brings up the habluetooth manager and a
+                                  bleak_esphome.APIConnectionManager per proxy.
+
+Reconnect/backoff is handled by APIConnectionManager (which owns an
+aioesphomeapi ReconnectLogic). Scanner registration with habluetooth is
+handled by APIConnectionManager internally.
 
 If any dependency is missing (`habluetooth`, `bleak_esphome`,
 `aioesphomeapi`), install_bleak_shim() logs a warning and returns False so
 the addon can fall back to plain bleak rather than crash.
-
-What's deliberately NOT here yet (see README.md):
-  - reconnect / backoff on a proxy losing its WiFi link
-  - mDNS discovery of proxies (require explicit list for now)
-  - per-device routing override (manager picks best-RSSI connectable proxy)
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List
 
 logger = logging.getLogger(__name__)
 
-# Populated by install_bleak_shim() and consumed by start_manager().
+# Populated by install_bleak_shim() and consumed by start_proxies().
 _manager: Any = None
-_clients: List[Any] = []
+_conns: List[Any] = []
 
 
 def install_bleak_shim() -> bool:
     """Patch `bleak.BleakClient`/`BleakScanner` to habluetooth wrappers.
 
-    MUST run before any module imports those symbols by name, otherwise the
-    bound reference still points at the stock backend. Returns True on
-    success, False if a dependency is missing (caller should treat that as
-    "fall back to plain bleak").
+    MUST run before any module imports those symbols by name. Returns True
+    on success, False if a dependency is missing (caller should treat that
+    as "fall back to plain bleak").
     """
     global _manager
 
@@ -72,83 +67,59 @@ def install_bleak_shim() -> bool:
     return True
 
 
-async def start_manager(proxies: Iterable[dict]) -> None:
-    """Start the BluetoothManager and connect each configured proxy.
+async def start_proxies(proxies: Iterable[dict]) -> None:
+    """Start the BluetoothManager and bring up an APIConnectionManager per proxy.
 
-    `proxies` is an iterable of dicts with keys: host (str), port (int,
-    default 6053), noise_psk (str|None), password (str|None), name (str|
-    None — diagnostic label only).
+    `proxies` is an iterable of dicts with keys: host (str), noise_psk
+    (str|None), name (str|None — diagnostic label only).
 
-    Survives per-proxy failures: a proxy that can't be reached is logged
-    and skipped; the rest are brought up. Aborts cleanly if the shim was
-    not installed.
+    Per-proxy `start()` failures are logged and skipped; the rest are
+    brought up. APIConnectionManager keeps reconnecting on its own once
+    started, so transient WiFi blips are recovered without addon restart.
     """
     if _manager is None:
-        logger.warning("esphome_proxy: start_manager() called without "
+        logger.warning("esphome_proxy: start_proxies() called without "
                        "install_bleak_shim(); nothing to do")
         return
 
-    from aioesphomeapi import APIClient
-    from bleak_esphome import connect_scanner
-    from bleak_esphome.backend.cache import ESPHomeBluetoothCache
+    from bleak_esphome import APIConnectionManager, ESPHomeStartAborted
 
     await _manager.async_setup()
-    cache = ESPHomeBluetoothCache()
 
     for proxy in proxies:
         host = proxy.get("host")
         if not host:
-            logger.warning("esphome_proxy: proxy entry missing host: %r",
-                           proxy)
+            logger.warning("esphome_proxy: proxy entry missing host: %r", proxy)
             continue
-        port = int(proxy.get("port", 6053))
         label = proxy.get("name") or host
+        config = {"address": host, "noise_psk": proxy.get("noise_psk")}
 
-        cli = APIClient(
-            address=host,
-            port=port,
-            password=proxy.get("password"),
-            noise_psk=proxy.get("noise_psk"),
-            client_info="batmon-ha",
-        )
-
+        conn = APIConnectionManager(config)
         try:
-            await cli.connect(login=True)
-            device_info = await cli.device_info()
+            await conn.start()
+        except ESPHomeStartAborted:
+            logger.warning("esphome_proxy: %s: start aborted", label)
+            continue
         except Exception as exc:
-            logger.error("esphome_proxy: %s: connect failed: %s", label, exc)
+            logger.error("esphome_proxy: %s: start failed: %s", label, exc)
             continue
 
-        client_data = connect_scanner(
-            cli=cli,
-            device_info=device_info,
-            cache=cache,
-            available=True,
-        )
-        scanner = client_data.scanner
-        await scanner.async_setup()
-        _manager.async_register_scanner(scanner, connectable=True)
+        _conns.append(conn)
+        logger.info("esphome_proxy: %s up at %s", label, host)
 
-        _clients.append(cli)
-        logger.info(
-            "esphome_proxy: registered %s (%s) feature_flags=0x%x",
-            label, host,
-            device_info.bluetooth_proxy_feature_flags_compat(cli.api_version),
-        )
-
-    if not _clients:
+    if not _conns:
         logger.warning("esphome_proxy: no proxies connected; "
                        "BleakScanner will return no devices")
 
 
-async def stop_manager() -> None:
+async def stop_proxies() -> None:
     """Best-effort teardown for clean shutdown."""
-    for cli in _clients:
+    for conn in _conns:
         try:
-            await cli.disconnect()
+            await conn.stop()
         except Exception:
             pass
-    _clients.clear()
+    _conns.clear()
     if _manager is not None:
         try:
             await _manager.async_stop()

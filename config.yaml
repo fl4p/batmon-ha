@@ -105,9 +105,7 @@ schema:
 
   bluetooth_proxies:
     - host: str
-      port: "int(1,65535)?"
       noise_psk: "str?"
-      password: "str?"
       name: "str?"
 
   influxdb_host: "str?"
