@@ -500,23 +500,14 @@ class BtBms:
 
         self._connect_time = time.time()
 
-        # When connected through an ESPHome BT proxy (habluetooth wrapper),
-        # request LE bonding so subsequent reads of encrypted characteristics
-        # don't fail with "Insufficient authorization (8)". Idempotent for
-        # already-bonded devices; the proxy persists the LTK in NVS.
-        # Stock bleak.pair() semantics differ across backends, so we only
-        # call it on the habluetooth path. Requires ESPHome >= 2024.3.0
-        # (FEATURE_PAIRING). Skipped when self._psk is set — the PSK block
-        # below handles passkey-pairing with its own callback.
-        if not self._psk and self.client.__class__.__name__ == 'HaBleakClientWrapper':
-            try:
-                await self.client.pair()
-                self.logger.debug('esphome proxy: pair() ok for %s', self.address)
-            except NotImplementedError:
-                pass
-            except Exception as exc:
-                self.logger.info('esphome proxy: pair() failed for %s: %s',
-                                 self.address, exc)
+        # NOTE: do NOT unconditionally call client.pair() on the esphome
+        # proxy path. For BMSes that don't actually implement SMP (like
+        # the ANT BMS), the proxy's Pairing Request times out and leaves
+        # Bluedroid in "encryption pending" state, which then causes ALL
+        # subsequent ATT ops to be auto-elevated to "requires auth" and
+        # rejected by the BMS with error 8 (Insufficient Authorization).
+        # The PSK path below remains for BMSes that genuinely passkey-pair
+        # (JK with PSK, etc.) via the bleak callback.
 
         if self.verbose_log:
             try:
