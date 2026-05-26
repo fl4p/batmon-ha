@@ -500,6 +500,24 @@ class BtBms:
 
         self._connect_time = time.time()
 
+        # When connected through an ESPHome BT proxy (habluetooth wrapper),
+        # request LE bonding so subsequent reads of encrypted characteristics
+        # don't fail with "Insufficient authorization (8)". Idempotent for
+        # already-bonded devices; the proxy persists the LTK in NVS.
+        # Stock bleak.pair() semantics differ across backends, so we only
+        # call it on the habluetooth path. Requires ESPHome >= 2024.3.0
+        # (FEATURE_PAIRING). Skipped when self._psk is set — the PSK block
+        # below handles passkey-pairing with its own callback.
+        if not self._psk and self.client.__class__.__name__ == 'HaBleakClientWrapper':
+            try:
+                await self.client.pair()
+                self.logger.debug('esphome proxy: pair() ok for %s', self.address)
+            except NotImplementedError:
+                pass
+            except Exception as exc:
+                self.logger.info('esphome proxy: pair() failed for %s: %s',
+                                 self.address, exc)
+
         if self.verbose_log:
             try:
                 await enumerate_services(self.client, logger=self.logger)
