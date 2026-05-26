@@ -179,6 +179,15 @@ If you'd like another BMS family added over RS485, open an issue with a
 captured frame (`tcpdump` of the USB-serial line, or a wireshark log from
 the vendor's PC tool).
 
+## Adding a new BMS
+
+If your BMS isn't supported yet, set `type: snoop` (optionally
+`type: snoop:jbd,jk,daly,ant,sok,supervolt` to also write known probe
+frames) on the device entry. Batmon will connect, dump the GATT tree, and
+log every notification byte the device sends — enough to reverse-engineer
+the protocol or share with us in an issue. See
+[doc/SNOOP.md](doc/SNOOP.md).
+
 ## BLE Stack
 
 Batmon can talk to your BMS through one of four Bluetooth backends. Pick one with the global

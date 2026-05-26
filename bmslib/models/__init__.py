@@ -84,7 +84,19 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     if not addr or addr.startswith('#'):
         return None
 
-    slug = dev['type']
+    slug = str(dev['type'] or '').strip()
+
+    # Optional `:<spec>` suffix on the type. Currently only the `snoop` type
+    # consumes it (comma-separated list of BMS families to actively probe,
+    # e.g. `type: snoop:jbd,jk,daly`).
+    extra_kwargs = {}
+    if ':' in slug:
+        slug, probe_spec = slug.split(':', 1)
+        slug = slug.strip()
+        probe_spec = probe_spec.strip()
+        if probe_spec:
+            extra_kwargs['probe'] = probe_spec
+
     bms_class = get_bms_model_class(slug)
 
     if bms_class is None:
@@ -108,10 +120,6 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     addr = name2addr(addr)
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
-
-    extra_kwargs = {}
-    if dev.get('probe') is not None:
-        extra_kwargs['probe'] = dev['probe']
 
     bms: bmslib.bt.BtBms = bms_class(
         address=addr,

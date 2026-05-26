@@ -3,6 +3,9 @@
 
 ## [1.97]
 
+* Add `translations/{en,de,es}.yaml` in English, German and Spanish
+* Remove the per-device `probe:` field. The `snoop` BMS type now reads its probe spec from a `:families` suffix on `type:` (e.g. `type: snoop:jbd,jk,daly`) — see [doc/SNOOP.md](doc/SNOOP.md)
+* Expand `snoop` probe set from 6 to 25 BMS families. Frames for the `aiobmsble`-backed ones (abc, ant_leg, braunpwr, cbtpwr, cbtpwr_vb, felicity, lipower, neey, pace, pro, redodo, renogy, renogy_pro, roypow, seplos, seplos_v2, tdt, tianpwr, vatrer) were snapshotted directly from each plugin's frame builder so CRCs/LRCs match
 * Restore multi-arch Docker builds (aarch64/amd64/armhf/armv7/i386) — re-add `ARG BUILD_FROM` consumed by `build.yaml`, which 1.96 had dropped (#365)
 
 

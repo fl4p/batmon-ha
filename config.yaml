@@ -75,7 +75,6 @@ schema:
       adapter: "str?"
       algorithm: "str?"
       current_calibration: "float?"
-      probe: "str?"  # snoop type: comma-sep families to actively probe, e.g. "jbd,jk,daly"
 
   mqtt_user: "str?"
   mqtt_password: "str?"

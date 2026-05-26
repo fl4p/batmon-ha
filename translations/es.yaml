@@ -1,0 +1,170 @@
+configuration:
+  devices:
+    name: Dispositivos BMS
+    description: >-
+      Lista de sistemas de gestión de batería (BMS) que se monitorizarán.
+      Cada entrada necesita una dirección y un tipo; el resto de campos
+      son opcionales.
+  address:
+    name: Dirección
+    description: >-
+      MAC Bluetooth (p.ej. AA:BB:CC:DD:EE:FF) o "serial" para BMS por
+      RS-485/UART. Antepón "#" para desactivar una entrada temporalmente.
+  type:
+    name: Tipo de BMS
+    description: >-
+      Familia de protocolo. Integrados: jbd, jk, jk_24s, jk_32s, jk_uart,
+      daly, daly2, daly_uart, ant, victron, supervolt, sok, litime, snoop,
+      group_parallel. Cualquier otro se busca en aiobmsble. Ver README.
+  alias:
+    name: Alias
+    description: >-
+      Nombre descriptivo usado como prefijo de las entidades MQTT/Home
+      Assistant. Si se omite, se usa la dirección.
+  debug:
+    name: Depuración
+    description: >-
+      Activar registro detallado a nivel de protocolo solo para este BMS.
+  pin:
+    name: PIN / clave de acceso
+    description: >-
+      PIN de emparejamiento Bluetooth (p.ej. para JK BMS con PSK
+      activado). Número de seis dígitos como cadena.
+  adapter:
+    name: Adaptador
+    description: >-
+      Controlador Bluetooth local para este BMS ("hci0", "hci1" o la MAC
+      del controlador). Para BMS por serie, la ruta del puerto serie
+      ("/dev/ttyUSB0"). Dejar vacío para usar el predeterminado.
+  algorithm:
+    name: Algoritmo de SoC
+    description: >-
+      Sustituir el algoritmo de estado de carga (SoC) para este BMS.
+      Normalmente déjalo vacío.
+  current_calibration:
+    name: Calibración de corriente
+    description: >-
+      Multiplicador aplicado a los valores de corriente reportados, para
+      corregir errores de escala del shunt. Por defecto 1.0.
+
+  concurrent_sampling:
+    name: Muestreo concurrente
+    description: >-
+      Muestrear todos los BMS en paralelo en lugar de secuencialmente. Más
+      rápido, pero cada adaptador soporta más cambios de conexión; úsalo
+      solo si dispones de suficientes slots BLE.
+  keep_alive:
+    name: Mantener conexión
+    description: >-
+      Mantener una conexión BLE persistente entre muestras en lugar de
+      reconectar en cada ciclo. Menor latencia y carga sobre el BMS;
+      necesario para algunos modelos.
+  verbose_log:
+    name: Registro detallado
+    description: Activar registro detallado a nivel de complemento.
+  sample_period:
+    name: Periodo de muestreo (s)
+    description: >-
+      Frecuencia con la que se lee una muestra nueva de cada BMS, en
+      segundos.
+  publish_period:
+    name: Periodo de publicación (s)
+    description: >-
+      Frecuencia con la que se publican muestras a MQTT, en segundos. Si
+      es menor que sample_period, se publica cada muestra.
+  invert_current:
+    name: Invertir signo de corriente
+    description: >-
+      Invertir el signo de la corriente reportada (positivo pasa a ser
+      descarga en lugar de carga). Algunos BMS usan la convención opuesta.
+  watchdog:
+    name: Watchdog
+    description: >-
+      Reiniciar el complemento si no se publica ningún mensaje MQTT en
+      "Caducar valores tras" segundos. Recomendado.
+  expire_values_after:
+    name: Caducar valores tras (s)
+    description: >-
+      Marcar los valores MQTT como no disponibles tras este número de
+      segundos sin una muestra nueva. Sirve también como tiempo límite
+      del watchdog.
+  bt_power_cycle:
+    name: Apagar/encender Bluetooth al inicio
+    description: >-
+      Apagar y volver a encender el adaptador Bluetooth una vez al
+      arrancar el complemento. A veces resuelve estados bloqueados del
+      adaptador del host.
+
+  ble_stack:
+    name: Stack Bluetooth
+    description: >-
+      Backend Bluetooth usado para comunicarse con el BMS.
+      "bleak" = stack estándar BlueZ/D-Bus (por defecto, máxima
+      compatibilidad).
+      "bumble" = HCI puro en Python (sin D-Bus, toma el adaptador en
+      exclusiva).
+      "bluek" = sockets del BlueZ del kernel (sin D-Bus, convive con el
+      Bluetooth de HA).
+      "esphome" = enrutar a través de uno o varios dispositivos ESPHome
+      Bluetooth Proxy (sin adaptador local; configúralos en "Proxies
+      Bluetooth" abajo).
+  bluetooth_proxies:
+    name: Proxies Bluetooth
+    description: >-
+      Solo se usa cuando el stack Bluetooth es "esphome". Una entrada
+      por dispositivo ESPHome Bluetooth Proxy.
+  host:
+    name: Host
+    description: >-
+      Dirección IP o nombre de host del dispositivo ESPHome Bluetooth
+      Proxy.
+  noise_psk:
+    name: Noise PSK
+    description: >-
+      Clave codificada en base64 de la configuración API de ESPHome del
+      proxy. Necesaria si el proxy exige cifrado Noise (predeterminado
+      en el firmware ESPHome actual).
+  name:
+    name: Nombre
+    description: >-
+      Etiqueta descriptiva opcional para este proxy, usada solo en los
+      mensajes de log.
+
+  mqtt_user:
+    name: Usuario MQTT
+    description: >-
+      Usuario del broker MQTT. Déjalo vacío para usar el broker descubierto
+      automáticamente desde el servicio MQTT del supervisor de Home
+      Assistant.
+  mqtt_password:
+    name: Contraseña MQTT
+    description: Contraseña del broker MQTT.
+  mqtt_broker:
+    name: Host del broker MQTT
+    description: >-
+      Nombre de host o IP del broker MQTT. Se obtiene automáticamente de
+      HA si está vacío.
+  mqtt_port:
+    name: Puerto del broker MQTT
+    description: Puerto del broker MQTT (por defecto 1883).
+
+  influxdb_host:
+    name: Host de InfluxDB
+    description: >-
+      Endpoint opcional de InfluxDB (host[:puerto]) al que enviar también
+      las muestras. Déjalo vacío para desactivarlo.
+  influxdb_username:
+    name: Usuario de InfluxDB
+    description: Usuario para autenticarse en InfluxDB.
+  influxdb_password:
+    name: Contraseña de InfluxDB
+    description: Contraseña para autenticarse en InfluxDB.
+  influxdb_ssl:
+    name: InfluxDB SSL
+    description: Conectar a InfluxDB por HTTPS.
+  influxdb_verify_ssl:
+    name: Verificar certificado SSL de InfluxDB
+    description: Validar el certificado TLS del servidor InfluxDB.
+  influxdb_database:
+    name: Base de datos InfluxDB
+    description: Nombre de la base de datos (o bucket) donde escribir las muestras.

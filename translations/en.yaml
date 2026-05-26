@@ -1,0 +1,152 @@
+configuration:
+  devices:
+    name: BMS devices
+    description: >-
+      List of Battery Management Systems to monitor. Each entry needs an
+      address and type; other fields are optional.
+  address:
+    name: Address
+    description: >-
+      Bluetooth MAC (e.g. AA:BB:CC:DD:EE:FF) or "serial" for RS-485/UART
+      BMSes. Prefix with "#" to disable an entry temporarily.
+  type:
+    name: BMS type
+    description: >-
+      Protocol family. Built-in: jbd, jk, jk_24s, jk_32s, jk_uart, daly,
+      daly2, daly_uart, ant, victron, supervolt, sok, litime, snoop,
+      group_parallel. Anything else is looked up in aiobmsble. See README.
+  alias:
+    name: Alias
+    description: >-
+      Friendly name used as the MQTT/Home Assistant entity prefix.
+      Defaults to the address if omitted.
+  debug:
+    name: Debug
+    description: Enable verbose protocol-level logging for this BMS only.
+  pin:
+    name: PIN / passkey
+    description: >-
+      Bluetooth pairing PIN (e.g. for JK BMS with PSK enabled). Six-digit
+      number as a string.
+  adapter:
+    name: Adapter
+    description: >-
+      Local Bluetooth controller for this BMS ("hci0", "hci1", or a
+      controller MAC). For serial BMSes, the serial-port path
+      ("/dev/ttyUSB0"). Leave empty to use the default.
+  algorithm:
+    name: SoC algorithm
+    description: >-
+      Override the State-of-Charge algorithm for this BMS. Usually leave unset.
+  current_calibration:
+    name: Current calibration
+    description: >-
+      Multiplier applied to reported current values, to correct shunt
+      scaling errors. Default 1.0.
+
+  concurrent_sampling:
+    name: Concurrent sampling
+    description: >-
+      Sample all BMSes in parallel instead of sequentially. Faster but
+      each adapter handles more connection churn; use only if you have
+      enough BLE connection slots.
+  keep_alive:
+    name: Keep connection alive
+    description: >-
+      Maintain a persistent BLE connection between samples instead of
+      reconnecting each cycle. Lower latency and load on the BMS; required
+      for some models.
+  verbose_log:
+    name: Verbose log
+    description: Enable verbose addon-level logging.
+  sample_period:
+    name: Sample period (s)
+    description: How often to read a fresh sample from each BMS, in seconds.
+  publish_period:
+    name: Publish period (s)
+    description: >-
+      How often to publish samples to MQTT, in seconds. Set lower than
+      sample_period to publish every sample.
+  invert_current:
+    name: Invert current sign
+    description: >-
+      Flip the sign of reported current (positive becomes discharge
+      instead of charge). Some BMSes use the opposite convention.
+  watchdog:
+    name: Watchdog
+    description: >-
+      Restart the addon if no MQTT message is published within
+      "Expire values after" seconds. Recommended.
+  expire_values_after:
+    name: Expire values after (s)
+    description: >-
+      Mark MQTT values as unavailable after this many seconds without a
+      fresh sample. Also doubles as the watchdog timeout.
+  bt_power_cycle:
+    name: Power-cycle Bluetooth at start
+    description: >-
+      Toggle the Bluetooth adapter off/on once at addon startup. Sometimes
+      clears stuck states on the host adapter.
+
+  ble_stack:
+    name: Bluetooth stack
+    description: >-
+      Bluetooth backend used to talk to your BMS.
+      "bleak" = stock BlueZ/D-Bus (default, most compatible).
+      "bumble" = pure-Python HCI (no D-Bus, takes the adapter exclusively).
+      "bluek" = kernel BlueZ sockets (no D-Bus, coexists with HA Bluetooth).
+      "esphome" = route via one or more ESPHome Bluetooth Proxy devices
+      (no local adapter; configure them under "Bluetooth proxies" below).
+  bluetooth_proxies:
+    name: Bluetooth proxies
+    description: >-
+      Only used when Bluetooth stack is "esphome". One entry per ESPHome
+      Bluetooth Proxy device.
+  host:
+    name: Host
+    description: IP address or hostname of the ESPHome Bluetooth Proxy device.
+  noise_psk:
+    name: Noise PSK
+    description: >-
+      Base64-encoded encryption key from the proxy's ESPHome API config.
+      Required if the proxy enforces Noise encryption (default in modern
+      ESPHome firmware).
+  name:
+    name: Name
+    description: Optional friendly label for this proxy, used only in log lines.
+
+  mqtt_user:
+    name: MQTT user
+    description: >-
+      MQTT broker username. Leave empty to use the broker auto-discovered
+      from the Home Assistant Supervisor MQTT service.
+  mqtt_password:
+    name: MQTT password
+    description: MQTT broker password.
+  mqtt_broker:
+    name: MQTT broker host
+    description: MQTT broker hostname or IP. Auto-discovered from HA if empty.
+  mqtt_port:
+    name: MQTT broker port
+    description: MQTT broker port (default 1883).
+
+  influxdb_host:
+    name: InfluxDB host
+    description: >-
+      Optional InfluxDB endpoint (host[:port]) to also push samples to.
+      Leave empty to disable.
+  influxdb_username:
+    name: InfluxDB username
+    description: Username for InfluxDB authentication.
+  influxdb_password:
+    name: InfluxDB password
+    description: Password for InfluxDB authentication.
+  influxdb_ssl:
+    name: InfluxDB SSL
+    description: Connect to InfluxDB over HTTPS.
+  influxdb_verify_ssl:
+    name: Verify InfluxDB SSL certificate
+    description: Validate the InfluxDB server's TLS certificate.
+  influxdb_database:
+    name: InfluxDB database
+    description: Database (bucket) name to write samples to.

@@ -1,0 +1,160 @@
+configuration:
+  devices:
+    name: BMS-Geräte
+    description: >-
+      Liste der Batterie-Management-Systeme, die überwacht werden sollen.
+      Jeder Eintrag braucht Adresse und Typ; alle anderen Felder sind
+      optional.
+  address:
+    name: Adresse
+    description: >-
+      Bluetooth-MAC (z.B. AA:BB:CC:DD:EE:FF) oder "serial" für RS-485/UART-
+      BMSe. Mit "#" am Anfang vorübergehend deaktivieren.
+  type:
+    name: BMS-Typ
+    description: >-
+      Protokollfamilie. Eingebaut: jbd, jk, jk_24s, jk_32s, jk_uart, daly,
+      daly2, daly_uart, ant, victron, supervolt, sok, litime, snoop,
+      group_parallel. Alles andere wird in aiobmsble gesucht. Siehe README.
+  alias:
+    name: Alias
+    description: >-
+      Anzeigename, der als Präfix für MQTT- und Home-Assistant-Entitäten
+      verwendet wird. Ohne Angabe wird die Adresse benutzt.
+  debug:
+    name: Debug
+    description: Ausführliches Protokoll-Logging nur für dieses BMS aktivieren.
+  pin:
+    name: PIN / Passkey
+    description: >-
+      Bluetooth-Pairing-PIN (z.B. für JK-BMS mit aktiviertem PSK).
+      Sechsstellige Zahl als Zeichenkette.
+  adapter:
+    name: Adapter
+    description: >-
+      Lokaler Bluetooth-Controller für dieses BMS ("hci0", "hci1" oder
+      Controller-MAC). Für serielle BMSe der Gerätepfad ("/dev/ttyUSB0").
+      Leer lassen für den Standardadapter.
+  algorithm:
+    name: SoC-Algorithmus
+    description: >-
+      State-of-Charge-Algorithmus für dieses BMS überschreiben. In der
+      Regel leer lassen.
+  current_calibration:
+    name: Stromkalibrierung
+    description: >-
+      Multiplikator für die gemeldeten Stromwerte, um Shunt-Skalierungsfehler
+      zu korrigieren. Standard 1.0.
+
+  concurrent_sampling:
+    name: Parallele Abtastung
+    description: >-
+      Alle BMSe parallel statt nacheinander abfragen. Schneller, aber mehr
+      Verbindungswechsel pro Adapter; nur sinnvoll, wenn genug BLE-
+      Verbindungsslots vorhanden sind.
+  keep_alive:
+    name: Verbindung offen halten
+    description: >-
+      BLE-Verbindung zwischen den Abtastungen aufrechterhalten statt jedes
+      Mal neu aufzubauen. Geringere Latenz und weniger Last für das BMS;
+      für einige Modelle erforderlich.
+  verbose_log:
+    name: Ausführliches Log
+    description: Ausführliches Logging auf Addon-Ebene aktivieren.
+  sample_period:
+    name: Abtastintervall (s)
+    description: Wie oft (in Sekunden) ein neuer Wert vom BMS gelesen wird.
+  publish_period:
+    name: Veröffentlichungsintervall (s)
+    description: >-
+      Wie oft (in Sekunden) Werte an MQTT gesendet werden. Niedriger als
+      sample_period setzen, um jeden Wert zu veröffentlichen.
+  invert_current:
+    name: Stromvorzeichen umkehren
+    description: >-
+      Vorzeichen des gemeldeten Stroms umdrehen (positiv = Entladen statt
+      Laden). Manche BMSe verwenden die umgekehrte Konvention.
+  watchdog:
+    name: Watchdog
+    description: >-
+      Addon neu starten, wenn innerhalb von "Werte ablaufen nach" Sekunden
+      keine MQTT-Nachricht veröffentlicht wurde. Empfohlen.
+  expire_values_after:
+    name: Werte ablaufen nach (s)
+    description: >-
+      MQTT-Werte nach so vielen Sekunden ohne neuen Sample als nicht
+      verfügbar markieren. Dient gleichzeitig als Watchdog-Timeout.
+  bt_power_cycle:
+    name: Bluetooth beim Start aus-/einschalten
+    description: >-
+      Den Bluetooth-Adapter beim Start des Addons einmal aus- und
+      wieder einschalten. Hilft manchmal gegen verklemmte Adapterzustände.
+
+  ble_stack:
+    name: Bluetooth-Stack
+    description: >-
+      Bluetooth-Backend für die Kommunikation mit dem BMS.
+      "bleak" = Standard BlueZ/D-Bus (Voreinstellung, höchste
+      Kompatibilität).
+      "bumble" = Pure-Python-HCI (kein D-Bus, beansprucht den Adapter
+      exklusiv).
+      "bluek" = Kernel-BlueZ-Sockets (kein D-Bus, koexistiert mit HA-
+      Bluetooth).
+      "esphome" = Über ein oder mehrere ESPHome-Bluetooth-Proxy-Geräte
+      (kein lokaler Adapter; siehe "Bluetooth-Proxies" unten).
+  bluetooth_proxies:
+    name: Bluetooth-Proxies
+    description: >-
+      Nur relevant, wenn Bluetooth-Stack auf "esphome" gesetzt ist. Ein
+      Eintrag pro ESPHome-Bluetooth-Proxy.
+  host:
+    name: Host
+    description: IP-Adresse oder Hostname des ESPHome-Bluetooth-Proxy-Geräts.
+  noise_psk:
+    name: Noise-PSK
+    description: >-
+      Base64-kodierter Schlüssel aus der ESPHome-API-Konfiguration des
+      Proxys. Erforderlich, wenn der Proxy Noise-Verschlüsselung erzwingt
+      (Standard in aktueller ESPHome-Firmware).
+  name:
+    name: Name
+    description: >-
+      Optionales Label für diesen Proxy, wird nur in Logzeilen verwendet.
+
+  mqtt_user:
+    name: MQTT-Benutzer
+    description: >-
+      MQTT-Broker-Benutzername. Leer lassen, um den vom Home-Assistant-
+      Supervisor automatisch erkannten MQTT-Dienst zu verwenden.
+  mqtt_password:
+    name: MQTT-Passwort
+    description: MQTT-Broker-Passwort.
+  mqtt_broker:
+    name: MQTT-Broker-Host
+    description: >-
+      MQTT-Broker-Hostname oder IP. Wird automatisch von HA übernommen,
+      wenn leer.
+  mqtt_port:
+    name: MQTT-Broker-Port
+    description: MQTT-Broker-Port (Standard 1883).
+
+  influxdb_host:
+    name: InfluxDB-Host
+    description: >-
+      Optionaler InfluxDB-Endpunkt (host[:port]), an den Werte zusätzlich
+      gesendet werden. Leer lassen, um InfluxDB zu deaktivieren.
+  influxdb_username:
+    name: InfluxDB-Benutzer
+    description: Benutzername für die InfluxDB-Authentifizierung.
+  influxdb_password:
+    name: InfluxDB-Passwort
+    description: Passwort für die InfluxDB-Authentifizierung.
+  influxdb_ssl:
+    name: InfluxDB SSL
+    description: Verbindung zu InfluxDB über HTTPS herstellen.
+  influxdb_verify_ssl:
+    name: InfluxDB-SSL-Zertifikat prüfen
+    description: TLS-Zertifikat des InfluxDB-Servers validieren.
+  influxdb_database:
+    name: InfluxDB-Datenbank
+    description: Datenbank- (bzw. Bucket-)Name für die Datenpunkte.

@@ -10,10 +10,12 @@ On connect it:
      enumerate_services() — readable chars and descriptors are logged with values).
   2. Subscribes to every notify/indicate characteristic and logs each payload.
   3. Optionally writes probe frames for known BMS families to elicit responses
-     (set `probe: "jbd,jk,daly,ant,sok"` in the device config).
+     (append `:jbd,jk,daly,ant,sok` to the device `type:` in config —
+     e.g. `type: snoop:jbd,jk,daly`).
 
 Most BMS only push notifications in response to a poll, so passive subscribe
-often sits silent — use `probe:` to coax a response and fingerprint the protocol.
+often sits silent — use the type-suffix probe spec to coax a response and
+fingerprint the protocol.
 """
 import asyncio
 import math
@@ -24,30 +26,108 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
 
+# Probe frames for known BMS families. Snoop writes these to every writable
+# characteristic on the target device until one responds. Frames for the
+# `aiobmsble`-backed families were snapshotted from each plugin's `_cmd()`
+# (or hand-built from its protocol constants) so the CRC/LRC bytes match.
 PROBE_FRAMES = {
     'jbd': [
-        bytes.fromhex('dd a5 03 00 ff fd 77'.replace(' ', '')),  # read basic info
-        bytes.fromhex('dd a5 04 00 ff fc 77'.replace(' ', '')),  # read cell voltages
-        bytes.fromhex('dd a5 05 00 ff fb 77'.replace(' ', '')),  # read hardware info
+        bytes.fromhex('dda50300fffd77'),  # read basic info
+        bytes.fromhex('dda50400fffc77'),  # read cell voltages
+        bytes.fromhex('dda50500fffb77'),  # read hardware info
     ],
     'jk': [
-        bytes.fromhex('aa5590eb97000000000000000000000000000010'),  # device info request
+        bytes.fromhex('aa5590eb97000000000000000000000000000010'),  # device info
         bytes.fromhex('aa5590eb96000000000000000000000000000011'),  # subscribe
     ],
     'daly': [
-        bytes.fromhex('a5 40 90 08 00 00 00 00 00 00 00 00 7d'.replace(' ', '')),  # SOC
-        bytes.fromhex('a5 40 95 08 00 00 00 00 00 00 00 00 82'.replace(' ', '')),  # cell voltages
-        bytes.fromhex('a5 40 94 08 00 00 00 00 00 00 00 00 81'.replace(' ', '')),  # status
+        bytes.fromhex('a540900800000000000000007d'),  # SOC
+        bytes.fromhex('a5409508000000000000000082'),  # cell voltages
+        bytes.fromhex('a5409408000000000000000081'),  # status
     ],
     'ant': [
-        bytes.fromhex('a5 a5 a5 a5'.replace(' ', '')),  # legacy poll
-        bytes.fromhex('7e a1 01 00 00 bea9 aa55'.replace(' ', '')),  # newer poll
+        bytes.fromhex('a5a5a5a5'),  # legacy poll
+        bytes.fromhex('7ea1010000bea9aa55'),  # newer poll
     ],
     'sok': [
-        bytes.fromhex('ee c1 f0 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 2f'.replace(' ', '')),
+        bytes.fromhex('eec1f000000000000000000000000000000000002f'),
     ],
     'supervolt': [
-        bytes.fromhex('dd a5 03 00 ff fd 77'.replace(' ', '')),  # JBD-compatible
+        bytes.fromhex('dda50300fffd77'),  # JBD-compatible
+    ],
+    # ---- extracted from aiobmsble plugins (CRC verified) ----
+    'abc': [
+        bytes.fromhex('eec1000000ce'),  # request 0xC1
+        bytes.fromhex('eec200000046'),  # request 0xC2
+    ],
+    'ant_leg': [
+        bytes.fromhex('dbdb00000000'),  # legacy ANT status request
+    ],
+    'braunpwr': [
+        bytes.fromhex('7b01007d'),  # status query
+    ],
+    'cbtpwr': [
+        bytes.fromhex('aa552100210a0d'),
+        bytes.fromhex('aa550900090a0d'),
+        bytes.fromhex('aa550a000a0a0d'),
+    ],
+    'cbtpwr_vb': [
+        bytes.fromhex('7e3131303134363432453030323031464433350d'),  # cmd 0x42
+    ],
+    'felicity': [
+        # b'wifilocalMonitor:get dev real infor'
+        bytes.fromhex('776966696c6f63616c4d6f6e69746f723a67657420646576207265616c20696e666f72'),
+    ],
+    'lipower': [
+        bytes.fromhex('220304000008426f'),  # modbus read addr 0, 8 words
+    ],
+    'neey': [
+        bytes.fromhex('aa551101010014000000000000000000000026ff'),
+        bytes.fromhex('aa551101020014000000000000000000000027ff'),
+    ],
+    'pace': [
+        bytes.fromhex('9a00000a0000000019519d'),  # status poll
+    ],
+    'pro': [
+        bytes.fromhex('0a0101558004077f648e682b'),  # init
+        bytes.fromhex('0901015580430000120084'),  # trigger
+        bytes.fromhex('070101558040000095'),  # ack
+    ],
+    'redodo': [
+        bytes.fromhex('000004011355aa17'),  # fixed 8-byte poll (LiTime/Redodo)
+    ],
+    'renogy': [
+        bytes.fromhex('300313b20007a48a'),  # modbus read 0x13b2/7
+        bytes.fromhex('300313880022455c'),  # modbus read 0x1388/34
+    ],
+    'renogy_pro': [
+        bytes.fromhex('ff0313b20007b575'),  # modbus read 0x13b2/7
+    ],
+    'roypow': [
+        bytes.fromhex('ead10104ff02f9f5'),
+        bytes.fromhex('ead10104ff03f8f5'),
+        bytes.fromhex('ead10104ff04fff5'),
+    ],
+    'seplos': [
+        bytes.fromhex('00042000001a7bd0'),  # modbus 0x2000/0x1A
+        bytes.fromhex('0004210000167a29'),  # modbus 0x2100/0x16
+    ],
+    'seplos_v2': [
+        bytes.fromhex('7e1000465100003a7f0d'),  # cmd 0x51
+        bytes.fromhex('7e10004661000100f7c10d'),  # cmd 0x61
+    ],
+    'tdt': [
+        bytes.fromhex('7e000103008c000099420d'),  # cmd 0x8C
+        bytes.fromhex('7e000103008d000059130d'),  # cmd 0x8D
+    ],
+    'tianpwr': [
+        bytes.fromhex('550483aa'),
+        bytes.fromhex('550484aa'),
+        bytes.fromhex('550485aa'),
+    ],
+    'vatrer': [
+        bytes.fromhex('02030000001445f6'),  # modbus read 0/20
+        bytes.fromhex('020300340012843a'),  # modbus read 0x34/18
     ],
 }
 
@@ -56,10 +136,6 @@ class SnoopBt(BtBms):
     def __init__(self, address, **kwargs):
         self._probe_spec: Optional[str] = kwargs.pop('probe', None)
         super().__init__(address, **kwargs)
-        # Allow reusing the `pin` field as a probe spec when the schema doesn't accept `probe`.
-        if not self._probe_spec and self._psk:
-            self._probe_spec = self._psk
-            self.logger.info('[snoop] using pin field as probe spec: %r', self._probe_spec)
         self._notify_chars = []
         self._connected_at = 0.0
 
@@ -105,7 +181,8 @@ class SnoopBt(BtBms):
             await self._probe(self._probe_spec)
         else:
             self.logger.info('[snoop] no probe spec; passive only. '
-                             'Set `pin: "jbd,jk,daly,ant,sok,supervolt"` to enable active probing.')
+                             'Append `:jbd,jk,daly,ant,sok,supervolt` to `type:` '
+                             '(e.g. `type: snoop:jbd,jk,daly`) to enable active probing.')
 
     async def _probe(self, spec: str):
         families = [s.strip().lower() for s in spec.split(',') if s.strip()]
