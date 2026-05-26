@@ -42,6 +42,10 @@ class BmsSample:
                  switches: Optional[Dict[str, bool]] = None,
                  problem: Optional[bool] = None,
                  problem_code: Optional[int] = None,
+                 runtime: float = math.nan,
+                 battery_charging: Optional[bool] = None,
+                 battery_mode: Optional[str] = None,
+                 total_charge_net: float = math.nan,
                  uptime=math.nan, timestamp: Optional[float] = None):
         """
 
@@ -99,6 +103,22 @@ class BmsSample:
             problem = bool(problem_code)
         self.problem: Optional[bool] = problem
         self.problem_code: Optional[int] = problem_code
+        # ``runtime``: estimated seconds-to-empty under the current load
+        # (aiobmsble field). nan = not reported.
+        self.runtime: float = runtime
+        # ``battery_charging``: explicit BMS-reported "is charging" flag. None
+        # when the BMS doesn't report it (consumers can fall back to
+        # current < 0 if they need a derived value).
+        self.battery_charging: Optional[bool] = battery_charging
+        # ``battery_mode``: charging stage label (e.g. "BULK", "ABSORPTION",
+        # "FLOAT"). String so we don't have to import an enum on the
+        # consumer side. None if unreported.
+        self.battery_mode: Optional[str] = battery_mode
+        # ``total_charge_net``: lifetime accumulated Ah discharged out of the
+        # pack — distinct from ``total_charge_throughput`` (∫|I|dt over both
+        # directions). Some BMSes derive cycle count from this divided by
+        # design capacity.
+        self.total_charge_net: float = total_charge_net
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 

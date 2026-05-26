@@ -226,6 +226,19 @@ sample_desc = {
         "unit_of_measurement": "s",
         "precision": 0,
         "icon": "clock"},
+    "bms/runtime": {
+        "field": "runtime",
+        "device_class": "duration",
+        "state_class": "measurement",
+        "unit_of_measurement": "s",
+        "precision": 0,
+        "icon": "timer-sand"},
+    "soc/total_charge_net": {
+        "field": "total_charge_net",
+        "device_class": None,
+        "state_class": "total_increasing",
+        "unit_of_measurement": "Ah",
+        "icon": "battery-arrow-down"},
     "meter/sample_count": {
         "field": "num_samples",
         "device_class": None,
@@ -253,6 +266,12 @@ def publish_sample(client, device_topic, sample: BmsSample):
                         'ON' if sample.problem else 'OFF')
     if sample.problem_code is not None:
         mqtt_single_out(client, f"{device_topic}/problem_code", sample.problem_code)
+
+    if sample.battery_charging is not None:
+        mqtt_single_out(client, f"{device_topic}/battery_charging",
+                        'ON' if sample.battery_charging else 'OFF')
+    if sample.battery_mode is not None:
+        mqtt_single_out(client, f"{device_topic}/battery_mode", sample.battery_mode)
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -392,6 +411,27 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "expire_after": expire_after_seconds,
             "device": device_json,
             "icon": "mdi:alert-circle-outline",
+        }
+
+    if sample.battery_charging is not None:
+        discovery_msg[f"homeassistant/binary_sensor/{node_id}/battery_charging/config"] = {
+            "unique_id": f"{device_topic}__battery_charging",
+            "name": "battery charging",
+            "device_class": "battery_charging",
+            "state_topic": f"{device_topic}/battery_charging",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+        }
+    if sample.battery_mode is not None:
+        discovery_msg[f"homeassistant/sensor/{node_id}/battery_mode/config"] = {
+            "unique_id": f"{device_topic}__battery_mode",
+            "name": "battery mode",
+            "device_class": "enum",
+            "options": ["UNKNOWN", "BULK", "ABSORPTION", "FLOAT"],
+            "state_topic": f"{device_topic}/battery_mode",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+            "icon": "mdi:battery-charging-medium",
         }
 
     switches = (sample.switches and sample.switches.keys())

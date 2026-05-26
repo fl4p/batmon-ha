@@ -189,6 +189,11 @@ class BMS():
                 switches['discharge'] = bool(dischrg)
             problem = sample.get('problem')
             problem_code = sample.get('problem_code')
+            # aiobmsble's BMSMode is an IntEnum (UNKNOWN/BULK/ABSORPTION/FLOAT);
+            # convert to the enum name string so MQTT consumers don't need the
+            # enum class to be importable.
+            mode = sample.get('battery_mode')
+            battery_mode = mode.name if mode is not None and hasattr(mode, 'name') else None
             return BmsSample(
                 soc=sample.get('battery_level', math.nan),
                 soh=sample.get('battery_health', math.nan),
@@ -204,6 +209,10 @@ class BMS():
                 switches=switches or None,
                 problem=problem,
                 problem_code=problem_code,
+                runtime=sample.get('runtime', math.nan),
+                battery_charging=sample.get('battery_charging'),
+                battery_mode=battery_mode,
+                total_charge_net=sample.get('total_charge', math.nan),
             )
         except Exception as e:
             raise ValueError('invalid ble_bms sample %r' % sample) from e
