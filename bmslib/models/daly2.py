@@ -83,6 +83,12 @@ class Daly2Bt(BtBms):
                 charge=mos_byte == 1 or mos_byte == 3,
             ),
 
+            # Alarm bitmask at byte 116 (8 bytes, big-endian) per aiobmsble's
+            # daly_bms decode. Daly v2 / Modbus protocol response covers cell
+            # OV/UV, pack OV/UV, charge/discharge OC, OT/UT, balance, MOSFET
+            # faults, etc.
+            problem_code=int.from_bytes(buf[116:124], byteorder='big', signed=False),
+
             # charge_enabled
             # discharge_enabled
         )

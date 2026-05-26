@@ -33,6 +33,8 @@ AIOBMSBLE_4S = dict(
         num_cycles=57,
         temperatures=[20, 21, 22, 23],
         switches=dict(charge=False, discharge=False),
+        problem_code=0,
+        problem=False,
     ),
 )
 

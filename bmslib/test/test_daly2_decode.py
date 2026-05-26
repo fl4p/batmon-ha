@@ -20,3 +20,7 @@ def test_daly2_decode(fx):
     assert sample.num_cycles == exp["num_cycles"]
     assert list(sample.temperatures) == exp["temperatures"]
     assert sample.switches == exp["switches"]
+    if "problem_code" in exp:
+        assert sample.problem_code == exp["problem_code"]
+    if "problem" in exp:
+        assert sample.problem == exp["problem"]
