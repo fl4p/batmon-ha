@@ -1,4 +1,4 @@
-* inspector bms: subscribes to all chars, read all chars and logs their values
+* inspector/snoop bms: subscribes to all chars, read all chars and logs their values
   * then feed this to LLM or so to find the pattern
     * - scraper bms: just reads all chars/subscribes
 * replace bleak-pairing with `bluetoothctl`? what platforms does pairing bleak implement?
