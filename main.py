@@ -433,7 +433,7 @@ async def main():
 
     for sink in sinks:
         try:
-            sink.flush()
+            sink.close()
         except:
             pass
 

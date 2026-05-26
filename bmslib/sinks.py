@@ -59,7 +59,6 @@ class InfluxDBSink(BmsSampleSink):
 
         self.Q = queue.Queue(50_000)
         self.db = kwargs.get('database')
-        self.time_last_flush = 0
         self._last_volt: Dict[str, List[int]] = {}
         self.flush_interval = flush_interval
         self.silent = False
@@ -177,7 +176,7 @@ class InfluxDBSink(BmsSampleSink):
     def flush(self):
         """Drain the queue and attempt one write. Always attempts regardless of
         the circuit breaker (callers like shutdown want a final flush);
-        _maybe_flush is the backoff-gated periodic entry point."""
+        _flush_loop is the backoff-gated periodic entry point."""
         now = time.time()
         batch = []
         while not self.Q.empty() and len(batch) < 20_000:
@@ -201,7 +200,6 @@ class InfluxDBSink(BmsSampleSink):
                         self._enqueue(point)  # re-queue for retry after backoff window
                 elif self.cb.enabled:
                     self._drain_queue()  # never succeeded: drop, stay flat
-            self.time_last_flush = now
 
     def _flush_loop(self):
         while not self._stop_event.wait(self.flush_interval):
@@ -225,7 +223,7 @@ def hash_urlsafe(s: str):
     if not s:
         return None
     sh = hashlib.sha1(s.encode("utf-8"))
-    return base64.urlsafe_b64encode(sh.digest()[1::2]).replace(b'=', b"")
+    return base64.urlsafe_b64encode(sh.digest()[1::2]).rstrip(b'=').decode("ascii")
 
 
 def get_user_id():
@@ -252,7 +250,7 @@ class TelemetrySink(InfluxDBSink):
 
     def __init__(self, bms_by_name: Dict[str, BtBms]):
         super().__init__(
-            flush_interval=30,
+            flush_interval=120,
             backoff_interval=3600,
             host="tm.fabi.me",
             username="batmon_wo",
@@ -294,7 +292,7 @@ class TelemetrySink(InfluxDBSink):
         tags and tags_.update(tags)
         try:
             InfluxDBSink.publish_sample(self,
-                                        self.slug_by_name[bms_name]+'_'+self.addrh_by_name[bms_name],
+                                        self.slug_by_name[bms_name] + '_' + self.addrh_by_name[bms_name],
                                         sample, tags=tags_)
         except Exception as e:
             pass
@@ -302,12 +300,14 @@ class TelemetrySink(InfluxDBSink):
     def publish_voltages(self, bms_name, voltages: List[int], short=True, tags=None):
         if bms_name not in self.slug_by_name:
             return
+        if 'dummy' in self.slug_by_name[bms_name]:
+            return
         if not self._should_sample(bms_name):
             return
         tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)
         try:
-            InfluxDBSink.publish_voltages(self, self.slug_by_name[bms_name], voltages, short=short, tags=tags_)
+            InfluxDBSink.publish_voltages(self, self.slug_by_name[bms_name] + '_' + self.addrh_by_name[bms_name], voltages, short=short, tags=tags_)
         except Exception:
             pass
 
