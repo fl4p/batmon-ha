@@ -137,8 +137,12 @@ class BMS():
     async def disconnect(self):
         if self.ble_bms is not None:
             await self.ble_bms.disconnect()
-        # await self.client.stop_notify(self.CHAR_UUID)
-        # await super().disconnect()
+
+    async def set_switch(self, switch: str, state: bool):
+        # aiobmsble has no switch-write API — surface mosfet states as read-only.
+        raise NotImplementedError(
+            "set_switch is not supported by the aiobmsble-backed adapter "
+            "(switch=%r, type=%s)" % (switch, self._type))
 
     async def fetch_device_info(self) -> DeviceInfo:
         di = await self.ble_bms.device_info()
@@ -172,6 +176,17 @@ class BMS():
             # no battery_level/current; nan defaults keep the sampling loop alive.
             current = sample.get('current', math.nan)
             power = sample.get('power', math.nan)
+            # aiobmsble exposes charge/discharge MOSFET states as sw_chrg_mosfet /
+            # sw_dischrg_mosfet (older releases used chrg_mosfet / dischrg_mosfet).
+            # Map either form into batmon's switches dict so HA discovery surfaces
+            # the charge/discharge entities (see issue #368).
+            chrg = sample.get('sw_chrg_mosfet', sample.get('chrg_mosfet'))
+            dischrg = sample.get('sw_dischrg_mosfet', sample.get('dischrg_mosfet'))
+            switches = {}
+            if chrg is not None:
+                switches['charge'] = bool(chrg)
+            if dischrg is not None:
+                switches['discharge'] = bool(dischrg)
             return BmsSample(
                 soc=sample.get('battery_level', math.nan),
                 soh=sample.get('battery_health', math.nan),
@@ -184,6 +199,7 @@ class BMS():
                 num_cycles=sample.get('cycles', math.nan),
                 balance_current=sample.get('balance_current', math.nan),
                 temperatures=[sample.get('temperature')],
+                switches=switches or None,
             )
         except Exception as e:
             raise ValueError('invalid ble_bms sample %r' % sample) from e
