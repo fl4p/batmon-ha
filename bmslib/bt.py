@@ -570,11 +570,11 @@ class BtBms:
             try:
                 discovered = set(b.address for b in scanner.discovered_devices)
                 ad = f' using adapter {self._adapter}' if self._adapter else ''
-                if self.client.address not in discovered:
+                if self.address not in discovered:
                     raise BleakDeviceNotFoundError(
-                        self.client.address, 'Device %s%s not discovered. Make sure it in range and is not being '
-                                             'accessed by another app. (found %s)' % (
-                                                 self.client.address, ad, discovered))
+                        self.address, 'Device %s%s not discovered. Make sure it in range and is not being '
+                                      'accessed by another app. (found %s)' % (
+                                          self.address, ad, discovered))
 
                 self.logger.debug("connect attempt %d", attempt)
                 await self._connect_client(timeout=timeout / 2)
@@ -643,7 +643,7 @@ class BtBms:
         raise NotImplementedError()
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self.client.address},{self.name})'
+        return f'{self.__class__.__name__}({self.address},{self.name})'
 
     async def __aenter__(self):
         # print("enter")
