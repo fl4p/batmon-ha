@@ -248,6 +248,12 @@ def publish_sample(client, device_topic, sample: BmsSample):
             topic = f"{device_topic}/switch/{switch_name}"
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
+    if sample.problem is not None:
+        mqtt_single_out(client, f"{device_topic}/problem",
+                        'ON' if sample.problem else 'OFF')
+    if sample.problem_code is not None:
+        mqtt_single_out(client, f"{device_topic}/problem_code", sample.problem_code)
+
 
 def publish_cell_voltages(client, device_topic, voltages):
     # "highest_voltage": parts[0] / 1000,
@@ -366,6 +372,27 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     }
     for name, m in meters.items():
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
+
+    if sample.problem is not None:
+        discovery_msg[f"homeassistant/binary_sensor/{node_id}/problem/config"] = {
+            "unique_id": f"{device_topic}__problem",
+            "name": "problem",
+            "device_class": "problem",
+            "entity_category": "diagnostic",
+            "state_topic": f"{device_topic}/problem",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+        }
+    if sample.problem_code is not None:
+        discovery_msg[f"homeassistant/sensor/{node_id}/problem_code/config"] = {
+            "unique_id": f"{device_topic}__problem_code",
+            "name": "problem code",
+            "entity_category": "diagnostic",
+            "state_topic": f"{device_topic}/problem_code",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+            "icon": "mdi:alert-circle-outline",
+        }
 
     switches = (sample.switches and sample.switches.keys())
     if switches:

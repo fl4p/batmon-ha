@@ -78,6 +78,12 @@ class JbdBt(BtBms):
 
         mos_byte = int.from_bytes(buf[20:21], 'big')
 
+        # JBD protection-status bitmask (header-stripped offset 16:18). Bits
+        # cover cell OV/UV, pack OV/UV, charge/discharge OC, short-circuit,
+        # NTC OT/UT, MOSFET errors, etc. We surface the raw code + a derived
+        # "any alarm" boolean so HA can show a problem indicator.
+        problem_code = int.from_bytes(buf[16:18], byteorder='big', signed=False)
+
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
             current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100,
@@ -94,6 +100,8 @@ class JbdBt(BtBms):
                 discharge=mos_byte == 2 or mos_byte == 3,
                 charge=mos_byte == 1 or mos_byte == 3,
             ),
+
+            problem_code=problem_code,
 
             # charge_enabled
             # discharge_enabled

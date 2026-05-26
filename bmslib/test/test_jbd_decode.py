@@ -22,3 +22,7 @@ def test_jbd_decode(fx):
     assert sample.num_cycles == exp["num_cycles"]
     assert sample.temperatures == pytest.approx(exp["temperatures"], abs=0.1)
     assert sample.switches == exp["switches"]
+    if "problem_code" in exp:
+        assert sample.problem_code == exp["problem_code"]
+    if "problem" in exp:
+        assert sample.problem == exp["problem"]

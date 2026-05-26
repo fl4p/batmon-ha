@@ -187,6 +187,8 @@ class BMS():
                 switches['charge'] = bool(chrg)
             if dischrg is not None:
                 switches['discharge'] = bool(dischrg)
+            problem = sample.get('problem')
+            problem_code = sample.get('problem_code')
             return BmsSample(
                 soc=sample.get('battery_level', math.nan),
                 soh=sample.get('battery_health', math.nan),
@@ -200,6 +202,8 @@ class BMS():
                 balance_current=sample.get('balance_current', math.nan),
                 temperatures=[sample.get('temperature')],
                 switches=switches or None,
+                problem=problem,
+                problem_code=problem_code,
             )
         except Exception as e:
             raise ValueError('invalid ble_bms sample %r' % sample) from e

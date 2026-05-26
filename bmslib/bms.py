@@ -40,6 +40,8 @@ class BmsSample:
                  temperatures: List[float] = None,
                  mos_temperature: float = math.nan,
                  switches: Optional[Dict[str, bool]] = None,
+                 problem: Optional[bool] = None,
+                 problem_code: Optional[int] = None,
                  uptime=math.nan, timestamp: Optional[float] = None):
         """
 
@@ -90,6 +92,13 @@ class BmsSample:
         self.temperatures = temperatures
         self.mos_temperature = mos_temperature
         self.switches = switches
+        # ``problem`` is the boolean "any alarm active" flag; ``problem_code`` is
+        # the raw BMS-specific bitmask. If only the code is given, derive the
+        # flag from "non-zero".
+        if problem is None and problem_code is not None:
+            problem = bool(problem_code)
+        self.problem: Optional[bool] = problem
+        self.problem_code: Optional[int] = problem_code
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 

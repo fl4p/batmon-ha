@@ -38,6 +38,8 @@ SYSSI_3CELL = dict(
         num_cycles=0,
         temperatures=[22.6, 22.5, 22.1],
         switches=dict(charge=True, discharge=True),
+        problem_code=0,
+        problem=False,
     ),
 )
 
@@ -55,6 +57,8 @@ DUMMY_7CELL = dict(
         num_cycles=0,
         temperatures=[21.0, 20.4],
         switches=dict(charge=True, discharge=True),
+        problem_code=0,
+        problem=False,
     ),
 )
 
