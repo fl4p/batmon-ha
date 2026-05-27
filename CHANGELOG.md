@@ -6,6 +6,7 @@
 * Add `translations/{en,de,es}.yaml` in English, German and Spanish
 * The new `snoop` BMS to explore unknown BMS types, pasive read-out or active probe spec writes from a `:families` suffix on `type:` (e.g. `type: snoop:jbd,jk,daly`) — see [doc/SNOOP.md](doc/SNOOP.md)
 * Restore multi-arch Docker builds (aarch64/amd64/armhf/armv7/i386) — re-add `ARG BUILD_FROM` consumed by `build.yaml`, which 1.96 had dropped (#365)
+* JK: restore sub-1% SOC precision lost in 1.95 — recompute from `charge / aged_capacity` instead of using the BMS's 1% SOC byte, while keeping 1.95's `capacity` fix for aged 11.x packs (#369)
 
 
 ## [1.96]

@@ -33,11 +33,12 @@ LEGACY_8S = dict(
     expected=dict(
         voltage=26.911,
         current=-12.219,
-        # BMS-authoritative integer SOC; previously this fixture pinned 65.83
-        # (the value BmsSample re-derived from charge/capacity for higher
-        # precision), but the JK BMS reports SOC against its internal aged
-        # capacity, so we now trust the raw byte (#365).
-        soc=65.0,
+        # SOC at full precision: charge_remaining / capacity_at_offset_146 * 100.
+        # The 1% SOC byte at 141 reads 65 (round(65.83)); we recover the
+        # sub-1% precision the BMS implicitly uses (#369). On legacy
+        # firmware aged_capacity is unset so BmsSample re-derives from
+        # charge / settings-capacity, which equals 146 on this firmware.
+        soc=65.83,
         charge=181.036,
         capacity=275.0,
         total_charge_throughput=22.173,
@@ -106,7 +107,9 @@ SYSSI_BLE_16S = dict(
     expected=dict(
         voltage=53.251,
         current=0.0,
-        soc=84.0,
+        # SOC at sub-1% precision (charge / capacity * 100). SOC byte at 141
+        # is 84, the recomputed value rounds to 84.56 (#369).
+        soc=84.56,
         charge=68.494,
         capacity=81.0,
         total_charge_throughput=1.085,
@@ -135,7 +138,12 @@ ISSUE_365_B2A8S20P = dict(
     expected=dict(
         voltage=13.405,
         current=-33.292,
-        soc=66,
+        # SOC byte at 141 reads 66 (1% resolution); the decoder recomputes
+        # from charge / aged_capacity (both BMS-internal) to recover the
+        # sub-1% precision the JK app displays (#369). Stays decoupled from
+        # the user-configured capacity so 11.x aged packs aren't mis-scaled
+        # (#365).
+        soc=65.87,
         charge=165.5,
         capacity=320.0,  # the fix: was 251.235 before
         total_charge_throughput=107478.918,  # lifetime ∫|I|dt, 427 cycles × ~250-320 Ah

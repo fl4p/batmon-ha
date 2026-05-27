@@ -61,7 +61,7 @@ def test_jk_issue365_capacity_from_settings_frame():
 
     assert sample.voltage == pytest.approx(exp["voltage"], abs=0.005)
     assert sample.current == pytest.approx(exp["current"], abs=0.005)
-    assert sample.soc == exp["soc"]
+    assert sample.soc == pytest.approx(exp["soc"], abs=0.01)
     assert sample.charge == pytest.approx(exp["charge"], abs=0.005)
     assert sample.capacity == pytest.approx(exp["capacity"], abs=0.005)
     assert sample.total_charge_throughput == pytest.approx(exp["total_charge_throughput"], abs=0.005)

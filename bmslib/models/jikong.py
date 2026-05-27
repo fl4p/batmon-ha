@@ -236,20 +236,29 @@ class JKBt(BtBms):
             soh = float(buf[158 + offset])  # SOH at 158+offset = 190, 1 byte, %
             aged_capacity = f32u(146 + offset)  # BMS-computed effective Ah
 
+        charge_remaining = f32u(142 + offset)  # "remaining capacity"
+        # SOC byte at 141 is 1% resolution. Recover sub-1% precision by
+        # recomputing charge_remaining / aged_capacity — both are BMS-internal
+        # values, so the ratio reproduces the BMS-displayed SOC at full
+        # precision (#369). Pass as float so BmsSample doesn't override it
+        # against the user-configured capacity from the settings frame, which
+        # would mis-scale SOC on aged 11.x packs (#365).
+        if aged_capacity > 0 and charge_remaining > 0:
+            soc = round(charge_remaining / aged_capacity * 100, 2)
+        else:
+            soc = int(buf[141 + offset])  # int → BmsSample recomputes for legacy
+
         return BmsSample(
             voltage=f32u(118 + offset),
             current=-f32s(126 + offset),
-            # SOC: BMS-authoritative. Pass as float so BmsSample doesn't recompute
-            # it from charge/capacity — those are relative to the BMS's internal
-            # aged capacity, while ours is the user-configured nominal (#365).
-            soc=float(buf[141 + offset]),
+            soc=soc,
 
             total_charge_throughput=f32u(154 + offset),  # lifetime ∫|I|dt, Ah
             # capacity: user-configured pack capacity from the settings frame.
             # The cell-info frame at offset 146+offset is an internal BMS-aged
             # value that diverges from the configured Ah on 11.x firmware (#365).
             capacity=int.from_bytes(buf_set[130:134], byteorder='little', signed=False) * 1e-3,
-            charge=f32u(142 + offset),  # "remaining capacity"
+            charge=charge_remaining,
             soh=soh,
             aged_capacity=aged_capacity,
 
