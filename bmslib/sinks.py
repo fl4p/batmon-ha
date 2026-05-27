@@ -271,7 +271,7 @@ class TelemetrySink(InfluxDBSink):
         self.sample_interval = 15
         self._last_pub: Dict[str, float] = {}
 
-        logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
+        # logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
         self.silent = True
 
     def _should_sample(self, bms_name) -> bool:
