@@ -119,6 +119,37 @@ class JKBt(BtBms):
             for cb in callbacks:
                 cb(buf)
 
+    async def _ensure_services_discovered(self, timeout=4):
+        # JK v19 firmware (e.g. 19.24, #346/#306/#310) sometimes returns from
+        # connect() with client.services == [] — discovery silently failed, or
+        # BlueZ handed back a stale empty cache. get_service() then raises the
+        # cryptic "service ffe0 not found (have [])". Wait a beat (covers a
+        # late-resolving discovery on bleak 2.x), force a re-discovery on older
+        # bleak builds that still expose get_services(), then surface a clear
+        # error with the workaround.
+        deadline = time.monotonic() + timeout
+        while True:
+            if list(self.client.services):
+                return
+            get_svc = getattr(self.client, 'get_services', None)
+            if get_svc is not None:
+                try:
+                    await get_svc()
+                except Exception as e:
+                    self.logger.debug("%s get_services() retry failed: %s", self.name, e)
+                if list(self.client.services):
+                    return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "%s: GATT service discovery returned no services for %s. "
+                    "Known JK v19 firmware issue / stale BlueZ cache. "
+                    "Try `bluetoothctl remove %s` (or restart the bluetooth service), "
+                    "then reconnect. If the BMS still won't connect, flashing JK firmware "
+                    "19.05 or 19.10 has worked for others (see issue #306)."
+                    % (self.name, self.address, self.address)
+                )
+            await asyncio.sleep(0.5)
+
     async def connect(self, timeout=20):
         """
         Connecting JK with bluetooth appears to require a prior bluetooth scan and discovery, otherwise the connectiong fails with
@@ -133,6 +164,8 @@ class JKBt(BtBms):
             self.logger.info("%s normal connect failed (%s), connecting with scanner (adapter: %s)", self.name,
                              str(e) or type(e), self._adapter or 'default')
             await self._connect_with_scanner(timeout=timeout)
+
+        await self._ensure_services_discovered(timeout=4)
 
         service = self.get_service(self.SERVICE_UUID)
         self.char_handle_write = (self.find_char(self.CHAR_UUID, 'write', service=service) or
