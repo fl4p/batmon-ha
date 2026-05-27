@@ -13,8 +13,9 @@ configuration:
     name: BMS type
     description: >-
       Protocol family. Built-in: jbd, jk, jk_24s, jk_32s, jk_uart, daly,
-      daly2, daly_uart, ant, victron, supervolt, sok, litime, snoop,
-      group_parallel. Anything else is looked up in aiobmsble. See README.
+      daly2, daly_uart, ant, victron, supervolt, sok, litime, noname_modbus,
+      snoop, group_parallel. Anything else is looked up in aiobmsble. See
+      README.
   alias:
     name: Alias
     description: >-

@@ -40,6 +40,7 @@ def get_bms_model_class(name):
         supervolt='models.supervolt.SuperVoltBt',
         sok='models.sok.SokBt',
         litime='models.litime.LitimeBt',
+        noname_modbus='models.noname_modbus.NoNameModbusBt',  # generic Modbus-RTU-over-NUS
         dummy='models.dummy.DummyBt',
         snoop='models.snoop.SnoopBt',  # GATT dumper for reverse-engineering new BMS
     )

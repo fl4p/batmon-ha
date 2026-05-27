@@ -41,6 +41,7 @@ batmon device connectors:
 * Supervolt BMS (`supervolt`)
 * SOK BMS (`sok`)
 * LiTime BMS (`litime`)
+* Generic no-name Chinese BMS with Modbus RTU over Nordic UART (`noname_modbus`) — see [issue #131](https://github.com/fl4p/batmon-ha/issues/131)
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)
   in the VictronConnect app) (`victron`)
