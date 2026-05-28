@@ -75,8 +75,8 @@ configuration:
   invert_current:
     name: Invertir signo de corriente
     description: >-
-      Invertir el signo de la corriente reportada (positivo pasa a ser
-      descarga en lugar de carga). Algunos BMS usan la convención opuesta.
+      Invertir el signo de la corriente reportada (la descarga pasa a ser
+      negativa y la carga positiva). Algunos BMS usan la convención opuesta.
   watchdog:
     name: Watchdog
     description: >-

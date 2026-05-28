@@ -71,8 +71,8 @@ configuration:
   invert_current:
     name: Invert current sign
     description: >-
-      Flip the sign of reported current (positive becomes discharge
-      instead of charge). Some BMSes use the opposite convention.
+      Flip the sign of reported current (discharge becomes negative,
+      charge positive). Some BMSes use the opposite convention.
   watchdog:
     name: Watchdog
     description: >-

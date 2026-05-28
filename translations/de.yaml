@@ -72,8 +72,8 @@ configuration:
   invert_current:
     name: Stromvorzeichen umkehren
     description: >-
-      Vorzeichen des gemeldeten Stroms umdrehen (positiv = Entladen statt
-      Laden). Manche BMSe verwenden die umgekehrte Konvention.
+      Vorzeichen des gemeldeten Stroms umdrehen (Entladen wird negativ,
+      Laden positiv). Manche BMSe verwenden die umgekehrte Konvention.
   watchdog:
     name: Watchdog
     description: >-
