@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "1.97"
+version: "1.98b"
 slug: "batmon"
 init: false
 host_dbus: true
@@ -47,16 +47,16 @@ options:
     - address: D6:6C:0A:61:14:30
       type: sok
       alias: battery1
-  concurrent_sampling: false
   keep_alive: true
-  verbose_log: false
   sample_period: 1.0
-  publish_period: 2.0
   invert_current: true
   watchdog: true
-  expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
+  # Advanced options below are intentionally omitted from these defaults so the
+  # HA config UI tucks them under "Show unused optional configuration options"
+  # (collapsed by default). Code defaults: concurrent_sampling=false,
+  # verbose_log=false, publish_period=sample_period, expire_values_after=20.
   # bluetooth_proxies: only consulted when ble_stack: esphome. Example:
   #   bluetooth_proxies:
   #     - host: 192.168.1.42
@@ -75,22 +75,24 @@ schema:
       adapter: "str?"
       algorithm: "str?"
       current_calibration: "float?"
+      note: "str?"
 
   mqtt_user: "str?"
   mqtt_password: "str?"
   mqtt_broker: "str?"
   mqtt_port: "int(1,65535)?"
 
-  concurrent_sampling: "bool"
   invert_current: "bool"
   keep_alive: "bool"
   watchdog: "bool"
 
   sample_period: "float"
-  publish_period: "float?"
-  expire_values_after: "float"
 
-  verbose_log: "bool"
+  # Advanced (optional -> collapsed in the UI until set):
+  concurrent_sampling: "bool?"
+  publish_period: "float?"
+  expire_values_after: "float?"
+  verbose_log: "bool?"
 
   bt_power_cycle: "bool?"
 
