@@ -413,7 +413,7 @@ class BmsSampler:
 
             # publish home assistant discovery every 60 samples
             if self.period_discov:
-                logger.info("Sending HA discovery for %s (num_samples=%d)", bms.name, self.num_samples)
+                logger.debug("Sending HA discovery for %s (num_samples=%d)", bms.name, self.num_samples)
                 if self.device_info is None:
                     await self._try_fetch_device_info()
                 publish_hass_discovery(
