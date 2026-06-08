@@ -3,6 +3,10 @@
     * - scraper bms: just reads all chars/subscribes
 * replace bleak-pairing with `bluetoothctl`? what platforms does pairing bleak implement?
 
+* InfluxDB/QuestDB sink: emit fixed-point fields as scaled integers, not rounded
+  floats, so QuestDB+pco compresses them (voltage->mV int, soc/temp scaled int;
+  keep current/power/wide-range as float - measured, current regresses). See
+  doc/QuestDB-compression.md. Touches publish_sample() int->float coercion.
 * For large publish periods, publish mean values
 * Try latest bleak version with victron smart shunt (on HA OS and macOS)
 * https://github.com/hbldh/bleak/pull/1133
@@ -22,3 +26,20 @@ Victron Readouts https://github.com/fl4p/batmon-ha/issues/63
 * batmon set soc
 * * Impedance computation
 * Calibrated SoC
+
+# dashboard
+
+cells, colored
+groups
+imptrack
+warnings
+stats
+qmax
+warnings
+imptrack
+calibrate bms adc topology 
+
+
+
+# tele 
+drop problem code or make it store long
