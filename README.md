@@ -171,8 +171,12 @@ Notes:
   `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
 * The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`
   uses 9600 8N1 (both match the respective vendor protocol docs).
-* On Linux you may need to add your user to the `dialout` group or run the
-  HA add-on with privileged access to read `/dev/ttyUSB*`.
+* As an HA add-on this works out of the box: the add-on manifest sets
+  `uart: true`, which maps the host's serial devices (`/dev/ttyUSB*`,
+  `/dev/ttyACM*`, `/dev/ttyAMA*` and their `/dev/serial/by-id/*` symlinks)
+  into the container. Prefer the stable `/dev/serial/by-id/...` path so the
+  port survives re-plugging. Running standalone (outside the add-on) on Linux,
+  add your user to the `dialout` group to read `/dev/ttyUSB*`.
 * This path is independent of the BLE backend selected by `ble_stack`, so
   it works even when Bluetooth is disabled.
 

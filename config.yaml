@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "1.98c"
+version: "1.98d"
 slug: "batmon"
 init: false
 host_dbus: true
@@ -22,6 +22,13 @@ host_network: true
 privileged:
   - NET_ADMIN
   - NET_RAW
+
+# Map host serial/UART devices (/dev/ttyUSB*, /dev/ttyACM*, /dev/ttyAMA*, and
+# their stable /dev/serial/by-id/* symlinks) into the container, for wired BMSes
+# (address: serial, e.g. type: jk_uart / daly_uart). HA's `privileged:` above is
+# only a capability list — it does NOT expose device nodes — so without `uart:`
+# the serial port the user configures simply isn't visible inside the add-on.
+uart: true
 
 homeassistant_api: true # http://supervisor/core/api
 hassio_api: true        # http://supervisor

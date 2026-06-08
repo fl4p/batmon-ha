@@ -3,7 +3,8 @@
 
 ## [1.98]
 
-* Config UI: keep `publish_period` and `expire_values_after` as always-visible, required fields. 1.98b had moved them into the collapsed "unused optional configuration options" section, where the HA frontend silently drops edits on save (#225). Only the rarely-tuned `concurrent_sampling`/`verbose_log` stay optional + collapsed.
+* Add `uart: true` to the manifest so wired BMSes (`address: serial`, e.g. `jk_uart`/`daly_uart`) work — the host serial devices are now mapped into the container; `privileged:` alone never exposed them (#22, #225)
+* Keep `publish_period`/`expire_values_after` as visible required fields again — under the collapsed "unused optional" section the HA frontend silently dropped edits on save (#225)
 
 
 ## [1.97]
