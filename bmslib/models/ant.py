@@ -168,7 +168,11 @@ class AntBt(BtBms):
         u32 = lambda i: int.from_bytes(data[i:(i + 4)], byteorder='little', signed=False)
         i32 = lambda i: int.from_bytes(data[i:(i + 4)], byteorder='little', signed=True)
 
-        num_temp = data[8]
+        # data[8] (temp-sensor count) reads back flaky on some units; a bogus
+        # large value spawns junk temp entities and misaligns every field
+        # decoded after the temps block. ANT packs at most a handful of NTCs,
+        # so cap it to a sane upper bound.
+        num_temp = min(data[8], 8)
         num_cell = data[9]
         offset = 34
 
