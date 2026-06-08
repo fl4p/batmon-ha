@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [1.98]
+
+* Config UI: keep `publish_period` and `expire_values_after` as always-visible, required fields. 1.98b had moved them into the collapsed "unused optional configuration options" section, where the HA frontend silently drops edits on save (#225). Only the rarely-tuned `concurrent_sampling`/`verbose_log` stay optional + collapsed.
+
+
 ## [1.97]
 
 * Add `translations/{en,de,es}.yaml` in English, German and Spanish

@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "1.98b"
+version: "1.98c"
 slug: "batmon"
 init: false
 host_dbus: true
@@ -49,14 +49,18 @@ options:
       alias: battery1
   keep_alive: true
   sample_period: 1.0
+  publish_period: 1.0
   invert_current: true
   watchdog: true
+  expire_values_after: 20
   bt_power_cycle: false
   ble_stack: bleak
-  # Advanced options below are intentionally omitted from these defaults so the
-  # HA config UI tucks them under "Show unused optional configuration options"
-  # (collapsed by default). Code defaults: concurrent_sampling=false,
-  # verbose_log=false, publish_period=sample_period, expire_values_after=20.
+  # sample_period/publish_period/expire_values_after are kept here (and required
+  # in the schema) so they render as normal, always-visible fields. They must NOT
+  # live in the collapsed "unused optional configuration options" section: edits
+  # made there are dropped by the HA frontend on save (see issue #225). Only the
+  # rarely-tuned concurrent_sampling/verbose_log stay optional + collapsed.
+  # Code defaults: concurrent_sampling=false, verbose_log=false.
   # bluetooth_proxies: only consulted when ble_stack: esphome. Example:
   #   bluetooth_proxies:
   #     - host: 192.168.1.42
@@ -87,11 +91,11 @@ schema:
   watchdog: "bool"
 
   sample_period: "float"
+  publish_period: "float"
+  expire_values_after: "float"
 
   # Advanced (optional -> collapsed in the UI until set):
   concurrent_sampling: "bool?"
-  publish_period: "float?"
-  expire_values_after: "float?"
   verbose_log: "bool?"
 
   bt_power_cycle: "bool?"
