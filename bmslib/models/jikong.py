@@ -60,11 +60,19 @@ class JKBt(BtBms):
     TEMPERATURE_STEP = 0.1
     TEMPERATURE_SMOOTH = 30
 
+    # Throttle window for non-protocol junk on the notify characteristic. Some
+    # firmwares (e.g. JK-PB inverters, #370) flood 'AT\r\n' on the shared UART;
+    # logging one ERROR + full buffer per packet rolls the log over before the
+    # real disconnect is captured and hammers I/O. Collapse to one line / window.
+    JUNK_LOG_PERIOD = 30
+
     def __init__(self, address, keep_alive=True, **kwargs):
         super().__init__(address, keep_alive=keep_alive, **kwargs)
         if kwargs.get('pin'):
             self.logger.warning('JK usually does not use a pairing PIN')
         self._buffer = bytearray()
+        self._junk_count = 0
+        self._junk_log_t = 0.0
         self._resp_table: Dict[int, Tuple[bytearray, float]] = {}
         self.num_cells = None
         self._callbacks: Dict[int, List[Callable[[bytes], None]]] = defaultdict(List)
@@ -104,8 +112,25 @@ class JKBt(BtBms):
                 crc_ok = self._buffer_crc_check()
 
             if not crc_ok:
-                self.logger.error("crc check failed, discarding buffer %s", self._buffer)
+                if HEADER in self._buffer:
+                    # A real frame that arrived corrupted - rare, keep visible.
+                    self.logger.error("crc check failed, discarding buffer %s", self._buffer)
+                else:
+                    # Non-protocol junk on the notify char (no frame header),
+                    # e.g. a JK-PB inverter flooding 'AT\r\n' on the shared UART
+                    # (#370). Throttle so the log stays usable during a flood.
+                    now = time.time()
+                    self._junk_count += 1
+                    if now - self._junk_log_t >= self.JUNK_LOG_PERIOD:
+                        self.logger.warning(
+                            "discarded %d non-protocol notify packet(s) in %.0fs "
+                            "(no frame header, e.g. JK-PB AT-flood #370); last %d bytes: %.40s",
+                            self._junk_count, (now - self._junk_log_t) if self._junk_log_t else 0,
+                            len(self._buffer), to_hex_str(self._buffer))
+                        self._junk_log_t = now
+                        self._junk_count = 0
             else:
+                self._junk_count = 0
                 self._decode_msg(bytearray(self._buffer))
             self._buffer.clear()
 

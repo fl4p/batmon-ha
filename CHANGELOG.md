@@ -3,6 +3,7 @@
 
 ## [1.98]
 
+* JK: throttle the per-packet "crc check failed" log when the notify characteristic carries non-protocol junk (e.g. JK-PB inverter firmware flooding `AT\r\n` on the shared UART, #370) — one rate-limited line per 30s instead of an ERROR + full buffer per packet, so the log stays usable during a flood
 * Add `uart: true` to the manifest so wired BMSes (`address: serial`, e.g. `jk_uart`/`daly_uart`) work — the host serial devices are now mapped into the container; `privileged:` alone never exposed them (#22, #225)
 * Keep `publish_period`/`expire_values_after` as visible required fields again — under the collapsed "unused optional" section the HA frontend silently dropped edits on save (#225)
 
