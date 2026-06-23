@@ -93,6 +93,15 @@ After connect you'll see, in order:
    ```
    The `+s` is seconds since connect, `h=` is the GATT handle, then length,
    hex bytes, and an ASCII rendering for the printable bytes.
+5. If a notification's framing matches a known protocol, snoop prints a hint:
+   ```
+   [snoop] ⭐ response matches 'braunpwr' protocol — try `type: braunpwr`
+   ```
+   This is matched on the response's header/tail magic, independent of which
+   probe elicited it — so a slow reply that lands in the log far from its probe
+   still gets identified. Modbus-style families (renogy/vatrer/seplos/…) have
+   no stable magic and are not fingerprinted, so absence of a ⭐ hint doesn't
+   rule those out.
 
 ## Sharing a capture for new-BMS support
 

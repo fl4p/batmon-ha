@@ -132,12 +132,44 @@ PROBE_FRAMES = {
 }
 
 
+# Response fingerprints for known framed protocols. Each notification logged by
+# the snoop callback is matched against these so a slow/late reply (which shows
+# up in the log far from the probe that elicited it) still gets attributed to a
+# family. A match prints a prominent hint with the `type:` to set.
+#   (label, head_prefix, tail_byte_or_None)
+# Modbus-style families (renogy/vatrer/lipower/seplos/...) echo only a function
+# code and have no stable magic, so they are intentionally omitted — a match
+# there would be a guess, not a fingerprint.
+RESPONSE_SIGNATURES = [
+    ('braunpwr', b'\x7b', 0x7d),
+    ('jbd / supervolt', b'\xdd', 0x77),
+    ('jk', b'\x55\xaa\xeb', None),
+    ('daly', b'\xa5\x01', None),
+    ('neey', b'\xaa\x55\x11', None),
+    ('cbtpwr', b'\xaa\x55', 0x0d),
+    ('tdt / seplos_v2 / cbtpwr_vb', b'\x7e', 0x0d),
+    ('ant_leg', b'\xaa\x55\xaa', None),
+]
+
+
+def _match_signatures(data: bytes) -> list:
+    """Return labels of families whose response framing matches `data`."""
+    if len(data) < 4:
+        return []
+    out = []
+    for label, head, tail in RESPONSE_SIGNATURES:
+        if data.startswith(head) and (tail is None or data[-1] == tail):
+            out.append(label)
+    return out
+
+
 class SnoopBt(BtBms):
     def __init__(self, address, **kwargs):
         self._probe_spec: Optional[str] = kwargs.pop('probe', None)
         super().__init__(address, **kwargs)
         self._notify_chars = []
         self._connected_at = 0.0
+        self._matched = set()  # families already reported, to avoid log spam
 
     def _make_callback(self, char):
         uuid = getattr(char, 'uuid', str(char))
@@ -150,6 +182,12 @@ class SnoopBt(BtBms):
                 ascii_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in bytes(data))
                 self.logger.info('[snoop +%6.2fs] %s h=%s len=%d  %s  | %s',
                                  dt, uuid, handle, len(data), hex_str, ascii_str)
+                for label in _match_signatures(bytes(data)):
+                    if label not in self._matched:
+                        self._matched.add(label)
+                        self.logger.info(
+                            '[snoop] ⭐ response matches %r protocol — try `type: %s`',
+                            label, label.split(' / ')[0].split(' ')[0])
             except Exception:
                 self.logger.exception('[snoop] notify callback error')
 

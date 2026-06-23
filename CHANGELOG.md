@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.02]
+
+* `type: snoop`: fingerprint incoming notifications against known protocol framing and print a hint (e.g. `⭐ response matches 'braunpwr' protocol — try \`type: braunpwr\``). A slow BMS reply can land in the log far from the probe that elicited it (a Braun Power BMS replied ~14s late, after the next family's probes), making the match impossible to spot by eye — the fingerprint identifies it regardless. Modbus-style families have no stable magic and are not matched (#375)
+
+
 ## [2.01]
 
 * Daly v2 (`type: daly2`): fix MOSFET switch control — use the host-command registers from the official Daly Modbus doc (discharge `0x000C`, charge `0x000D`; the worked example `D2 06 00 0C 00 01` = enable discharge) instead of the RS485-variant `0x121`/`0x122` registers that the BLE firmware silently ignored. A switch write that gets no echo (wrong register / rejected) now logs a warning instead of blocking the mqtt action queue for 8s with a traceback (#356)
