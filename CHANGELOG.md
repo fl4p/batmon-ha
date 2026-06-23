@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [1.99]
+
+* Daly v2 (`type: daly2`, Modbus-over-BLE): make it actually work — the live I/O path was a non-functional stub that never sent the request and crashed on an assert. Proper Modbus CRC-16 framing, response reassembly across BLE notifications, and a `fff1/fff2` → `ff01/ff02` UUID fallback for newer DL/JHB firmware (#356)
+* SOC sensor: report `state_class: measurement` (alongside `device_class: battery`) so Home Assistant records long-term statistics and the SOC shows up in the energy dashboard's battery-level selector (#374)
+
+
 ## [1.98]
 
 * JK: throttle the per-packet "crc check failed" log when the notify characteristic carries non-protocol junk (e.g. JK-PB inverter firmware flooding `AT\r\n` on the shared UART, #370) — one rate-limited line per 30s instead of an ERROR + full buffer per packet, so the log stays usable during a flood
