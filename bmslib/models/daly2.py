@@ -17,10 +17,14 @@ MODBUS_ADDRESS = 0xD2
 MODBUS_READ_HOLDING = 0x03
 MODBUS_WRITE_SINGLE = 0x06
 
-# Holding registers that toggle the MOSFETs (Modbus write-single, fct 0x06,
-# value 1=on / 0=off). Reverse-engineered for the Daly H/K/M/S Modbus map; same
-# values used by patagonaa/esphome-daly-hkms-bms.
-SWITCH_REGISTERS = dict(charge=0x121, discharge=0x122)
+# Host-command registers that toggle the MOSFETs (Modbus write-single, fct 0x06,
+# value 1=on / 0=off). The official Daly Modbus doc gives one worked write
+# example: `D2 06 00 0C 00 01` = "enable battery discharge" -> discharge is
+# register 0x000C; charge is the adjacent host command 0x000D. These are runtime
+# host commands and (unlike the 0xA4+ parameter-settings block) are NOT gated by
+# the "parameter setting password". NB: the write-register map differs from the
+# read-register map, where 0x0C is a cell-voltage word.
+SWITCH_REGISTERS = dict(charge=0x000D, discharge=0x000C)
 
 
 def _modbus_crc16(data: bytes) -> int:
@@ -58,6 +62,7 @@ def _write_request(reg: int, value: int) -> bytes:
 
 class Daly2Bt(BtBms):
     TIMEOUT = 8
+    SET_SWITCH_TIMEOUT = 4
 
     # rx (notify), tx (write). Older firmware exposes the fff0 service; newer
     # DL/JHB firmware (#356) returns org.bluez.Error.NotPermitted on fff1 and
@@ -137,13 +142,13 @@ class Daly2Bt(BtBms):
         self._fetch_futures.clear()
         await super().disconnect()
 
-    async def _q(self, request: bytes):
+    async def _q(self, request: bytes, timeout=None):
         func = request[1]
         self._buffer.clear()
         with self._fetch_futures.acquire(func):
             self.logger.debug("daly2 send: %s", request.hex())
             await self.client.write_gatt_char(self.UUID_TX, request, response=False)
-            return await self._fetch_futures.wait_for(func, self.TIMEOUT)
+            return await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
         # binary reading
@@ -214,9 +219,20 @@ class Daly2Bt(BtBms):
         reg = SWITCH_REGISTERS.get(switch)
         if reg is None:
             raise ValueError("unknown switch %s" % switch)
-        echo = await self._q(_write_request(reg, 1 if state else 0))
-        self.logger.info("daly2 set %s mosfet -> %s (echo %s)", switch, state, echo.hex())
-        if self._switches is not None:
-            self._switches[switch] = state
+
+        req = _write_request(reg, 1 if state else 0)
+        self.logger.info("daly2 set %s mosfet -> %s: %s", switch, state, req.hex())
+        # A correct write echoes the request frame (func 0x06). If the register
+        # is wrong the BMS stays silent, so don't let the missing echo turn into
+        # a fatal 8s-blocking traceback in the mqtt action queue.
+        try:
+            echo = await self._q(req, timeout=self.SET_SWITCH_TIMEOUT)
+            self.logger.info("daly2 %s mosfet write echoed: %s", switch, echo.hex())
+            if self._switches is not None:
+                self._switches[switch] = state
+        except TimeoutError:
+            self.logger.warning(
+                "daly2 %s mosfet write to reg 0x%04x got no echo - register may be "
+                "wrong for this firmware or the command was rejected", switch, reg)
 
 

@@ -92,6 +92,12 @@ def test_fetch_voltages_reuses_block_and_decodes_cells():
     assert voltages == fx["expected"]["cell_voltages"]
 
 
+def test_discharge_register_matches_official_doc():
+    # Daly Modbus doc worked example: D2 06 00 0C 00 01 9B AA = enable discharge
+    assert SWITCH_REGISTERS["discharge"] == 0x000C
+    assert _write_request(0x000C, 1) == bytes.fromhex("d206000c00019baa")
+
+
 def test_set_switch_writes_mosfet_register():
     bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
     bms.UUID_TX = "tx"
@@ -102,6 +108,17 @@ def test_set_switch_writes_mosfet_register():
 
     asyncio.run(bms.set_switch("discharge", True))
     assert bms.client.written == req
+
+
+def test_set_switch_no_echo_does_not_raise():
+    # wrong register / rejected write -> BMS stays silent; must not propagate a
+    # fatal timeout up through the mqtt action queue
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.SET_SWITCH_TIMEOUT = 0.2
+    bms.client = _FakeClient(bms, b"")  # no response delivered
+
+    asyncio.run(bms.set_switch("charge", False))  # should swallow the timeout
 
 
 def test_set_switch_unknown_raises():

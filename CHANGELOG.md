@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.01]
+
+* Daly v2 (`type: daly2`): fix MOSFET switch control — use the host-command registers from the official Daly Modbus doc (discharge `0x000C`, charge `0x000D`; the worked example `D2 06 00 0C 00 01` = enable discharge) instead of the RS485-variant `0x121`/`0x122` registers that the BLE firmware silently ignored. A switch write that gets no echo (wrong register / rejected) now logs a warning instead of blocking the mqtt action queue for 8s with a traceback (#356)
+
+
 ## [2.00]
 
 * Daly v2 (`type: daly2`): implement cell voltages, MOSFET switch control, and correct charge/discharge MOSFET state — follow-up to 1.99 (#356). `fetch_voltages()` now decodes per-cell voltages from the Modbus block instead of raising `NotImplementedError` every cycle; `set_switch()` toggles the charge/discharge MOSFETs via Modbus write-single-register (regs `0x121`/`0x122`); and the reported switch state now reads the dedicated MOSFET registers (`106`/`108`) rather than the old a5-protocol mode byte
