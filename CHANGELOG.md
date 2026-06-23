@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.00]
+
+* Daly v2 (`type: daly2`): implement cell voltages, MOSFET switch control, and correct charge/discharge MOSFET state — follow-up to 1.99 (#356). `fetch_voltages()` now decodes per-cell voltages from the Modbus block instead of raising `NotImplementedError` every cycle; `set_switch()` toggles the charge/discharge MOSFETs via Modbus write-single-register (regs `0x121`/`0x122`); and the reported switch state now reads the dedicated MOSFET registers (`106`/`108`) rather than the old a5-protocol mode byte
+
+
 ## [1.99]
 
 * Daly v2 (`type: daly2`, Modbus-over-BLE): make it actually work — the live I/O path was a non-functional stub that never sent the request and crashed on an assert. Proper Modbus CRC-16 framing, response reassembly across BLE notifications, and a `fff1/fff2` → `ff01/ff02` UUID fallback for newer DL/JHB firmware (#356)

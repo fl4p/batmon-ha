@@ -32,7 +32,9 @@ AIOBMSBLE_4S = dict(
         charge=345.6,
         num_cycles=57,
         temperatures=[20, 21, 22, 23],
-        switches=dict(charge=False, discharge=False),
+        # chrg_mosfet reg=False, dischrg_mosfet reg=True (aiobmsble ground truth)
+        switches=dict(charge=False, discharge=True),
+        cell_voltages=[4127, 4137, 4147, 4157],  # mV
         problem_code=0,
         problem=False,
     ),

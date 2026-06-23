@@ -6,7 +6,9 @@ import asyncio
 
 import pytest
 
-from bmslib.models.daly2 import Daly2Bt, _read_request, _modbus_crc16
+from bmslib.models.daly2 import (
+    Daly2Bt, _read_request, _write_request, _modbus_crc16, SWITCH_REGISTERS,
+)
 from bmslib.test.data import daly2_fixtures
 
 
@@ -64,3 +66,47 @@ def test_bad_crc_is_ignored_and_times_out():
 
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(bms.fetch())
+
+
+def test_switch_state_decoded_from_mosfet_registers():
+    fx = daly2_fixtures.AIOBMSBLE_4S
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.client = _FakeClient(bms, fx["raw"])
+
+    sample = asyncio.run(bms.fetch())
+    assert dict(sample.switches) == fx["expected"]["switches"]
+
+
+def test_fetch_voltages_reuses_block_and_decodes_cells():
+    fx = daly2_fixtures.AIOBMSBLE_4S
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.client = _FakeClient(bms, fx["raw"])
+
+    asyncio.run(bms.fetch())
+    bms.client.written = None  # fetch_voltages must NOT issue another read
+    voltages = asyncio.run(bms.fetch_voltages())
+
+    assert bms.client.written is None
+    assert voltages == fx["expected"]["cell_voltages"]
+
+
+def test_set_switch_writes_mosfet_register():
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+
+    # echo back the write request the BMS would mirror (func 0x06, 8 bytes)
+    req = _write_request(SWITCH_REGISTERS["discharge"], 1)
+    bms.client = _FakeClient(bms, req)
+
+    asyncio.run(bms.set_switch("discharge", True))
+    assert bms.client.written == req
+
+
+def test_set_switch_unknown_raises():
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.client = _FakeClient(bms, b"")
+    with pytest.raises(ValueError):
+        asyncio.run(bms.set_switch("bogus", True))

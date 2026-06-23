@@ -15,6 +15,12 @@ from bmslib.bt import BtBms, enumerate_services
 # app and ESPHome's daly_bms_ble send.
 MODBUS_ADDRESS = 0xD2
 MODBUS_READ_HOLDING = 0x03
+MODBUS_WRITE_SINGLE = 0x06
+
+# Holding registers that toggle the MOSFETs (Modbus write-single, fct 0x06,
+# value 1=on / 0=off). Reverse-engineered for the Daly H/K/M/S Modbus map; same
+# values used by patagonaa/esphome-daly-hkms-bms.
+SWITCH_REGISTERS = dict(charge=0x121, discharge=0x122)
 
 
 def _modbus_crc16(data: bytes) -> int:
@@ -30,13 +36,24 @@ def _modbus_crc16(data: bytes) -> int:
     return crc
 
 
-def _read_request(start: int, count: int) -> bytes:
-    """Build a Modbus read-holding-registers request frame with CRC."""
-    body = bytes([MODBUS_ADDRESS, MODBUS_READ_HOLDING,
-                  (start >> 8) & 0xFF, start & 0xFF,
-                  (count >> 8) & 0xFF, count & 0xFF])
+def _frame(body: bytes) -> bytes:
+    """Append the little-endian Modbus CRC to a frame body."""
     crc = _modbus_crc16(body)
     return body + bytes([crc & 0xFF, crc >> 8])
+
+
+def _read_request(start: int, count: int) -> bytes:
+    """Build a Modbus read-holding-registers request frame with CRC."""
+    return _frame(bytes([MODBUS_ADDRESS, MODBUS_READ_HOLDING,
+                         (start >> 8) & 0xFF, start & 0xFF,
+                         (count >> 8) & 0xFF, count & 0xFF]))
+
+
+def _write_request(reg: int, value: int) -> bytes:
+    """Build a Modbus write-single-register request frame with CRC."""
+    return _frame(bytes([MODBUS_ADDRESS, MODBUS_WRITE_SINGLE,
+                         (reg >> 8) & 0xFF, reg & 0xFF,
+                         (value >> 8) & 0xFF, value & 0xFF]))
 
 
 class Daly2Bt(BtBms):
@@ -54,6 +71,7 @@ class Daly2Bt(BtBms):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._switches = None
+        self._last_block = None
         self.UUID_RX = None
         self.UUID_TX = None
 
@@ -61,10 +79,24 @@ class Daly2Bt(BtBms):
         self.logger.debug("ble data frame %s", data)
         self._buffer += data
 
-        # Modbus response: [addr][func][bytecount][...data...][crc_lo][crc_hi]
         if len(self._buffer) < 3:
             return
-        expected = 3 + self._buffer[2] + 2
+
+        func = self._buffer[1]
+        if func == MODBUS_READ_HOLDING:
+            # [addr][0x03][bytecount][...data...][crc_lo][crc_hi]
+            expected = 3 + self._buffer[2] + 2
+        elif func == MODBUS_WRITE_SINGLE:
+            # echo: [addr][0x06][reg_hi][reg_lo][val_hi][val_lo][crc_lo][crc_hi]
+            expected = 8
+        elif func & 0x80:
+            # exception: [addr][func|0x80][exc_code][crc_lo][crc_hi]
+            expected = 5
+        else:
+            self.logger.warning("daly2 unexpected func 0x%02x: %s", func, self._buffer.hex())
+            self._buffer.clear()
+            return
+
         if len(self._buffer) < expected:
             return
 
@@ -120,11 +152,10 @@ class Daly2Bt(BtBms):
         # read 0x3E (62) holding registers starting at 0 -> 124-byte payload
         buf = await self._q(_read_request(0x0000, 0x003E))
         buf = buf[3:]
+        self._last_block = buf  # reused by fetch_voltages() within the same cycle
 
-        #num_cell = int.from_bytes(buf[21:22], 'big')
+        #num_cell = int.from_bytes(buf[98:100], 'big')
         num_temp = int.from_bytes(buf[100:102], 'big')
-
-        mos_byte = int.from_bytes(buf[20:21], 'big')
 
         sample = BmsSample(
             voltage=int.from_bytes(buf[80:82], byteorder='big') / 10,
@@ -138,9 +169,11 @@ class Daly2Bt(BtBms):
 
             temperatures=[(int.from_bytes(buf[64 + i * 2:i * 2 + 66], 'big') - 40) for i in range(num_temp)],
 
+            # Separate charge/discharge MOSFET state registers (matches aiobmsble
+            # daly_bms). The old single mos_byte at buf[20] was a5-protocol logic.
             switches=dict(
-                discharge=mos_byte == 2 or mos_byte == 3,
-                charge=mos_byte == 1 or mos_byte == 3,
+                charge=bool(int.from_bytes(buf[106:108], byteorder='big')),
+                discharge=bool(int.from_bytes(buf[108:110], byteorder='big')),
             ),
 
             # Alarm bitmask at byte 116 (8 bytes, big-endian) per aiobmsble's
@@ -165,10 +198,25 @@ class Daly2Bt(BtBms):
 
         return sample
 
-    async def fetch_voltages(self):
-        raise NotImplementedError()
+    async def fetch_voltages(self, num_cells=0):
+        # Cell voltages (mV, big-endian) sit at the start of the 0x3E block,
+        # cell_count at register offset 98. Reuse the block read by fetch() in
+        # the same sampling cycle; fall back to a fresh read if called alone.
+        buf = self._last_block
+        if buf is None:
+            buf = (await self._q(_read_request(0x0000, 0x003E)))[3:]
+        if not num_cells:
+            num_cells = int.from_bytes(buf[98:100], 'big')
+        num_cells = min(num_cells, 48)
+        return [int.from_bytes(buf[i * 2:i * 2 + 2], 'big') for i in range(num_cells)]
 
     async def set_switch(self, switch: str, state: bool):
-        pass
+        reg = SWITCH_REGISTERS.get(switch)
+        if reg is None:
+            raise ValueError("unknown switch %s" % switch)
+        echo = await self._q(_write_request(reg, 1 if state else 0))
+        self.logger.info("daly2 set %s mosfet -> %s (echo %s)", switch, state, echo.hex())
+        if self._switches is not None:
+            self._switches[switch] = state
 
 
