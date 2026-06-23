@@ -160,7 +160,7 @@ sample_desc = {
     "soc/soc_percent": {
         "field": "soc",
         "device_class": "battery",
-        "state_class": None,
+        "state_class": "measurement",
         "unit_of_measurement": "%",
         "precision": 2,
         "significant_digits": 4,
