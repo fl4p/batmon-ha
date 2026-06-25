@@ -17,14 +17,19 @@ MODBUS_ADDRESS = 0xD2
 MODBUS_READ_HOLDING = 0x03
 MODBUS_WRITE_SINGLE = 0x06
 
-# Host-command registers that toggle the MOSFETs (Modbus write-single, fct 0x06,
-# value 1=on / 0=off). The official Daly Modbus doc gives one worked write
-# example: `D2 06 00 0C 00 01` = "enable battery discharge" -> discharge is
-# register 0x000C; charge is the adjacent host command 0x000D. These are runtime
-# host commands and (unlike the 0xA4+ parameter-settings block) are NOT gated by
-# the "parameter setting password". NB: the write-register map differs from the
-# read-register map, where 0x0C is a cell-voltage word.
-SWITCH_REGISTERS = dict(charge=0x000D, discharge=0x000C)
+# Registers that toggle the MOSFETs (Modbus write-single, fct 0x06, value
+# 1=on / 0=off). Confirmed against an HCI snoop of the official Daly app (#356):
+# toggling charge wrote `D2 06 00 A5 00 01/00`, discharge wrote `D2 06 00 A6
+# 00 01/00`. These are the "charging MOS switch" (0xA5) / "discharge MOS switch"
+# (0xA6) registers from the Daly Modbus spec.
+#
+# NB: the host commands 0x000C/0x000D (an earlier guess from the spec's "enable
+# battery discharge" example) echo a valid write but do NOT actuate the physical
+# MOSFET on this firmware. Despite the official app prompting for the parameter
+# password (123456), the snoop shows it is NEVER written to the BMS before the
+# switch write - the app only *reads* it (reg 0xC9) to validate the user's input
+# locally. So no unlock sequence is needed; the 0xA5/0xA6 write stands alone.
+SWITCH_REGISTERS = dict(charge=0x00A5, discharge=0x00A6)
 
 
 def _modbus_crc16(data: bytes) -> int:

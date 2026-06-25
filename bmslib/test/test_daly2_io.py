@@ -92,10 +92,15 @@ def test_fetch_voltages_reuses_block_and_decodes_cells():
     assert voltages == fx["expected"]["cell_voltages"]
 
 
-def test_discharge_register_matches_official_doc():
-    # Daly Modbus doc worked example: D2 06 00 0C 00 01 9B AA = enable discharge
-    assert SWITCH_REGISTERS["discharge"] == 0x000C
-    assert _write_request(0x000C, 1) == bytes.fromhex("d206000c00019baa")
+def test_switch_writes_match_official_app_snoop():
+    # Exact frames captured from the official Daly app's HCI snoop (#356):
+    #   charge on/off    -> D2 06 00 A5 00 01/00
+    #   discharge on/off -> D2 06 00 A6 00 01/00
+    assert SWITCH_REGISTERS == dict(charge=0x00A5, discharge=0x00A6)
+    assert _write_request(0x00A5, 1) == bytes.fromhex("d20600a500014b8a")
+    assert _write_request(0x00A5, 0) == bytes.fromhex("d20600a500008a4a")
+    assert _write_request(0x00A6, 1) == bytes.fromhex("d20600a60001bb8a")
+    assert _write_request(0x00A6, 0) == bytes.fromhex("d20600a600007a4a")
 
 
 def test_set_switch_writes_mosfet_register():
