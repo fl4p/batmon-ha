@@ -82,6 +82,13 @@ class JKBt(BtBms):
         self._has_float_charger = None # used for the `float_charge` switch
 
     def _buffer_crc_check(self):
+        # Guard: if buffer is shorter than expected, don't index into it.
+        # This can happen when _notification_handler slices the buffer to the
+        # position of a HEADER and calls us again — the tail may be < MIN_RESPONSE_SIZE.
+        # Without this check, self._buffer[MIN_RESPONSE_SIZE - 1] raises IndexError
+        # inside the bleak notify callback, which tears down the BLE event loop.
+        if len(self._buffer) < MIN_RESPONSE_SIZE:
+            return False
         crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
         crc_expected = self._buffer[MIN_RESPONSE_SIZE - 1]
         if crc_comp != crc_expected:
@@ -429,7 +436,7 @@ async def main():
 
             # new_state = not s.switches['charge']
             # await bms.set_switch('charge', new_state)
-            # await bms._q(cmd=0x96, resp= 0x01)
+            # await self._q(cmd=0x96, resp= 0x01)
             # print('set charge', new_state)
             # await asyncio.sleep(4)
             # s = await bms.fetch(wait=True)
