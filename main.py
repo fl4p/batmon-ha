@@ -196,7 +196,8 @@ async def main():
         bl_ctrls = set(bmslib.bt.bt_controllers_hci() or [None])
         # normalize so a device referenced by controller MAC dedupes against its hciN
         bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
-                     for dev in user_config.get('devices', []) if dev.get('adapter')}
+                     for dev in user_config.get('devices', [])
+                     if dev.get('adapter') and dev.get('address') != 'serial'}
         g = asyncio.gather(*[bmslib.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
         ble_devices = (await asyncio.wait_for(g, 30))[0]
     except Exception as e:

@@ -5,6 +5,7 @@
 
 * JK BLE: fix notify framing — resync on the frame header instead of clearing the buffer, which dropped a frame whenever one packet carried two. Fixes endless `timeout waiting for 2/3` and `crc check failed` after a reconnect (#377), and tolerates junk spliced between frames (#370)
 * JBD: estimated time remaining (`bms/runtime`) from remaining capacity / smoothed discharge current (#381)
+* Fix: skip BLE discovery and `bt_diagnostics` for serial devices (`address: serial`), whose `adapter:` is a tty path (#380)
 * Daly v2: fix MOSFET switch control — write regs `0x00A5` (charge) / `0x00A6` (discharge), confirmed by official-app HCI snoop; no password write needed (#356)
 
 

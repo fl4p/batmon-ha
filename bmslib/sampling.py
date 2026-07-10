@@ -200,13 +200,14 @@ class BmsSampler:
                 self._last_diag_t = t_now
                 logger.info('%s stack: Bleak %s, %s', self.bms.name,
                             bmslib.bt.bleak_version(), bmslib.bt.bt_stack_version())
-                try:
-                    await bmslib.bt.bt_diagnostics(
-                        self.bms.address, getattr(self.bms, '_adapter', None),
-                        logger, timeout=3.0)
-                except Exception as de:
-                    logger.warning('%s bt_diagnostics failed: %s', self.bms.name,
-                                   str(de) or type(de).__name__)
+                if self.bms.address != 'serial':
+                    try:
+                        await bmslib.bt.bt_diagnostics(
+                            self.bms.address, getattr(self.bms, '_adapter', None),
+                            logger, timeout=3.0)
+                    except Exception as de:
+                        logger.warning('%s bt_diagnostics failed: %s', self.bms.name,
+                                       str(de) or type(de).__name__)
 
             bms = self.bms
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
