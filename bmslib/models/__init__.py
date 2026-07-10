@@ -79,8 +79,20 @@ def get_bms_model_class(name):
         return None
 
 
+def device_address(dev: dict) -> str:
+    """Normalized `address:` of a configured device. The HA add-on schema types it
+    as free text, so users paste stray whitespace; everyone comparing against
+    `'serial'` must go through here or the comparison silently misses (#380)."""
+    return str(dev.get('address') or '').strip()
+
+
+def is_serial_device(dev: dict) -> bool:
+    """True for a wired BMS, whose `adapter:` is a tty path, not a BT controller."""
+    return device_address(dev) == 'serial'
+
+
 def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
-    addr: str = str(dev['address'] or '').strip()
+    addr: str = device_address(dev)
 
     if not addr or addr.startswith('#'):
         return None

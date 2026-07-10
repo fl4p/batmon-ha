@@ -42,7 +42,7 @@ import bmslib.bt
 import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, VirtualGroupBms
-from bmslib.models import construct_bms
+from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler
 from bmslib.scan import stop_all_scanners
@@ -197,7 +197,7 @@ async def main():
         # normalize so a device referenced by controller MAC dedupes against its hciN
         bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
                      for dev in user_config.get('devices', [])
-                     if dev.get('adapter') and dev.get('address') != 'serial'}
+                     if dev.get('adapter') and not is_serial_device(dev)}
         g = asyncio.gather(*[bmslib.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
         ble_devices = (await asyncio.wait_for(g, 30))[0]
     except Exception as e:
