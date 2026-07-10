@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import types
 
 import pytest
 
@@ -190,37 +191,117 @@ def test_jbd_second_outage_is_still_detected(fake_clock):
     assert s.runtime == pytest.approx(50.0 / 5.0 * 3600, rel=0.001)
 
 
-def test_jbd_keep_alive_false_reconnect_does_not_reset_the_filter(fake_clock, monkeypatch):
-    """With `keep_alive: false` the sampler reconnects before every poll. Resetting
-    the filter on connect() would leave runtime equal to the instantaneous current,
-    i.e. no smoothing at all. Only elapsed time may reset it."""
-    from bmslib.bt import BtBms
+class _FakeClient:
+    """Minimal stand-in for a BleakClient. `services` stays empty so BtBms.stop_notify
+    short-circuits without needing a GATT table."""
 
-    async def noop_connect(self, **kwargs):
+    def __init__(self):
+        self.is_connected = False
+        self.services = []
+
+    async def start_notify(self, *a, **kw):
         pass
 
-    class _Client:
-        async def start_notify(self, *a, **kw):
-            pass
+    async def disconnect(self):
+        self.is_connected = False
 
-    monkeypatch.setattr(BtBms, "connect", noop_connect)
-    bms = JbdBt("00:11:22:33:44:55", name="jbd", keep_alive=False)
-    bms.client = _Client()
+
+@pytest.fixture
+def fake_ble(monkeypatch):
+    """Drive the real BtBms.__aenter__/__aexit__ and JbdBt.connect()/disconnect()
+    against a fake client. Only the transport (_connect_client) is stubbed, so the
+    keep_alive policy under test is the production one, not a copy of it."""
+    from bmslib.bt import BtBms
+
+    connects = []
+
+    async def fake_connect_client(self, timeout=20):
+        connects.append(1)
+        self.client.is_connected = True
+
+    monkeypatch.setattr(BtBms, "_connect_client", fake_connect_client)
+
+    def make(**kwargs):
+        bms = JbdBt("00:11:22:33:44:55", name="jbd", **kwargs)
+        bms.client = _FakeClient()
+        return bms
+
+    return types.SimpleNamespace(make=make, connects=connects)
+
+
+def _poll(bms, frame):
+    """One sampler cycle: `async with bms:` (connect per policy) then fetch."""
+    async def fake_q(*a, **kw):
+        return frame
+
+    bms._q = fake_q
+
+    async def run():
+        async with bms:
+            return await bms.fetch()
+
+    return asyncio.run(run())
+
+
+def test_jbd_keep_alive_false_reconnects_every_poll_but_keeps_the_filter(fake_clock, fake_ble):
+    """With `keep_alive: false` BtBms.__aenter__ connects before every poll and
+    __aexit__ disconnects after it. Resetting the filter on connect() would leave
+    runtime equal to the instantaneous current, i.e. no smoothing at all. Only
+    elapsed time may reset it.
+
+    This drives the real context manager, so it stays honest if __aenter__'s policy
+    changes -- unlike a test that imitates it by calling connect() in a loop.
+    """
+    bms = fake_ble.make(keep_alive=False)
 
     for _ in range(6):                   # settle at 2 A across per-poll reconnects
         fake_clock[0] += 60
-        asyncio.run(bms.connect())
-        _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=100.0))
+        _poll(bms, _jbd_frame(jbd_current=-2.0, charge_ah=100.0))
+
+    assert len(fake_ble.connects) == 6, "keep_alive=False must reconnect every poll"
+    assert bms.client.is_connected is False, "__aexit__ must disconnect after each poll"
     assert bms._current_ewma.value == pytest.approx(2.0, rel=0.01)
 
     fake_clock[0] += 60
-    asyncio.run(bms.connect())
-    s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
+    s = _poll(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
 
     blended = (1 - 2 / 7) * 2.0 + (2 / 7) * 10.0
     assert bms._current_ewma.value == pytest.approx(blended, rel=0.01), \
         "connect() reseeded the filter; smoothing is dead under keep_alive=false"
     assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)
+
+
+def test_jbd_keep_alive_true_connects_once_and_smooths(fake_clock, fake_ble):
+    """The counterpart: with keep_alive the connection is held across polls."""
+    bms = fake_ble.make(keep_alive=True)
+
+    for _ in range(6):
+        fake_clock[0] += 60
+        _poll(bms, _jbd_frame(jbd_current=-2.0, charge_ah=100.0))
+
+    assert len(fake_ble.connects) == 1, "keep_alive=True must hold the connection"
+    assert bms.client.is_connected is True
+    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.01)
+
+
+def test_jbd_real_ble_drop_reconnects_and_resets_the_filter(fake_clock, fake_ble):
+    """A genuine drop: the client goes disconnected, __aenter__ reconnects on the
+    next poll, and because a real gap elapsed the stale current is discarded."""
+    bms = fake_ble.make(keep_alive=True)
+
+    for _ in range(8):
+        fake_clock[0] += 60
+        _poll(bms, _jbd_frame(jbd_current=-10.0, charge_ah=50.0))
+    assert bms._current_ewma.value == pytest.approx(10.0, rel=0.001)
+
+    bms.client.is_connected = False      # BLE drops; an hour passes
+    fake_clock[0] += 3600
+    s = _poll(bms, _jbd_frame(jbd_current=-2.0, charge_ah=50.0))
+
+    assert len(fake_ble.connects) == 2, "__aenter__ must reconnect after a drop"
+    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.001), \
+        "stale pre-outage current survived the reconnect"
+    assert s.runtime == pytest.approx(50.0 / 2.0 * 3600, rel=0.001)
 
 
 def test_jbd_backward_wall_clock_step_does_not_disturb_the_filter(fake_clock, monkeypatch):
