@@ -47,7 +47,62 @@ def _jk_command(address, value: list = ()):
 
 
 MIN_RESPONSE_SIZE = 300
-MAX_RESPONSE_SIZE = 320
+
+HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
+FRAME_SIZE = MIN_RESPONSE_SIZE  # a JK response frame is exactly 300 B, CRC in the last one
+
+
+def feed_frames(buf: bytearray, chunk: bytes) -> Tuple[List[bytes], int, List[bytes]]:
+    """Accumulate ``chunk`` into ``buf`` and return
+    ``(complete frames, discarded junk bytes, corrupt frames)``.
+    Returned frames are CRC-checked and removed from ``buf``.
+
+    The JK BLE endpoint is a UART bridge: notify packets carry a raw byte stream
+    and do *not* respect frame boundaries. One packet can hold the tail of one
+    frame and the head of the next (#377: a 384 B buffer = frame 0x01 + the first
+    84 B of frame 0x03), and some firmwares splice non-protocol junk into the
+    stream (an 'AT\\r\\n' flood, #370, or an echo of the host command frame).
+    So we resync on HEADER and consume frame-by-frame instead of assuming that
+    a notify packet starts a frame and that the buffer holds at most one.
+    """
+    buf.extend(chunk)
+    frames: List[bytes] = []
+    corrupt: List[bytes] = []
+    dropped = 0
+    keep = len(HEADER) - 1  # a header may straddle two notify packets
+
+    while True:
+        if len(buf) < len(HEADER):
+            break
+
+        idx = buf.find(HEADER)
+        if idx < 0:
+            dropped += len(buf) - keep
+            del buf[:-keep]
+            break
+        if idx > 0:
+            dropped += idx
+            del buf[:idx]
+
+        if len(buf) < FRAME_SIZE:
+            break  # header-aligned but incomplete, wait for more packets
+
+        frame = bytes(buf[:FRAME_SIZE])
+        if calc_crc(frame[:-1]) == frame[-1]:
+            del buf[:FRAME_SIZE]
+            frames.append(frame)
+            continue
+
+        # Header-aligned with a full frame available but bad CRC: the frame is
+        # corrupt, no amount of further data can fix it. Resync on the next header.
+        corrupt.append(frame)
+        nxt = buf.find(HEADER, len(HEADER))
+        if nxt < 0:
+            del buf[:-keep]
+            break
+        del buf[:nxt]
+
+    return frames, dropped, corrupt
 
 
 class JKBt(BtBms):
@@ -81,71 +136,43 @@ class JKBt(BtBms):
         self.is_new_11fw_32s = None  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
         self._has_float_charger = None # used for the `float_charge` switch
 
-    def _buffer_crc_check(self):
-        # Guard: if buffer is shorter than expected, don't index into it.
-        # This can happen when _notification_handler slices the buffer to the
-        # position of a HEADER and calls us again — the tail may be < MIN_RESPONSE_SIZE.
-        # Without this check, self._buffer[MIN_RESPONSE_SIZE - 1] raises IndexError
-        # inside the bleak notify callback, which tears down the BLE event loop.
-        if len(self._buffer) < MIN_RESPONSE_SIZE:
-            return False
-        crc_comp = calc_crc(self._buffer[0:MIN_RESPONSE_SIZE - 1])
-        crc_expected = self._buffer[MIN_RESPONSE_SIZE - 1]
-        if crc_comp != crc_expected:
-            self.logger.debug("crc check failed, %s != %s, %s", crc_comp, crc_expected, self._buffer)
-        return crc_comp == crc_expected
-
     def _notification_handler(self, _sender, data):
-        HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
-
-        if data[0:4] == HEADER:  # and len(self._buffer)
-            self.logger.debug("header, clear buf %s", self._buffer)
-            self._buffer.clear()
-
-        self._buffer += data
-
+        data = bytes(data)
         self.logger.debug("bms msg(%d) (buf%d): %s\n", len(data), len(self._buffer), to_hex_str(data))
 
-        if len(self._buffer) >= MIN_RESPONSE_SIZE:
-            if len(self._buffer) > MAX_RESPONSE_SIZE:
-                self.logger.warning('buffer longer than expected %d %s', len(self._buffer), self._buffer)
+        # Supersedes the #373 IndexError guard: feed_frames only ever indexes a
+        # complete FRAME_SIZE window, so a short buffer can no longer overrun.
+        frames, dropped, corrupt = feed_frames(self._buffer, data)
 
-            crc_ok = self._buffer_crc_check()
+        for frame in corrupt:
+            # A real frame that arrived corrupted - rare, keep visible.
+            self.logger.error("crc check failed, discarding frame 0x%02x: %s...",
+                              frame[4], to_hex_str(frame[:32]))
 
-            if not crc_ok and HEADER in self._buffer:
-                idx = self._buffer.index(HEADER)
-                self.logger.debug("crc check failed, header at %d, discarding start of %s", idx, self._buffer)
-                self._buffer = self._buffer[idx:]
-                crc_ok = self._buffer_crc_check()
-
-            if not crc_ok:
-                if HEADER in self._buffer:
-                    # A real frame that arrived corrupted - rare, keep visible.
-                    self.logger.error("crc check failed, discarding buffer %s", self._buffer)
-                else:
-                    # Non-protocol junk on the notify char (no frame header),
-                    # e.g. a JK-PB inverter flooding 'AT\r\n' on the shared UART
-                    # (#370). Throttle so the log stays usable during a flood.
-                    now = time.time()
-                    self._junk_count += 1
-                    if now - self._junk_log_t >= self.JUNK_LOG_PERIOD:
-                        self.logger.warning(
-                            "discarded %d non-protocol notify packet(s) in %.0fs "
-                            "(no frame header, e.g. JK-PB AT-flood #370); last %d bytes: %.40s",
-                            self._junk_count, (now - self._junk_log_t) if self._junk_log_t else 0,
-                            len(self._buffer), to_hex_str(self._buffer))
-                        self._junk_log_t = now
-                        self._junk_count = 0
-            else:
+        if dropped:
+            # Non-protocol junk on the notify char, e.g. a JK-PB inverter flooding
+            # 'AT\r\n' on the shared UART (#370). Throttle so a flood cannot roll
+            # the log over before the real disconnect is captured.
+            now = time.time()
+            self._junk_count += dropped
+            if now - self._junk_log_t >= self.JUNK_LOG_PERIOD:
+                self.logger.warning(
+                    "discarded %d junk byte(s) between frames in %.0fs "
+                    "(e.g. JK-PB AT-flood #370); last %d bytes: %.40s",
+                    self._junk_count, (now - self._junk_log_t) if self._junk_log_t else 0,
+                    len(data), to_hex_str(data))
+                self._junk_log_t = now
                 self._junk_count = 0
-                self._decode_msg(bytearray(self._buffer))
-            self._buffer.clear()
+
+        for frame in frames:
+            self._junk_count = 0
+            self._decode_msg(bytearray(frame))
 
     def _decode_msg(self, buf: bytearray):
         resp_type = buf[4]
         self.logger.debug('got response %d (len%d)', resp_type, len(buf))
         self._resp_table[resp_type] = buf, time.time()
-        self._fetch_futures.set_result(resp_type, self._buffer[:])
+        self._fetch_futures.set_result(resp_type, buf[:])
         callbacks = self._callbacks.get(resp_type, None)
         if callbacks:
             for cb in callbacks:
