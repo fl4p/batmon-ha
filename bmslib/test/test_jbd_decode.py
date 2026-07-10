@@ -1,10 +1,48 @@
 """JBD basic-info (cmd 0x03) decode regression tests."""
 
+import asyncio
+import math
+
 import pytest
 
 from bmslib.models.jbd import JbdBt
 from bmslib.test._decode_helpers import run_fetch_with_response
 from bmslib.test.data import jbd_fixtures
+
+
+def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0):
+    """Build a minimal JBD 0x03 response frame.
+
+    jbd_current uses JBD wire sign (positive=charging, negative=discharging);
+    the decoder negates it to batmon convention (positive=discharging).
+    """
+    data = bytearray()
+    data += int(26.0 * 100).to_bytes(2, 'big')
+    data += int(jbd_current * 100).to_bytes(2, 'big', signed=True)
+    data += int(charge_ah * 100).to_bytes(2, 'big')
+    data += int(capacity_ah * 100).to_bytes(2, 'big')
+    data += (0).to_bytes(2, 'big')       # cycles
+    data += (0).to_bytes(2, 'big')       # production date
+    data += (0).to_bytes(4, 'big')       # balancer
+    data += (0).to_bytes(2, 'big')       # protection
+    data += bytes([0x80])                # version
+    data += bytes([100])                 # SOC
+    data += bytes([0x03])                # MOS
+    data += bytes([4])                   # num_cell
+    data += bytes([num_temp])            # num_temp
+    for _ in range(num_temp):
+        data += (2731).to_bytes(2, 'big')
+    frame = bytes([0xDD, 0x03, 0x00, len(data)]) + data
+    checksum = (0x10000 - sum(frame[2:])) & 0xFFFF
+    frame += checksum.to_bytes(2, 'big') + bytes([0x77])
+    return frame
+
+
+def _fetch(bms, frame):
+    async def fake_q(*a, **kw):
+        return frame
+    bms._q = fake_q
+    return asyncio.run(bms.fetch())
 
 
 @pytest.mark.parametrize("fx", jbd_fixtures.ALL, ids=lambda fx: fx["name"])
@@ -26,3 +64,37 @@ def test_jbd_decode(fx):
         assert sample.problem_code == exp["problem_code"]
     if "problem" in exp:
         assert sample.problem == exp["problem"]
+    if exp.get("runtime") is None:
+        assert math.isnan(sample.runtime)
+    else:
+        assert sample.runtime == pytest.approx(exp["runtime"], rel=0.01)
+
+
+def test_jbd_runtime_ewma_charge_discharge_transition():
+    """Runtime EWMA resets on charge/idle so a charge→discharge transition
+    seeds fresh instead of being contaminated by stale negative values."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    charge_ah = 100.0
+
+    # 1. Charging at 10 A (JBD wire: +1000) → batmon current = -10 → runtime nan
+    s = _fetch(bms, _jbd_frame(jbd_current=10.0, charge_ah=charge_ah))
+    assert math.isnan(s.runtime)
+
+    # 2. First discharge at 5 A (JBD wire: -500) → EWMA seeds to 5.0 (no blending
+    #    on first sample) → runtime = 100/5*3600 = 72000 s exactly
+    s = _fetch(bms, _jbd_frame(jbd_current=-5.0, charge_ah=charge_ah))
+    assert s.runtime == pytest.approx(72000, rel=0.001)
+
+    # 3. Second discharge at 10 A → EWMA blends: (1-α)*5 + α*10
+    #    α = 2/(6+1) ≈ 0.2857 → smoothed ≈ 6.4286 → runtime = 100/6.4286*3600
+    s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=charge_ah))
+    expected_current = (1 - 2/7) * 5.0 + (2/7) * 10.0
+    assert s.runtime == pytest.approx(charge_ah / expected_current * 3600, rel=0.01)
+
+    # 4. Charging again → runtime nan, EWMA resets
+    s = _fetch(bms, _jbd_frame(jbd_current=10.0, charge_ah=charge_ah))
+    assert math.isnan(s.runtime)
+
+    # 5. Discharge at 8 A → EWMA seeds fresh to 8.0 (not contaminated by step 3)
+    s = _fetch(bms, _jbd_frame(jbd_current=-8.0, charge_ah=charge_ah))
+    assert s.runtime == pytest.approx(charge_ah / 8.0 * 3600, rel=0.001)

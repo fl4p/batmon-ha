@@ -13,9 +13,11 @@ https://github.com/tgalarneau/bms
 
 """
 import asyncio
+import math
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
+from bmslib.pwmath import EWMA
 
 
 def _jbd_command(command: int):
@@ -32,6 +34,7 @@ class JbdBt(BtBms):
         self._buffer = bytearray()
         self._switches = None
         self._last_response = None
+        self._current_ewma = EWMA(span=6)
 
     def _notification_handler(self, sender, data):
 
@@ -84,11 +87,29 @@ class JbdBt(BtBms):
         # "any alarm" boolean so HA can show a problem indicator.
         problem_code = int.from_bytes(buf[16:18], byteorder='big', signed=False)
 
+        current = -int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100
+        charge = int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100
+
+        # JBD 0x03 has no native "time remaining" field; the Xiaoxiang app
+        # derives it from remaining capacity / load. Do the same: seconds to
+        # empty at the present discharge rate. Smooth the discharge current
+        # with a short EWMA so transient load spikes don't make the estimate
+        # jump. Only feed discharge current (batmon sign: current > 0) and
+        # reset on charge/idle so a charge→discharge transition seeds fresh
+        # instead of being contaminated by stale negative values. At very low
+        # discharge rates the 0.01 A ADC resolution makes the estimate noisy.
+        if current > 0:
+            self._current_ewma.add(current)
+        else:
+            self._current_ewma.y = math.nan
+        smoothed_current = self._current_ewma.value
+        runtime = (charge / smoothed_current * 3600) if smoothed_current > 0 else math.nan
+
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
-            current=-int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100,
+            current=current,
 
-            charge=int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100,
+            charge=charge,
             capacity=int.from_bytes(buf[6:8], byteorder='big', signed=False) / 100,
             soc=buf[19],
 
@@ -102,6 +123,8 @@ class JbdBt(BtBms):
             ),
 
             problem_code=problem_code,
+
+            runtime=runtime,
 
             # charge_enabled
             # discharge_enabled

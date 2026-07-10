@@ -40,6 +40,7 @@ SYSSI_3CELL = dict(
         switches=dict(charge=True, discharge=True),
         problem_code=0,
         problem=False,
+        runtime=None,  # current=0 → nan
     ),
 )
 
@@ -59,6 +60,7 @@ DUMMY_7CELL = dict(
         switches=dict(charge=True, discharge=True),
         problem_code=0,
         problem=False,
+        runtime=279360,  # 468.71 Ah / 6.04 A * 3600 ≈ 279365 s
     ),
 )
 
