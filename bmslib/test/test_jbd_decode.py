@@ -102,10 +102,10 @@ def test_jbd_runtime_ewma_charge_discharge_transition():
 
 @pytest.fixture
 def fake_clock(monkeypatch):
-    """A controllable time.time() for bmslib.models.jbd, so tests can simulate
+    """A controllable monotonic clock for bmslib.models.jbd, so tests can simulate
     polling cadence and outages without sleeping."""
     now = [1000.0]
-    monkeypatch.setattr("bmslib.models.jbd.time.time", lambda: now[0])
+    monkeypatch.setattr("bmslib.models.jbd.time.monotonic", lambda: now[0])
     return now
 
 
@@ -163,30 +163,38 @@ def test_jbd_runtime_ewma_fast_poll_jitter_is_not_an_outage(fake_clock):
     assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)
 
 
-def test_jbd_reconnect_discards_the_previous_session_filter(fake_clock):
-    """A new BLE session says nothing about the load before the old one ended."""
+def test_jbd_second_outage_is_still_detected(fake_clock):
+    """The stale gap must not be fed to the cadence filter: that would inflate the
+    learned interval (60s -> ~780s) and blind the detector to the next outage.
+
+    The sizes matter. A second 3600s gap would trip even a poisoned threshold, so
+    this uses a 1200s gap after a single relearn poll — caught with a correctly
+    reset cadence (threshold 240s), missed with a poisoned one (threshold ~3130s).
+    """
     bms = JbdBt("00:11:22:33:44:55", name="jbd")
 
-    for _ in range(10):
-        fake_clock[0] += 60
-        _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=50.0))
-    assert bms._current_ewma.value == pytest.approx(10.0, rel=0.001)
+    def poll(gap, amps):
+        fake_clock[0] += gap
+        return _fetch(bms, _jbd_frame(jbd_current=-amps, charge_ah=50.0))
 
-    bms._reset_current_ewma()
-    assert math.isnan(bms._current_ewma.value)
+    for _ in range(8):
+        poll(60, 10.0)                   # settle: cadence 60 s, current 10 A
+    poll(3600, 2.0)                      # outage -> reseed to 2 A
+    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.001)
 
-    fake_clock[0] += 60
-    s = _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=50.0))
-    assert s.runtime == pytest.approx(50.0 / 2.0 * 3600, rel=0.001)
+    poll(60, 2.0)                        # one normal poll relearns cadence = 60 s
+    assert bms._sample_dt.value == pytest.approx(60.0, rel=0.001)
+
+    s = poll(1200, 5.0)                  # second outage -> reseed to 5 A, not blended
+    assert bms._current_ewma.value == pytest.approx(5.0, rel=0.001)
+    assert s.runtime == pytest.approx(50.0 / 5.0 * 3600, rel=0.001)
 
 
-def test_jbd_connect_resets_the_current_filter(monkeypatch):
-    """connect() must drop the previous session's smoothed current."""
+def test_jbd_keep_alive_false_reconnect_does_not_reset_the_filter(fake_clock, monkeypatch):
+    """With `keep_alive: false` the sampler reconnects before every poll. Resetting
+    the filter on connect() would leave runtime equal to the instantaneous current,
+    i.e. no smoothing at all. Only elapsed time may reset it."""
     from bmslib.bt import BtBms
-
-    bms = JbdBt("00:11:22:33:44:55", name="jbd")
-    bms._current_ewma.add(10.0)
-    assert bms._current_ewma.value == pytest.approx(10.0)
 
     async def noop_connect(self, **kwargs):
         pass
@@ -196,7 +204,44 @@ def test_jbd_connect_resets_the_current_filter(monkeypatch):
             pass
 
     monkeypatch.setattr(BtBms, "connect", noop_connect)
+    bms = JbdBt("00:11:22:33:44:55", name="jbd", keep_alive=False)
     bms.client = _Client()
-    asyncio.run(bms.connect())
 
-    assert math.isnan(bms._current_ewma.value)
+    for _ in range(6):                   # settle at 2 A across per-poll reconnects
+        fake_clock[0] += 60
+        asyncio.run(bms.connect())
+        _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=100.0))
+    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.01)
+
+    fake_clock[0] += 60
+    asyncio.run(bms.connect())
+    s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
+
+    blended = (1 - 2 / 7) * 2.0 + (2 / 7) * 10.0
+    assert bms._current_ewma.value == pytest.approx(blended, rel=0.01), \
+        "connect() reseeded the filter; smoothing is dead under keep_alive=false"
+    assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)
+
+
+def test_jbd_backward_wall_clock_step_does_not_disturb_the_filter(fake_clock, monkeypatch):
+    """An NTP correction stepping time.time() backward (a Pi with no RTC) must not
+    poison the learned cadence. _age_current_ewma uses a monotonic clock."""
+    wall = [1_000_000.0]
+    monkeypatch.setattr("bmslib.models.jbd.time.time", lambda: wall[0])
+
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    for _ in range(8):
+        fake_clock[0] += 60
+        wall[0] += 60
+        _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
+    assert bms._sample_dt.value == pytest.approx(60.0, rel=0.001)
+
+    wall[0] -= 200          # clock steps backward; monotonic keeps advancing
+    fake_clock[0] += 60
+    s = _fetch(bms, _jbd_frame(jbd_current=-14.0, charge_ah=100.0))
+
+    assert bms._sample_dt.value > 0, "negative interval poisoned the cadence filter"
+    blended = (1 - 2 / 7) * 10.0 + (2 / 7) * 14.0
+    assert bms._current_ewma.value == pytest.approx(blended, rel=0.001), \
+        "backward clock step spuriously reset the filter"
+    assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)

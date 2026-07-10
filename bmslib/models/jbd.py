@@ -38,6 +38,11 @@ class JbdBt(BtBms):
     # is user-configurable and a fixed threshold would either never fire or fire
     # every sample. The floor keeps scheduler jitter at a fast poll (or in tests,
     # where samples are microseconds apart) from reading as an outage.
+    #
+    # Elapsed time is the *only* trigger. Resetting in connect() instead looks
+    # equivalent but is not: with `keep_alive: false` the sampler reconnects
+    # before every poll, which would reseed the filter each cycle and leave the
+    # estimate equal to the instantaneous current, i.e. no smoothing at all.
     EWMA_STALE_FACTOR = 4
     EWMA_STALE_MIN_S = 10
 
@@ -47,17 +52,16 @@ class JbdBt(BtBms):
         self._switches = None
         self._last_response = None
         self._current_ewma = EWMA(span=6)
-        self._sample_t = math.nan       # time.time() of the last fetch()
+        self._sample_t = math.nan       # time.monotonic() of the last fetch()
         self._sample_dt = EWMA(span=6)  # observed polling interval, seconds
-
-    def _reset_current_ewma(self):
-        self._current_ewma.reset()
-        self._sample_dt.reset()
-        self._sample_t = math.nan
 
     def _age_current_ewma(self):
         """Drop the smoothed current if this sample arrives long after the last one."""
-        now = time.time()
+        # monotonic, not time.time(): a backward wall-clock step (an NTP
+        # correction on a Pi with no RTC) would otherwise feed a negative
+        # interval into the cadence filter and misread the next ordinary poll
+        # as an outage.
+        now = time.monotonic()
         dt = now - self._sample_t
         typical_dt = self._sample_dt.value
         threshold = max(self.EWMA_STALE_MIN_S, self.EWMA_STALE_FACTOR * typical_dt)
@@ -86,8 +90,6 @@ class JbdBt(BtBms):
             self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
-        # A new session says nothing about the load before the old one ended.
-        self._reset_current_ewma()
         await super().connect(**kwargs)
         #try:
         #    await super().connect(**kwargs)
