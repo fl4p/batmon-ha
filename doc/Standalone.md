@@ -17,45 +17,14 @@ python3 -m venv ./venv
 ./venv/bin/pip3 install -r requirements.txt
 ```
 
-Create `options.json` within the `batmon-ha` directory. Use this as an example and adjust as needed:
+Create `options.json` within the `batmon-ha` directory. Start from
+[`doc/options.json.template`](options.json.template) and adjust as needed:
+
 ```
-{
-  "devices": [
-    {
-      "address": "",
-      "type": "daly",
-      "alias": "daly1"
-    },
-    {
-      "address": "",
-      "type": "jk",
-      "alias": "jk1"
-    },
-    {
-      "address": "",
-      "type": "jbd",
-      "alias": "jbd1"
-    },
-    {
-      "address": "",
-      "type": "victron",
-      "alias": "victron1",
-      "pin": "000000"
-    }
-  ],
-  "mqtt_broker": "homeassistant.local",
-  "mqtt_user": "pv",
-  "mqtt_password": "Offgrid",
-  "concurrent_sampling": false,
-  "keep_alive": true,
-  "sample_period": 1.0,
-  "publish_period": 1.0,
-  "invert_current": false,
-  "expire_values_after": 20,
-  "verbose_log": false,
-  "watchdog": false
-}
+cp doc/options.json.template options.json
 ```
+
+`config.yaml` holds the authoritative option schema.
 
 Then start:
 ```
@@ -101,8 +70,8 @@ add this line at the bottom:
 
 
 # Docker
-Small modifications are needed to run this inside Docker, see https://github.com/fl4p/batmon-ha/issues/25#issuecomment-1400900525
-
+See [Docker.md](Docker.md) for prebuilt images, `docker run` / compose examples,
+and a Helm chart.
 
 
 # Minimal options.json
@@ -110,9 +79,12 @@ Small modifications are needed to run this inside Docker, see https://github.com
 {
   "devices": [
     {
-      "address": "",
+      "address": "C8:47:8C:E4:55:E5",
       "type": "jk"
-    }    
+    }
   ]
 }
 ```
+
+Everything else falls back to a code default. `address` must be a real MAC (or
+a device name, or `serial`) — batmon skips a device with an empty address.

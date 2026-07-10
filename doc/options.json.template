@@ -1,0 +1,31 @@
+{
+  "devices": [
+    {
+      "address": "C8:47:8C:E4:55:E5",
+      "type": "jk",
+      "alias": "jk_bms1"
+    },
+    {
+      "address": "D6:6C:0A:61:14:30",
+      "type": "sok",
+      "alias": "battery1",
+      "pin": "000000"
+    }
+  ],
+
+  "mqtt_broker": "homeassistant.local",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "mqtt_password": "",
+
+  "ble_stack": "bleak",
+
+  "sample_period": 1.0,
+  "publish_period": 1.0,
+  "expire_values_after": 20,
+  "invert_current": true,
+  "keep_alive": true,
+  "watchdog": true,
+  "concurrent_sampling": false,
+  "verbose_log": false
+}

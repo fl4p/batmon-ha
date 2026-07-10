@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "batmon-ha.fullname" . }}
+  labels:
+    {{- include "batmon-ha.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # A BLE adapter cannot be shared, and two samplers would fight over the same
+  # meter state on the PVC. Never run two pods at once, not even during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "batmon-ha.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when options.json changes — batmon reads it once at start.
+        checksum/config: {{ .Values.config | toJson | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "batmon-ha.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: batmon-ha
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            # /data must be a writable DIRECTORY: bmslib/store.py sets
+            # root_dir='/data/' once /data/options.json is readable, then writes
+            # bms_meter_states.json, bat_state_<name>.json and user_id beside it.
+            # Mounting only the ConfigMap file (as some downstream charts do)
+            # leaves /data on the container filesystem, so the coulomb-counter and
+            # energy-meter totals are silently lost on every restart.
+            - name: data
+              mountPath: /data
+            # Nested on top of the /data mount. Kubelet orders mounts by path
+            # depth, so this lands inside the volume above. If a kubelet ever
+            # rejects the nesting, swap this for an initContainer that copies the
+            # ConfigMap into the volume.
+            - name: config
+              mountPath: /data/options.json
+              subPath: options.json
+              readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "batmon-ha.fullname" . }}-config
+        - name: data
+        {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "batmon-ha.pvcName" . }}
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

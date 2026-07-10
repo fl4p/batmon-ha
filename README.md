@@ -324,6 +324,9 @@ You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending M
 All you need is an operating system supported by [bleak](https://pypi.org/project/bleak/).
 See [doc/Standalone.md](doc/Standalone.md)
 
+To run it in a container instead, see [doc/Docker.md](doc/Docker.md): prebuilt
+multi-arch images (`ghcr.io/fl4p/batmon-ha`), compose examples, and a Helm chart.
+
 # Contribute / Donate
 
 * [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)

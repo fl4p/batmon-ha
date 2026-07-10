@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.04]
+
+* Standalone Docker: prebuilt multi-arch images at `ghcr.io/fl4p/batmon-ha` (amd64, arm64, armv7), plus a Helm chart in `charts/batmon-ha`. See [doc/Docker.md](doc/Docker.md) (#120)
+* `addon_main.sh` no longer requires bashio, so `ble_stack` (`bumble`/`bluek`/`esphome`) now works outside Home Assistant. Community images that ran it by rewriting the shebang to `#!/bin/sh` silently ignored the setting and always used `bleak`
+* Fix: `MQTT_HOST`/`MQTT_PORT`/`MQTT_USER`/`MQTT_PASSWORD` from the environment were overwritten with empty strings when no Supervisor MQTT service was present, so `docker run -e MQTT_HOST=...` never took effect
+* Fix: an `options.json` without `ble_stack` skipped the BLE pairing pre-step instead of defaulting to `bleak`
+* `docker stop` now terminates batmon promptly (the entrypoint `exec`s python, so SIGTERM is delivered)
+* Add `.dockerignore`: a local `docker build` used to bake the developer's `options.json` (MQTT/InfluxDB credentials) into the image
+
+
 ## [2.03]
 
 * JK BLE: fix notify framing — resync on the frame header instead of clearing the buffer, which dropped a frame whenever one packet carried two. Fixes endless `timeout waiting for 2/3` and `crc check failed` after a reconnect (#377), and tolerates junk spliced between frames (#370)

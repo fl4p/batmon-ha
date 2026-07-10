@@ -1,0 +1,96 @@
+image:
+  repository: ghcr.io/fl4p/batmon-ha
+  # Prefer pinning to a released version (matches config.yaml `version:`) over
+  # "latest", so a pod reschedule can't silently move you to a new build.
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Becomes /data/options.json inside the container. See doc/Docker.md for the
+# full option reference, and doc/options.json.template for a starting point.
+#
+# Keep secrets (mqtt_password, influxdb_password, bluetooth_proxies[].noise_psk)
+# out of this file — put them in a values.secret.yaml, or switch to
+# existingSecret below.
+config:
+  # esphome is the default because it is the only stack that makes unqualified
+  # sense in a cluster: GATT is routed over the network through ESPHome Bluetooth
+  # Proxy devices, so the pod needs no adapter, no host network, and no
+  # capabilities. For a local adapter see `bleStack` guidance in doc/Docker.md and
+  # set hostNetwork/capabilities/nodeSelector below accordingly.
+  ble_stack: esphome
+  bluetooth_proxies: []
+  #  - host: 192.168.1.42
+  #    name: garage-proxy
+  #    noise_psk: "base64-encoded-encryption-key"
+
+  devices: []
+  #  - address: "AA:BB:CC:DD:EE:FF"
+  #    type: jbd
+  #    alias: battery1
+
+  mqtt_broker: ""
+  mqtt_user: ""
+  mqtt_password: ""
+
+  # Pinned because main.py's fallback disagrees with the add-on's own default:
+  # without an HA options schema to fill them in, watchdog and invert_current
+  # fall back to false (main.py) and keep_alive to the BMS class default, while
+  # config.yaml ships all three on. Pin them so a pod behaves like the add-on.
+  #
+  # sample_period, publish_period and expire_values_after agree on both sides,
+  # so they are deliberately left out and track the upstream default. Add one
+  # here and it becomes yours to keep in sync.
+  keep_alive: true
+  watchdog: true
+  invert_current: true
+
+# Mount an existing Secret's keys as env vars (MQTT_HOST/MQTT_PORT/MQTT_USER/
+# MQTT_PASSWORD). main.py reads these, and a value set in `config` above wins,
+# so leave config.mqtt_* empty when using this.
+existingSecret: ""
+
+# batmon writes bms_meter_states.json, bat_state_<name>.json and user_id next to
+# options.json, so /data must be WRITABLE and should survive a restart — those
+# files hold the coulomb-counter / energy-meter state. With persistence disabled
+# you get an emptyDir and your meter totals reset on every reschedule.
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 64Mi
+  existingClaim: ""
+
+# Required for ble_stack: bluek | bumble (AF_BLUETOOTH/HCI/L2CAP sockets live in
+# the host network namespace). Not needed for esphome.
+hostNetwork: false
+
+securityContext:
+  capabilities:
+    add: []
+    #  - NET_ADMIN   # bluek/bumble: mgmt control channel, HCI User Channel
+    #  - NET_RAW     # bluek/bumble: raw HCI + L2CAP sockets
+  privileged: false
+
+# Pin to the node that owns the Bluetooth adapter when using bleak/bluek/bumble.
+nodeSelector: {}
+#  kubernetes.io/hostname: rpi
+tolerations: []
+affinity: {}
+
+resources: {}
+#  limits:
+#    memory: 256Mi
+#  requests:
+#    cpu: 50m
+#    memory: 128Mi
+
+podAnnotations: {}
+podLabels: {}
+
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []

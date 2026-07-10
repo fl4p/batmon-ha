@@ -1,0 +1,194 @@
+name: Docker
+
+# Publishes the standalone image (doc/Docker.md) to ghcr.io/fl4p/batmon-ha.
+# The Home Assistant add-on is NOT built here — the supervisor builds that on the
+# user's machine from the same Dockerfile, with BUILD_FROM taken from build.yaml.
+# The `validate-addon` job below only guards that path from Dockerfile regressions.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'entrypoint.sh'
+      - 'addon_main.sh'
+      - 'requirements.txt'
+      - 'config.yaml'
+      - 'main.py'
+      - 'bmslib/**'
+      - '.github/workflows/docker.yml'
+  # Keep in sync with push.paths. config.yaml belongs here too: it carries the
+  # release version, and a PR that only bumps it must still run validate-addon.
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'entrypoint.sh'
+      - 'addon_main.sh'
+      - 'requirements.txt'
+      - 'config.yaml'
+      - 'main.py'
+      - 'bmslib/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  # Pin the base. The Dockerfile does `apk add python3~3.13 || ~3.12 || python3`,
+  # so `alpine:latest` would silently move the python minor version (and musl
+  # wheel availability) under us. Bump this deliberately.
+  BASE_IMAGE: alpine:3.21
+
+jobs:
+  # Cheap regression guard: a Dockerfile change must not break the add-on build.
+  # Native amd64, never pushed.
+  validate-addon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build add-on image (HA base)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
+          cache-from: type=gha,scope=addon-amd64
+          cache-to: type=gha,mode=max,scope=addon-amd64
+
+  # One job per platform so arm64/armv7 (QEMU-emulated, and this Dockerfile
+  # builds four venvs with several git+https installs) run in parallel rather
+  # than serially inside a single buildx invocation.
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            slug: amd64
+          - platform: linux/arm64
+            slug: arm64
+          # armv7 ships WITHOUT the esphome stack: there are no musl armv7 wheels
+          # for cryptography/dbus-fast/bleak-esphome, and the Dockerfile declines
+          # to pull in a ~400MB Rust toolchain to compile them. venv_esphome fails,
+          # `|| true` swallows it, and addon_main.sh falls back to bleak at runtime.
+          - platform: linux/arm/v7
+            slug: armv7
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.platform != 'linux/amd64'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # NOTE on caching: the unpinned `git+https` installs (aiobmsble,
+      # bumble-bleak) key their layer on the RUN string, not on upstream HEAD, so
+      # a warm cache keeps serving a stale revision. Bump config.yaml `version:`
+      # (or clear the cache) when you want to pull new upstream commits.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_FROM=${{ env.BASE_IMAGE }}
+          cache-from: type=gha,scope=standalone-${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=standalone-${{ matrix.slug }}
+          outputs: >-
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Join the per-platform digests into one multi-arch manifest under the real tags.
+  merge:
+    runs-on: ubuntu-latest
+    needs: [build, validate-addon]
+    # Only ever push from master. `push` is already branch-scoped, but
+    # workflow_dispatch is not — without the ref check, dispatching from a
+    # feature branch would publish a `sha-` tag to the public registry (the
+    # `latest`/version tags are already guarded by is_default_branch).
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Single source of truth for the release tag. Upstream bumps config.yaml
+      # `version:` per release and does not cut git tags, so `type=semver` would
+      # never fire.
+      - name: Read version from config.yaml
+        id: ver
+        run: |
+          v="$(sed -nE 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' config.yaml)"
+          [ -n "$v" ] || { echo "could not parse version from config.yaml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.version }},enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.version }}

@@ -1,0 +1,25 @@
+# Keep local dev state out of the image. `options.json` in particular holds real
+# MQTT/InfluxDB credentials on a developer machine (it is gitignored, so CI never
+# sees it, but `docker build .` would happily bake it in). Excluding it also makes
+# the standalone contract deterministic: config always resolves to the mounted
+# /data/options.json, never to a stale copy at /app/options.json.
+options.json
+bms_meter_states.json
+bat_*.json
+user_id
+.env
+
+venv
+venv_*
+__pycache__
+**/__pycache__
+*.pyc
+*.pickle
+
+.git
+.github
+.idea
+.pytest_cache
+.explyt
+.DS_Store
+plans

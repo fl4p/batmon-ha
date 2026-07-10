@@ -1,0 +1,22 @@
+apiVersion: v2
+name: batmon-ha
+description: Monitor various BMS over Bluetooth LE and publish to MQTT
+type: application
+home: https://github.com/fl4p/batmon-ha
+sources:
+  - https://github.com/fl4p/batmon-ha
+maintainers:
+  - name: fl4p
+    url: https://github.com/fl4p
+keywords:
+  - bms
+  - battery
+  - bluetooth
+  - mqtt
+  - home-assistant
+# version:    chart version, bump on chart changes
+# appVersion: batmon version, MUST track config.yaml `version:` — values.yaml
+#             defaults image.tag to it, so a forgotten bump here does not just
+#             mislabel the release, it pins `helm install` to the older image.
+version: 0.1.0
+appVersion: "2.04"
