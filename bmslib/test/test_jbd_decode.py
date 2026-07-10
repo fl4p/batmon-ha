@@ -98,3 +98,105 @@ def test_jbd_runtime_ewma_charge_discharge_transition():
     # 5. Discharge at 8 A → EWMA seeds fresh to 8.0 (not contaminated by step 3)
     s = _fetch(bms, _jbd_frame(jbd_current=-8.0, charge_ah=charge_ah))
     assert s.runtime == pytest.approx(charge_ah / 8.0 * 3600, rel=0.001)
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """A controllable time.time() for bmslib.models.jbd, so tests can simulate
+    polling cadence and outages without sleeping."""
+    now = [1000.0]
+    monkeypatch.setattr("bmslib.models.jbd.time.time", lambda: now[0])
+    return now
+
+
+def test_jbd_runtime_ewma_resets_after_a_long_gap(fake_clock):
+    """EWMA is sample-indexed, not time-aware: without this reset a sample from
+    an hour ago would blend into the first post-outage estimate as if it were
+    one poll old. Reviewer's scenario for #381."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    charge_ah = 50.0
+
+    # steady 60 s polling at a 10 A load
+    for _ in range(20):
+        fake_clock[0] += 60
+        s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=charge_ah))
+    assert s.runtime == pytest.approx(charge_ah / 10.0 * 3600, rel=0.001)
+
+    # BLE drops for an hour; when it returns the real load is only 2 A
+    fake_clock[0] += 3600
+    s = _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=charge_ah))
+
+    # the filter is reseeded, so the estimate reflects 2 A, not a blend with 10 A
+    assert s.runtime == pytest.approx(charge_ah / 2.0 * 3600, rel=0.001)
+
+
+def test_jbd_runtime_ewma_survives_cadence_jitter(fake_clock):
+    """A slow poll or a bit of scheduler jitter must not be mistaken for an
+    outage, or the EWMA degenerates into the instantaneous current."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    charge_ah = 100.0
+
+    for _ in range(6):
+        fake_clock[0] += 60
+        _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=charge_ah))
+
+    fake_clock[0] += 75  # 25% late, well inside 4x
+    s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=charge_ah))
+
+    blended = (1 - 2 / 7) * 2.0 + (2 / 7) * 10.0
+    assert s.runtime == pytest.approx(charge_ah / blended * 3600, rel=0.01)
+
+
+def test_jbd_runtime_ewma_fast_poll_jitter_is_not_an_outage(fake_clock):
+    """At a fast poll, 4x the cadence is a tiny absolute gap; the floor keeps
+    ordinary jitter from resetting the filter every other sample."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+
+    for _ in range(6):
+        fake_clock[0] += 1.0
+        _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=100.0))
+
+    fake_clock[0] += 6.0  # 6x the 1 s cadence, but under EWMA_STALE_MIN_S
+    s = _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
+
+    blended = (1 - 2 / 7) * 2.0 + (2 / 7) * 10.0
+    assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)
+
+
+def test_jbd_reconnect_discards_the_previous_session_filter(fake_clock):
+    """A new BLE session says nothing about the load before the old one ended."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+
+    for _ in range(10):
+        fake_clock[0] += 60
+        _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=50.0))
+    assert bms._current_ewma.value == pytest.approx(10.0, rel=0.001)
+
+    bms._reset_current_ewma()
+    assert math.isnan(bms._current_ewma.value)
+
+    fake_clock[0] += 60
+    s = _fetch(bms, _jbd_frame(jbd_current=-2.0, charge_ah=50.0))
+    assert s.runtime == pytest.approx(50.0 / 2.0 * 3600, rel=0.001)
+
+
+def test_jbd_connect_resets_the_current_filter(monkeypatch):
+    """connect() must drop the previous session's smoothed current."""
+    from bmslib.bt import BtBms
+
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    bms._current_ewma.add(10.0)
+    assert bms._current_ewma.value == pytest.approx(10.0)
+
+    async def noop_connect(self, **kwargs):
+        pass
+
+    class _Client:
+        async def start_notify(self, *a, **kw):
+            pass
+
+    monkeypatch.setattr(BtBms, "connect", noop_connect)
+    bms.client = _Client()
+    asyncio.run(bms.connect())
+
+    assert math.isnan(bms._current_ewma.value)

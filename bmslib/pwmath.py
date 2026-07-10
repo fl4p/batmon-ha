@@ -11,6 +11,10 @@ class EWMA:
     def update_span(self, span):
         self.alpha = (2 / (span + 1))
 
+    def reset(self):
+        """Forget accumulated history. The next add() seeds the filter with its value."""
+        self.y = math.nan
+
     def add(self, x):
         if not math.isfinite(x):
             return
