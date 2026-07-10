@@ -9,7 +9,8 @@ All byte strings here are real captures from issue #377.
 
 import time
 
-from bmslib.models.jikong import FRAME_SIZE, HEADER, JKBt, calc_crc, feed_frames
+from bmslib.models.jikong import (FRAME_SIZE, HEADER, RESPONSE_TYPES, JKBt,
+                                  calc_crc, feed_frames)
 from bmslib.test.data import jk_issue377 as fx
 
 
@@ -95,6 +96,48 @@ def test_header_split_across_packets_is_not_lost():
     ])
     assert frames == [fx.FRAME_02_STATUS]
     assert dropped == 4 and corrupt == [] and len(buf) == 0
+
+
+def _forge_impostor(real_frame, delta=12, resp_type=0x50):
+    """Build junk containing a HEADER whose following 300-byte window (junk + the
+    head of `real_frame`) happens to satisfy the 8-bit additive checksum."""
+    pad_fixed = bytes([resp_type]) + bytes([0x41]) * (delta - 4 - 2)
+    window_tail = real_frame[:FRAME_SIZE - delta]
+    target = window_tail[-1]
+    s = calc_crc(HEADER + pad_fixed + window_tail[:-1])
+    pad = pad_fixed + bytes([(target - s) % 256])
+    forged = HEADER + pad
+    assert calc_crc((forged + real_frame)[:FRAME_SIZE - 1]) == (forged + real_frame)[FRAME_SIZE - 1]
+    return forged
+
+
+def test_checksum_collision_on_a_false_header_does_not_eat_the_next_frame():
+    """calc_crc is an 8-bit sum, so a HEADER-shaped sequence in junk has a ~1/256
+    chance its 300-byte window passes the checksum. Accepting it would consume the
+    real frame behind it, silently — no corrupt entry, no junk count. Requiring a
+    known resp_type sends the impostor down the logged resync path instead."""
+    forged = _forge_impostor(fx.FRAME_02_STATUS, resp_type=0x50)
+    assert 0x50 not in RESPONSE_TYPES
+
+    frames, _, corrupt = _feed([forged + fx.FRAME_02_STATUS])[:3]
+    assert frames == [fx.FRAME_02_STATUS]           # real frame survives
+    assert [f[4] for f in corrupt] == [0x50]        # impostor is reported, not swallowed
+
+
+def test_only_known_response_types_are_accepted():
+    """A CRC-valid window whose type byte is not 0x01/0x02/0x03 is not a frame."""
+    for resp_type in (0x00, 0x04, 0x50, 0xEE, 0xFF):
+        frame = bytearray(fx.FRAME_02_STATUS)
+        frame[4] = resp_type
+        frame[-1] = calc_crc(frame[:-1])            # make the checksum valid again
+        frames, _, corrupt = _feed([bytes(frame)])[:3]
+        assert frames == [], f"accepted unknown resp_type 0x{resp_type:02x}"
+        assert [f[4] for f in corrupt] == [resp_type]
+
+    # ...and the three real types still round-trip
+    for frame in (fx.FRAME_01_SETTINGS, fx.FRAME_02_STATUS, fx.FRAME_03_DEVINFO):
+        assert frame[4] in RESPONSE_TYPES
+        assert _feed([frame])[0] == [frame]
 
 
 def test_corrupt_frame_is_reported_and_stream_resyncs():

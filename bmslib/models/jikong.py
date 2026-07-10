@@ -51,6 +51,12 @@ MIN_RESPONSE_SIZE = 300
 HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
 FRAME_SIZE = MIN_RESPONSE_SIZE  # a JK response frame is exactly 300 B, CRC in the last one
 
+# Response types the BMS actually sends: 0x01 settings, 0x02 status, 0x03 device info.
+# calc_crc is an 8-bit sum, so a HEADER-looking sequence in junk has a ~1/256 chance
+# of its 300-byte window passing the checksum. Accepting such a window would silently
+# swallow the real frame behind it, so also require a known type byte.
+RESPONSE_TYPES = frozenset((0x01, 0x02, 0x03))
+
 
 def feed_frames(buf: bytearray, chunk: bytes) -> Tuple[List[bytes], int, List[bytes]]:
     """Accumulate ``chunk`` into ``buf`` and return
@@ -88,13 +94,15 @@ def feed_frames(buf: bytearray, chunk: bytes) -> Tuple[List[bytes], int, List[by
             break  # header-aligned but incomplete, wait for more packets
 
         frame = bytes(buf[:FRAME_SIZE])
-        if calc_crc(frame[:-1]) == frame[-1]:
+        if calc_crc(frame[:-1]) == frame[-1] and frame[4] in RESPONSE_TYPES:
             del buf[:FRAME_SIZE]
             frames.append(frame)
             continue
 
-        # Header-aligned with a full frame available but bad CRC: the frame is
-        # corrupt, no amount of further data can fix it. Resync on the next header.
+        # Either a bad CRC (a real frame arrived corrupt) or a header-shaped
+        # sequence in junk whose window happened to pass the 8-bit sum. Neither
+        # is fixable by more data, and consuming FRAME_SIZE here would eat the
+        # real frame behind it. Resync on the next header instead.
         corrupt.append(frame)
         nxt = buf.find(HEADER, len(HEADER))
         if nxt < 0:
