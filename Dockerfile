@@ -27,8 +27,11 @@ RUN venv_bleak_pairing/bin/pip3 install 'git+https://github.com/jpeters-ml/bleak
 RUN python3 -m venv venv
 RUN venv/bin/pip3 install -r requirements.txt
 RUN venv/bin/pip3 install influxdb || true
-#RUN venv/bin/pip3 install "aiobmsble==0.11.0" || true
-RUN venv/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' || true
+# aiobmsble declares bleak>=3.0.2, but requirements.txt pins bleak==2.0.0 for
+# #275. A plain install silently upgraded bleak to 3.0.2 (#383), so install it
+# pinned and with --no-deps to keep the pin. aiobmsble imports no bleak-3-only
+# API; its other runtime dep, bleak-retry-connector, is in requirements.txt.
+RUN venv/bin/pip3 install --no-deps 'aiobmsble==0.25.0' || true
 # bumble-bleak: bleak-compatible BLE stack without BlueZ/D-Bus. Installed only in
 # the main `venv` (NOT venv_bleak_pairing, which keeps forked bleak for PSK
 # pairing). Activation is opt-in at runtime: addon_main.sh prepends the shadow
@@ -58,7 +61,7 @@ RUN python3 -m venv venv_esphome \
  && venv_esphome/bin/pip3 install 'bleak>=3.0.2' habluetooth bleak-esphome aioesphomeapi \
     'bluetooth-data-tools<1.29' \
  && venv_esphome/bin/pip3 install influxdb \
- && venv_esphome/bin/pip3 install 'git+https://github.com/patman15/aiobmsble' \
+ && venv_esphome/bin/pip3 install 'aiobmsble==0.25.0' \
  || true
 # bluetooth-data-tools<1.29: 1.29.x ships only an x86_64 wheel (upstream
 # regression as of writing). Pin to 1.28.x to keep prebuilt aarch64/armv7

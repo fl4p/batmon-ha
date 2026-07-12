@@ -1,7 +1,10 @@
 
 bleak==2.0.0 # see Dockerfile
 #      ^ https://github.com/fl4p/batmon-ha/issues/275
-#bleak-retry-connector
+# aiobmsble is installed with --no-deps (see Dockerfile) so it can't drag bleak
+# to 3.x, so pull in its runtime dep here. brc 4.6.1 needs only bleak>=2, so the
+# pin above holds. batmon itself also imports bleak_retry_connector (bt.py). (#383)
+bleak-retry-connector
 
 paho-mqtt==2.1.0
 backoff
