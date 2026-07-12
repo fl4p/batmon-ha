@@ -10,7 +10,7 @@
 * `docker stop` now terminates batmon promptly (entrypoint `exec`s python)
 * Add `.dockerignore` so a local `docker build` no longer bakes `options.json` credentials into the image
 * JK BLE: fix notify framing — resync on the frame header instead of clearing the buffer, which dropped a frame when one packet carried two. Fixes endless `timeout waiting for 2/3` / `crc check failed` after reconnect (#377) and tolerates inter-frame junk (#370)
-* JBD: estimated time remaining (`bms/runtime`) from remaining capacity / smoothed discharge current (#381)
+* All BMS: estimated time remaining (`bms/runtime`) from remaining capacity / smoothed discharge current (#381)
 * Fix: skip BLE discovery and `bt_diagnostics` for serial devices (`address: serial`) (#380)
 * Fix: keep `bleak` at 2.x — `aiobmsble` (dep `bleak>=3.0.2`) silently upgraded it, overriding the `bleak==2.0.0` pin for #275. Install `aiobmsble==0.25.0` with `--no-deps` (#383)
 

@@ -13,12 +13,9 @@ https://github.com/tgalarneau/bms
 
 """
 import asyncio
-import math
-import time
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
-from bmslib.pwmath import EWMA
 
 
 def _jbd_command(command: int):
@@ -30,50 +27,11 @@ class JbdBt(BtBms):
     UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
     TIMEOUT = 16
 
-    # EWMA is sample-indexed, not time-aware: a sample from 5 s ago and one from
-    # 5 h ago carry the same weight. So when the gap since the last sample dwarfs
-    # the usual polling cadence (a BLE outage, or fetch() erroring for a while),
-    # discard the history rather than blending a stale current into the estimate.
-    # The cadence is learned instead of hard-coded, because the sampling period
-    # is user-configurable and a fixed threshold would either never fire or fire
-    # every sample. The floor keeps scheduler jitter at a fast poll (or in tests,
-    # where samples are microseconds apart) from reading as an outage.
-    #
-    # Elapsed time is the *only* trigger. Resetting in connect() instead looks
-    # equivalent but is not: with `keep_alive: false` the sampler reconnects
-    # before every poll, which would reseed the filter each cycle and leave the
-    # estimate equal to the instantaneous current, i.e. no smoothing at all.
-    EWMA_STALE_FACTOR = 4
-    EWMA_STALE_MIN_S = 10
-
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._switches = None
         self._last_response = None
-        self._current_ewma = EWMA(span=6)
-        self._sample_t = math.nan       # time.monotonic() of the last fetch()
-        self._sample_dt = EWMA(span=6)  # observed polling interval, seconds
-
-    def _age_current_ewma(self):
-        """Drop the smoothed current if this sample arrives long after the last one."""
-        # monotonic, not time.time(): a backward wall-clock step (an NTP
-        # correction on a Pi with no RTC) would otherwise feed a negative
-        # interval into the cadence filter and misread the next ordinary poll
-        # as an outage.
-        now = time.monotonic()
-        dt = now - self._sample_t
-        typical_dt = self._sample_dt.value
-        threshold = max(self.EWMA_STALE_MIN_S, self.EWMA_STALE_FACTOR * typical_dt)
-        stale = math.isfinite(dt) and math.isfinite(typical_dt) and dt > threshold
-        if stale:
-            self.logger.debug('%s: %.0fs since last sample (usual %.0fs), '
-                              'resetting current filter', self.name, dt, typical_dt)
-            self._current_ewma.reset()
-            self._sample_dt.reset()  # the stale gap is not a cadence observation
-        elif math.isfinite(dt):
-            self._sample_dt.add(dt)
-        self._sample_t = now
 
     def _notification_handler(self, sender, data):
 
@@ -129,22 +87,9 @@ class JbdBt(BtBms):
         current = -int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100
         charge = int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100
 
-        # JBD 0x03 has no native "time remaining" field; the Xiaoxiang app
-        # derives it from remaining capacity / load. Do the same: seconds to
-        # empty at the present discharge rate. Smooth the discharge current
-        # with a short EWMA so transient load spikes don't make the estimate
-        # jump. Only feed discharge current (batmon sign: current > 0) and
-        # reset on charge/idle so a charge→discharge transition seeds fresh
-        # instead of being contaminated by stale negative values. At very low
-        # discharge rates the 0.01 A ADC resolution makes the estimate noisy.
-        self._age_current_ewma()
-        if current > 0:
-            self._current_ewma.add(current)
-        else:
-            self._current_ewma.reset()
-        smoothed_current = self._current_ewma.value
-        runtime = (charge / smoothed_current * 3600) if smoothed_current > 0 else math.nan
-
+        # `runtime` (estimated seconds-to-empty) is derived centrally by the
+        # sampler from charge / smoothed discharge current, see
+        # BtBms.estimate_runtime().
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
             current=current,
@@ -163,8 +108,6 @@ class JbdBt(BtBms):
             ),
 
             problem_code=problem_code,
-
-            runtime=runtime,
 
             # charge_enabled
             # discharge_enabled

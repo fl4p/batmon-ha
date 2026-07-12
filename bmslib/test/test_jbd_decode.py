@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-import bmslib.models.jbd as jbd_module
+import bmslib.bt as bt_module
 from bmslib.models.jbd import JbdBt
 from bmslib.test._decode_helpers import run_fetch_with_response
 from bmslib.test.data import jbd_fixtures
@@ -41,10 +41,17 @@ def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0):
 
 
 def _fetch(bms, frame):
+    """fetch() then the sampler's runtime derivation, mirroring BmsSampler.
+
+    runtime is no longer computed in fetch(); the sampler calls
+    bms.estimate_runtime(sample) once per poll. Reproduce that here so the
+    per-poll cadence/EWMA state advances exactly as it does in production."""
     async def fake_q(*a, **kw):
         return frame
     bms._q = fake_q
-    return asyncio.run(bms.fetch())
+    sample = asyncio.run(bms.fetch())
+    sample.runtime = bms.estimate_runtime(sample)
+    return sample
 
 
 @pytest.mark.parametrize("fx", jbd_fixtures.ALL, ids=lambda fx: fx["name"])
@@ -66,6 +73,8 @@ def test_jbd_decode(fx):
         assert sample.problem_code == exp["problem_code"]
     if "problem" in exp:
         assert sample.problem == exp["problem"]
+    # runtime is derived by the sampler, not fetch(); replicate that one step.
+    sample.runtime = bms.estimate_runtime(sample)
     if exp.get("runtime") is None:
         assert math.isnan(sample.runtime)
     else:
@@ -123,17 +132,18 @@ class _FakeTime:
 
 @pytest.fixture
 def fake_clock(monkeypatch):
-    """A controllable clock for bmslib.models.jbd, so tests can simulate polling
-    cadence and outages without sleeping.
+    """A controllable clock for the runtime estimator (BtBms.estimate_runtime,
+    in bmslib.bt), so tests can simulate polling cadence and outages without
+    sleeping.
 
-    Replaces the *name* `time` in jbd's namespace. Patching `bmslib.models.jbd.
-    time.monotonic` instead would mutate the stdlib `time` module process-wide
-    (`jbd.time is sys.modules['time']`), and asyncio's event loop reads
+    Replaces the *name* `time` in bt's namespace. Patching `bmslib.bt.time.
+    monotonic` instead would mutate the stdlib `time` module process-wide
+    (`bt.time is sys.modules['time']`), and asyncio's event loop reads
     `time.monotonic()` for every scheduling deadline -- a frozen clock makes
     `asyncio.wait_for` never fire, hanging the suite instead of failing it.
     """
     clock = _FakeTime()
-    monkeypatch.setattr(jbd_module, "time", clock)
+    monkeypatch.setattr(bt_module, "time", clock)
     return clock
 
 
@@ -208,13 +218,13 @@ def test_jbd_second_outage_is_still_detected(fake_clock):
     for _ in range(8):
         poll(60, 10.0)                   # settle: cadence 60 s, current 10 A
     poll(3600, 2.0)                      # outage -> reseed to 2 A
-    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.001)
+    assert bms._runtime_current_ewma.value == pytest.approx(2.0, rel=0.001)
 
     poll(60, 2.0)                        # one normal poll relearns cadence = 60 s
-    assert bms._sample_dt.value == pytest.approx(60.0, rel=0.001)
+    assert bms._runtime_sample_dt.value == pytest.approx(60.0, rel=0.001)
 
     s = poll(1200, 5.0)                  # second outage -> reseed to 5 A, not blended
-    assert bms._current_ewma.value == pytest.approx(5.0, rel=0.001)
+    assert bms._runtime_current_ewma.value == pytest.approx(5.0, rel=0.001)
     assert s.runtime == pytest.approx(50.0 / 5.0 * 3600, rel=0.001)
 
 
@@ -272,7 +282,9 @@ def _poll(bms, frame):
         async with bms:
             return await bms.fetch()
 
-    return asyncio.run(run())
+    sample = asyncio.run(run())
+    sample.runtime = bms.estimate_runtime(sample)
+    return sample
 
 
 def test_jbd_keep_alive_false_reconnects_every_poll_but_keeps_the_filter(fake_clock, fake_ble):
@@ -292,13 +304,13 @@ def test_jbd_keep_alive_false_reconnects_every_poll_but_keeps_the_filter(fake_cl
 
     assert len(fake_ble.connects) == 6, "keep_alive=False must reconnect every poll"
     assert bms.client.is_connected is False, "__aexit__ must disconnect after each poll"
-    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.01)
+    assert bms._runtime_current_ewma.value == pytest.approx(2.0, rel=0.01)
 
     fake_clock.advance(60)
     s = _poll(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
 
     blended = (1 - 2 / 7) * 2.0 + (2 / 7) * 10.0
-    assert bms._current_ewma.value == pytest.approx(blended, rel=0.01), \
+    assert bms._runtime_current_ewma.value == pytest.approx(blended, rel=0.01), \
         "connect() reseeded the filter; smoothing is dead under keep_alive=false"
     assert s.runtime == pytest.approx(100.0 / blended * 3600, rel=0.01)
 
@@ -313,7 +325,7 @@ def test_jbd_keep_alive_true_connects_once_and_smooths(fake_clock, fake_ble):
 
     assert len(fake_ble.connects) == 1, "keep_alive=True must hold the connection"
     assert bms.client.is_connected is True
-    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.01)
+    assert bms._runtime_current_ewma.value == pytest.approx(2.0, rel=0.01)
 
 
 def test_jbd_real_ble_drop_reconnects_and_resets_the_filter(fake_clock, fake_ble):
@@ -330,14 +342,14 @@ def test_jbd_real_ble_drop_reconnects_and_resets_the_filter(fake_clock, fake_ble
     for _ in range(8):
         fake_clock.advance(60)
         _poll(bms, _jbd_frame(jbd_current=-10.0, charge_ah=50.0))
-    assert bms._current_ewma.value == pytest.approx(10.0, rel=0.001)
+    assert bms._runtime_current_ewma.value == pytest.approx(10.0, rel=0.001)
 
     bms.client.is_connected = False      # BLE drops; an hour passes
     fake_clock.advance(3600)
     s = _poll(bms, _jbd_frame(jbd_current=-2.0, charge_ah=50.0))
 
     assert len(fake_ble.connects) == 2, "__aenter__ must reconnect after a drop"
-    assert bms._current_ewma.value == pytest.approx(2.0, rel=0.001), \
+    assert bms._runtime_current_ewma.value == pytest.approx(2.0, rel=0.001), \
         "stale pre-outage current survived the reconnect"
     assert s.runtime == pytest.approx(50.0 / 2.0 * 3600, rel=0.001)
 
@@ -366,7 +378,7 @@ def test_aenter_keep_alive_check_is_independent_of_aexit(fake_ble):
 
 def test_jbd_backward_wall_clock_step_does_not_disturb_the_filter(fake_clock):
     """An NTP correction stepping time.time() backward (a Pi with no RTC) must not
-    poison the learned cadence. _age_current_ewma reads a monotonic clock.
+    poison the learned cadence. estimate_runtime reads a monotonic clock.
 
     If it read the wall clock, the step would make dt negative (-200 + 60 = -140s),
     dragging typical_dt from 60s to 2.9s. The spurious reset then lands on the
@@ -377,21 +389,21 @@ def test_jbd_backward_wall_clock_step_does_not_disturb_the_filter(fake_clock):
     for _ in range(8):
         fake_clock.advance(60)   # advances wall and monotonic together
         _fetch(bms, _jbd_frame(jbd_current=-10.0, charge_ah=100.0))
-    assert bms._sample_dt.value == pytest.approx(60.0, rel=0.001)
+    assert bms._runtime_sample_dt.value == pytest.approx(60.0, rel=0.001)
 
     fake_clock.wall -= 200       # NTP steps the wall clock back; monotonic cannot
     fake_clock.advance(60)       # 60 s of real time passes before the next poll
     _fetch(bms, _jbd_frame(jbd_current=-14.0, charge_ah=100.0))
 
-    assert bms._sample_dt.value == pytest.approx(60.0, rel=0.01), \
+    assert bms._runtime_sample_dt.value == pytest.approx(60.0, rel=0.01), \
         "a negative interval reached the cadence filter; it is not reading monotonic"
     blend1 = (1 - 2 / 7) * 10.0 + (2 / 7) * 14.0
-    assert bms._current_ewma.value == pytest.approx(blend1, rel=0.001)
+    assert bms._runtime_current_ewma.value == pytest.approx(blend1, rel=0.001)
 
     fake_clock.advance(60)       # the poll where a collapsed threshold would bite
     s = _fetch(bms, _jbd_frame(jbd_current=-14.0, charge_ah=100.0))
 
     blend2 = (1 - 2 / 7) * blend1 + (2 / 7) * 14.0
-    assert bms._current_ewma.value == pytest.approx(blend2, rel=0.001), \
+    assert bms._runtime_current_ewma.value == pytest.approx(blend2, rel=0.001), \
         "backward clock step spuriously reset the filter one poll later"
     assert s.runtime == pytest.approx(100.0 / blend2 * 3600, rel=0.01)

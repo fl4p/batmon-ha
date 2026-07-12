@@ -1,6 +1,7 @@
 import asyncio
 import fcntl
 import logging
+import math
 import os
 import re
 import socket
@@ -18,6 +19,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
+from .pwmath import EWMA
 from .util import get_logger
 from .wired import SerialServiceStub, SerialCharStub
 
@@ -347,6 +349,11 @@ class BtBms:
         self._connect_time = 0
         self._pending_disconnect_call = False
 
+        # runtime (seconds-to-empty) estimation state, see estimate_runtime()
+        self._runtime_current_ewma = EWMA(span=6)
+        self._runtime_sample_t = math.nan       # time.monotonic() of the last estimate
+        self._runtime_sample_dt = EWMA(span=6)  # observed polling interval, seconds
+
         if not _uses_pin and psk:
             self.logger.warning('%s usually does not use a pairing PIN', type(self).__name__)
 
@@ -619,6 +626,60 @@ class BtBms:
         :return:
         """
         raise NotImplementedError()
+
+    # Runtime estimate: seconds-to-empty from remaining charge / discharge current.
+    # Most BMS have no native "time remaining" field (the vendor apps derive it),
+    # so the sampler derives it here for every BMS from the two fields it needs,
+    # `charge` (remaining Ah) and `current`.
+    #
+    # The discharge current is smoothed with a short EWMA so a transient load
+    # spike doesn't make the estimate jump. EWMA is sample-indexed, not time-
+    # aware: a sample from 5 s ago and one from 5 h ago carry the same weight. So
+    # when the gap since the last sample dwarfs the usual polling cadence (a BLE
+    # outage, or fetch() erroring for a while), the history is discarded rather
+    # than blending a stale current into the estimate. The cadence is learned
+    # instead of hard-coded, because the sampling period is user-configurable and
+    # a fixed threshold would either never fire or fire every sample. The floor
+    # keeps scheduler jitter at a fast poll (or in tests, where samples are
+    # microseconds apart) from reading as an outage.
+    RUNTIME_EWMA_STALE_FACTOR = 4
+    RUNTIME_EWMA_STALE_MIN_S = 10
+
+    def estimate_runtime(self, sample: BmsSample) -> float:
+        """Estimated seconds-to-empty for ``sample``, or nan when not discharging
+        or when the pack reports no remaining charge. Advances the per-device
+        smoothing/cadence filters, so call it once per poll, in order."""
+        # monotonic, not time.time(): a backward wall-clock step (an NTP
+        # correction on a Pi with no RTC) would otherwise feed a negative
+        # interval into the cadence filter and misread the next ordinary poll
+        # as an outage.
+        now = time.monotonic()
+        dt = now - self._runtime_sample_t
+        typical_dt = self._runtime_sample_dt.value
+        threshold = max(self.RUNTIME_EWMA_STALE_MIN_S, self.RUNTIME_EWMA_STALE_FACTOR * typical_dt)
+        stale = math.isfinite(dt) and math.isfinite(typical_dt) and dt > threshold
+        if stale:
+            self.logger.debug('%s: %.0fs since last sample (usual %.0fs), '
+                              'resetting current filter', self.name, dt, typical_dt)
+            self._runtime_current_ewma.reset()
+            self._runtime_sample_dt.reset()  # the stale gap is not a cadence observation
+        elif math.isfinite(dt):
+            self._runtime_sample_dt.add(dt)
+        self._runtime_sample_t = now
+
+        charge = sample.charge
+        if not math.isfinite(charge):
+            return math.nan
+        # Only feed discharge current (batmon sign: current > 0) and reset on
+        # charge/idle so a charge→discharge transition seeds fresh instead of
+        # being contaminated by stale values. At very low discharge rates the
+        # BMS ADC resolution makes the estimate noisy.
+        if sample.current > 0:
+            self._runtime_current_ewma.add(sample.current)
+        else:
+            self._runtime_current_ewma.reset()
+        smoothed_current = self._runtime_current_ewma.value
+        return (charge / smoothed_current * 3600) if smoothed_current > 0 else math.nan
 
     async def fetch_voltages(self) -> List[int]:
         """

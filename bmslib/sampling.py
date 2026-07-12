@@ -301,6 +301,16 @@ class BmsSampler:
             if self.invert_current:
                 sample = sample.invert_current()
 
+            # Estimated seconds-to-empty, derived here for every BMS from
+            # remaining charge / smoothed discharge current (batmon sign:
+            # current > 0). Computed after calibration/invert so it uses the
+            # canonical current sign. A BMS that reports its own runtime (e.g.
+            # via aiobmsble) keeps it. VirtualGroupBms is duck-typed and not yet
+            # a BtBms subclass, so it has no estimator (keeps runtime=nan, as
+            # before); it'll get one for free once it inherits BtBms.
+            if math.isnan(sample.runtime) and hasattr(bms, 'estimate_runtime'):
+                sample.runtime = bms.estimate_runtime(sample)
+
             self.current_integrator += (t_hour, sample.current)  # Ah
             self.power_integrator += (t_hour, sample.power * 1e-3)  # kWh
 
