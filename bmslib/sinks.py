@@ -208,11 +208,15 @@ class InfluxDBSink(BmsSampleSink):
                 elif self.cb.enabled:
                     self._drain_queue()  # never succeeded: drop, stay flat
 
+    def _maybe_flush(self):
+        """One circuit-breaker-gated flush attempt (the periodic loop's body)."""
+        if self.cb.should_attempt():
+            self.flush()
+
     def _flush_loop(self):
         while not self._stop_event.wait(self.flush_interval):
             try:
-                if self.cb.should_attempt():
-                    self.flush()
+                self._maybe_flush()
             except Exception as e:
                 if not self.silent:
                     logger.error('flush loop error: %s', e)

@@ -31,8 +31,7 @@ def test_failure_before_success_drops_and_blocks():
     # new points are dropped while in backoff
     sink._enqueue({"measurement": "m", "fields": {"v": 2.0}, "tags": {}})
     assert sink.Q.empty()
-    # _maybe_flush makes no attempt while blocked
-    sink.time_last_flush = 0
+    # _maybe_flush makes no attempt while the breaker is open
     sink._maybe_flush()
     assert calls["n"] == 1
 
@@ -69,7 +68,6 @@ def test_disabled_breaker_preserves_drop_on_failure():
     sink.flush()                      # fails
     assert sink.Q.empty()             # dropped, no buffering
     # not blocked: another attempt happens
-    sink.time_last_flush = 0
     sink._enqueue({"measurement": "m", "fields": {"v": 2.0}, "tags": {}})
     sink._maybe_flush()
     assert calls["n"] == 2

@@ -8,6 +8,8 @@ References
 
 """
 
+import asyncio
+
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms, enumerate_services
 
@@ -235,7 +237,9 @@ class Daly2Bt(BtBms):
             self.logger.info("daly2 %s mosfet write echoed: %s", switch, echo.hex())
             if self._switches is not None:
                 self._switches[switch] = state
-        except TimeoutError:
+        except asyncio.TimeoutError:
+            # asyncio.TimeoutError, not the builtin: _q()/FuturesPool.wait_for
+            # raises the asyncio one, which is a distinct class before Python 3.11.
             self.logger.warning(
                 "daly2 %s mosfet write to reg 0x%04x got no echo - register may be "
                 "wrong for this firmware or the command was rejected", switch, reg)
