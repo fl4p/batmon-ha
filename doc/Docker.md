@@ -9,7 +9,7 @@ Prebuilt multi-arch images (`linux/amd64`, `linux/arm64`, `linux/arm/v7`):
 
 ```
 ghcr.io/fl4p/batmon-ha:latest     # tracks master
-ghcr.io/fl4p/batmon-ha:2.04       # pinned release
+ghcr.io/fl4p/batmon-ha:2.05       # pinned release
 ```
 
 To build it yourself, pass an Alpine base instead of the Home Assistant one:

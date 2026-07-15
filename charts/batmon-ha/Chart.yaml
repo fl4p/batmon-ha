@@ -18,5 +18,5 @@ keywords:
 # appVersion: batmon version, MUST track config.yaml `version:` — values.yaml
 #             defaults image.tag to it, so a forgotten bump here does not just
 #             mislabel the release, it pins `helm install` to the older image.
-version: 0.1.0
-appVersion: "2.04"
+version: 0.1.1
+appVersion: "2.05"
