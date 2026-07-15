@@ -55,6 +55,26 @@ class BLEDeviceResolver:
 class BMS():
 
     def __init__(self, address, type, blebms_class=None, keep_alive=False, adapter=None, name=None, **kwargs):
+        # aiobmsble constructs its own bleak client internally via `import bleak`,
+        # so it always uses the process-global stack and cannot honour a
+        # per-device ble_stack that *differs* from it. Compare against the stack
+        # actually running (the shadow swaps `import bleak`), not the literal
+        # 'bleak' — otherwise annotating an aiobmsble device with the same stack
+        # as a non-bleak global (e.g. `bumble` under a global `bumble` shadow, a
+        # no-op) would be wrongly rejected. Reject only a genuine override, loudly
+        # (see docs/per-device-ble-stack.md, "Out of scope").
+        ble_stack = kwargs.get('ble_stack')
+        if ble_stack:
+            import bleak
+            mod = bleak.BleakClient.__module__
+            eff_stack = ('bumble' if mod.startswith('bumble_bleak')
+                         else 'bluek' if mod.startswith('bluek') else 'bleak')
+            if ble_stack != eff_stack:
+                raise NotImplementedError(
+                    "device type %r uses aiobmsble, which cannot honour a "
+                    "per-device ble_stack (%r) different from the process stack "
+                    "(%r); set ble_stack globally instead" % (type, ble_stack, eff_stack))
+
         self.address = address
         self.adapter = adapter
         self.name = name

@@ -228,9 +228,33 @@ async def main():
     names = set()
     dev_args: Dict[str, dict] = {}
 
+    # Per-device ble_stack (Approach A, docs/per-device-ble-stack.md): fail fast
+    # on a stack *configuration* error (bad value, or an override under a non-
+    # bleak global) with a clear message instead of a raw traceback.
+    from bmslib.models import check_ble_stack_config
+    try:
+        check_ble_stack_config(user_config)
+    except ValueError as e:
+        raise SystemExit(str(e))
+
+    # bumble claims its adapter exclusively (HCI User Channel); a global BT power
+    # cycle via bluetoothctl fights that claim. Warn — bumble devices should be
+    # on their own adapter and typically don't want the power cycle.
+    if user_config.get('bt_power_cycle') and any(
+            dev.get('ble_stack') == 'bumble' for dev in user_config.get('devices', [])):
+        logger.warning("bt_power_cycle is on and a device uses ble_stack: bumble; "
+                       "power-cycling may conflict with bumble's exclusive adapter claim")
+
     for dev in user_config.get('devices', []):
 
-        bms = construct_bms(dev, verbose_log, ble_devices)
+        # A per-device stack that can't be honoured at runtime (selected package
+        # not installed -> RuntimeError; an aiobmsble model given an override ->
+        # NotImplementedError) must fail fast with a clear message, not a raw
+        # traceback that would take down every configured BMS.
+        try:
+            bms = construct_bms(dev, verbose_log, ble_devices)
+        except (RuntimeError, NotImplementedError) as e:
+            raise SystemExit(str(e))
 
         if bms is None:
             logger.info("Skip %s", dev.get('address') or str(dev))
