@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [2.05]
+
+* Per-device `ble_stack`: override the global stack per device (e.g. a JK on `bluek`, Dalys on `bleak`) for mixed setups (#385). Only when the global stack is `bleak`; `esphome`/aiobmsble stay global-only.
+* bluek → `bd9070d`: answer a peripheral that server-initiates the ATT MTU exchange (JK failed with `unexpected ATT opcode 0x02`) (#385)
+* bluek `bleak_retry_connector` shim: add missing symbols so aiobmsble BMS (Daly `daly_ble`) load on bluek instead of "Unknown device type" (#385)
+
+
 ## [2.04]
 
 * Standalone Docker: prebuilt multi-arch images at `ghcr.io/fl4p/batmon-ha` + a Helm chart in `charts/batmon-ha`. See [doc/Docker.md](doc/Docker.md) (#120)
