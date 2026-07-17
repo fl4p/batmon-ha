@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.06]
+
+* Fix: aiobmsble-backed BMS (e.g. `*_ble`/`*_aiobmsble` types) could wedge on `org.bluez.Error.NotPermitted: Notify acquired` after a dropped keep-alive link, failing every reconnect until the add-on was restarted. The wrapper now disconnects the previous aiobmsble instance (`disconnect(reset=True)`) before opening a new connection, releasing the stale notify (#384)
+
+
 ## [2.05]
 
 * Per-device `ble_stack`: override the global stack per device (e.g. a JK on `bluek`, Dalys on `bleak`) for mixed setups (#385). Only when the global stack is `bleak`; `esphome`/aiobmsble stay global-only.

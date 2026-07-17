@@ -131,6 +131,35 @@ class BMS():
             raise BleakDeviceNotFoundError(
                 "device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
 
+        # A previous BaseBMS instance — left over from a dropped keep-alive link
+        # or an earlier failed connect — may still hold an acquired notify FD on
+        # the RX characteristic. aiobmsble builds a *fresh* BleakClient on every
+        # _connect() (basebms.py: `self._client = await establish_connection(...)`)
+        # and its _init_connection() calls start_notify() with no preceding
+        # stop_notify. If we orphan the old client without disconnecting it, BlueZ
+        # still sees the notify as acquired and rejects the new start_notify with
+        # `org.bluez.Error.NotPermitted: Notify acquired` — and then *every*
+        # reconnect fails the same way until the add-on is restarted (#384).
+        # The native BtBms path avoids this by reusing one client and stop_notify-
+        # ing orphans before start_notify (see bt.py start_notify); the aiobmsble
+        # path has neither, so tear the old instance down explicitly first.
+        # disconnect(reset=True) closes the old client (releasing its notify FD)
+        # and runs close_stale_connections to drop any lingering BlueZ link.
+        # connect() runs under the process-wide ConnectLock (shared by every
+        # device), so this cleanup must never block indefinitely: disconnect() ->
+        # close_stale_connections() is a D-Bus round trip with no timeout of its
+        # own, and a wedged BlueZ would otherwise freeze reconnection for *all*
+        # devices, not just this one. Bound it and move on — a failed release is
+        # logged (not swallowed) and the fresh _connect() below will surface any
+        # notify still stuck.
+        if self.ble_bms is not None:
+            try:
+                await asyncio.wait_for(self.ble_bms.disconnect(reset=True), timeout=10)
+            except Exception as e:
+                logger.warning('%s: cleanup of previous ble_bms failed: %s',
+                               self.name, str(e) or type(e).__name__)
+            self.ble_bms = None
+
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: BaseBMS = self._blebms_class(
             ble_device=ble_device,
