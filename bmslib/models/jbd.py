@@ -22,6 +22,48 @@ def _jbd_command(command: int):
     return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
 
 
+def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
+    """Validate a complete JBD response and return its payload.
+
+    Cell values are intentionally not range-checked here. A structurally valid
+    frame reporting 0 mV may represent a real, safety-critical cell fault and
+    must reach the caller unchanged.
+    """
+    if len(frame) < 7:
+        raise ValueError("JBD response is shorter than the minimum frame size")
+    if frame[0] != 0xDD:
+        raise ValueError("JBD response has an invalid header")
+
+    command = frame[1]
+    if expected_command is not None and command != expected_command:
+        raise ValueError(
+            f"JBD response command mismatch: expected 0x{expected_command:02x}, "
+            f"got 0x{command:02x}"
+        )
+
+    payload_length = frame[3]
+    expected_length = payload_length + 7  # header(4) + checksum(2) + terminator(1)
+    if len(frame) != expected_length:
+        raise ValueError(
+            f"JBD response length mismatch: expected {expected_length} bytes, "
+            f"got {len(frame)}"
+        )
+    if frame[-1] != 0x77:
+        raise ValueError("JBD response has an invalid terminator")
+    if frame[2] != 0:
+        raise ValueError(f"JBD command 0x{command:02x} failed with status 0x{frame[2]:02x}")
+
+    received_checksum = int.from_bytes(frame[-3:-1], "big")
+    calculated_checksum = (0x10000 - sum(frame[2:-3])) & 0xFFFF
+    if received_checksum != calculated_checksum:
+        raise ValueError(
+            f"JBD response checksum mismatch: expected 0x{calculated_checksum:04x}, "
+            f"got 0x{received_checksum:04x}"
+        )
+
+    return frame[4:-3]
+
+
 class JbdBt(BtBms):
     UUID_RX = '0000ff01-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
@@ -34,18 +76,36 @@ class JbdBt(BtBms):
         self._last_response = None
 
     def _notification_handler(self, sender, data):
-
-        # print("bms msg {0}: {1}".format(sender, data))
         self._buffer += data
 
-        if self._buffer.endswith(b'w'):
-            command = self._buffer[1]
-            buf = self._buffer[:]
-            self._buffer.clear()
+        while self._buffer:
+            # Discard noise before the next JBD header, but retain a partial frame.
+            header = self._buffer.find(0xDD)
+            if header < 0:
+                self.logger.warning("discarding %d bytes without a JBD header", len(self._buffer))
+                self._buffer.clear()
+                return
+            if header:
+                self.logger.warning("discarding %d bytes before JBD header", header)
+                del self._buffer[:header]
+            if len(self._buffer) < 4:
+                return
 
-            # print(command, 'buffer endswith w', self._buffer)
-            self._last_response = buf
-            self._fetch_futures.set_result(command, buf)
+            frame_length = self._buffer[3] + 7
+            if len(self._buffer) < frame_length:
+                return
+
+            frame = bytes(self._buffer[:frame_length])
+            del self._buffer[:frame_length]
+            try:
+                _validate_jbd_response(frame)
+            except ValueError as exc:
+                self.logger.warning("discarding invalid JBD response: %s", exc)
+                continue
+
+            command = frame[1]
+            self._last_response = frame
+            self._fetch_futures.set_result(command, frame)
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
@@ -70,8 +130,8 @@ class JbdBt(BtBms):
         # binary reading
         #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
 
-        buf = await self._q(cmd=0x03)
-        buf = buf[4:]
+        frame = await self._q(cmd=0x03)
+        buf = _validate_jbd_response(frame, expected_command=0x03)
 
         num_cell = int.from_bytes(buf[21:22], 'big')
         num_temp = int.from_bytes(buf[22:23], 'big')
@@ -126,10 +186,11 @@ class JbdBt(BtBms):
         return sample
 
     async def fetch_voltages(self):
-        buf = await self._q(cmd=0x04)
-        num_cell = int(buf[3] / 2)
-        voltages = [(int.from_bytes(buf[4 + i * 2:i * 2 + 6], 'big')) for i in range(num_cell)]
-        return voltages
+        frame = await self._q(cmd=0x04)
+        payload = _validate_jbd_response(frame, expected_command=0x04)
+        if len(payload) % 2:
+            raise ValueError(f"JBD cell-voltage payload has odd length {len(payload)}")
+        return [int.from_bytes(payload[i:i + 2], 'big') for i in range(0, len(payload), 2)]
 
     async def set_switch(self, switch: str, state: bool):
 

@@ -40,6 +40,58 @@ def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0):
     return frame
 
 
+def _jbd_voltage_frame(voltages):
+    payload = b''.join(voltage.to_bytes(2, 'big') for voltage in voltages)
+    frame = bytes([0xDD, 0x04, 0x00, len(payload)]) + payload
+    checksum = (0x10000 - sum(frame[2:])) & 0xFFFF
+    return frame + checksum.to_bytes(2, 'big') + bytes([0x77])
+
+
+def _fetch_voltages(bms, frame):
+    async def fake_q(*a, **kw):
+        return frame
+    bms._q = fake_q
+    return asyncio.run(bms.fetch_voltages())
+
+
+def test_jbd_voltage_decode_preserves_valid_zero_cell_reading():
+    """A real zero in an intact, checksum-valid frame must never be hidden."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    assert _fetch_voltages(bms, _jbd_voltage_frame([3301, 0, 3299])) == [3301, 0, 3299]
+
+
+def test_jbd_voltage_decode_rejects_truncated_frame_instead_of_fabricating_zeros():
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    complete = _jbd_voltage_frame([3300 + i for i in range(13)])
+    # Retain the declared 26-byte payload length but simulate receipt ending
+    # after cell 8. The old decoder returned five fabricated zero values.
+    truncated = complete[:4 + 8 * 2] + bytes([0x77])
+
+    with pytest.raises(ValueError, match="length mismatch"):
+        _fetch_voltages(bms, truncated)
+
+
+def test_jbd_voltage_decode_rejects_bad_checksum():
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    frame = bytearray(_jbd_voltage_frame([3300, 3301]))
+    frame[4] ^= 0x01
+
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        _fetch_voltages(bms, bytes(frame))
+
+
+def test_jbd_notification_waits_for_declared_frame_length_even_if_fragment_ends_in_77():
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    frame = _jbd_voltage_frame([3300 + i for i in range(13)])
+    fragment = frame[:4 + 8 * 2]
+    fragment = fragment[:-1] + bytes([0x77])  # terminator-like payload byte
+
+    bms._notification_handler(None, fragment)
+
+    assert bytes(bms._buffer) == fragment
+    assert bms._last_response is None
+
+
 def _fetch(bms, frame):
     """fetch() then the sampler's runtime derivation, mirroring BmsSampler.
 
