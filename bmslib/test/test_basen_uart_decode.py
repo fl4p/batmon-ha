@@ -68,6 +68,21 @@ def test_decode_info_real_frame():
     assert info['soh'] == pytest.approx(100.0)          # 0x2710
 
 
+def test_decode_info_requires_status_block():
+    # A valid INFO frame always carries the 0x06 status block. Dropping it must
+    # NOT decode to "no problem, MOSFETs on" — it must raise.
+    data = bytearray(parse_frame(INFO_FRAME)['data'])
+    assert data[60] == 0x06                 # the status block type byte
+    data[60] = 0x00                         # unhandled type, same size -> alignment ok
+    # fix the frame checksum so parse_frame accepts it and decode_info is reached
+    frame = bytearray(INFO_FRAME)
+    frame[4 + 60] = 0x00
+    from bmslib.models.basen_uart import _checksum
+    frame[-2] = _checksum(frame[:-2])
+    with pytest.raises(ValueError, match="missing status block"):
+        decode_info(parse_frame(bytes(frame))['data'])
+
+
 def test_status_bitmask_all_clear():
     info = decode_info(parse_frame(INFO_FRAME)['data'])
     st = decode_status_bitmask(info['status_bitmask'])
@@ -126,8 +141,20 @@ def test_current_direction_from_status_bits():
 
     charging = asyncio.run(run(0x01))    # Charging bit
     discharging = asyncio.run(run(0x02))  # Discharging bit
+    idle = asyncio.run(run(0x00))         # neither bit -> ambiguous branch
     assert charging.current == pytest.approx(-30.0)    # charge -> negative
     assert discharging.current == pytest.approx(30.0)  # discharge -> positive
+    # GHswitt raw is +charging (+30); with no direction bit set batmon still
+    # negates it, so a small residual charging current reads negative, not +30.
+    assert idle.current == pytest.approx(-30.0)
+
+
+def test_bmssample_survives_known_soc_unknown_charge():
+    # basen_uart passes charge=capacity_ah (may be nan) with a finite soc; the
+    # shared BmsSample must not crash on round(nan) deriving capacity.
+    from bmslib.bms import BmsSample
+    s = BmsSample(voltage=52.0, current=0.0, charge=float('nan'), soc=95.0)
+    assert s.soc == 95.0
 
 
 if __name__ == "__main__":

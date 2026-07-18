@@ -58,6 +58,12 @@ class SerialTransport(Transport):
 
     def read(self) -> Optional[bytes]:
         if self.ser.is_open and self.ser.readable():
+            # eol=None: raw mode for length-framed binary protocols (e.g. basen),
+            # where the terminator byte (0x0D) also occurs inside the payload, so
+            # read_until would fragment a single frame into many pieces. Return
+            # whatever is buffered now, falling back to a 1-byte timed read.
+            if self.eol is None:
+                return self.ser.read(self.ser.in_waiting or 1)
             # read_until(b'\n') is equivalent to readline(); a different `eol`
             # (e.g. b'\r' for paceic) splits frames on that byte instead.
             return self.ser.read_until(self.eol)

@@ -72,7 +72,9 @@ class BmsSample:
         # infer soc from capacity if soc is nan or type(soc)==int (for higher precision)
         if capacity > 0 and (math.isnan(soc) or (isinstance(soc, int) and charge > 0)):
             soc = round(charge / capacity * 100, 2)
-        elif math.isnan(capacity) and soc > .2:
+        elif math.isnan(capacity) and soc > .2 and not math.isnan(charge):
+            # guard `charge`: round(nan) is int(nan) which raises ValueError, so a
+            # sample with a known soc but unknown charge must skip this derivation.
             capacity = round(charge / soc * 100)
 
         # assert math.isfinite(soc)

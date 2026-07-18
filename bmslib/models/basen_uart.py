@@ -189,6 +189,7 @@ def decode_info(data: bytes) -> dict:
         cycles=float('nan'), voltage=float('nan'), soh=float('nan'),
         status_bitmask=b'',
     )
+    status_seen = False
 
     # type/count/value blocks
     while pos < len(data):
@@ -222,6 +223,7 @@ def decode_info(data: bytes) -> dict:
             out['temps_c'] = normals
         elif btype == 0x06:    # status bitmask
             out['status_bitmask'] = bytes(data[pos + 2:pos + 2 + count * size])
+            status_seen = True
         elif btype == 0x07:    # cycles
             out['cycles'] = v
         elif btype == 0x08:    # total voltage (V)
@@ -232,6 +234,13 @@ def decode_info(data: bytes) -> dict:
 
     if sum(cell_mv) == 0:
         raise ValueError("basen INFO: all cell voltages zero, invalid frame")
+    # The status bitmask (0x06) carries the alarm/fault state, current direction
+    # and MOSFET state. If it's absent we must NOT silently report "no problem,
+    # MOSFETs on" — that's absence of evidence encoding absence of the problem.
+    # A valid Basen INFO frame always includes it, so treat its absence as a
+    # malformed frame and refuse to produce a reading.
+    if not status_seen:
+        raise ValueError("basen INFO: missing status block (0x06)")
     return out
 
 
@@ -239,7 +248,10 @@ class BasenUart(BtBms):
     """Basen BMS over an RS232 / RS485 (USB-UART) adapter."""
 
     BAUDRATE = 9600  # 9600 8N1 per GHswitt
-    SERIAL_KWARGS = dict(eol=bytes([EOI]), timeout=2)
+    # eol=None -> raw binary read. Basen frames are length-prefixed and the EOI
+    # byte (0x0D) recurs inside the payload (it's the high byte of ~3.3xx V cell
+    # voltages), so a read_until(0x0D) would shred one frame into many fragments.
+    SERIAL_KWARGS = dict(eol=None, timeout=1)
 
     ADR = 0x01
     TIMEOUT = 16
@@ -304,16 +316,18 @@ class BasenUart(BtBms):
         info = decode_info((await self._read(CMD_INFO))['data'])
         st = decode_status_bitmask(info['status_bitmask'])
 
-        # batmon convention: current > 0 == discharge. Magnitude from the analog
-        # field, direction from the status bits (authoritative). When neither
-        # bit is set (idle) the near-zero magnitude keeps its raw sign.
+        # batmon convention: current > 0 == discharge; GHswitt's raw value is
+        # +charging, so the raw value is negated. When a direction bit is set it
+        # is authoritative for the sign; otherwise (idle / small residual
+        # current) we still negate the raw value rather than pass it through with
+        # the wrong sign.
         mag = abs(info['current_a'])
         if st['discharging'] and not st['charging']:
             current = mag
         elif st['charging'] and not st['discharging']:
             current = -mag
         else:
-            current = info['current_a']
+            current = -info['current_a']
 
         # Ambient probe appended so it isn't lost (batmon has no ambient field).
         temps = list(info['temps_c'])
@@ -334,7 +348,7 @@ class BasenUart(BtBms):
             mos_temperature=info['mos_temp'],
             balance_current=float('nan'),
             switches=dict(charge=st['charge_mosfet'], discharge=st['discharge_mosfet']),
-            battery_charging=st['charging'] or None,
+            battery_charging=st['charging'],
             problem=st['problem'],
             problem_code=st['problem_code'],
         )
