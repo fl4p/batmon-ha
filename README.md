@@ -103,7 +103,7 @@ find a list of visible Bluetooth devices in the add-on log. Alternatively you ca
 displayed in the discovery list.
 
 `type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jbd`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `supervolt`, `sok`, `basen`, `litime`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`pace_uart`, `supervolt`, `sok`, `basen`, `basen_uart`, `litime`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
@@ -167,6 +167,15 @@ Currently supported:
   PDF; decoders are unit-tested against real captured frames but not yet
   confirmed on live hardware — feedback welcome.
 
+* `basen_uart` — Basen BMS over RS232 / RS485 (**9600 8N1**), the binary
+  `7E … 0D` protocol used on the pack's serial port. This is a different
+  protocol from the Basen BLE app (`basen`). Reads voltage, current,
+  per-cell voltages (with balancing flags), temperatures, SoC, SoH,
+  cycles and a classified alarm/fault bitmask. Ported from
+  `GHswitt/esphome-basen`; decoders are unit-tested against the real
+  example frame in that project's README but not yet confirmed on live
+  hardware — feedback welcome.
+
 Example config:
 
 ```yaml
@@ -181,9 +190,9 @@ Notes:
 * `address: serial` tells batmon to use the wired transport instead of
   Bluetooth. `adapter` is then the serial port path (`/dev/ttyUSB0`,
   `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
-* The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`
-  and `pace_uart` use 9600 8N1 (all match the respective vendor protocol
-  docs).
+* The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`,
+  `pace_uart` and `basen_uart` use 9600 8N1 (all match the respective
+  vendor protocol docs).
 * As an HA add-on this works out of the box: the add-on manifest sets
   `uart: true`, which maps the host's serial devices (`/dev/ttyUSB*`,
   `/dev/ttyACM*`, `/dev/ttyAMA*` and their `/dev/serial/by-id/*` symlinks)

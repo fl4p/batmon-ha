@@ -42,6 +42,7 @@ def get_bms_model_class(name):
         sok='models.sok.SokBt',
         litime='models.litime.LitimeBt',
         basen='models.basen.BasenBt',  # Basen BLE (0xFA00/01/02), ported from syssi/esphome-basen-bms
+        basen_uart='models.basen_uart.BasenUart',  # Basen RS232/RS485 (paceic-unrelated), ported from GHswitt/esphome-basen
         noname_modbus='models.noname_modbus.NoNameModbusBt',  # generic Modbus-RTU-over-NUS
         dummy='models.dummy.DummyBt',
         snoop='models.snoop.SnoopBt',  # GATT dumper for reverse-engineering new BMS
