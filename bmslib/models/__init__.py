@@ -33,6 +33,7 @@ def get_bms_model_class(name):
         jk_32s='models.jikong.JKBt_32s',
         jk_uart='models.jikong_uart.JKUart',  # RS485/UART TLV protocol; use with address=serial
         daly_uart='models.daly_uart.DalyUart',  # RS485/USB-UART; same A5/04 frames as BLE
+        pace_uart='models.pace.PaceUart',  # PACE "paceic" RS232/RS485 ASCII protocol (#276)
         ant='models.ant.AntBt',
         victron='models.victron.SmartShuntBt',
         group_parallel='bmslib.group.VirtualGroupBms',

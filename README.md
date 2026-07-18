@@ -102,7 +102,7 @@ find a list of visible Bluetooth devices in the add-on log. Alternatively you ca
 displayed in the discovery list.
 
 `type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jbd`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`supervolt`, `sok`, `litime`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`pace_uart`, `supervolt`, `sok`, `litime`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
@@ -155,6 +155,17 @@ Currently supported:
   `maland16/daly-bms-uart`, `dreadnought/python-daly-bms`, and
   `syssi/esphome-daly-bms`.
 
+* `pace_uart` — PACE BMS over RS232 / RS485 (**9600 8N1**), the ASCII
+  "paceic" protocol (`~2501…\r`) used by PACE-based server-rack packs
+  (SOK, SunGoldPower, Sunsynk, and other rebrands) and by PbmsTools. This
+  is a different protocol from the PACEEX/PeiCheng phone-app BLE packs
+  (`pace_aiobmsble`, [#276](https://github.com/fl4p/batmon-ha/issues/276)).
+  Reads voltage, current, per-cell voltages, temperatures, SoC, SoH,
+  cycles and alarm/MOSFET state. Ported from `nkinnan/esphome-pace-bms`
+  (v25), cross-checked against `syssi/esphome-pace-bms` and the PACE RS232
+  PDF; decoders are unit-tested against real captured frames but not yet
+  confirmed on live hardware — feedback welcome.
+
 Example config:
 
 ```yaml
@@ -170,7 +181,8 @@ Notes:
   Bluetooth. `adapter` is then the serial port path (`/dev/ttyUSB0`,
   `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
 * The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`
-  uses 9600 8N1 (both match the respective vendor protocol docs).
+  and `pace_uart` use 9600 8N1 (all match the respective vendor protocol
+  docs).
 * As an HA add-on this works out of the box: the add-on manifest sets
   `uart: true`, which maps the host's serial devices (`/dev/ttyUSB*`,
   `/dev/ttyACM*`, `/dev/ttyAMA*` and their `/dev/serial/by-id/*` symlinks)

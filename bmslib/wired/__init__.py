@@ -8,7 +8,11 @@ class SerialBleakClientWrapper(object):
 
     def __init__(self, address, baudrate: int = 115200, **kwargs):
         self.address = address
-        self.t = SerialTransport(address.split(':')[-1], baudrate=baudrate)
+        # Forward optional framing knobs (eol / timeout) a BMS class exposes via
+        # its SERIAL_KWARGS; unknown kwargs are ignored so existing callers keep
+        # the readline() default.
+        serial_kwargs = {k: kwargs[k] for k in ('eol', 'timeout') if k in kwargs}
+        self.t = SerialTransport(address.split(':')[-1], baudrate=baudrate, **serial_kwargs)
         # self.t = StdioTransport()
         self.callback = {}
         self.services = []

@@ -26,9 +26,13 @@ class Transport(object):
 
 class SerialTransport(Transport):
 
-    def __init__(self, port, baudrate: int = 115200):
+    def __init__(self, port, baudrate: int = 115200, eol: bytes = b'\n', timeout=None):
         self.port = port
         self.baudrate = baudrate
+        # `eol` is the frame delimiter read() stops at. Default b'\n' keeps the
+        # historical readline() behaviour; paceic frames end in b'\r' instead.
+        self.eol = eol
+        self.timeout = timeout
         self.ser: Optional[serial.Serial] = None
 
     def open(self):
@@ -39,7 +43,7 @@ class SerialTransport(Transport):
                 raise FileNotFoundError('Serial port device not found: {}'.format(port))
             port =files[0]
         logger.info(f'opening serial port {port} @ {self.baudrate} baud')
-        self.ser = serial.Serial(port, baudrate=self.baudrate)
+        self.ser = serial.Serial(port, baudrate=self.baudrate, timeout=self.timeout)
 
     def close(self):
         if self.ser is not None:
@@ -54,7 +58,9 @@ class SerialTransport(Transport):
 
     def read(self) -> Optional[bytes]:
         if self.ser.is_open and self.ser.readable():
-            return self.ser.readline()
+            # read_until(b'\n') is equivalent to readline(); a different `eol`
+            # (e.g. b'\r' for paceic) splits frames on that byte instead.
+            return self.ser.read_until(self.eol)
         return None
 
 class StdioTransport(Transport):
