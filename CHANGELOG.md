@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.08]
+
+* Fix: temperature sensors flickered to "unavailable" every ~20–30s in Home Assistant (#207). Temperatures were only published on a 30s tick, but the HA entities `expire_after` defaults to 20s, so with slowly-changing temps nothing refreshed them between ticks and HA expired them. They're now published every sample cycle like the other sensors; unchanged values are still deduplicated (republished every `MIN_VALUE_EXPIRY/2` s), and the BMS temperature fetch stays rate-limited by its 30s cache, so no extra BLE traffic.
+* Fix: BMS without temperatures (e.g. SOK, or any BMS whose temperature fetch transiently fails) crashed on every HA discovery publish (`len(None)`), which — since it happened before the discovery-period reset — recurred every sample and prevented entity discovery. `publish_hass_discovery` now handles absent temperatures.
+
+
 ## [2.07]
 
 * Removed per-device `ble_stack` (the 2.05 Approach A). It required a global `bleak` stack, which is exactly the case that runs the forked-bleak pairing pre-step — and that pre-step's venv has no `bluek`/`bumble`, so a `bluek`/`bumble` device crash-looped the add-on before sampling (#386). For a mixed JK+Daly host, set `ble_stack: bluek` globally instead: bluek serves both and coexists with `bluetoothd`.

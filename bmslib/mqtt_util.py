@@ -301,6 +301,8 @@ def publish_cell_voltages(client, device_topic, voltages):
 
 
 def publish_temperatures(client, device_topic, temperatures):
+    if not temperatures:
+        return
     for i in range(0, len(temperatures)):
         topic = f"{device_topic}/temperatures/{i + 1}"
         if not is_none_or_nan(temperatures[i]):
@@ -372,7 +374,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             k = 'cell_voltages/%s' % f
             _hass_discovery(k, name="Cell Index %s" % f[:3], device_class=None, unit="")
 
-    for i in range(0, len(temperatures)):
+    for i in range(0, len(temperatures or [])):
         k = 'temperatures/%d' % (i + 1)
         if not is_none_or_nan(temperatures[i]):
             _hass_discovery(k, "temperature", unit="°C", precision=1)

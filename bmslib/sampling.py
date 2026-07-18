@@ -12,7 +12,7 @@ import bleak.exc
 import paho.mqtt.client
 
 import bmslib.bt
-from bmslib.algorithm import create_algorithm, BatterySwitches
+from bmslib.algorithm import create_algorithm
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
@@ -321,8 +321,12 @@ class BmsSampler:
             if self.algorithm:
                 res = self.algorithm.update(sample)
                 if res or self.bms.verbose_log:
+                    # sample.switches may carry keys BatterySwitches doesn't take
+                    # (JK reports balance/float_charge too), so log the dict as-is
+                    # instead of splatting it into BatterySwitches(charge, discharge)
+                    # — the latter raised TypeError and killed the sample (#234).
                     logger.info('Algo State=%s (bms=%s) -> %s ', self.algorithm.state,
-                                BatterySwitches(**sample.switches), res)
+                                sample.switches, res)
 
                 if res:
                     from bmslib.store import store_algorithm_state
@@ -331,10 +335,16 @@ class BmsSampler:
                         store_algorithm_state(bms.name, algorithm_name=self.algorithm.name, state=state.__dict__)
 
                 if res and res.switches:
-                    for swk in sample.switches.keys():
-                        if res.switches[swk] is not None:
-                            logger.info('%s algo set %s switch -> %s', bms.name, swk, res.switches[swk])
-                            await self.bms.set_switch('charge', res.switches[swk])
+                    # Apply only the switches the algorithm set. Iterate
+                    # BatterySwitches' own fields, NOT sample.switches — the BMS
+                    # may report switches res.switches has no key for (JK:
+                    # balance/float_charge → KeyError), and set_switch must target
+                    # the switch that changed, not always 'charge' (#234).
+                    for swk in ('charge', 'discharge'):
+                        val = res.switches[swk]
+                        if val is not None:
+                            logger.info('%s algo set %s switch -> %s', bms.name, swk, val)
+                            await self.bms.set_switch(swk, val)
 
             if self.num_samples == 0 and sample.switches and mqtt_client:
                 logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
@@ -407,13 +417,19 @@ class BmsSampler:
                 voltages = await cached_fetch_voltages()
                 publish_cell_voltages(mqtt_client, device_topic=self.mqtt_topic_prefix, voltages=voltages)
 
-                # temperatures = None
-                if self.period_30s or self.period_discov:
-                    if not sample.temperatures:
-                        sample.temperatures = await self._fetch_temperatures_cached()
-                        sample.temperatures = self._filter_temperatures(sample.temperatures)
-                    publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix,
-                                         temperatures=sample.temperatures)
+                # Publish temperatures every cycle so the HA entity doesn't
+                # flicker to "unavailable" (#207). Temps change slowly, so
+                # gating them to a 30s tick meant nothing republished them
+                # between ticks while expire_after defaults to 20s. Publishing
+                # every cycle lets mqtt_single_out's keep-alive republish
+                # unchanged values every MIN_VALUE_EXPIRY/2 s, well within
+                # expire_after. The separate BMS fetch stays rate-limited by its
+                # 30s mem-cache, so this adds no extra BLE traffic.
+                if not sample.temperatures:
+                    sample.temperatures = await self._fetch_temperatures_cached()
+                    sample.temperatures = self._filter_temperatures(sample.temperatures)
+                publish_temperatures(mqtt_client, device_topic=self.mqtt_topic_prefix,
+                                     temperatures=sample.temperatures)
 
                 if log_data and (voltages or sample.temperatures) and not bms.is_virtual:
                     logger.info('%s volt=[%s] temp=%s', bms.name,
