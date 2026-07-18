@@ -60,3 +60,19 @@ class SerialCharStub():
     def __init__(self, uuid_or_handle, property_name):
         self.uuid_or_handle = uuid_or_handle
         self.property_name = property_name
+
+    # Value-based identity so a stub is a stable dict key. Serial BMS models
+    # build a fresh SerialCharStub on every connect() and register it as the
+    # notify-callback key. Without this, each reconnect adds a *new* key
+    # (SerialBleakClientWrapper.stop_notify never removes the old one, because
+    # BtBms.stop_notify is gated on `client.services`, which is always empty for
+    # serial transports), so the same _notification_handler accumulates and
+    # every received chunk is delivered N times, corrupting frame reassembly
+    # from the second poll onward. Equal stubs collapse to one key instead.
+    def __eq__(self, other):
+        return (isinstance(other, SerialCharStub)
+                and self.uuid_or_handle == other.uuid_or_handle
+                and self.property_name == other.property_name)
+
+    def __hash__(self):
+        return hash((self.uuid_or_handle, self.property_name))

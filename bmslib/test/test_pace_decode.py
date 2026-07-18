@@ -75,6 +75,86 @@ def test_temperature_offset_zero_celsius():
     assert a["cell_mv"] == [0x0FA0]
 
 
+def test_serial_char_stub_is_stable_dict_key():
+    # Regression for the reconnect callback-accumulation bug: a fresh stub built
+    # on each connect() must collapse to one callback-dict key, not pile up.
+    from bmslib.wired import SerialCharStub
+    d = {}
+    for _ in range(3):
+        d[SerialCharStub("pace-uart", "notify")] = "handler"
+    assert len(d) == 1
+    # Different char/property stays distinct.
+    d[SerialCharStub("pace-uart", "write")] = "h2"
+    assert len(d) == 2
+
+
+# --- _read response-validation gates (#2 return-code, #4 address/cid1) ---------
+import asyncio
+import contextlib
+
+
+class _FakeFutures:
+    def __init__(self, fields):
+        self._fields = fields
+
+    def acquire(self, key):
+        return contextlib.nullcontext()
+
+    async def wait_for(self, key, timeout):
+        return self._fields
+
+
+class _FakeClient:
+    async def write_gatt_char(self, char, data):
+        pass
+
+
+def _bms_returning(fields):
+    from bmslib.models.pace import PaceUart
+    bms = PaceUart.__new__(PaceUart)
+    bms.VER, bms.ADR, bms.CID1, bms._KEY, bms.TIMEOUT, bms.UUID_TX = 0x25, 0x01, 0x46, 0, 1, None
+    bms.client = _FakeClient()
+    bms._fetch_futures = _FakeFutures(fields)
+    return bms
+
+
+def test_read_rejects_device_error_code():
+    bms = _bms_returning(dict(ver=0x25, adr=0x01, cid1=0x46, cid2=0x01, info=b""))
+    with pytest.raises(ValueError, match="error code 0x01"):
+        asyncio.run(bms._read(CID2_READ_ANALOG))
+
+
+def test_read_rejects_wrong_address():
+    bms = _bms_returning(dict(ver=0x25, adr=0x02, cid1=0x46, cid2=0x00, info=b""))
+    with pytest.raises(ValueError, match="address mismatch"):
+        asyncio.run(bms._read(CID2_READ_ANALOG))
+
+
+def test_current_sign_stable_when_status_unavailable():
+    # #3: with status down, the sign comes from the last resolved direction, not
+    # PACE's unverified raw analog sign — so it can't silently flip between polls.
+    import logging
+
+    from bmslib.models.pace import PaceUart, decode_analog
+    analog_info = parse_frame(ANALOG_RESP)["info"]
+    mag = abs(decode_analog(analog_info)["current_a"])
+
+    async def analog_only(cid2):
+        if cid2 == CID2_READ_ANALOG:
+            return {"info": analog_info}
+        raise ValueError("status down")
+
+    for last_charging, expect_sign in ((True, -1), (False, +1)):
+        bms = PaceUart.__new__(PaceUart)
+        bms.logger = logging.getLogger("t-pace")
+        bms._last_charging = last_charging
+        bms._last_cells = []
+        bms._last_temps = []
+        bms._read = analog_only
+        sample = asyncio.run(bms.fetch())
+        assert sample.current == pytest.approx(expect_sign * mag)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

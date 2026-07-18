@@ -35,7 +35,7 @@ Configure with:
     alias:   any human-readable name
 """
 import asyncio
-from typing import List
+from typing import List, Optional
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
@@ -277,6 +277,7 @@ class PaceUart(BtBms):
         self._buffer = bytearray()
         self._last_cells: List[int] = []
         self._last_temps: List[float] = []
+        self._last_charging: Optional[bool] = None  # last status-resolved current direction
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
@@ -297,8 +298,9 @@ class PaceUart(BtBms):
             except ValueError as exc:
                 self.logger.warning("discarding invalid paceic frame: %s", exc)
                 continue
-            if fields['cid2'] != CID2_OK:
-                self.logger.warning("paceic error response, return-code 0x%02X", fields['cid2'])
+            # Deliver every well-formed frame; the request/response contract
+            # (return-code, address, cid1) is validated in _read so the error is
+            # surfaced there rather than silently decoded as a reading.
             self._fetch_futures.set_result(self._KEY, fields)
 
     async def connect(self, timeout=10, **kwargs):
@@ -317,7 +319,22 @@ class PaceUart(BtBms):
         req = build_frame(self.VER, self.ADR, self.CID1, cid2, b'%02X' % self.ADR)
         with self._fetch_futures.acquire(self._KEY):
             await self.client.write_gatt_char(self.UUID_TX, data=req)
-            return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+            fields = await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+
+        # A response's CID2 field carries the return-code (0x00 == OK); a device
+        # error must raise, never be decoded as if it were analog/status data.
+        if fields['cid2'] != CID2_OK:
+            raise ValueError(
+                f"PACE returned error code 0x{fields['cid2']:02X} for request 0x{cid2:02X}")
+        # Reject a frame that isn't from the pack/command we asked (stale echo,
+        # RS485 cross-talk, wrong address).
+        if fields['adr'] != self.ADR:
+            raise ValueError(
+                f"PACE response address mismatch: got 0x{fields['adr']:02X}, want 0x{self.ADR:02X}")
+        if fields['cid1'] != self.CID1:
+            raise ValueError(
+                f"PACE response CID1 mismatch: got 0x{fields['cid1']:02X}, want 0x{self.CID1:02X}")
+        return fields
 
     async def fetch(self) -> BmsSample:
         analog = decode_analog((await self._read(CID2_READ_ANALOG))['info'])
@@ -337,16 +354,23 @@ class PaceUart(BtBms):
 
         # batmon convention: current > 0 == discharge (out of the pack). The
         # pack's own charging/discharging flags are authoritative for direction;
-        # the analog current only supplies the magnitude. Fall back to the raw
-        # signed analog value when the status frame is unavailable.
+        # the analog current only supplies the magnitude. PACE's raw analog sign
+        # convention is not documented, so we never trust it to set direction.
+        #
+        # The status frame is best-effort (independent half-duplex transaction).
+        # When it's unavailable this poll we reuse the LAST status-resolved
+        # direction on the magnitude, rather than the unverified raw sign — a
+        # sign that silently flips between polls would corrupt the sampler's
+        # coulomb/energy integrators. Only on cold start (never a status yet) do
+        # we fall back to the raw value.
+        mag = abs(analog['current_a'])
         current = analog['current_a']
         battery_charging = None
+        if status is not None and status['charging'] != status['discharging']:
+            self._last_charging = status['charging']
+        if self._last_charging is not None:
+            current = -mag if self._last_charging else mag
         if status is not None:
-            mag = abs(analog['current_a'])
-            if status['charging'] and not status['discharging']:
-                current = -mag
-            elif status['discharging'] and not status['charging']:
-                current = mag
             battery_charging = status['charging']
 
         full_ah = analog['full_ah']
