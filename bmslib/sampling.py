@@ -200,7 +200,7 @@ class BmsSampler:
                 self._last_diag_t = t_now
                 logger.info('%s stack: Bleak %s, %s', self.bms.name,
                             bmslib.bt.bleak_version(),
-                            bmslib.bt.bt_stack_version(getattr(self.bms, '_BleakClient', None)))
+                            bmslib.bt.bt_stack_version())
                 if self.bms.address != 'serial':
                     try:
                         await bmslib.bt.bt_diagnostics(

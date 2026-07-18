@@ -1,7 +1,7 @@
 name: "Batmon"
 description: "Monitor various BMS over bluetooth"
 url: https://github.com/fl4p/batmon-ha
-version: "2.06"
+version: "2.07"
 slug: "batmon"
 init: false
 host_dbus: true
@@ -84,11 +84,6 @@ schema:
       debug: "bool?"
       pin: "str?"
       adapter: "str?"
-      # Per-device BLE stack override (docs/per-device-ble-stack.md). Only valid
-      # when the global `ble_stack` is `bleak`; lets one device use `bluek` (or
-      # `bumble`, which needs its own adapter) while others stay on bleak — e.g.
-      # a JK on bluek + a Daly on bleak (#385). `esphome` is not selectable here.
-      ble_stack: "list(bleak|bumble|bluek)?"
       algorithm: "str?"
       current_calibration: "float?"
       note: "str?"

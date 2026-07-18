@@ -138,46 +138,11 @@ def bleak_version() -> str:
         return str(version('bleak'))
 
 
-def _resolve_stack(name):
-    """Return the ``(BleakClient, BleakScanner)`` classes for a per-device
-    ``ble_stack`` (Approach A, see docs/per-device-ble-stack.md).
-
-    The process runs stock ``bleak`` globally; a device may opt into ``bluek`` or
-    ``bumble`` by importing that package's bleak-compatible classes *directly*
-    (independent of the process-wide ``_shadow`` PYTHONPATH redirect). ``None`` /
-    ``'bleak'`` yields the module-global classes, so the default path is byte-for-
-    byte the previous behaviour. ``'esphome'`` is not per-device selectable — it
-    needs its own venv (bleak 3 vs the bleak 2 pin), so it stays global-only.
-    """
-    if not name or name == 'bleak':
-        return BleakClient, BleakScanner
-    if name == 'bluek':
-        try:
-            import bluek
-        except ImportError as e:
-            raise RuntimeError("ble_stack: bluek requested but the 'bluek' "
-                               "package is not installed") from e
-        return bluek.BleakClient, bluek.BleakScanner
-    if name == 'bumble':
-        try:
-            import bumble_bleak
-        except ImportError as e:
-            raise RuntimeError("ble_stack: bumble requested but the "
-                               "'bumble_bleak' package is not installed") from e
-        return bumble_bleak.BleakClient, bumble_bleak.BleakScanner
-    if name == 'esphome':
-        raise ValueError("ble_stack 'esphome' cannot be selected per device "
-                         "(it needs a separate venv); set it globally instead")
-    raise ValueError("unknown ble_stack %r" % (name,))
-
-
-def bt_stack_version(client_cls=None):
+def bt_stack_version():
     # noinspection PyPep8
     # When the `bleak` shadow (bumble-bleak) is active there is no BlueZ in the
     # path, so report the bumble stack instead of shelling out to bluetoothctl.
-    # `client_cls` lets a per-device stack (Approach A) report its own label
-    # instead of the process-global default.
-    cls = client_cls or BleakClient
+    cls = BleakClient
     mod = cls.__module__
     if mod.startswith('bumble_bleak'):
         try:
@@ -374,20 +339,13 @@ class BtBms:
     shutdown = False
 
     def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False,
-                 _uses_pin=False, ble_stack=None):
+                 _uses_pin=False):
         self.address = address
         self.name = name
         self.keep_alive = keep_alive
         self.verbose_log = verbose_log
         self.logger = get_logger(verbose_log)
 
-        # Per-device BLE stack (Approach A). Default to the process-global
-        # classes; a real BLE device resolves its own below. Serial/`test_`
-        # devices never touch these, so we don't resolve for them — that avoids
-        # crashing an unrelated wired device just because a stray `ble_stack` was
-        # copied onto it and the selected package isn't installed.
-        self.ble_stack = ble_stack
-        self._BleakClient, self._BleakScanner = BleakClient, BleakScanner
         self._fetch_futures = FuturesPool()
         self._psk = psk
         self._connect_time = 0
@@ -424,8 +382,6 @@ class BtBms:
                 self.client = SerialBleakClientWrapper(
                     adapter, baudrate=getattr(self, 'BAUDRATE', 115200))
             else:
-                # Resolve the per-device stack only for a real BLE device.
-                self._BleakClient, self._BleakScanner = _resolve_stack(ble_stack)
                 self.client = self._create_client(address)
 
             self._in_disconnect = False
@@ -446,7 +402,7 @@ class BtBms:
         if adapter:  # hci0, hci1 (BT adapter hardware)
             self.logger.info('Using adapter %s to connect to %s (%s)', adapter, self.address, self.name)
             kwargs['adapter'] = adapter
-        return self._BleakClient(addr_or_device,
+        return BleakClient(addr_or_device,
                                  handle_pairing=bool(self._psk),
                                  disconnected_callback=self._on_disconnect,
                                  **kwargs
@@ -623,7 +579,7 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        scanner = self._BleakScanner(adapter=self._adapter) if self._adapter else self._BleakScanner()
+        scanner = BleakScanner(adapter=self._adapter) if self._adapter else BleakScanner()
         self.logger.debug("starting scan")
         await scanner.start()
 

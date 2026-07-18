@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.07]
+
+* Removed per-device `ble_stack` (the 2.05 Approach A). It required a global `bleak` stack, which is exactly the case that runs the forked-bleak pairing pre-step — and that pre-step's venv has no `bluek`/`bumble`, so a `bluek`/`bumble` device crash-looped the add-on before sampling (#386). For a mixed JK+Daly host, set `ble_stack: bluek` globally instead: bluek serves both and coexists with `bluetoothd`.
+
+
 ## [2.06]
 
 * Fix: aiobmsble-backed BMS (e.g. `*_ble`/`*_aiobmsble` types) could wedge on `org.bluez.Error.NotPermitted: Notify acquired` after a dropped keep-alive link, failing every reconnect until the add-on was restarted. The wrapper now disconnects the previous aiobmsble instance (`disconnect(reset=True)`) before opening a new connection, releasing the stale notify (#384)

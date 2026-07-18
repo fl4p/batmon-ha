@@ -79,55 +79,6 @@ def get_bms_model_class(name):
         return None
 
 
-# Stacks a *device* may select. `esphome` is deliberately excluded — it needs
-# its own venv (bleak 3 vs the bleak 2 pin), so it is global-only.
-PER_DEVICE_BLE_STACKS = frozenset(('bleak', 'bluek', 'bumble'))
-
-
-def check_ble_stack_config(user_config: dict) -> list:
-    """Validate per-device ``ble_stack`` overrides (Approach A, see
-    docs/per-device-ble-stack.md) and return the list of overriding devices.
-
-    This is the single fail-fast gate for stack *configuration* errors, run
-    before any device is constructed. It enforces two rules and raises
-    ``ValueError`` (never a silent pass) on either:
-
-    1. Every per-device ``ble_stack``, when set, must be one of
-       ``PER_DEVICE_BLE_STACKS``. A typo or an ``esphome`` at device level is
-       rejected here rather than crashing later, deep in ``_resolve_stack``, with
-       an uncaught traceback that would take down every configured BMS.
-    2. An override imports its stack's bleak-compatible classes directly, which
-       only works while the process runs the stock bleak stack. If the global
-       ``ble_stack`` swapped ``import bleak`` for a shadow (bumble/bluek) or runs
-       the esphome venv, stock bleak is gone process-wide and no override can be
-       honoured.
-
-    (Environment failures — a selected package not installed, or an aiobmsble
-    model that cannot take an override — are not config errors and surface at
-    construction; ``main.py`` converts those to a clean exit too.)
-    """
-    global_stack = (user_config.get('ble_stack') or 'bleak')
-    overriders = []
-    for dev in user_config.get('devices', []):
-        stack = dev.get('ble_stack')
-        if not stack:
-            continue
-        if stack not in PER_DEVICE_BLE_STACKS:
-            raise ValueError(
-                "device %s: unsupported per-device ble_stack %r (choose one of "
-                "%s; 'esphome' is global-only). See docs/per-device-ble-stack.md."
-                % (dev.get('address'), stack, ', '.join(sorted(PER_DEVICE_BLE_STACKS))))
-        if stack != global_stack:
-            overriders.append(dev)
-    if overriders and global_stack != 'bleak':
-        raise ValueError(
-            "Per-device ble_stack override is only supported when the global "
-            "ble_stack is 'bleak' (got '%s'). Offending device(s): %s. "
-            "See docs/per-device-ble-stack.md." % (
-                global_stack, ', '.join(str(d.get('address')) for d in overriders)))
-    return overriders
-
-
 def device_address(dev: dict) -> str:
     """Normalized `address:` of a configured device. The HA add-on schema types it
     as free text, so users paste stray whitespace; everyone comparing against
@@ -190,7 +141,6 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
         psk=dev.get('pin'),
         adapter=dev.get('adapter'),
         keep_alive=dev.get('keep_alive'),
-        ble_stack=dev.get('ble_stack'),
         **extra_kwargs,
     )
 
