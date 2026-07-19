@@ -16,17 +16,17 @@
 
 ## [2.07]
 
-* Removed per-device `ble_stack` (the 2.05 Approach A). It required a global `bleak` stack, which is exactly the case that runs the forked-bleak pairing pre-step — and that pre-step's venv has no `bluek`/`bumble`, so a `bluek`/`bumble` device crash-looped the add-on before sampling (#386). For a mixed JK+Daly host, set `ble_stack: bluek` globally instead: bluek serves both and coexists with `bluetoothd`.
+* Removed per-device `ble_stack` (2.05 Approach A): it forced global `bleak`, whose pairing pre-step lacks `bluek`/`bumble` and crash-looped those devices. Use `ble_stack: bluek` globally (#386).
 
 
 ## [2.06]
 
-* Fix: aiobmsble-backed BMS (e.g. `*_ble`/`*_aiobmsble` types) could wedge on `org.bluez.Error.NotPermitted: Notify acquired` after a dropped keep-alive link, failing every reconnect until the add-on was restarted. The wrapper now disconnects the previous aiobmsble instance (`disconnect(reset=True)`) before opening a new connection, releasing the stale notify (#384)
+* Fix: aiobmsble BMS wedged on `NotPermitted: Notify acquired` after a dropped keep-alive, failing every reconnect until restart. Now disconnects the stale instance first (#384).
 
 
 ## [2.05]
 
-* Per-device `ble_stack`: override the global stack per device (e.g. a JK on `bluek`, Dalys on `bleak`) for mixed setups (#385). Only when the global stack is `bleak`; `esphome`/aiobmsble stay global-only.
+* Per-device `ble_stack`: override the global stack per device for mixed setups — only when global is `bleak`; `esphome`/aiobmsble stay global (#385).
 * bluek → `bd9070d`: answer a peripheral that server-initiates the ATT MTU exchange (JK failed with `unexpected ATT opcode 0x02`) (#385)
 * bluek `bleak_retry_connector` shim: add missing symbols so aiobmsble BMS (Daly `daly_ble`) load on bluek instead of "Unknown device type" (#385)
 
@@ -39,7 +39,7 @@
 * Fix: an `options.json` without `ble_stack` now defaults to `bleak` instead of skipping the pairing pre-step
 * `docker stop` now terminates batmon promptly (entrypoint `exec`s python)
 * Add `.dockerignore` so a local `docker build` no longer bakes `options.json` credentials into the image
-* JK BLE: fix notify framing — resync on the frame header instead of clearing the buffer, which dropped a frame when one packet carried two. Fixes endless `timeout waiting for 2/3` / `crc check failed` after reconnect (#377) and tolerates inter-frame junk (#370)
+* JK BLE: resync framing on the header instead of clearing the buffer (dropped a frame when a packet held two), fixing `timeout waiting 2/3` / `crc check failed` after reconnect (#377, #370).
 * All BMS: estimated time remaining (`bms/runtime`) from remaining capacity / smoothed discharge current (#381)
 * Fix: skip BLE discovery and `bt_diagnostics` for serial devices (`address: serial`) (#380)
 * Fix: keep `bleak` at 2.x — `aiobmsble` (dep `bleak>=3.0.2`) silently upgraded it, overriding the `bleak==2.0.0` pin for #275. Install `aiobmsble==0.25.0` with `--no-deps` (#383)
@@ -67,21 +67,21 @@
 
 ## [1.99]
 
-* Daly v2 (`type: daly2`, Modbus-over-BLE): make it actually work — the live I/O path was a non-functional stub that never sent the request and crashed on an assert. Proper Modbus CRC-16 framing, response reassembly across BLE notifications, and a `fff1/fff2` → `ff01/ff02` UUID fallback for newer DL/JHB firmware (#356)
-* SOC sensor: report `state_class: measurement` (alongside `device_class: battery`) so Home Assistant records long-term statistics and the SOC shows up in the energy dashboard's battery-level selector (#374)
+* Daly v2 (`daly2`, Modbus-over-BLE): the I/O path was a stub that never sent the request. Adds CRC-16 framing, notification reassembly, and a `fff1/fff2`→`ff01/ff02` UUID fallback (#356).
+* SOC sensor: add `state_class: measurement` so HA records long-term statistics and it shows in the energy dashboard's battery-level selector (#374).
 
 
 ## [1.98]
 
-* JK: throttle the per-packet "crc check failed" log when the notify characteristic carries non-protocol junk (e.g. JK-PB inverter firmware flooding `AT\r\n` on the shared UART, #370) — one rate-limited line per 30s instead of an ERROR + full buffer per packet, so the log stays usable during a flood
-* Add `uart: true` to the manifest so wired BMSes (`address: serial`, e.g. `jk_uart`/`daly_uart`) work — the host serial devices are now mapped into the container; `privileged:` alone never exposed them (#22, #225)
+* JK: throttle the per-packet `crc check failed` log when the UART carries junk (e.g. JK-PB firmware flooding `AT\r\n`, #370) — one line per 30s instead of an ERROR per packet.
+* Add `uart: true` to the manifest so wired BMSes (`address: serial`, e.g. `jk_uart`/`daly_uart`) work — host serial devices are now mapped in; `privileged:` alone never exposed them (#22, #225).
 * Keep `publish_period`/`expire_values_after` as visible required fields again — under the collapsed "unused optional" section the HA frontend silently dropped edits on save (#225)
 
 
 ## [1.97]
 
 * Add `translations/{en,de,es}.yaml` in English, German and Spanish
-* The new `snoop` BMS to explore unknown BMS types, pasive read-out or active probe spec writes from a `:families` suffix on `type:` (e.g. `type: snoop:jbd,jk,daly`) — see [doc/SNOOP.md](doc/SNOOP.md)
+* Add `snoop` BMS to explore unknown types — passive read-out or active probe writes via a `:families` suffix on `type:` (e.g. `type: snoop:jbd,jk,daly`); see [doc/SNOOP.md](doc/SNOOP.md).
 * Add `noname_modbus` for generic Chinese BMSes that speak Modbus RTU over the Nordic UART Service (#131) — needs verification with a real device
 * Restore multi-arch Docker builds (aarch64/amd64/armhf/armv7/i386) — re-add `ARG BUILD_FROM` consumed by `build.yaml`, which 1.96 had dropped (#365)
 * JK: restore sub-1% SOC precision lost in 1.95 — recompute from `charge / aged_capacity` instead of using the BMS's 1% SOC byte, while keeping 1.95's `capacity` fix for aged 11.x packs (#369)
@@ -89,7 +89,7 @@
 
 ## [1.96]
 
-* Add new bluetooth backend `esphome` for [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices — see README *BLE Stack* section for setup. Known incompatibility: ANT BMS.
+* Add `esphome` BLE backend for [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices — see README *BLE Stack*. Incompatible with ANT BMS.
 * Fix HA discovery topics when device alias contains `/` (#366)
 * Throttle telemetry writes to 15s and suffix InfluxDB measurement with address hash
 * InfluxDB: flush in a background task to avoid stalling the sample loop
