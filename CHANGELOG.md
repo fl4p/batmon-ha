@@ -10,6 +10,7 @@
 * `pace_uart`: reject a response with a non-OK return code (surface the device error instead of decoding it as data) or a mismatched address/CID, and keep the current-sign stable when the best-effort status read intermittently fails.
 * Fix: temperature sensors flickered to "unavailable" every ~20–30s in Home Assistant (#207). Temperatures were only published on a 30s tick, but the HA entities `expire_after` defaults to 20s, so with slowly-changing temps nothing refreshed them between ticks and HA expired them. They're now published every sample cycle like the other sensors; unchanged values are still deduplicated (republished every `MIN_VALUE_EXPIRY/2` s), and the BMS temperature fetch stays rate-limited by its 30s cache, so no extra BLE traffic.
 * Fix: BMS without temperatures (e.g. SOK, or any BMS whose temperature fetch transiently fails) crashed on every HA discovery publish (`len(None)`), which — since it happened before the discovery-period reset — recurred every sample and prevented entity discovery. `publish_hass_discovery` now handles absent temperatures.
+* bluek → `60d1c77`: drop a stray/late Exchange MTU Rsp instead of feeding it to the next transaction. A JK BMS that server-initiates the MTU exchange also emits a duplicate `0x03` afterwards, which landed on the following service-discovery request and crash-looped it with `unexpected ATT opcode 0x03 (wanted 0x11)` (#386).
 
 
 ## [2.07]
