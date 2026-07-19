@@ -140,41 +140,23 @@ For verbose logs of particular BMS add `debug: true`.
 ## Serial / RS485
 
 Some BMS expose an RS485 (or TTL UART) port in addition to BLE. Batmon can
-read those directly using a USB-to-RS485 adapter, no Bluetooth needed.
+read those directly with a USB-to-RS485 adapter, no Bluetooth needed. This
+path is independent of `ble_stack` and works even with Bluetooth disabled.
 
-Currently supported:
+Supported types (baud rate in parentheses):
 
-* `jk_uart` — JK / Jikong BMS over RS485. Speaks the genuine UART TLV
-  protocol (`4E 57 …`), which is a different wire format from the BLE one
-  (`55 AA EB 90 …`). Cross-referenced against `syssi/esphome-jk-bms`,
-  `jblance/mpp-solar`, and `Louisvdw/dbus-serialbattery`.
+* `jk_uart` (115200) — JK / Jikong, native UART TLV protocol (`4E 57 …`),
+  distinct from the BLE format.
+* `daly_uart` (9600) — Daly, same `A5 …` 13-byte frames as Daly BLE.
+* `pace_uart` (9600) — PACE ASCII "paceic" protocol (`~2501…\r`) used by
+  PACE server-rack packs (SOK, SunGoldPower, Sunsynk rebrands, PbmsTools);
+  distinct from the BLE `pace_aiobmsble`
+  ([#276](https://github.com/fl4p/batmon-ha/issues/276)).
+* `basen_uart` (9600) — Basen binary `7E … 0D` protocol; distinct from the
+  BLE `basen`.
 
-* `daly_uart` — Daly BMS over RS485 / USB-UART (**9600 8N1**, per the Daly
-  protocol PDF + `maland16/daly-bms-uart`). Same `A5 …` 13-byte frame
-  format as Daly BLE; the only on-wire difference is the host-address byte
-  (4 = USB/RS485, 8 = BLE). Cross-referenced against
-  `maland16/daly-bms-uart`, `dreadnought/python-daly-bms`, and
-  `syssi/esphome-daly-bms`.
-
-* `pace_uart` — PACE BMS over RS232 / RS485 (**9600 8N1**), the ASCII
-  "paceic" protocol (`~2501…\r`) used by PACE-based server-rack packs
-  (SOK, SunGoldPower, Sunsynk, and other rebrands) and by PbmsTools. This
-  is a different protocol from the PACEEX/PeiCheng phone-app BLE packs
-  (`pace_aiobmsble`, [#276](https://github.com/fl4p/batmon-ha/issues/276)).
-  Reads voltage, current, per-cell voltages, temperatures, SoC, SoH,
-  cycles and alarm/MOSFET state. Ported from `nkinnan/esphome-pace-bms`
-  (v25), cross-checked against `syssi/esphome-pace-bms` and the PACE RS232
-  PDF; decoders are unit-tested against real captured frames but not yet
-  confirmed on live hardware — feedback welcome.
-
-* `basen_uart` — Basen BMS over RS232 / RS485 (**9600 8N1**), the binary
-  `7E … 0D` protocol used on the pack's serial port. This is a different
-  protocol from the Basen BLE app (`basen`). Reads voltage, current,
-  per-cell voltages (with balancing flags), temperatures, SoC, SoH,
-  cycles and a classified alarm/fault bitmask. Ported from
-  `GHswitt/esphome-basen`; decoders are unit-tested against the real
-  example frame in that project's README but not yet confirmed on live
-  hardware — feedback welcome.
+`pace_uart` and `basen_uart` decoders are unit-tested against captured
+frames but not yet confirmed on live hardware — feedback welcome.
 
 Example config:
 
@@ -185,26 +167,16 @@ Example config:
   alias: battery1
 ```
 
-Notes:
+`address: serial` selects the wired transport; `adapter` is then the serial
+port path (`/dev/ttyUSB0`, `/dev/ttyAMA0`, `COM3`, …) instead of a Bluetooth
+HCI index. As an HA add-on this works out of the box (the manifest sets
+`uart: true`, mapping the host's serial devices into the container) — prefer
+the stable `/dev/serial/by-id/...` path so the port survives re-plugging.
+Running standalone on Linux, add your user to the `dialout` group.
 
-* `address: serial` tells batmon to use the wired transport instead of
-  Bluetooth. `adapter` is then the serial port path (`/dev/ttyUSB0`,
-  `/dev/ttyAMA0`, `COM3`, …) rather than a Bluetooth HCI index.
-* The baud rate is picked per BMS — `jk_uart` uses 115200, `daly_uart`,
-  `pace_uart` and `basen_uart` use 9600 8N1 (all match the respective
-  vendor protocol docs).
-* As an HA add-on this works out of the box: the add-on manifest sets
-  `uart: true`, which maps the host's serial devices (`/dev/ttyUSB*`,
-  `/dev/ttyACM*`, `/dev/ttyAMA*` and their `/dev/serial/by-id/*` symlinks)
-  into the container. Prefer the stable `/dev/serial/by-id/...` path so the
-  port survives re-plugging. Running standalone (outside the add-on) on Linux,
-  add your user to the `dialout` group to read `/dev/ttyUSB*`.
-* This path is independent of the BLE backend selected by `ble_stack`, so
-  it works even when Bluetooth is disabled.
-
-If you'd like another BMS family added over RS485, open an issue with a
-captured frame (`tcpdump` of the USB-serial line, or a wireshark log from
-the vendor's PC tool).
+To request another BMS family over RS485, open an issue with a captured
+frame (`tcpdump` of the USB-serial line, or a wireshark log from the
+vendor's PC tool).
 
 ## Adding a new BMS
 
