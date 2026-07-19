@@ -8,6 +8,7 @@
 * Add `basen` for Basen BMS over BLE.
 * Fix: serial BMS (`pace_uart`, `daly_uart`, `jk_uart`) stacked a duplicate notify callback on every reconnect, corrupting frame reassembly.
 * `pace_uart`: reject responses with a bad return code or mismatched address/CID.
+* Fix: algorithms crashed on a JK BMS reporting `balance`/`float_charge` switches (#234).
 * Fix: temperature sensors flickered to "unavailable" every ~20–30s (#207).
 * Fix: a BMS without temperatures (e.g. SOK) crashed HA discovery publish (`len(None)`).
 * bluek → `60d1c77`: fix a JK MTU stray-`0x03` crash-loop in service discovery (#386).
