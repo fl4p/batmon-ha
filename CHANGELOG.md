@@ -3,14 +3,14 @@
 
 ## [2.08]
 
-* Add `pace_uart` for PACE BMS over RS232/RS485 — the ASCII "paceic" protocol (`~2501…\r`) used by PACE-based server-rack packs (SOK, SunGoldPower, Sunsynk, other rebrands) and PbmsTools (#276). Reads voltage, current, per-cell voltages, temperatures, SoC, SoH, cycles and alarm/MOSFET state. Distinct from the PACEEX/PeiCheng BLE app packs, which already work via `pace_aiobmsble`. Ported from `nkinnan/esphome-pace-bms` (v25) and unit-tested against real captured frames; live-hardware confirmation still welcome. The wired serial transport gained a configurable frame delimiter so paceic's `\r`-terminated frames read correctly (the generic `readline()` path would never return, as paceic frames contain no newline).
-* Add `basen_uart` for Basen BMS over RS232/RS485 — the binary `7E…0D` serial protocol (distinct from the Basen BLE app). Reads voltage, current, per-cell voltages with balancing, temperatures, SoC, SoH, cycles and a classified alarm/fault bitmask (benign status bits like Charging/Discharging/heating/manual-MOS don't false-alarm; current direction and MOSFET state come from the same bitmask). Ported from `GHswitt/esphome-basen` and unit-tested against the real example frame in its README; live-hardware confirmation still welcome.
-* Add `basen` for Basen BMS over BLE. Reads voltage, current, per-cell voltages, temperatures, SoC, SoH, cycles and alarm/MOSFET state. Ported from `syssi/esphome-basen-bms` and unit-tested against captured frames; live-hardware confirmation still welcome. Protection-trip flags feed the `problem` sensor (a real trip is never reported as OK, and a full charge doesn't false-alarm), and a genuine 0 mV dead cell is preserved rather than trimmed as padding.
-* Fix: serial BMS (`pace_uart`, `daly_uart`, `jk_uart`) accumulated a stale notify callback on every reconnect, so — with the default `keep_alive: false` (which reconnects each poll) — each received chunk was delivered into the frame buffer one extra time per poll, corrupting frame reassembly from the second cycle on. Notify callbacks are now keyed by value, so re-registration replaces the old one.
-* `pace_uart`: reject a response with a non-OK return code (surface the device error instead of decoding it as data) or a mismatched address/CID, and keep the current-sign stable when the best-effort status read intermittently fails.
-* Fix: temperature sensors flickered to "unavailable" every ~20–30s in Home Assistant (#207). Temperatures were only published on a 30s tick, but the HA entities `expire_after` defaults to 20s, so with slowly-changing temps nothing refreshed them between ticks and HA expired them. They're now published every sample cycle like the other sensors; unchanged values are still deduplicated (republished every `MIN_VALUE_EXPIRY/2` s), and the BMS temperature fetch stays rate-limited by its 30s cache, so no extra BLE traffic.
-* Fix: BMS without temperatures (e.g. SOK, or any BMS whose temperature fetch transiently fails) crashed on every HA discovery publish (`len(None)`), which — since it happened before the discovery-period reset — recurred every sample and prevented entity discovery. `publish_hass_discovery` now handles absent temperatures.
-* bluek → `60d1c77`: drop a stray/late Exchange MTU Rsp instead of feeding it to the next transaction. A JK BMS that server-initiates the MTU exchange also emits a duplicate `0x03` afterwards, which landed on the following service-discovery request and crash-looped it with `unexpected ATT opcode 0x03 (wanted 0x11)` (#386).
+* Add `pace_uart` for PACE BMS over RS232/RS485 — SOK, SunGoldPower, Sunsynk and other PACE rebrands (#276).
+* Add `basen_uart` for Basen BMS over RS232/RS485.
+* Add `basen` for Basen BMS over BLE.
+* Fix: serial BMS (`pace_uart`, `daly_uart`, `jk_uart`) stacked a duplicate notify callback on every reconnect, corrupting frame reassembly.
+* `pace_uart`: reject responses with a bad return code or mismatched address/CID.
+* Fix: temperature sensors flickered to "unavailable" every ~20–30s (#207).
+* Fix: a BMS without temperatures (e.g. SOK) crashed HA discovery publish (`len(None)`).
+* bluek → `60d1c77`: fix a JK MTU stray-`0x03` crash-loop in service discovery (#386).
 
 
 ## [2.07]
