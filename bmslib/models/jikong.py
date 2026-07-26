@@ -154,8 +154,8 @@ class JKBt(BtBms):
 
         for frame in corrupt:
             # A real frame that arrived corrupted - rare, keep visible.
-            self.logger.error("crc check failed, discarding frame 0x%02x: %s...",
-                              frame[4], to_hex_str(frame[:32]))
+            self.logger.error("%s crc check failed, discarding frame 0x%02x: %s...",
+                              self.name, frame[4], to_hex_str(frame[:32]))
 
         if dropped:
             # Non-protocol junk on the notify char, e.g. a JK-PB inverter flooding
@@ -165,9 +165,10 @@ class JKBt(BtBms):
             self._junk_count += dropped
             if now - self._junk_log_t >= self.JUNK_LOG_PERIOD:
                 self.logger.warning(
-                    "discarded %d junk byte(s) between frames in %.0fs "
+                    "%s discarded %d junk byte(s) between frames in %.0fs "
                     "(e.g. JK-PB AT-flood #370); last %d bytes: %.40s",
-                    self._junk_count, (now - self._junk_log_t) if self._junk_log_t else 0,
+                    self.name, self._junk_count,
+                    (now - self._junk_log_t) if self._junk_log_t else 0,
                     len(data), to_hex_str(data))
                 self._junk_log_t = now
                 self._junk_count = 0
@@ -411,7 +412,8 @@ class JKBt(BtBms):
         return self._decode_sample(buf, t_buf, has_float_charger=has_float_charger)
 
     async def subscribe(self, callback: Callable[[BmsSample], None]):
-        self._callbacks[0x02].append(lambda buf: callback(self._decode_sample(buf, t_buf=time.time())))
+        self._callbacks[0x02].append(lambda buf: callback(
+            self._decode_sample(buf, t_buf=time.time(), has_float_charger=bool(self._has_float_charger))))
 
     async def fetch_voltages(self):
         """
@@ -432,7 +434,7 @@ class JKBt(BtBms):
             balance=0x1F
         )
 
-        if self.has_float_charger():
+        if await self.has_float_charger():
             addresses['float_charge'] = 0x30
 
         await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])

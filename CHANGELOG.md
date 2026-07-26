@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.09]
+
+* Fix: JK `set_switch` never awaited `has_float_charger()`, so `float_charge` was offered on every model and each switch write leaked a RuntimeWarning (#391).
+* JK: the junk-byte and CRC-failure log lines now name the BMS, so two JK devices can be told apart (#391).
+
+
 ## [2.08]
 
 * Add `pace_uart` for PACE BMS over RS232/RS485 — SOK, SunGoldPower, Sunsynk and other PACE rebrands (#276).

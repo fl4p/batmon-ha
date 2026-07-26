@@ -7,7 +7,10 @@ does not respect the 300-byte frame boundary, and some firmwares splice junk
 All byte strings here are real captures from issue #377.
 """
 
+import asyncio
 import time
+
+import pytest
 
 from bmslib.models.jikong import (FRAME_SIZE, HEADER, RESPONSE_TYPES, JKBt,
                                   calc_crc, feed_frames)
@@ -204,3 +207,26 @@ def test_notification_handler_decodes_a_real_sample_after_split_delivery():
     assert 20 < sample.voltage < 30      # 8s LFP pack, ~26.9 V in the log
     assert -1 < sample.current < 1
     assert 0 <= sample.soc <= 100
+
+
+def test_set_switch_awaits_has_float_charger():
+    """#391: `if self.has_float_charger():` was missing the await. A coroutine
+    object is always truthy, so float_charge was offered on every model (and the
+    write leaked a 'never awaited' RuntimeWarning at GC time)."""
+    bms = _make_jk()
+    written = []
+
+    async def _write(address, value):
+        written.append((address, value))
+
+    bms._write = _write
+
+    bms._has_float_charger = False  # non-PB model: float_charge must not exist
+    asyncio.run(bms.set_switch("balance", True))
+    assert written == [(0x1F, [1, 0, 0, 0])]
+    with pytest.raises(KeyError):
+        asyncio.run(bms.set_switch("float_charge", True))
+
+    bms._has_float_charger = True  # JK-PB: float_charge is addressable
+    asyncio.run(bms.set_switch("float_charge", False))
+    assert written[-1] == (0x30, [0, 0, 0, 0])
