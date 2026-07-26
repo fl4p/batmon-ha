@@ -6,6 +6,7 @@
 * `sok` now routes to the aiobmsble `abc_bms` decoder; fixes `timeout waiting for 193` on current SOK/ABC firmware (#390, #222, #178). Old native driver stays as `sok_legacy`.
 * Fix: JK `set_switch` never awaited `has_float_charger()`, so `float_charge` was offered on every model and each switch write leaked a RuntimeWarning (#391).
 * JK: the junk-byte and CRC-failure log lines now name the BMS, so two JK devices can be told apart (#391).
+* `telemetry` is now a documented add-on option (default on). Set `telemetry: false` to opt out of anonymous sample uploads.
 
 
 ## [2.08]

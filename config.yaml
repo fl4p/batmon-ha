@@ -74,7 +74,7 @@ options:
   #       noise_psk: "base64-encoded-encryption-key"
   #       name: "garage-proxy"
   bluetooth_proxies: []
-#  telemetry: false
+  telemetry: true
 
 schema:
   devices:
@@ -128,4 +128,4 @@ schema:
   influxdb_verify_ssl: "bool?"
   influxdb_database: "str?"
 
-#  telemetry: "bool?"
+  telemetry: "bool?"
