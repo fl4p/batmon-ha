@@ -255,6 +255,8 @@ batmon implements the **new protocol** (`7E A1`).
 
 ## SOK BMS — `models/sok.py`
 
+**Routing (since 2.09).** The `sok` device type now resolves to the aiobmsble `abc_bms` decoder (alias `sok` → `abc` in `models/__init__.py`), not the native `models/sok.py`. The native driver only completes a reply when the notification buffer ends in `0x77` ('w'); current SOK/ABC firmware sends `0xCC`-headed fixed-length frames without that terminator, so it hangs forever with `timeout waiting for 193` (#390, #222, #178). The native driver stays reachable as `sok_legacy` for early firmware it works on. The section below documents that legacy driver.
+
 **Vendor / variants.** SOK Battery (brand of Shenzhen Basen / sokbattery.com). LiFePO4 packs with integrated Bluetooth BMS branded **ABC-BMS** (Android app `com.sjty.sbs_bms`). Variants: SOK 12V 100 Ah marine (SK12V100P) — transparent case, current "V8" BMS — and 12V 206 Ah / 24V 100 Ah / 48V 100 Ah server-rack metal-box packs. Some Basen, EG4 and rebadged Amazon LiFePO4 packs use the same protocol.
 
 **Transport.** BLE GATT, Nordic-UART-style: service `0x ffe0`, notify on `0xffe1`, write on `0xffe2`.

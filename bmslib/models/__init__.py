@@ -9,8 +9,16 @@ from bmslib.util import get_logger
 logger = get_logger()
 
 
-def get_bms_model_class(name):
+def get_bms_model_class(name: str):
     #
+
+    # Type aliases resolved before the registry / aiobmsble lookup below.
+    # `sok` now routes to aiobmsble's ABC-BMS driver (`abc` -> abc_bms): current
+    # SOK/ABC-firmware batteries answer with CC-prefixed frames that the legacy
+    # models/sok.py (EE-prefix, 'w'-terminated) never completes, producing the
+    # recurring "timeout waiting for 193" (#390, #222, #178). The old driver is
+    # still reachable as `sok_legacy` for early firmware it works on.
+    name = {'sok': 'abc'}.get(name, name)
 
     if False:
         import bmslib.models.ant
@@ -39,7 +47,7 @@ def get_bms_model_class(name):
         group_parallel='bmslib.group.VirtualGroupBms',
         # group_serial=bmslib.group.VirtualGroupBms, # TODO
         supervolt='models.supervolt.SuperVoltBt',
-        sok='models.sok.SokBt',
+        sok_legacy='models.sok.SokBt',  # pre-2023 SOK/ABC firmware; `sok` -> aiobmsble abc_bms (see alias above)
         litime='models.litime.LitimeBt',
         basen='models.basen.BasenBt',  # Basen BLE (0xFA00/01/02), ported from syssi/esphome-basen-bms
         basen_uart='models.basen_uart.BasenUart',  # Basen RS232/RS485 (paceic-unrelated), ported from GHswitt/esphome-basen
