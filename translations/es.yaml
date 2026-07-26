@@ -168,3 +168,11 @@ configuration:
   influxdb_database:
     name: Base de datos InfluxDB
     description: Nombre de la base de datos (o bucket) donde escribir las muestras.
+  telemetry:
+    name: Telemetría de SoH y resistencia de celda
+    description: >-
+      Enviar muestras anonimizadas de la batería (tensión, corriente,
+      temperatura, tensiones de celda) al desarrollador para mejorar los
+      algoritmos de estado de salud (SoH) y resistencia de celda. Los
+      identificadores son aleatorios o con hash; sin dirección MAC, sin
+      ubicación, sin datos personales.

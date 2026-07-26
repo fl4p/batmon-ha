@@ -151,3 +151,10 @@ configuration:
   influxdb_database:
     name: InfluxDB database
     description: Database (bucket) name to write samples to.
+  telemetry:
+    name: SoH and cell resistance telemetry
+    description: >-
+      Send anonymized battery samples (voltage, current, temperature, cell
+      voltages) to the developer to help refine the state-of-health and cell
+      resistance algorithms. Identifiers are random or hashed; no MAC address,
+      no location, no personal data.

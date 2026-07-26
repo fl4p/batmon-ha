@@ -158,3 +158,11 @@ configuration:
   influxdb_database:
     name: InfluxDB-Datenbank
     description: Datenbank- (bzw. Bucket-)Name für die Datenpunkte.
+  telemetry:
+    name: SoH- und Zellwiderstands-Telemetrie
+    description: >-
+      Anonymisierte Batteriedaten (Spannung, Strom, Temperatur,
+      Zellspannungen) an den Entwickler senden, um die Algorithmen für
+      Zustand (SoH) und Zellwiderstand zu verbessern. Kennungen sind
+      zufällig oder gehasht; keine MAC-Adresse, kein Standort, keine
+      personenbezogenen Daten.
