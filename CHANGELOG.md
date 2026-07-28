@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.11]
+
+* Fix: the retry backoff from 2.10 was only cleared by a good sample, so a BMS that connects and publishes but keeps failing `fetch_voltages` carried its old not-found streak indefinitely. It now clears on a successful connect (#391).
+
+
 ## [2.10]
 
 * Fix: the device-not-found retry backoff escalated on polling cadence instead of on failures, so a BMS that went out of reach dropped to one retry every 5 minutes after only 3 failed connects (#391).

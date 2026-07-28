@@ -263,6 +263,11 @@ class BmsSampler:
             logger.debug('connecting bms %s', bms)
 
         async with bms:
+            # a successful connect ends the not-found streak. don't wait for a good
+            # sample: _sample_inner returns None for a healthy BMS whose fetch_voltages
+            # fails (err below), which would carry the old streak forever (#391).
+            self._num_not_found = 0
+
             if not was_connected:
                 logger.info('connected bms %s!', bms)
 
