@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.10]
+
+* Fix: the device-not-found retry backoff escalated on polling cadence instead of on failures, so a BMS that went out of reach dropped to one retry every 5 minutes after only 3 failed connects (#391).
+
+
 ## [2.09]
 
 * `sok` now routes to the aiobmsble `abc_bms` decoder; fixes `timeout waiting for 193` on current SOK/ABC firmware (#390, #222, #178). Old native driver stays as `sok_legacy`.

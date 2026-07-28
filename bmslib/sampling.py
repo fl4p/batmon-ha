@@ -113,6 +113,7 @@ class BmsSampler:
         self._t_last_power_jump = 0
 
         self._num_errors = 0
+        self._num_not_found = 0  # consecutive device-not-found, drives the retry backoff
         self._time_next_retry = 0
         self._last_diag_t = 0
 
@@ -157,9 +158,14 @@ class BmsSampler:
             s = await self._sample_inner()
             if s:
                 self._num_errors = 0
+                self._num_not_found = 0
             return s
         except (bmslib.bt.BleakDeviceNotFoundError, bmslib.bt.BleakNotFoundError) as e:
-            t_wait = 1.5 ** min(self._num_errors + 4, 14)
+            # back off on the number of failed *connects*, not on _num_errors: the latter
+            # also counts the cycles spent waiting in _sample_inner(), so the wait fed
+            # itself and hit the 291 s cap after 3 failures (#391).
+            self._num_not_found += 1
+            t_wait = 1.5 ** min(self._num_not_found + 4, 14)
             logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, str(e) or type(e).__name__)
             self._time_next_retry = time.time() + t_wait
             return None
