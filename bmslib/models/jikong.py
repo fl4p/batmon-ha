@@ -162,11 +162,16 @@ class JKBt(BtBms):
             # 'AT\r\n' on the shared UART (#370). Throttle so a flood cannot roll
             # the log over before the real disconnect is captured.
             try:
-                # JUNK BUFFER FLUSH: Clear raw incoming streams on the fly to prevent asyncio queue freeze
-                if hasattr(self, '_buffer') and isinstance(self._buffer, bytearray):
-                    self._buffer.clear()
-                if hasattr(self, '_junk_buffer') and isinstance(self._junk_buffer, bytearray):
-                    self._junk_buffer.clear()
+                # SMART JUNK BUFFER FLUSH: Slice away AT\r\n flood prefixes, preserve valid protocol starts
+                if hasattr(self, '_buffer') and isinstance(self._buffer, bytearray) and len(self._buffer) > 0:
+                    while len(self._buffer) > 0 and self._buffer[0] in (0x41, 0x54, 0x0D, 0x0A):
+                        self._buffer.pop(0)
+                    
+                    # Защита от переполнения: если буфер всё равно забит неизвестным шумом и раздулся > 512 байт
+                    if len(self._buffer) > 512:
+                        self.logger.error("%s: Buffer overflow protection triggered (>512 bytes). Flushing completely.", self.name)
+                        self._buffer.clear()
+
             except Exception:
                 pass
 
