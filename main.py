@@ -419,6 +419,52 @@ async def main():
                         exceptions.append(ex)
                 if exceptions:
                     logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
+
+                    # 1. SOFT MODE: Flush Bleak cache and soft-close active connections
+                    if len(exceptions) > 0 and user_config.get('bms_cooldown_on_error', False):
+                        try:
+                            logger.warning('BMS sampling error detected. Flushing GATT cache and closing connections...')
+                            from bleak import BleakClient
+                            import asyncio
+                            
+                            if hasattr(BleakClient, '_gatt_cache'):
+                                BleakClient._gatt_cache.clear()
+                                logger.info('Bleak GATT cache successfully cleared.')
+                            
+                            active_bms = locals().get('bms_list') or globals().get('bms_list') or []
+                            for bms in active_bms:
+                                if hasattr(bms, 'close'):
+                                    await bms.close()
+                                        
+                            logger.info('Soft programmatic flush completed.')
+                            await asyncio.sleep(1)
+                        except Exception as soft_err:
+                            logger.error('Failed to execute soft programmatic flush: %s', soft_err)
+
+                    # 2. HARD MODE: Total hardware restart of the configured hcieX chip via Linux kernel
+                    if len(exceptions) > 0 and user_config.get('bt_power_cycle_on_error', False):
+                        try:
+                            logger.warning('Bluetooth stack freeze detected. Executing hot hardware power cycle...')
+                            import bmslib.bt
+                            import asyncio
+                            import os
+                            
+                            bmslib.bt.bt_power(False)
+                            await asyncio.sleep(3)
+                            try:
+                                bmslib.bt.bt_power(True)
+                            except Exception:
+                                pass
+                            
+                            # DYNAMIC ADAPTER SELECTION: Extract active interface from user config (e.g., hci0, hci1) to prevent hardcoding
+                            adapter = user_config.get('bluetooth_adapter') or user_config.get('adapter') or 'hci0'
+                            os.system(f"hciconfig {adapter} up >/dev/null 2>&1")
+                            
+                            await asyncio.sleep(3)
+                            logger.info('Hot Bluetooth power cycle completed successfully.')
+                        except Exception as hw_err:
+                            logger.error('Failed to execute hardware BT power cycle: %s', hw_err)
+
                     raise exceptions[0]
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)

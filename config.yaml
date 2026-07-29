@@ -107,6 +107,9 @@ schema:
 
   bt_power_cycle: "bool?"
 
+  bt_power_cycle_on_error: "bool?"
+  bms_cooldown_on_error: "bool?"
+
   # "bleak" = stock BlueZ/D-Bus stack (default); "bumble" = bumble-bleak
   # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
   # adapter(s) it uses (brings them down), so they leave the HA Bluetooth pool;

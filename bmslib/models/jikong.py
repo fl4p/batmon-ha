@@ -161,8 +161,18 @@ class JKBt(BtBms):
             # Non-protocol junk on the notify char, e.g. a JK-PB inverter flooding
             # 'AT\r\n' on the shared UART (#370). Throttle so a flood cannot roll
             # the log over before the real disconnect is captured.
+            try:
+                # JUNK BUFFER FLUSH: Clear raw incoming streams on the fly to prevent asyncio queue freeze
+                if hasattr(self, '_buffer') and isinstance(self._buffer, bytearray):
+                    self._buffer.clear()
+                if hasattr(self, '_junk_buffer') and isinstance(self._junk_buffer, bytearray):
+                    self._junk_buffer.clear()
+            except Exception:
+                pass
+
             now = time.time()
             self._junk_count += dropped
+
             if now - self._junk_log_t >= self.JUNK_LOG_PERIOD:
                 self.logger.warning(
                     "%s discarded %d junk byte(s) between frames in %.0fs "
