@@ -69,14 +69,47 @@ async def bt_discovery(logger, timeout: int = 5, adapter=None):
         await scanner.stop()
 
 
+def scanner_is_proxy() -> bool:
+    """True when ble_stack=esphome swapped BleakScanner for habluetooth's wrapper.
+
+    In that case there is no local adapter in the BLE path at all, so reporting
+    hci devices alongside a scan result is misleading (#391).
+    """
+    return getattr(BleakScanner, '__module__', '').startswith('habluetooth')
+
+
 async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: float = 3.0) -> dict:
     """Quick scan + adapter snapshot to attach to a connect/sampling error.
 
     Returns {address, rssi, name, seen, others, adapter, adapters}; also logs a
     one-line summary so the error context is visible without a verbose_log dive.
+
+    With ble_stack=esphome the scan goes through the proxies, so we report the
+    registered proxy scanners instead of the host's hci adapters — the local
+    controller is not in the path and naming it sends people chasing ghosts.
     """
-    ad = adapter or 'default'
-    adapters = bt_adapters_info()
+    via_proxy = scanner_is_proxy()
+
+    if via_proxy:
+        # a configured `adapter:` refers to a local controller and means nothing
+        # to the proxy scanner; passing it on would just fail scanner init
+        adapter = None
+        try:
+            from bmslib.esphome_proxy import proxy_sources
+            sources = proxy_sources()
+        except Exception:
+            sources = None
+        ad = 'esphome-proxy'
+        adapters = sources
+        where = 'via esphome-proxy'
+        # None means "could not determine", which must not read as "none connected"
+        where_full = '%s (proxies=%s)' % (where, '?' if sources is None else sources)
+    else:
+        ad = adapter or 'default'
+        adapters = bt_adapters_info()
+        where = 'on adapter=%s' % ad
+        where_full = '%s (adapters=%s)' % (where, adapters)
+
     target = (address or '').upper()
     result = dict(address=address, rssi=None, name=None, seen=False,
                   others=0, adapter=ad, adapters=adapters)
@@ -84,15 +117,15 @@ async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: 
     try:
         scanner = BleakScanner(adapter=adapter) if adapter else BleakScanner()
     except Exception as e:
-        logger.warning('bt_diagnostics: scanner init failed (%s); adapter=%s adapters=%s',
-                       str(e) or type(e).__name__, ad, adapters)
+        logger.warning('bt_diagnostics: scanner init failed (%s); %s',
+                       str(e) or type(e).__name__, where_full)
         return result
 
     try:
         await scanner.start()
     except Exception as e:
-        logger.warning('bt_diagnostics: scanner start failed (%s); adapter=%s adapters=%s',
-                       str(e) or type(e).__name__, ad, adapters)
+        logger.warning('bt_diagnostics: scanner start failed (%s); %s',
+                       str(e) or type(e).__name__, where_full)
         return result
 
     try:
@@ -121,11 +154,13 @@ async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: 
             pass
 
     if result['seen']:
-        logger.info('bt_diagnostics %s: seen rssi=%s name=%r adapter=%s (%d devices in range)',
-                    address, result['rssi'], result['name'], ad, result['others'])
+        logger.info('bt_diagnostics %s: seen rssi=%s name=%r %s (%d devices in range)',
+                    address, result['rssi'], result['name'], where, result['others'])
     else:
-        logger.info('bt_diagnostics %s: NOT seen during %.1fs scan on adapter=%s (%d other devices in range, adapters=%s)',
-                    address, timeout, ad, result['others'], adapters)
+        # a connected peripheral stops advertising, so "not seen" on its own is
+        # not evidence that it is out of range
+        logger.info('bt_diagnostics %s: NOT seen during %.1fs scan %s (%d other devices in range)',
+                    address, timeout, where_full, result['others'])
     return result
 
 

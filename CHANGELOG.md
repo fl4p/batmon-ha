@@ -1,3 +1,7 @@
+## [2.13]
+
+* `bt_diagnostics` no longer reports the host's hci adapters when `ble_stack: esphome` is active. The scan goes through the proxies, so it now names the registered proxy scanners instead of a local controller that is not in the BLE path, and it stops passing a configured `adapter:` to the proxy scanner (#391).
+
 ## [2.12]
 
 * Fix: the watchdog's error counter never reset during serial sampling (the default), so it counted errors for the lifetime of the add-on instead of consecutive failures. After ~44 lifetime errors every single error stalled both BMS for a full minute, and at 200 the add-on aborted sampling for good — the "stops polling after a few hours" report in #391.

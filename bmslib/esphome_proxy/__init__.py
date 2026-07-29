@@ -8,6 +8,6 @@ proxies under `bluetooth_proxies:`. See README.md for the architecture and
 the runtime contract.
 """
 
-from .bootstrap import install_bleak_shim, start_proxies, stop_proxies
+from .bootstrap import install_bleak_shim, start_proxies, stop_proxies, proxy_sources
 
-__all__ = ["install_bleak_shim", "start_proxies", "stop_proxies"]
+__all__ = ["install_bleak_shim", "start_proxies", "stop_proxies", "proxy_sources"]

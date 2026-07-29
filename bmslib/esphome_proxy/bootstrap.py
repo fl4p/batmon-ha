@@ -112,6 +112,26 @@ async def start_proxies(proxies: Iterable[dict]) -> None:
                        "BleakScanner will return no devices")
 
 
+def proxy_sources() -> List[str] | None:
+    """Best-effort list of the proxy scanners currently registered.
+
+    Returns None when the set cannot be determined (manager not up, habluetooth
+    API changed) — that is NOT the same as "no proxies", and callers must not
+    report it as such. Returns [] only when the manager genuinely has none.
+    """
+    if _manager is None:
+        return None
+    try:
+        scanners = _manager.async_current_scanners()
+    except Exception:
+        return None
+    out = []
+    for s in scanners:
+        name = getattr(s, 'name', None) or getattr(s, 'source', None) or type(s).__name__
+        out.append('%s%s' % (name, '' if getattr(s, 'scanning', True) else ' (not scanning)'))
+    return out
+
+
 async def stop_proxies() -> None:
     """Best-effort teardown for clean shutdown."""
     for conn in _conns:
