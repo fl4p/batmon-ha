@@ -559,3 +559,43 @@ class Downsampler:
         self._last = None
 
         return s
+
+
+async def fetch_loop(fn, period, max_errors, should_stop=None):
+    """Drive `fn` every `period` seconds, aborting after `max_errors` consecutive failures.
+
+    `num_errors_row` counts *consecutive* failing cycles: it drives the 1.1**n
+    error backoff and the max_errors abort, and both only make sense that way.
+    It used to be reset by `if await fn(): num_errors_row = 0`, but the serial
+    fetch fn in main() returns None on success, so the reset never ran and the
+    count grew for the lifetime of the add-on: every error slept the full 60 s
+    cap after ~44 lifetime errors, and the watchdog aborted a perfectly healthy
+    add-on once it reached 200 (#391).
+    """
+    num_errors_row = 0
+    while not (should_stop and should_stop()):
+        try:
+            await fn()
+            num_errors_row = 0  # a cycle that did not raise is not an error
+        except Exception as e:
+            num_errors_row += 1
+            # The per-sampler logger in BmsSampler.__call__ already logged a
+            # collapsed one-line trace via summarize_exc; just record the
+            # rolling count here without duplicating the multi-page traceback
+            # (see #367). Keep full trace for unexpected non-BLE exception types.
+            short_types = (TimeoutError, asyncio.TimeoutError, OSError,
+                           bleak.exc.BleakError,
+                           bmslib.bt.BleakCharacteristicNotFoundError)
+            if isinstance(e, short_types):
+                logger.error('Error (num %d, max %d) reading BMS: %s',
+                             num_errors_row, max_errors, summarize_exc(e))
+            else:
+                import traceback
+                logger.error('Error (num %d, max %d) reading BMS: %s',
+                             num_errors_row, max_errors, e)
+                logger.error('Stack: %s', traceback.format_exc())
+            if max_errors and num_errors_row > max_errors:
+                logger.warning('too many errors, abort')
+                break
+            await asyncio.sleep(min(1.1 ** num_errors_row, 60))
+        await asyncio.sleep(period)

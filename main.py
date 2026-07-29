@@ -4,7 +4,6 @@ import random
 import sys
 import threading
 import time
-import traceback
 from importlib.metadata import PackageNotFoundError
 from typing import List, Dict
 
@@ -44,7 +43,7 @@ from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, VirtualGroupBms
 from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
-from bmslib.sampling import BmsSampler
+from bmslib.sampling import BmsSampler, fetch_loop as _fetch_loop
 from bmslib.scan import stop_all_scanners
 from bmslib.store import load_user_config
 from bmslib.util import get_logger, exit_process
@@ -58,34 +57,8 @@ t_last_store = 0
 
 
 async def fetch_loop(fn, period, max_errors):
-    num_errors_row = 0
-    while not shutdown:
-        try:
-            if await fn():
-                num_errors_row = 0
-        except Exception as e:
-            num_errors_row += 1
-            # The per-sampler logger in BmsSampler.__call__ already logged a
-            # collapsed one-line trace via summarize_exc; just record the
-            # rolling count here without duplicating the multi-page traceback
-            # (see #367). Keep full trace for unexpected non-BLE exception types.
-            from bmslib.util import summarize_exc
-            import bleak.exc
-            short_types = (TimeoutError, asyncio.TimeoutError, OSError,
-                           bleak.exc.BleakError,
-                           bmslib.bt.BleakCharacteristicNotFoundError)
-            if isinstance(e, short_types):
-                logger.error('Error (num %d, max %d) reading BMS: %s',
-                             num_errors_row, max_errors, summarize_exc(e))
-            else:
-                logger.error('Error (num %d, max %d) reading BMS: %s',
-                             num_errors_row, max_errors, e)
-                logger.error('Stack: %s', traceback.format_exc())
-            if max_errors and num_errors_row > max_errors:
-                logger.warning('too many errors, abort')
-                break
-            await asyncio.sleep(min(1.1 ** num_errors_row, 60))
-        await asyncio.sleep(period)
+    # the loop itself lives in bmslib.sampling so it is testable (main.py runs asyncio.run at import)
+    await _fetch_loop(fn, period=period, max_errors=max_errors, should_stop=lambda: shutdown)
 
     logger.debug("fetch_loop %s ends", fn)
     if isinstance(fn, BmsSampler):

@@ -1,3 +1,7 @@
+## [2.12]
+
+* Fix: the watchdog's error counter never reset during serial sampling (the default), so it counted errors for the lifetime of the add-on instead of consecutive failures. After ~44 lifetime errors every single error stalled both BMS for a full minute, and at 200 the add-on aborted sampling for good — the "stops polling after a few hours" report in #391.
+
 # Changelog
 
 
