@@ -166,7 +166,7 @@ class JKBt(BtBms):
                 if hasattr(self, '_buffer') and isinstance(self._buffer, bytearray) and len(self._buffer) > 0:
                     while len(self._buffer) > 0 and self._buffer[0] in (0x41, 0x54, 0x0D, 0x0A):
                         self._buffer.pop(0)
-                    
+
                     # Защита от переполнения: если буфер всё равно забит неизвестным шумом и раздулся > 512 байт
                     if len(self._buffer) > 512:
                         self.logger.error("%s: Buffer overflow protection triggered (>512 bytes). Flushing completely.", self.name)
