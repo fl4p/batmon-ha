@@ -53,7 +53,7 @@ More `aiobmsble` device connectors:
 * Seplos smart BMS V3 (`seplos`), Seplos smart BMS V2 (`seplos_v2`)
 * TianPwr smart BMS (`tianpwr`)
 * ATORCH CW20 DC Meter (`cw20`)
-* TDT smart BMS (`tdt`)
+* TDT smart BMS (`tdt`; `tdt_nocrc` for units with broken CRC firmware, e.g. Humsienk golf-cart batteries — see [issue #394](https://github.com/fl4p/batmon-ha/issues/394))
 * E&J Technology smart BMS (`ej`)
 * Chunguang Song ABC-BMS (`abc`)
 * D-powercore smart BMS (`dpwrcore`)
