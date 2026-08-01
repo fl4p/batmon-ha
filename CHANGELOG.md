@@ -1,5 +1,6 @@
 ## [2.13]
 
+* MQTT discovery now sets `state_class: measurement` on the temperature (`temperatures_1..N`) and cell-voltage sensors. Without it HA kept no long-term statistics for them and warned "the entity no longer has a state class" (#395).
 * `bt_diagnostics` no longer reports the host's hci adapters when `ble_stack: esphome` is active. The scan goes through the proxies, so it now names the registered proxy scanners instead of a local controller that is not in the BLE path, and it stops passing a configured `adapter:` to the proxy scanner (#391).
 
 ## [2.12]

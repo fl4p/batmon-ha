@@ -362,13 +362,14 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
         n = 'Cell Volt %0*d' % (1 + int(math.log10(num_cells)), i + 1)
-        _hass_discovery(k, "voltage", name=n, unit="V", precision=3)
+        _hass_discovery(k, "voltage", state_class="measurement", name=n, unit="V", precision=3)
 
     if num_cells > 1:
         statistic_fields = ["min", "max", "average", "median", "delta"]
         for f in statistic_fields:
             k = 'cell_voltages/%s' % f
-            _hass_discovery(k, name="Cell Volt %s" % f, device_class="voltage", unit="V", precision=3)
+            _hass_discovery(k, name="Cell Volt %s" % f, device_class="voltage", state_class="measurement",
+                            unit="V", precision=3)
 
         for f in ["min_index", "max_index"]:
             k = 'cell_voltages/%s' % f
@@ -377,7 +378,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, len(temperatures or [])):
         k = 'temperatures/%d' % (i + 1)
         if not is_none_or_nan(temperatures[i]):
-            _hass_discovery(k, "temperature", unit="°C", precision=1)
+            _hass_discovery(k, "temperature", state_class="measurement", unit="°C", precision=1)
 
     meters = {
         # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics
