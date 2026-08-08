@@ -414,8 +414,14 @@ class BtBms:
             if address == 'serial':
                 from bmslib.wired import SerialBleakClientWrapper
                 assert adapter, "You need to specify a serial device (adapter)"
+                # SERIAL_KWARGS carries the per-model framing knobs (eol /
+                # timeout). It MUST be forwarded: with the defaults
+                # (eol=b'\n', timeout=None) the reader thread blocks forever in
+                # read_until() on any binary protocol whose frames contain no
+                # 0x0A, so no response is ever delivered (#398).
                 self.client = SerialBleakClientWrapper(
-                    adapter, baudrate=getattr(self, 'BAUDRATE', 115200))
+                    adapter, baudrate=getattr(self, 'BAUDRATE', 115200),
+                    **getattr(self, 'SERIAL_KWARGS', {}))
             else:
                 self.client = self._create_client(address)
 

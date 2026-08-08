@@ -95,6 +95,11 @@ class DalyUart(DalyBt):
     # Daly UART is 9600 8N1 per the protocol PDF + maland16/daly-bms-uart.
     # The JK UART path uses 115200 (BtBms default).
     BAUDRATE = 9600
+    # eol=None -> raw binary reads. Daly response frames are fixed-length (13 B)
+    # binary and usually contain no 0x0A at all, so the default read_until(b'\n')
+    # with timeout=None parks the reader thread forever and every command times
+    # out with "got 0/N responses" (#398). feed_buffer() below does the framing.
+    SERIAL_KWARGS = dict(eol=None, timeout=1)
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
