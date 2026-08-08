@@ -1,5 +1,6 @@
 ## [2.14]
 
+* Fix: the add-on appeared to hang for minutes after a failed BLE subscribe — the diagnostic GATT dump read every characteristic serially, and each unanswered read costs 30 s over an ESPHome proxy. Reads are now capped, so a failed subscribe no longer stalls the other BMS (#391).
 * Install failing with `Could not find a version that satisfies the requirement bleak==2.0.0 (from versions: none)` reads as a missing package but means python < 3.10 or an unreachable PyPI; the build now checks both up front and says which (#397).
 * Fix: `daly_uart` got no response at all over RS485 (`got 0/1 responses`) — the serial transport ignored the per-model framing config and did line-based reads, blocking on a `0x0A` that Daly's binary frames never contain. Same bug affected `basen_uart` and `pace_uart` (#398, #396).
 
