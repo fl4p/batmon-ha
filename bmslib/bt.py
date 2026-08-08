@@ -784,8 +784,26 @@ class BtBms:
         return None
 
 
+ENUMERATE_READ_TIMEOUT = 2.0  # per GATT read
+ENUMERATE_BUDGET = 20.0  # for all reads of one dump
+
+
 # noinspection DuplicatedCode
-async def enumerate_services(client: BleakClient, logger):
+async def enumerate_services(client: BleakClient, logger,
+                             read_timeout: float = ENUMERATE_READ_TIMEOUT,
+                             budget: float = ENUMERATE_BUDGET):
+    """Log the GATT tree, with the value of every readable characteristic.
+
+    The reads are bounded, because this also runs on the start_notify failure
+    path (inside the sampling loop, so nothing else is sampled meanwhile). A
+    read of a characteristic the device advertises but does not really serve
+    blocks for the backend's full timeout — 30 s over an ESPHome proxy — and a
+    JK offers about six of those, so the unbounded version turned one failed
+    subscribe into a six-minute outage for *every* BMS (#391).
+
+    Past `budget` the tree is still listed, values are not read. The dump says
+    so instead of just showing fewer lines.
+    """
     try:
         # might raise bleak.exc.BleakError: Service Discovery has not been performed yet
         services = client.services
@@ -795,31 +813,42 @@ async def enumerate_services(client: BleakClient, logger):
             services = await client.get_services()
         else:
             raise
+
+    t_end = time.time() + budget
+    skipped = 0
+
+    async def read(make_coro):
+        """Returns (ok, value_or_exception). Never blocks longer than read_timeout.
+
+        Takes a factory, not a coroutine: on the skip path we must not leave an
+        un-awaited coroutine behind.
+        """
+        nonlocal skipped
+        if time.time() >= t_end:
+            skipped += 1
+            return False, 'skipped (%.0fs read budget exhausted)' % budget
+        try:
+            return True, bytes(await asyncio.wait_for(make_coro(), read_timeout))
+        except Exception as e:
+            return False, e if str(e) else type(e).__name__
+
     for service in services:
         logger.info(f"[Service] {service}")
         for char in service.characteristics:
             if "read" in char.properties:
-                try:
-                    value = bytes(await client.read_gatt_char(char.uuid))
-                    logger.info(
-                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {e}"
-                    )
-
+                ok, value = await read(lambda c=char: client.read_gatt_char(c.uuid))
+                log = logger.info if ok else logger.error
+                log(f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}")
             else:
-                value = None
                 logger.info(
-                    f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: {value}"
+                    f"\t[Characteristic] {char} ({','.join(char.properties)}), Value: None"
                 )
 
             for descriptor in char.descriptors:
-                try:
-                    value = bytes(
-                        await client.read_gatt_descriptor(descriptor.handle)
-                    )
-                    logger.info(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
-                except Exception as e:
-                    logger.error(f"\t\t[Descriptor] {descriptor}) | Value: {e}")
+                ok, value = await read(lambda d=descriptor: client.read_gatt_descriptor(d.handle))
+                log = logger.info if ok else logger.error
+                log(f"\t\t[Descriptor] {descriptor}) | Value: {value}")
+
+    if skipped:
+        logger.warning('enumerate_services: %d value(s) not read, %.0fs budget exhausted '
+                       '(the tree above is complete, the values are not)', skipped, budget)
