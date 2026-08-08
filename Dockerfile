@@ -18,6 +18,23 @@ RUN apk add git
 # copy files
 COPY . .
 
+# Fail early and legibly instead of letting pip report a confusing
+# "Could not find a version that satisfies the requirement bleak==2.0.0
+# (from versions: none)" further down (#397). bleak 2.0.0 is a universal
+# py3-none-any wheel and needs Python >=3.10, so `versions: none` can only mean
+# a too-old interpreter or an unreachable index -- distinguish the two here.
+RUN python3 -V \
+ && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' \
+    || { echo "FATAL: need python >= 3.10 for bleak==2.0.0, got $(python3 -V 2>&1)"; exit 1; }
+# Reachability of the package index (pip needs BOTH hosts). Plain TCP connect --
+# no TLS, no certs -- so this checks exactly what pip's "(from versions: none)"
+# hides: DNS resolution and routing to :443. Skipped when a proxy is configured,
+# where a direct connect legitimately fails while pip still works.
+RUN if [ -z "$HTTPS_PROXY$https_proxy$HTTP_PROXY$http_proxy" ]; then \
+      python3 -c 'import socket; [socket.create_connection((h, 443), 15).close() for h in ("pypi.org", "files.pythonhosted.org")]' \
+        || { echo "FATAL: cannot reach the python package index from the build container -- check Supervisor DNS / proxy / IPv6 (#397)"; exit 1; }; \
+    fi
+
 # create a separate venv for a specific bleak version that has a pairing agent that can pair devices with a PSK
 RUN python3 -m venv venv_bleak_pairing
 RUN venv_bleak_pairing/bin/pip3 install -r requirements.txt
