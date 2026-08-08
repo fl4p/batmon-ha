@@ -1,3 +1,8 @@
+## [2.14]
+
+* Install failures now name their actual cause. `pip install -r requirements.txt` reported `Could not find a version that satisfies the requirement bleak==2.0.0 (from versions: none)`, which reads as a missing package but really means python < 3.10 or an unreachable PyPI. The build now checks both before the first pip run (#397).
+* Fix: `daly_uart` got no response at all over RS485 (`got 0/1 responses`) — the serial transport ignored the per-model framing config and did line-based reads, blocking on a `0x0A` that Daly's binary frames never contain. Same bug affected `basen_uart` and `pace_uart` (#398, #396).
+
 ## [2.13]
 
 * MQTT discovery now sets `state_class: measurement` on the temperature (`temperatures_1..N`) and cell-voltage sensors. Without it HA kept no long-term statistics for them and warned "the entity no longer has a state class" (#395).
