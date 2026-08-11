@@ -443,7 +443,17 @@ class BtBms:
         if adapter:  # hci0, hci1 (BT adapter hardware)
             self.logger.info('Using adapter %s to connect to %s (%s)', adapter, self.address, self.name)
             kwargs['adapter'] = adapter
-        return BleakClient(addr_or_device,
+
+        # НАШЕ РЕШЕНИЕ: Подменяем стандартный клиент на сокеты ядра Linux (BlueK)
+        client_class = BleakClient
+        try:
+            import bluek
+            client_class = bluek.BleakClient
+            self.logger.info('Successfully forced native BlueK L2CAP sockets for %s (%s)', self.address, self.name)
+        except Exception as e:
+            self.logger.warning('Fallback to standard bleak. BlueK import failed: %s', e)
+
+        return client_class(addr_or_device,
                                  handle_pairing=bool(self._psk),
                                  disconnected_callback=self._on_disconnect,
                                  **kwargs
