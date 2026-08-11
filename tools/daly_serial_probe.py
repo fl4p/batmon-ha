@@ -96,6 +96,26 @@ def split_frames(buf: bytes):
         yield buf[i:], None, skipped
 
 
+def is_echo(frame: bytes, request: bytes) -> bool:
+    """True if `frame` is our own request looped back rather than a reply.
+
+    A half-duplex RS485 adapter whose driver-enable is stuck asserted (no
+    auto-direction, RTS wired to DE) puts the transmitted bytes straight back on
+    RX. Such a frame passes the checksum test trivially -- it was checksummed by
+    build_request -- so without this it would be counted as a valid reply and the
+    tool would announce "BMS answers" on a link that has no BMS on it at all.
+
+    Two independent signals, either is conclusive:
+      * byte-identical to what we just sent;
+      * byte 1 in the host-address range 0x40..0x4F. A genuine reply carries the
+        board NUMBER there (1..16), never the host address, so the two ranges
+        cannot collide.
+    """
+    if frame == request:
+        return True
+    return BOARD1_ADDR <= frame[1] <= BOARD1_ADDR + 15
+
+
 def hexs(b: bytes) -> str:
     return ' '.join('%02x' % x for x in b)
 
@@ -157,7 +177,7 @@ def main():
     boards = parse_range(args.boards)
     fills = [int(f, 16) for f in args.fill.split(',') if f.strip()]
 
-    stat = dict(rx=0, frames=0, bad_crc=0, skipped=0)
+    stat = dict(rx=0, frames=0, bad_crc=0, skipped=0, echo=0)
     hits = []          # (label, board, cmd, fill, frame)
     incomplete = []    # sweep configurations that did not fully run
     opened = 0
@@ -198,15 +218,24 @@ def main():
                         stat['skipped'] += skipped
                         if ok is None:
                             continue  # trailing partial frame
-                        if ok:
+                        if not ok:
+                            stat['bad_crc'] += 1
+                            print('  CRC %s fill=%02x -> %s'
+                                  % (label, fill, hexs(frame)))
+                        elif is_echo(frame, req):
+                            # Our own request looped back. It is checksummed by
+                            # construction, so counting it as a reply would
+                            # report "BMS answers" on a bus where the RS485
+                            # transceiver is stuck transmitting -- precisely the
+                            # fault this tool exists to find.
+                            stat['echo'] += 1
+                            print('  ECHO %s fill=%02x -> %s (our own request came '
+                                  'back)' % (label, fill, hexs(frame)))
+                        else:
                             stat['frames'] += 1
                             hits.append((label, board, cmd, fill, frame))
                             print('  OK  %s fill=%02x -> %s'
                                   % (label, fill, describe(frame)))
-                        else:
-                            stat['bad_crc'] += 1
-                            print('  CRC %s fill=%02x -> %s'
-                                  % (label, fill, hexs(frame)))
 
     for baud in bauds:
         # rts/dtr: None keeps pyserial's default (both asserted). False
@@ -249,8 +278,9 @@ def main():
     print('')
     print('--- summary ---')
     print('raw bytes received: %d' % stat['rx'])
-    print('valid frames: %d, bad checksum: %d, resync-skipped bytes: %d'
-          % (stat['frames'], stat['bad_crc'], stat['skipped']))
+    print('valid frames: %d, echoes of our own request: %d, bad checksum: %d, '
+          'resync-skipped bytes: %d'
+          % (stat['frames'], stat['echo'], stat['bad_crc'], stat['skipped']))
     if incomplete:
         print('NOT fully tested: %s' % '; '.join(incomplete))
 
@@ -271,6 +301,18 @@ def main():
         print('No configuration completed, so this run says NOTHING about the BMS.')
         print('Fix the errors above (is %s really a serial port?) and re-run.' % args.port)
         return 2
+
+    if stat['echo']:
+        print('Everything that came back was our OWN request looped back (%d frames),'
+              % stat['echo'])
+        print('so no BMS was heard. That is the RS485 direction-control fault: the')
+        print('transceiver stays in transmit and never lets the reply through. Check:')
+        print('  1. Is the adapter auto-direction? If it drives DE from RTS or DTR,')
+        print('     try --baud with the rts=False pass (see whether it appeared above).')
+        print('  2. Some adapters echo unconditionally in hardware. Then this is')
+        print('     expected and tells you nothing about the BMS -- test with the')
+        print('     vendor PC tool on the same adapter to confirm it works at all.')
+        return 1
 
     if total_rx == 0:
         print('NO bytes received at all with boards %s at %s baud -- the link is dead'

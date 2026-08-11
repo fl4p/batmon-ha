@@ -146,14 +146,23 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
 
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
-    bms: bmslib.bt.BtBms = bms_class(
-        address=addr,
-        name=name,
-        verbose_log=verbose_log or dev.get('debug'),
-        psk=dev.get('pin'),
-        adapter=dev.get('adapter'),
-        keep_alive=dev.get('keep_alive'),
-        **extra_kwargs,
-    )
+    try:
+        bms: bmslib.bt.BtBms = bms_class(
+            address=addr,
+            name=name,
+            verbose_log=verbose_log or dev.get('debug'),
+            psk=dev.get('pin'),
+            adapter=dev.get('adapter'),
+            keep_alive=dev.get('keep_alive'),
+            **extra_kwargs,
+        )
+    except Exception:
+        # A per-device config problem must stay per-device. An unknown `type` or
+        # a commented-out address already skip with a warning; a constructor that
+        # rejects its arguments (e.g. `type: daly_uart:0` -- the board number is
+        # 1-based) used to propagate out of main()'s device loop and abort the
+        # whole add-on, so every *other* configured battery never started.
+        logger.exception('Cannot construct %s device %s, skipping it', slug, name)
+        return None
 
     return bms

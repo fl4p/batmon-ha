@@ -34,8 +34,27 @@ class SerialBleakClientWrapper(object):
     async def get_services(self):
         return self.services
 
+    @property
+    def rx_bytes(self):
+        """Bytes read off the port since open. Port-level truth, independent of
+        whether any notify callback was registered to consume them."""
+        return getattr(self.t, 'rx_bytes', None)
+
     async def connect(self, timeout=None):
         self.t.open()
+        # Respawn the reader if a previous incarnation gave up. Without this a
+        # transient USB dropout that outlasted RX_MAX_ERRORS killed the thread
+        # for the life of the process: the port still opened, writes still
+        # succeeded, and every command timed out forever with no reader to
+        # deliver the reply. sampling.py disconnects a BMS after repeated
+        # errors and reconnects on the next cycle, so this makes it self-heal.
+        if not self._rx_thread.is_alive():
+            logger.warning('restarting the serial reader thread for %s (previous '
+                           'one died: %s)', self.t.port, self.rx_thread_error)
+            self.rx_thread_error = None
+            self._rx_thread = threading.Thread(target=self._on_receive, daemon=True,
+                                               name='serial-rx')
+            self._rx_thread.start()
 
     async def disconnect(self):
         self.t.close()

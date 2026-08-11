@@ -2,7 +2,9 @@
 
 * Fix: `daly_uart` addressed RS485 board 1 unconditionally, so a Daly whose board number was changed from the factory default answered nothing at all. Set it with `type: daly_uart:2` (#398).
 * Fix: wired Daly requests padded their unused payload with `0x00`. Daly's firmware UART resyncs on edges and gets none from an all-zero payload, so requests went unanswered; they now use `0xAA` like dbus-serialbattery, plus a 20 ms gap between commands (#398).
-* A wired timeout now reports how many raw bytes arrived, separating a dead link (`0 bytes received`) from a mis-framed one (bytes, `0 valid frames`), and the serial reader thread logs read errors instead of dying silently. New `tools/daly_serial_probe.py` sweeps board numbers, fill bytes and RTS/DTR to find which combination a BMS answers (#398).
+* A wired timeout now reports how many raw bytes arrived, separating a dead link (`0 bytes received`) from a mis-framed one (bytes, `0 valid frames`), and names a dead reader thread instead of blaming the wiring. New `tools/daly_serial_probe.py` sweeps board numbers, fill bytes and RTS/DTR to find which combination a BMS answers (#398).
+* Fix: a wired BMS stayed dark until the add-on was restarted if its serial reader thread gave up (e.g. a USB adapter re-enumerating) — read errors killed the thread silently and nothing ever restarted it. It now logs, and restarts on the next reconnect.
+* Fix: a bad option for one device (e.g. the 1-based board number as `daly_uart:0`) aborted the whole add-on before any battery started. Such a device is now skipped with an error, like an unknown `type` already was.
 * Fix: Daly MOSFET switch writes always used the BLE address byte, so charge/discharge toggles were ignored over UART/RS485.
 
 ## [2.14]

@@ -166,17 +166,33 @@ class DalyUart(DalyBt):
         return await super()._q(command, num_responses)
 
     def _q_timeout_context(self) -> str:
+        # A dead reader thread has to be reported FIRST. Its death freezes
+        # _uart_stats, so the byte counts below would keep asserting a confident
+        # (and by then wrong) diagnosis forever. Absence of new bytes here means
+        # "nobody was listening", not "nothing arrived".
+        rx_err = getattr(self.client, 'rx_thread_error', None)
+        if rx_err is not None:
+            return ('board=%d, the serial reader thread died (%s) — no reply can be '
+                    'delivered until it restarts, which happens on the next reconnect. '
+                    'The byte counts below are stale' % (self.board, rx_err))
+
         s = self._uart_stats
-        rx = s.get('rx', 0)
+        decoded = s.get('rx', 0)
+        # Port-level count is authoritative when the transport exposes it: it
+        # also covers bytes that arrived before the notify callback was
+        # registered, which the decoder's own counter cannot see.
+        port_rx = getattr(self.client, 'rx_bytes', None)
+        rx = decoded if port_rx is None else max(port_rx, decoded)
+
         if not rx:
             return ('board=%d, 0 bytes received on %s since connect — nothing reached us, '
                     'so this is wiring / adapter / port, not framing. Run '
                     'tools/daly_serial_probe.py to localize it' % (self.board, self._adapter))
-        return ('board=%d, %d bytes received on %s (%d valid frames, %d bad checksum, '
-                '%d resync-skipped) — bytes are arriving, so check baud rate and board '
-                'number with tools/daly_serial_probe.py'
-                % (self.board, rx, self._adapter, s.get('frames', 0), s.get('bad_crc', 0),
-                   s.get('skipped', 0)))
+        return ('board=%d, %d bytes received on %s (%d reached the decoder: %d valid '
+                'frames, %d bad checksum, %d resync-skipped) — bytes are arriving, so '
+                'check baud rate and board number with tools/daly_serial_probe.py'
+                % (self.board, rx, self._adapter, decoded, s.get('frames', 0),
+                   s.get('bad_crc', 0), s.get('skipped', 0)))
 
     def _wrap_notify(self, sender, data):
         """Re-buffer chunked serial data into 13-byte frames before handing
