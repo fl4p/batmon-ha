@@ -165,7 +165,9 @@ def _match_signatures(data: bytes) -> list:
 
 class SnoopBt(BtBms):
     def __init__(self, address, **kwargs):
-        self._probe_spec: Optional[str] = kwargs.pop('probe', None)
+        # `type_spec` is the generic `type: snoop:<spec>` suffix channel;
+        # `probe` is kept for direct constructor callers.
+        self._probe_spec: Optional[str] = kwargs.pop('type_spec', None) or kwargs.pop('probe', None)
         super().__init__(address, **kwargs)
         self._notify_chars = []
         self._connected_at = 0.0

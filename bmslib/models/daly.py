@@ -18,7 +18,7 @@ import asyncio
 import math
 import struct
 import time
-from typing import Dict
+from typing import Dict, Optional
 
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms, enumerate_services
@@ -29,25 +29,55 @@ def calc_crc(message_bytes):
     return sum(message_bytes) & 0xFF
 
 
-def daly_command_message(command: int, extra="", address: int = 8):
+def daly_board_addr_byte(board: int) -> int:
+    """Wire value of request byte 1 addressing Daly board number ``board`` (1-based).
+
+    Board 1 = 0x40, board 2 = 0x41, ... A reply carries the board number itself
+    in byte 1, so board 1 answers with 0x01 (``0x3F + board`` outbound, ``board``
+    inbound). A BMS whose board number is not 1 stays completely silent when
+    addressed as 0x40 -- which is all batmon <= 2.14 ever sent (#398).
+
+    Cross-checked against mr-manuel/venus-os_dbus-serialbattery bms/daly.py:
+    ``buffer[1] = self.address[0]  # Board No 1 = 0x40; Board No 2 = 0x41, ...``
+    with the matching reply check ``(63 + id) != self.address[0]``.
+    """
+    if not 1 <= board <= 16:
+        raise ValueError('Daly board number must be 1..16, got %r' % (board,))
+    return 0x3F + board
+
+
+def daly_command_message(command: int, extra="", address: int = 8,
+                         addr_byte: Optional[int] = None, fill: int = 0x00):
     """
     Takes the command ID and formats a request message
 
     :param command: Command ID ("90" - "98")
-    :param extra:
-    :param address: Daly host-address byte. 4 = USB / RS485, 8 = Bluetooth.
+    :param extra: hex string placed at the front of the 8-byte payload
+    :param address: Daly host-address nibble. 4 = USB / RS485, 8 = Bluetooth.
         Defaults to 8 (BLE) for backward compatibility.
+    :param addr_byte: full wire value of byte 1, overriding `address`. The UART
+        path uses this to address a specific board (see daly_board_addr_byte).
+    :param fill: byte padding the payload out to 8 bytes. 0x00 historically; the
+        UART path uses 0xAA, because Daly's firmware UART resyncs on edges and an
+        all-zero payload gives it none, so 0x00 requests are answered much less
+        reliably over a wire link (#398). Same value and rationale as
+        dbus-serialbattery, which notes it "reduces read errors dramatically".
     :return: Request message as bytes
     """
     # 95 -> a58095080000000000000000c2
 
     assert isinstance(command, int)
-    assert address in (4, 8), "Daly host address must be 4 (USB) or 8 (BLE)"
 
-    message = "a5%i0%02x08%s" % (address, command, extra)
-    #          "a5%i0%s  08%s"
-    message = message.ljust(24, "0")
-    message_bytes = bytearray.fromhex(message)
+    if addr_byte is None:
+        assert address in (4, 8), "Daly host address must be 4 (USB) or 8 (BLE)"
+        addr_byte = address << 4
+
+    payload = bytearray.fromhex(extra) if extra else bytearray()
+    assert len(payload) <= 8, "Daly payload is 8 bytes, got %d" % len(payload)
+    payload.extend([fill] * (8 - len(payload)))
+
+    message_bytes = bytearray([0xA5, addr_byte, command, 0x08])
+    message_bytes.extend(payload)
     message_bytes.append(calc_crc(message_bytes))
 
     return message_bytes
@@ -165,8 +195,18 @@ class DalyBt(BtBms):
             await self.client.stop_notify(self.UUID_RX)
         await super().disconnect()
 
+    def _build_request(self, command: int, extra="") -> bytearray:
+        """Single place every outbound frame is built, so DalyUart can override
+        the addressing / payload fill without duplicating the command list."""
+        return daly_command_message(command, extra=extra, address=self.WIRE_ADDRESS)
+
+    def _q_timeout_context(self) -> str:
+        """Extra detail appended to the _q timeout message. Overridden by the
+        wired path, which can say whether any bytes arrived at all."""
+        return ''
+
     async def _q(self, command: int, num_responses: int = 1):
-        msg = daly_command_message(command, address=self.WIRE_ADDRESS)
+        msg = self._build_request(command)
         if num_responses > 1:
             self._fetch_nr[command] = [None] * num_responses
         else:
@@ -180,14 +220,19 @@ class DalyBt(BtBms):
                 sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
             except TimeoutError:
                 n_recv = num_responses - self._fetch_nr.get(command, [None]).count(None)
+                ctx = self._q_timeout_context()
                 raise TimeoutError(
-                    "timeout awaiting result for cmd=0x%02x, got %d/%d responses" % (command, n_recv, num_responses))
+                    "timeout awaiting result for cmd=0x%02x, got %d/%d responses%s"
+                    % (command, n_recv, num_responses, (' [%s]' % ctx) if ctx else ''))
 
             return sample
 
     async def set_switch(self, switch: str, state: bool):
         fet_addr = dict(discharge=0xD9, charge=0xDA)
-        msg = daly_command_message(fet_addr[switch], extra="01" if state else "00")
+        # via _build_request, so the wired path gets its own address byte here
+        # too -- this used to fall back to the BLE default 0x80 and the MOSFET
+        # write was silently ignored by a BMS reached over UART/RS485.
+        msg = self._build_request(fet_addr[switch], extra="01" if state else "00")
         self.logger.info('write %s', msg)
         self._fetch_status.invalidate(self)
         status = await self._fetch_status()

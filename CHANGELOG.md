@@ -1,3 +1,10 @@
+## [2.15]
+
+* Fix: `daly_uart` addressed RS485 board 1 unconditionally, so a Daly whose board number was changed from the factory default answered nothing at all. Set it with `type: daly_uart:2` (#398).
+* Fix: wired Daly requests padded their unused payload with `0x00`. Daly's firmware UART resyncs on edges and gets none from an all-zero payload, so requests went unanswered; they now use `0xAA` like dbus-serialbattery, plus a 20 ms gap between commands (#398).
+* A wired timeout now reports how many raw bytes arrived, separating a dead link (`0 bytes received`) from a mis-framed one (bytes, `0 valid frames`), and the serial reader thread logs read errors instead of dying silently. New `tools/daly_serial_probe.py` sweeps board numbers, fill bytes and RTS/DTR to find which combination a BMS answers (#398).
+* Fix: Daly MOSFET switch writes always used the BLE address byte, so charge/discharge toggles were ignored over UART/RS485.
+
 ## [2.14]
 
 * Fix: the add-on appeared to hang for minutes after a failed BLE subscribe — the diagnostic GATT dump read every characteristic serially, and each unanswered read costs 30 s over an ESPHome proxy. Reads are now capped, so a failed subscribe no longer stalls the other BMS (#391).

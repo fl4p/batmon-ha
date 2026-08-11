@@ -3,9 +3,32 @@ import struct
 
 import pytest
 
+import bmslib.wired
 from bmslib.models import daly_uart as du
 from bmslib.models.daly import daly_command_message
 from bmslib.test.data import daly_uart_fixtures as fx
+
+
+class _NullWrapper:
+    """Stand-in for SerialBleakClientWrapper: constructing the real one opens a
+    tty and spawns a reader thread."""
+
+    def __init__(self, address, **kwargs):
+        self.address = address
+        self.services = []
+        self.rx_thread_error = None
+
+
+@pytest.fixture
+def uart_bms(monkeypatch):
+    """Build a DalyUart against a stub transport, exercising the real
+    address='serial' construction path."""
+    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+
+    def make(**kwargs):
+        return du.DalyUart('serial', name='t', adapter='/dev/ttyUSB0', **kwargs)
+
+    return make
 
 
 # === Request builder ========================================================
@@ -21,20 +44,75 @@ def test_build_command_uses_address_4():
     """UART path must set the host-address byte to 4 (USB/RS485)."""
     msg = du.build_command(0x90)
     assert msg[0] == 0xA5
-    assert msg[1] == 0x40  # "%i0" with i=4 → "40"
+    assert msg[1] == 0x40  # board 1
     assert msg[2] == 0x90
     assert msg[3] == 0x08
     assert len(msg) == 13
 
 
 def test_build_command_matches_known_request_frames():
-    """All four read commands match the byte sequences we'd expect from the
-    Daly UART v1.2 PDF (cross-derived via daly_command_message(addr=4))."""
+    """All four read commands match their independently checksummed frames."""
     for cmd, expected in fx.REQUEST_FRAMES.items():
         assert du.build_command(cmd) == expected, (
             f"cmd 0x{cmd:02x}: got {du.build_command(cmd).hex()}, "
             f"expected {expected.hex()}"
         )
+
+
+def test_uart_requests_are_aa_filled():
+    """The 8 don't-care payload bytes must be 0xAA, not 0x00: Daly's firmware
+    UART resyncs on edges and an all-zero payload gives it none, which makes
+    requests go unanswered on a wire link (#398)."""
+    msg = du.build_command(0x93)
+    assert set(msg[4:12]) == {0xAA}, msg.hex()
+    assert du.UART_FILL == 0xAA
+    # ... and this is genuinely a different frame from what <= 2.14 sent
+    assert msg != fx.REQUEST_FRAMES_ZERO_FILL[0x93]
+
+
+def test_board_addressing():
+    """Board N is addressed as 0x3F + N in request byte 1. Getting this wrong
+    means total silence, not a degraded reading (#398)."""
+    for (cmd, board), expected in fx.REQUEST_FRAMES_BOARD.items():
+        got = du.build_command(cmd, board=board)
+        assert got == expected, (f"cmd 0x{cmd:02x} board {board}: got {got.hex()}, "
+                                 f"expected {expected.hex()}")
+    assert du.build_command(0x90, board=1)[1] == 0x40
+    assert du.build_command(0x90, board=16)[1] == 0x4F
+
+
+@pytest.mark.parametrize("board", [0, -1, 17, 100])
+def test_board_addressing_rejects_out_of_range(board):
+    """A bad board number must raise, not silently wrap into another board's
+    address (or into the 0x80 BLE address space)."""
+    with pytest.raises(ValueError):
+        du.build_command(0x90, board=board)
+
+
+def test_board_number_from_type_suffix(uart_bms):
+    """`type: daly_uart:3` selects board 3."""
+    bms = uart_bms(type_spec='3')
+    assert bms.board == 3
+    assert bms._build_request(0x90)[1] == 0x42
+    assert uart_bms().board == 1
+
+
+def test_bad_type_suffix_raises_at_construction(uart_bms):
+    """A typo must fail loudly at startup, not poll a wrong board forever."""
+    with pytest.raises((ValueError, TypeError)):
+        uart_bms(type_spec='99')
+    with pytest.raises((ValueError, TypeError)):
+        uart_bms(type_spec='abc')
+
+
+def test_set_switch_uses_the_wired_address(uart_bms):
+    """MOSFET writes went out with the BLE address byte 0x80 on the wired path,
+    so the BMS ignored them. They must use the board address like reads do."""
+    msg = uart_bms(type_spec='2')._build_request(0xDA, extra='01')
+    assert msg[1] == 0x41
+    assert msg[2] == 0xDA
+    assert msg[4] == 0x01
+    assert set(msg[5:12]) == {0xAA}
 
 
 def test_uart_and_ble_request_frames_differ_only_in_address_byte():

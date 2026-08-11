@@ -174,6 +174,40 @@ HCI index. As an HA add-on this works out of the box (the manifest sets
 the stable `/dev/serial/by-id/...` path so the port survives re-plugging.
 Running standalone on Linux, add your user to the `dialout` group.
 
+### Daly board number
+
+Daly puts the board number in the request, so a BMS whose board number isn't
+the factory default 1 answers nothing at all. Append it to the type:
+
+```yaml
+- address: serial
+  adapter: /dev/ttyUSB0
+  type: daly_uart:2       # RS485 board number 2 (omit `:2` for board 1)
+  alias: battery2
+```
+
+Daly's PC tool calls this "Board No". One BMS per adapter for now: several
+Daly on a shared RS485 bus is [#398](https://github.com/fl4p/batmon-ha/issues/398).
+
+### Troubleshooting a silent wired link
+
+`timeout awaiting result for cmd=0x93, got 0/1 responses` means no reply was
+decoded. The message now says whether any bytes arrived at all — `0 bytes
+received` is a wiring/adapter/port problem, while a non-zero count with `0
+valid frames` points at the baud rate or the board number.
+
+For Daly, `tools/daly_serial_probe.py` sweeps board numbers, payload fill bytes
+and RTS/DTR states and dumps every raw byte, so one run tells you which board
+answers (or that nothing does):
+
+```
+python3 tools/daly_serial_probe.py /dev/serial/by-id/usb-FTDI_...-port0
+```
+
+Note that Daly's UART (TTL) and RS485 ports are different RJ45 sockets with
+different pinouts, and on many boards the UART port is shared with the
+Bluetooth module — only one of the two can talk at a time.
+
 To request another BMS family over RS485, open an issue with a captured
 frame (`tcpdump` of the USB-serial line, or a wireshark log from the
 vendor's PC tool).

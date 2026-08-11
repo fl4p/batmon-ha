@@ -110,16 +110,17 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
 
     slug = str(dev['type'] or '').strip()
 
-    # Optional `:<spec>` suffix on the type. Currently only the `snoop` type
-    # consumes it (comma-separated list of BMS families to actively probe,
-    # e.g. `type: snoop:jbd,jk,daly`).
+    # Optional `:<spec>` suffix on the type, forwarded to the model as
+    # `type_spec`. Consumed by `snoop` (comma-separated BMS families to actively
+    # probe, e.g. `type: snoop:jbd,jk,daly`) and by `daly_uart` (the RS485 board
+    # number, e.g. `type: daly_uart:2`).
     extra_kwargs = {}
     if ':' in slug:
-        slug, probe_spec = slug.split(':', 1)
+        slug, type_spec = slug.split(':', 1)
         slug = slug.strip()
-        probe_spec = probe_spec.strip()
-        if probe_spec:
-            extra_kwargs['probe'] = probe_spec
+        type_spec = type_spec.strip()
+        if type_spec:
+            extra_kwargs['type_spec'] = type_spec
 
     bms_class = get_bms_model_class(slug)
 

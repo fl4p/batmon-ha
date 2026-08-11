@@ -34,6 +34,13 @@ class SerialTransport(Transport):
         self.eol = eol
         self.timeout = timeout
         self.ser: Optional[serial.Serial] = None
+        # Byte counters, so a model that never completes a response can report
+        # whether anything arrived at all. "0 bytes received" (dead link) and
+        # "N bytes received, none parseable" (wrong baud / framing / address)
+        # need completely different fixes but produced the same add-on log
+        # message before #398.
+        self.rx_bytes = 0
+        self.tx_bytes = 0
 
     def open(self):
         port = self.port
@@ -42,7 +49,11 @@ class SerialTransport(Transport):
             if not files:
                 raise FileNotFoundError('Serial port device not found: {}'.format(port))
             port =files[0]
-        logger.info(f'opening serial port {port} @ {self.baudrate} baud')
+        # Log the framing config too: it is per-model (SERIAL_KWARGS) and was
+        # silently dropped before #398, so "did my build get the fix?" must be
+        # answerable from a normal INFO log without a debug rebuild.
+        logger.info('opening serial port %s @ %s baud (eol=%s, timeout=%s)',
+                    port, self.baudrate, self.eol, self.timeout)
         self.ser = serial.Serial(port, baudrate=self.baudrate, timeout=self.timeout)
 
     def close(self):
@@ -51,6 +62,7 @@ class SerialTransport(Transport):
 
     def write(self, data: bytes):
         self.ser.write(data)
+        self.tx_bytes += len(data)
 
     @property
     def is_open(self):
@@ -63,10 +75,13 @@ class SerialTransport(Transport):
             # read_until would fragment a single frame into many pieces. Return
             # whatever is buffered now, falling back to a 1-byte timed read.
             if self.eol is None:
-                return self.ser.read(self.ser.in_waiting or 1)
-            # read_until(b'\n') is equivalent to readline(); a different `eol`
-            # (e.g. b'\r' for paceic) splits frames on that byte instead.
-            return self.ser.read_until(self.eol)
+                data = self.ser.read(self.ser.in_waiting or 1)
+            else:
+                # read_until(b'\n') is equivalent to readline(); a different `eol`
+                # (e.g. b'\r' for paceic) splits frames on that byte instead.
+                data = self.ser.read_until(self.eol)
+            self.rx_bytes += len(data or b'')
+            return data
         return None
 
 class StdioTransport(Transport):

@@ -71,14 +71,43 @@ STATES_8S = dict(
 )
 
 
-# === Request frames (address=4) ============================================
-# Cross-checked by feeding ``daly_command_message(cmd, address=4)`` through
-# the same builder the live ``_q`` uses.
+# === Request frames ========================================================
+# Byte 1 is 0x40 for board number 1 (0x41 for board 2, ...); the 8 payload bytes
+# of a read command are don't-care, and the checksum is a plain sum of the first
+# 12 bytes, so the fill byte is free to choose.
+#
+# The wired path fills with 0xAA (see daly_uart.UART_FILL): Daly's firmware UART
+# resyncs on edges and an all-zero payload gives it none, so 0x00 requests go
+# unanswered far more often on a wire link. dbus-serialbattery made the same
+# choice.
+#
+# Checksums below are derived independently of the builder, so a regression in
+# the builder cannot silently redefine "expected":
+#   sum = (0xA5 + addr + cmd + 0x08 + 8*0xAA) & 0xFF
+#       = (0x5FD + addr + cmd) & 0xFF
+#   addr 0x40: 0x90 -> 0xCD, 0x93 -> 0xD0, 0x94 -> 0xD1, 0x95 -> 0xD2
+#   addr 0x41: 0x90 -> 0xCE      addr 0x42: 0x93 -> 0xD2
 REQUEST_FRAMES = {
+    0x90: bytes.fromhex("a5409008aaaaaaaaaaaaaaaacd"),  # SOC
+    0x93: bytes.fromhex("a5409308aaaaaaaaaaaaaaaad0"),  # Status
+    0x94: bytes.fromhex("a5409408aaaaaaaaaaaaaaaad1"),  # States
+    0x95: bytes.fromhex("a5409508aaaaaaaaaaaaaaaad2"),  # Cell voltages
+}
+
+# Same commands with the 0x00 fill batmon <= 2.14 sent, kept so the two encodings
+# stay distinguishable in tests (and as the reference for the Daly v1.2 PDF's
+# own example frames, which are zero-filled).
+REQUEST_FRAMES_ZERO_FILL = {
     0x90: bytes.fromhex("a540900800000000000000007d"),  # SOC
     0x93: bytes.fromhex("a5409308000000000000000080"),  # Status
     0x94: bytes.fromhex("a5409408000000000000000081"),  # States
     0x95: bytes.fromhex("a5409508000000000000000082"),  # Cell voltages
+}
+
+# Board addressing: request byte 1 = 0x3F + board number.
+REQUEST_FRAMES_BOARD = {
+    (0x90, 2): bytes.fromhex("a5419008aaaaaaaaaaaaaaaace"),
+    (0x93, 3): bytes.fromhex("a5429308aaaaaaaaaaaaaaaad2"),
 }
 
 

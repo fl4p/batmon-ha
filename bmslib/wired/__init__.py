@@ -1,10 +1,17 @@
 import threading
 import time
 
+from bmslib.util import get_logger
 from bmslib.wired.transport import SerialTransport, StdioTransport
+
+logger = get_logger()
 
 
 class SerialBleakClientWrapper(object):
+    # Consecutive read errors tolerated before the reader thread gives up, and
+    # the pause between retries. Class attributes so tests can shrink them.
+    RX_MAX_ERRORS = 20
+    RX_ERROR_SLEEP = 0.5
 
     def __init__(self, address, baudrate: int = 115200, **kwargs):
         self.address = address
@@ -16,7 +23,12 @@ class SerialBleakClientWrapper(object):
         # self.t = StdioTransport()
         self.callback = {}
         self.services = []
-        self._rx_thread = threading.Thread(target=self._on_receive)
+        # Set when the reader thread has stopped for good. Anything waiting on a
+        # response must be able to tell "nothing arrived yet" from "nothing will
+        # ever arrive again", instead of timing out identically forever.
+        self.rx_thread_error = None
+        self._rx_thread = threading.Thread(target=self._on_receive, daemon=True,
+                                           name='serial-rx')
         self._rx_thread.start()
 
     async def get_services(self):
@@ -33,11 +45,33 @@ class SerialBleakClientWrapper(object):
         return self.t.is_open
 
     def _on_receive(self):
+        # Any exception escaping this loop used to kill the reader thread
+        # silently: the port stayed "connected", writes kept succeeding, and
+        # every command timed out forever with no hint as to why. Log it and
+        # record it so the failure is attributable.
+        errors = 0
         while True:
-            data = self.t.is_open and self.t.read()
-            if data:
-                for callback in self.callback.values():
-                    callback(self, data)
+            try:
+                data = self.t.is_open and self.t.read()
+                if data:
+                    errors = 0
+                    for callback in list(self.callback.values()):
+                        try:
+                            callback(self, data)
+                        except Exception:
+                            logger.exception('serial rx callback failed on %d bytes', len(data))
+            except Exception as e:
+                errors += 1
+                # Bounded retry: a transient read error (USB re-enumeration) is
+                # worth riding out, a permanent one must not spin the CPU or
+                # pretend the link is alive.
+                if errors >= self.RX_MAX_ERRORS:
+                    self.rx_thread_error = e
+                    logger.error('serial reader thread giving up on %s after %d '
+                                 'consecutive errors: %s', self.t.port, errors, e)
+                    return
+                logger.warning('serial read error on %s (%d): %s', self.t.port, errors, e)
+                time.sleep(self.RX_ERROR_SLEEP)
             time.sleep(0.1) # todo block
 
     async def start_notify(self, char, callback):
