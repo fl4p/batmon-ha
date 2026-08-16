@@ -17,6 +17,15 @@ from bmslib.models.daly import daly_command_message
 from bmslib.test.data import daly_uart_fixtures as fx
 
 
+@pytest.fixture(autouse=True)
+def _isolate_shared_ports():
+    """Serial ports are cached per device path so several BMS can share one bus.
+    Without resetting, one test's fake port leaks into the next."""
+    bmslib.wired._reset_shared_ports()
+    yield
+    bmslib.wired._reset_shared_ports()
+
+
 # === feed_buffer accounting =================================================
 
 def test_feed_buffer_counts_good_frames():
@@ -183,11 +192,20 @@ class _FlakyTransport:
         pass
 
 
-def _wrapper_with(monkeypatch, transport_factory, max_errors=3):
+def _wrapper_with(monkeypatch, transport_factory, max_errors=3, port='/dev/fake'):
     monkeypatch.setattr(bmslib.wired, 'SerialTransport', transport_factory)
-    monkeypatch.setattr(bmslib.wired.SerialBleakClientWrapper, 'RX_MAX_ERRORS', max_errors)
-    monkeypatch.setattr(bmslib.wired.SerialBleakClientWrapper, 'RX_ERROR_SLEEP', 0.001)
-    return bmslib.wired.SerialBleakClientWrapper('/dev/fake')
+    monkeypatch.setattr(bmslib.wired._SharedSerialPort, 'RX_MAX_ERRORS', max_errors)
+    monkeypatch.setattr(bmslib.wired._SharedSerialPort, 'RX_ERROR_SLEEP', 0.001)
+    return bmslib.wired.SerialBleakClientWrapper(port)
+
+
+def _set_callback(wrapper, key, fn):
+    """Register a raw callback the way start_notify would."""
+    wrapper.port.register(key, wrapper, fn)
+
+
+def _rx_thread(wrapper):
+    return wrapper.port._rx_thread
 
 
 def _wait_until(pred, timeout=3.0):
@@ -205,14 +223,14 @@ def test_reader_thread_records_permanent_failure(monkeypatch):
     w = _wrapper_with(monkeypatch, _FlakyTransport)
     assert _wait_until(lambda: w.rx_thread_error is not None), 'error never recorded'
     assert isinstance(w.rx_thread_error, OSError)
-    assert _wait_until(lambda: not w._rx_thread.is_alive())
+    assert _wait_until(lambda: not _rx_thread(w).is_alive())
 
 
 def test_reader_thread_rides_out_transient_errors(monkeypatch):
     """...but a couple of failed reads (USB re-enumeration) must not kill it."""
     got = []
     w = _wrapper_with(monkeypatch, lambda *a, **kw: _FlakyTransport(errors=2), max_errors=5)
-    w.callback['x'] = lambda _s, data: got.append(data)
+    _set_callback(w, 'x', lambda _s, data: got.append(data))
     assert _wait_until(lambda: got), 'reader gave up on a transient error'
     assert w.rx_thread_error is None
 
@@ -225,10 +243,10 @@ def test_reader_thread_is_respawned_on_reconnect(monkeypatch):
 
     w = _wrapper_with(monkeypatch, lambda *a, **kw: _FlakyTransport(errors=3))
     assert _wait_until(lambda: w.rx_thread_error is not None)
-    assert _wait_until(lambda: not w._rx_thread.is_alive())
+    assert _wait_until(lambda: not _rx_thread(w).is_alive())
 
     got = []
-    w.callback['x'] = lambda _s, data: got.append(data)
+    _set_callback(w, 'x', lambda _s, data: got.append(data))
     asyncio.run(w.connect())
 
     assert w.rx_thread_error is None, 'stale error survived the reconnect'
@@ -244,10 +262,10 @@ def test_reader_thread_survives_a_raising_callback(monkeypatch):
         raise ValueError('decoder bug')
 
     w = _wrapper_with(monkeypatch, lambda *a, **kw: _FlakyTransport(errors=0))
-    w.callback['x'] = boom
+    _set_callback(w, 'x', boom)
     assert _wait_until(lambda: len(calls) >= 3)
     assert w.rx_thread_error is None
-    assert w._rx_thread.is_alive()
+    assert _rx_thread(w).is_alive()
 
 
 # === one bad device must not take down the others ===========================

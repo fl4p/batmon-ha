@@ -1,3 +1,10 @@
+## [2.16]
+
+* Several Daly can now share one RS485 bus and one USB adapter: point them at the same `adapter:` and give each a board number (`type: daly_uart:1`, `daly_uart:2`, …). Replies are routed by board number and requests are serialized across the bus, so it is safe with `concurrent_sampling`. Two units on one bus with the same board number, or two BMS families needing different baud rates on one port, are now rejected instead of silently corrupting each other's readings (#398).
+* Fix: every reply on a wired BMS was delivered a full command timeout late (12 s for Daly) whenever the event loop was otherwise idle — the serial reader thread resolved the pending future without waking the loop. Round trips drop from ~12 s to well under a second. Affects all wired models (`daly_uart`, `jk_uart`, `pace_uart`, `basen_uart`); BLE was never affected.
+* Serial reader threads now stop on shutdown instead of holding the port open.
+* Docs: Daly RS485 wiring that works (XH 5-pin: 1 = B−, 2 = A+, 3 = GND — GND is required), and a correction — on some Daly the UART port and the Bluetooth module share one UART, but on others they run at the same time (#398).
+
 ## [2.15]
 
 * Fix: `daly_uart` addressed RS485 board 1 unconditionally, so a Daly whose board number was changed from the factory default answered nothing at all. Set it with `type: daly_uart:2` (#398).

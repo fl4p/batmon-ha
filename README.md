@@ -186,8 +186,33 @@ the factory default 1 answers nothing at all. Append it to the type:
   alias: battery2
 ```
 
-Daly's PC tool calls this "Board No". One BMS per adapter for now: several
-Daly on a shared RS485 bus is [#398](https://github.com/fl4p/batmon-ha/issues/398).
+Daly's PC tool calls this "Board No".
+
+### Several Daly on one RS485 bus
+
+Give each unit a distinct board number in Daly's PC tool, then point them all at
+the same `adapter:` — one USB adapter for the whole string, not one each:
+
+```yaml
+- address: serial
+  adapter: /dev/ttyUSB0
+  type: daly_uart:1
+  alias: battery1
+- address: serial
+  adapter: /dev/ttyUSB0     # same port
+  type: daly_uart:2
+  alias: battery2
+```
+
+Batmon opens the port once, shares it, and routes each reply to the unit whose
+board number it carries. Requests are serialized across the bus, so this is safe
+with `concurrent_sampling` too (RS485 is half duplex — only one unit may
+transmit at a time).
+
+Two units configured with the *same* board number are rejected at connect: they
+would answer each other's requests and publish each other's readings. Mixing
+families on one port (say `jk_uart` at 115200 and `daly_uart` at 9600) is
+rejected for the same reason — one wire cannot run two baud rates.
 
 ### Troubleshooting a silent wired link
 
@@ -204,9 +229,15 @@ answers (or that nothing does):
 python3 tools/daly_serial_probe.py /dev/serial/by-id/usb-FTDI_...-port0
 ```
 
-Note that Daly's UART (TTL) and RS485 ports are different RJ45 sockets with
-different pinouts, and on many boards the UART port is shared with the
-Bluetooth module — only one of the two can talk at a time.
+Wiring, as confirmed on a Daly 4S in [#398](https://github.com/fl4p/batmon-ha/issues/398):
+the Daly-supplied XH 5-pin RS485/CAN cable is pin 1 = B−, pin 2 = A+,
+pin 3 = GND, pins 4–5 = CAN. **GND must be connected** — without it there is no
+communication at all. A plain FTDI USB-RS485 adapter works.
+
+Daly's UART (TTL) and RS485 are separate ports with different pinouts. On some
+boards they share one UART with the Bluetooth module, so BT and a wired link
+cannot both be used; on others (including recent ones with two UART headers)
+they run at the same time. If in doubt, unplug the BT module and retest.
 
 To request another BMS family over RS485, open an issue with a captured
 frame (`tcpdump` of the USB-serial line, or a wireshark log from the
