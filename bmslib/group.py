@@ -5,7 +5,7 @@ from copy import copy
 from typing import Dict, Iterable, List
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
 
 
@@ -36,6 +36,25 @@ class BmsGroup:
             return sum((self.voltages[name] for name in self.bms_names), [])
         except KeyError as e:
             raise GroupNotReady(e)
+
+
+def resolve_member_ref(bms_by_name: dict, ref: str):
+    """Look up one `group_parallel` member by name or address, or None.
+
+    A group's `address:` is a comma-separated list of refs and is not itself an
+    address, so it never goes through normalize_ble_address() -- while a real BMS
+    is indexed under its *canonical* address. A group referring to its members by
+    lower-case MAC (which was the only spelling that worked before #399) would
+    otherwise miss and abort the whole add-on. Refs are also stripped, since
+    `get_member_refs()` splits on ',' without trimming.
+
+    Names are matched first and exactly, so a device whose alias happens to be
+    MAC-shaped still wins over normalization.
+    """
+    ref = ref.strip()
+    if ref in bms_by_name:
+        return bms_by_name[ref]
+    return bms_by_name.get(normalize_ble_address(ref))
 
 
 class GroupNotReady(Exception):

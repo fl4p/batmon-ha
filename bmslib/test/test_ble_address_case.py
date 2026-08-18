@@ -17,9 +17,10 @@ candidate never appeared), and `type: daly_ble` died in
 `BLEDeviceResolver.resolve()` with BleakDeviceNotFoundError.
 """
 
+import pytest
+
 import bmslib.bt
 from bmslib.bt import normalize_ble_address
-from bmslib.models.BLE_BMS_wrap import BMS as WrappedBMS
 
 REPORTED = 'd1:1a:04:01:01:b7'  # verbatim from the #399 config
 CANONICAL = 'D1:1A:04:01:01:B7'  # what a proxy-sourced advertisement is keyed by
@@ -60,6 +61,13 @@ def test_aiobmsble_wrapper_normalizes_too():
     the backend's own spelling and looks it up exactly, so without this the
     lookup misses and connect() raises BleakDeviceNotFoundError forever.
     """
+    # Imported here, not at module scope: BLE_BMS_wrap imports aiobmsble
+    # unconditionally, and aiobmsble is installed with --no-deps outside
+    # requirements.txt, so a module-level import fails *collection* of this
+    # whole file in a checkout without it -- taking the other cases with it.
+    pytest.importorskip('aiobmsble')
+    from bmslib.models.BLE_BMS_wrap import BMS as WrappedBMS
+
     bms = WrappedBMS(address=REPORTED, type='daly_bms', name='battery1')
     assert bms.address == CANONICAL
 
@@ -93,3 +101,51 @@ def test_the_client_is_built_with_the_canonical_address():
 
     assert bms.address == CANONICAL
     assert seen == [CANONICAL]
+
+
+def test_group_member_referenced_by_lowercase_mac_still_resolves():
+    """Regression: canonicalizing the address must not orphan a group's members.
+
+    `group_parallel` names its members in `address:` as a comma-separated list.
+    That list is not an address, so it is never normalized -- but each real BMS is
+    indexed under its canonical address, so a group written with the lower-case
+    spelling (the only one that worked before #399) missed the lookup. main()
+    raises on a miss, which aborts the whole add-on rather than just the group.
+    """
+    from bmslib.group import resolve_member_ref
+
+    class _Dev:
+        def __init__(self, name):
+            self.name = name
+
+    battery1, battery2 = _Dev('battery1'), _Dev('battery2')
+    bms_by_name = {
+        'D1:1A:04:01:01:B7': battery1, 'battery1': battery1,
+        'E2:2B:15:02:02:C8': battery2, 'battery2': battery2,
+    }
+
+    # the group's own config spelling, verbatim, including a space after the comma
+    for ref, want in (('d1:1a:04:01:01:b7', battery1),
+                      (' e2:2b:15:02:02:c8', battery2),
+                      ('d1-1a-04-01-01-b7', battery1),
+                      ('battery1', battery1),
+                      ('D1:1A:04:01:01:B7', battery1)):
+        assert resolve_member_ref(bms_by_name, ref) is want, ref
+
+    # a genuinely unknown member must still be reported, not silently dropped
+    assert resolve_member_ref(bms_by_name, 'aa:bb:cc:dd:ee:ff') is None
+    assert resolve_member_ref(bms_by_name, 'battery9') is None
+
+
+def test_an_alias_wins_over_normalization():
+    """A MAC-shaped *alias* must match exactly rather than being canonicalized
+    onto some other device."""
+    from bmslib.group import resolve_member_ref
+
+    class _Dev:
+        def __init__(self, name):
+            self.name = name
+
+    aliased, other = _Dev('aliased'), _Dev('other')
+    bms_by_name = {'d1:1a:04:01:01:b7': aliased, 'D1:1A:04:01:01:B7': other}
+    assert resolve_member_ref(bms_by_name, 'd1:1a:04:01:01:b7') is aliased

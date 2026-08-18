@@ -40,7 +40,7 @@ _esphome_proxies = _early_select_ble_stack()
 import bmslib.bt
 import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
-from bmslib.group import BmsGroup, VirtualGroupBms
+from bmslib.group import BmsGroup, VirtualGroupBms, resolve_member_ref
 from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler, fetch_loop as _fetch_loop
@@ -241,17 +241,18 @@ async def main():
         if isinstance(bms, VirtualGroupBms):
             group_bms = bms
             for member_ref in bms.get_member_refs():
-                if member_ref not in bms_by_name:
+                member = resolve_member_ref(bms_by_name, member_ref)
+                if member is None:
                     logger.warning('Please choose one of these names: %s', set(bms_by_name.keys()))
                     raise Exception("unknown bms '%s' in group %s" % (member_ref, group_bms))
 
-                member_name = bms_by_name[member_ref].name
+                member_name = member.name
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,
                                     groups_by_bms[member_name], group_bms)
 
                 groups_by_bms[member_name] = group_bms.group
-                bms.add_member(bms_by_name[member_ref])
+                bms.add_member(member)
 
     # import env vars from addon_main.sh
     for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_port='MQTT_PORT', mqtt_user='MQTT_USER',
