@@ -12,6 +12,7 @@ import time
 
 import pytest
 
+from bmslib.models import jikong
 from bmslib.models.jikong import (FRAME_SIZE, HEADER, RESPONSE_TYPES, JKBt,
                                   calc_crc, feed_frames)
 from bmslib.test.data import jk_issue377 as fx
@@ -160,6 +161,55 @@ def test_junk_flood_does_not_grow_the_buffer():
         assert len(buf) < len(HEADER)
     frames, _, _ = feed_frames(buf, fx.FRAME_02_STATUS)
     assert frames == [fx.FRAME_02_STATUS]
+
+
+def test_buffer_holds_less_than_one_frame_after_every_packet():
+    """The invariant the handler's resync guard checks: feed_frames consumes or
+    trims on every iteration, so it can never return with a whole frame still
+    buffered. Exercised over an adversarial interleaving of junk, split frames,
+    a corrupt frame and a checksum-colliding false header."""
+    stream = (b'AT\r\n' + fx.FRAME_02_STATUS + fx.JUNK_AFTER_02
+              + fx.CORRUPT_FRAME_02 + fx.FRAME_03_DEVINFO + fx.JUNK_AFTER_03
+              + _forge_impostor(fx.FRAME_01_SETTINGS) + fx.FRAME_01_SETTINGS
+              + b'AT\r\n' * 50 + fx.FRAME_02_STATUS[:137])
+    buf = bytearray()
+    for i in range(0, len(stream), 17):  # 17: never aligned with anything
+        feed_frames(buf, stream[i:i + 17])
+        assert len(buf) < FRAME_SIZE, 'buffer grew to %d at offset %d' % (len(buf), i)
+
+
+def test_junk_before_a_partial_frame_keeps_the_partial_frame():
+    """#392: junk is already deleted by the time `dropped` is counted, so what is
+    left in the buffer is the head of the frame *behind* the junk. Flushing the
+    buffer on dropped>0 would destroy it — and dropped>0 together with a partial
+    frame is exactly what an AT-flood produces, so every frame would be lost."""
+    bms = _make_jk()
+    bms._notification_handler(None, b'AT\r\n' + fx.FRAME_02_STATUS[:84])
+    assert bytes(bms._buffer) == fx.FRAME_02_STATUS[:84]
+
+    bms._notification_handler(None, fx.FRAME_02_STATUS[84:])
+    assert bytes(bms._resp_table[0x02][0]) == fx.FRAME_02_STATUS
+    assert len(bms._buffer) == 0
+
+
+def test_resync_guard_fires_when_the_framing_invariant_breaks(monkeypatch):
+    """Calibrate the guard against the known-bad input it exists to catch: a
+    feed_frames that stops consuming. Without it the buffer grows without bound
+    and decoding never recovers; the guard must resync and say so."""
+    bms = _make_jk()
+    errors = []
+    monkeypatch.setattr(bms.logger, 'error', lambda *a, **kw: errors.append(a[0]))
+
+    def _stuck(buf, chunk):  # accumulates, never consumes or trims
+        buf.extend(chunk)
+        return [], 0, []
+
+    monkeypatch.setattr(jikong, 'feed_frames', _stuck)
+    for _ in range(3):
+        bms._notification_handler(None, fx.FRAME_02_STATUS)
+        assert len(bms._buffer) < FRAME_SIZE
+
+    assert errors and all('framing invariant broken' in e for e in errors)
 
 
 def test_short_buffer_never_raises():

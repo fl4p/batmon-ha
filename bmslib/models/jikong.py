@@ -152,6 +152,20 @@ class JKBt(BtBms):
         # complete FRAME_SIZE window, so a short buffer can no longer overrun.
         frames, dropped, corrupt = feed_frames(self._buffer, data)
 
+        # feed_frames consumes or trims on every iteration, so it must return with
+        # less than one frame still buffered: either a header-aligned partial frame
+        # or the <= 3 byte straddle reserve. More than that means the resync logic
+        # stopped consuming, and keeping the buffer would stall decoding forever -
+        # resync, and make the bug visible instead of growing quietly.
+        # Do NOT key this on `dropped` (#392): junk is already deleted by the time
+        # it is counted, so what is left over is the partial frame we still need,
+        # and dropping it turns a recoverable split frame into a lost one (#377).
+        if len(self._buffer) >= FRAME_SIZE:
+            self.logger.error("%s framing invariant broken, %d byte(s) buffered after "
+                              "parsing (>= one %d B frame), resyncing - please report",
+                              self.name, len(self._buffer), FRAME_SIZE)
+            self._buffer.clear()
+
         for frame in corrupt:
             # A real frame that arrived corrupted - rare, keep visible.
             self.logger.error("%s crc check failed, discarding frame 0x%02x: %s...",
