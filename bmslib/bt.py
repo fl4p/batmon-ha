@@ -370,7 +370,11 @@ def bt_power(on):
         logging.error('Failed to power controllers via bluetoothctl: %s', e)
 
 
-_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')
+# Deliberately *not* named _MAC_RE: that name is already taken above for the
+# adapter check, which accepts only the colon form. Reusing it here silently
+# rebound the module global, so `resolve_adapter()` started accepting
+# hyphen-separated (and mixed-separator) controller MACs as a side effect.
+_BLE_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')
 
 
 def normalize_ble_address(address):
@@ -391,7 +395,7 @@ def normalize_ble_address(address):
     Only MAC-shaped addresses are touched. macOS/CoreBluetooth identifiers are
     UUIDs and `serial` is not an address at all; both are returned unchanged.
     """
-    if not isinstance(address, str) or not _MAC_RE.match(address.strip()):
+    if not isinstance(address, str) or not _BLE_MAC_RE.match(address.strip()):
         return address
     return address.strip().replace('-', ':').upper()
 

@@ -7,7 +7,7 @@ from aiobmsble import BMSSample
 from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock
+from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock, normalize_ble_address
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -55,7 +55,16 @@ class BLEDeviceResolver:
 class BMS():
 
     def __init__(self, address, type, blebms_class=None, keep_alive=False, adapter=None, name=None, **kwargs):
-        self.address = address
+        # This class does NOT subclass BtBms, so it does not inherit the
+        # normalization in BtBms.__init__ -- and it needs it just as much:
+        # BLEDeviceResolver.resolve() below caches by `(adapter, d.address)` with
+        # the address verbatim from the backend (uppercase over an ESPHome proxy)
+        # and looks the key up exactly, so a lowercase `address:` in the config
+        # never hits and every connect raises "device ... not found"
+        # (BleakDeviceNotFoundError). That is the second half of #399: switching
+        # a Daly from `type: daly` to `type: daly_ble` traded habluetooth's
+        # "no available connection slot" for this, same root cause both times.
+        self.address = normalize_ble_address(address)
         self.adapter = adapter
         self.name = name
         self._type = type
