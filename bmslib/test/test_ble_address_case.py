@@ -72,3 +72,24 @@ def test_adapter_mac_regex_was_not_rebound():
     assert bmslib.bt._MAC_RE.pattern != bmslib.bt._BLE_MAC_RE.pattern
     assert not bmslib.bt._MAC_RE.match('0C-EF-15-47-4A-46')
     assert bmslib.bt._BLE_MAC_RE.match('0C-EF-15-47-4A-46')
+
+
+def test_the_client_is_built_with_the_canonical_address():
+    """Normalizing `self.address` is worthless if the client gets the raw spelling.
+
+    habluetooth keeps the address the client was constructed with and looks it up
+    verbatim (`async_scanner_devices_by_address`), so a canonical `self.address`
+    next to a lower-case BleakClient argument leaves the native path exactly as
+    broken as before -- while every address-level test still passes.
+    """
+    seen = []
+
+    class _Bms(bmslib.bt.BtBms):
+        def _create_client(self, addr_or_device):
+            seen.append(addr_or_device)
+            return object()
+
+    bms = _Bms(REPORTED, 'battery1')
+
+    assert bms.address == CANONICAL
+    assert seen == [CANONICAL]

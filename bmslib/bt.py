@@ -400,6 +400,11 @@ def normalize_ble_address(address):
     return address.strip().replace('-', ':').upper()
 
 
+# tearing down a stale link happens under the process-wide ConnectLock, see
+# BtBms._force_disconnect()
+FORCE_DISCONNECT_TIMEOUT = 10.0
+
+
 class BtBms:
     shutdown = False
 
@@ -464,7 +469,10 @@ class BtBms:
                     adapter, baudrate=getattr(self, 'BAUDRATE', 115200),
                     **getattr(self, 'SERIAL_KWARGS', {}))
             else:
-                self.client = self._create_client(address)
+                # self.address, not address: habluetooth looks the address up as a
+                # plain dict key and proxies report it upper-case, so handing the
+                # client the raw config spelling would undo the normalization (#399)
+                self.client = self._create_client(self.address)
 
             self._in_disconnect = False
 
@@ -709,6 +717,36 @@ class BtBms:
         self._in_disconnect = False
         self._fetch_futures.clear()
 
+    async def _force_disconnect(self, timeout=FORCE_DISCONNECT_TIMEOUT):
+        """Tear the link down whatever the model's disconnect() does.
+
+        Model overrides clean up before delegating — JK calls stop_notify() first
+        (jikong.py) and HaBleakClientWrapper.stop_notify() is known to raise
+        non-BleakError exceptions when its backend is gone (ant.py). An exception
+        there means the link is still up, and a caller that then "reconnects" gets
+        a client habluetooth considers already connected: connect() returns at once
+        and the model stays as broken as before. So close the client directly if the
+        override did not get that far.
+
+        Bounded, because this runs under the process-wide ConnectLock: a proxy
+        teardown that never returns would stall every other BMS behind it (#391).
+        """
+        try:
+            await asyncio.wait_for(self.disconnect(), timeout)
+        except Exception as e:
+            self.logger.debug('%s disconnect() failed (%s), closing the client directly',
+                              self.name, str(e) or type(e).__name__)
+
+        if self.is_connected:
+            try:
+                await asyncio.wait_for(self.client.disconnect(), timeout)
+            except Exception as e:
+                self.logger.warning('%s could not close the stale link: %s',
+                                    self.name, str(e) or type(e).__name__)
+
+        # disconnect() clears this, but it may have raised before getting there
+        self._connect_complete = False
+
     async def fetch_device_info(self) -> DeviceInfo:
         """
         Retrieve static BMS device info (HW, SW version, serial number, etc)
@@ -822,11 +860,7 @@ class BtBms:
                 # Nothing repairs that later, and keep_alive would hold the broken
                 # link forever: drop it and start over (#391).
                 self.logger.warning('%s reconnecting: previous connect did not complete', self.name)
-                try:
-                    await self.disconnect()
-                except Exception as e:
-                    self.logger.debug('%s disconnect before reconnect failed: %s', self.name,
-                                      str(e) or type(e).__name__)
+                await self._force_disconnect()
             self._connect_complete = False
             await self.connect()
             self._connect_complete = True
