@@ -70,6 +70,39 @@ def _forced_reconnect(sampler):
         asyncio.run(sampler())
 
 
+class _WedgedHostBms(_FakeBms):
+    """The scenario the option exists for: the host stack answers every connect
+    with 'Operation already in progress', so the link never comes up. The real
+    BtBms.is_connected is a read-only property over client.is_connected, so it
+    stays False here - unlike _FakeBms, which the other tests force to True."""
+
+    @property
+    def is_connected(self):
+        return False
+
+    async def disconnect(self):
+        pass
+
+
+def test_power_cycle_fires_when_the_host_never_lets_us_connect(bt_power_calls):
+    """Keying escalation on the forced-*disconnect* branch made the recovery
+    unreachable exactly when it was needed: that branch requires is_connected,
+    and a wedged host never connects, so the counter stayed at 0 forever."""
+    sampler = _make_sampler(bms=_WedgedHostBms(), bt_power_cycle_on_error=True)
+
+    async def _sample_inner():
+        raise TimeoutError("Operation already in progress")
+
+    sampler._sample_inner = _sample_inner
+    sampler._t_wd_reset = time.time()
+
+    for _ in range(50):
+        with pytest.raises(TimeoutError):
+            asyncio.run(sampler())
+
+    assert bt_power_calls == [False, True]
+
+
 def test_no_power_cycle_when_the_option_is_off(bt_power_calls):
     sampler = _make_sampler()  # bt_power_cycle_on_error defaults to False
     for _ in range(5):
@@ -139,6 +172,63 @@ def test_wired_and_virtual_bms_never_power_cycle_bluetooth(bt_power_calls, attr,
         _forced_reconnect(sampler)
 
     assert bt_power_calls == []
+
+
+def test_a_downstream_error_does_not_power_cycle(bt_power_calls):
+    """The generic handler also catches failures raised *after* fetch() returned a
+    sample (publishing, algorithms, sinks). Those say nothing about the radio, so
+    they must not cycle it."""
+    sampler = _make_sampler(bms=_WedgedHostBms(), bt_power_cycle_on_error=True)
+
+    async def _sample_inner():
+        raise ValueError("bug in a downstream sink")
+
+    sampler._sample_inner = _sample_inner
+    sampler._t_wd_reset = time.time()
+
+    for _ in range(50):
+        with pytest.raises(ValueError):
+            asyncio.run(sampler())
+
+    assert bt_power_calls == []
+    assert sampler._num_error_disconnects >= 2, "rounds should still be counted"
+
+
+def test_a_rate_limited_skip_keeps_the_escalation_history(bt_power_calls, monkeypatch):
+    """A skipped cycle must not consume the per-BMS history, or the BMS has to earn
+    its way back from zero while the radio is still wedged."""
+    monkeypatch.setattr(sampling, "_t_last_bt_power_cycle", time.time())  # just cycled
+    sampler = _make_sampler(bt_power_cycle_on_error=True)
+
+    _forced_reconnect(sampler)
+    _forced_reconnect(sampler)
+    assert bt_power_calls == []
+    assert sampler._num_error_disconnects == 2, "history thrown away on a skip"
+
+    monkeypatch.setattr(sampling, "_t_last_bt_power_cycle", time.time() - 601)
+    _forced_reconnect(sampler)
+    assert bt_power_calls == [False, True]
+
+
+def test_cancellation_between_off_and_on_still_powers_the_controller_up(monkeypatch):
+    """main.py cancels the pending fetch loops whenever one of them returns. Being
+    cancelled mid-cycle must not leave the radio switched off for good."""
+    calls = []
+    monkeypatch.setattr(bmslib.bt, "bt_power", lambda on: calls.append(on))
+    monkeypatch.setattr(sampling, "BT_POWER_CYCLE_SETTLE", 5)
+    monkeypatch.setattr(sampling, "_t_last_bt_power_cycle", 0.0)
+
+    async def _cancel_mid_cycle():
+        task = asyncio.ensure_future(sampling.bt_power_cycle("fake"))
+        await asyncio.sleep(0.1)  # let it get past bt_power(False) into the settle
+        assert calls == [False]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.1)  # let the hand-off task run
+        return calls
+
+    assert asyncio.run(_cancel_mid_cycle()) == [False, True]
 
 
 def test_power_cycle_survives_a_failing_bt_power(monkeypatch):

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import math
 import random
 import re
@@ -42,10 +43,15 @@ async def bt_power_cycle(bms_name):
     host stack that no longer completes connects (BlueZ answering every attempt
     with 'Operation already in progress', #370).
 
-    Returns True if the cycle ran. Goes through bt_power() rather than hciconfig
-    so the ble_stack guards apply: with bumble the adapter is owned by bumble
-    itself, and with esphome there is no local adapter to cycle. bt_power shells
-    out to bluetoothctl, so it runs in a thread - other samplers share this loop.
+    Returns True if the cycle was *attempted*, False if it was rate-limited or
+    raised. It cannot promise the controller actually came back: bt_power() logs
+    and swallows bluetoothctl failures internally, so success here is not
+    observable from the return value.
+
+    Goes through bt_power() rather than hciconfig so the ble_stack guards apply:
+    with bumble the adapter is owned by bumble itself, and with esphome there is
+    no local adapter to cycle. bt_power shells out to bluetoothctl, so it runs in
+    a thread - other samplers share this loop.
     """
     global _t_last_bt_power_cycle
     t_now = time.time()
@@ -55,19 +61,35 @@ async def bt_power_cycle(bms_name):
                     bms_name, dt, BT_POWER_CYCLE_MIN_INTERVAL)
         return False
 
+    # claim the slot before the first await, so two samplers on one loop cannot
+    # interleave their way into two cycles
     _t_last_bt_power_cycle = t_now
     logger.warning('%s: still failing after repeated reconnects, power-cycling the '
                    'bluetooth controller(s). This drops all BLE connections.', bms_name)
+    powered_off = False
     try:
         await asyncio.to_thread(bmslib.bt.bt_power, False)
+        powered_off = True
         await asyncio.sleep(BT_POWER_CYCLE_SETTLE)  # settle before powering back up
         await asyncio.to_thread(bmslib.bt.bt_power, True)
         await asyncio.sleep(BT_POWER_CYCLE_SETTLE)
+    except asyncio.CancelledError:
+        # main.py cancels the pending fetch loops whenever one of them returns.
+        # Being cancelled between off and on would leave the radio down for good,
+        # so hand the power-on to a task that outlives this coroutine.
+        if powered_off:
+            logger.warning('bt power cycle cancelled while the controller was down, '
+                           'powering back up')
+            asyncio.ensure_future(asyncio.to_thread(bmslib.bt.bt_power, True))
+        raise
     except Exception as e:
         logger.error('bt power cycle failed: %s', str(e) or type(e).__name__)
+        if powered_off:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(bmslib.bt.bt_power, True)
         return False
 
-    logger.info('bt power cycle done')
+    logger.info('bt power cycle attempted (bluetoothctl does not report success)')
     return True
 
 
@@ -269,22 +291,29 @@ class BmsSampler:
                 logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
                 await bms.disconnect()
 
-            if bms.is_connected and self._num_errors > 20:
-                logger.warning("disconnecting %s due to too many errors %d", bms, self._num_errors)
-                await bms.disconnect()
+            if self._num_errors > 20:
+                # One saturation round: drop the link if there is one, and count it
+                # either way. Keying the count on is_connected made the escalation
+                # below unreachable in the case it exists for - a host that answers
+                # every connect with 'Operation already in progress' never gets the
+                # link up, so is_connected stays False forever (#392).
+                if bms.is_connected:
+                    logger.warning("disconnecting %s due to too many errors %d", bms, self._num_errors)
+                    await bms.disconnect()
                 self._num_errors = 0
                 self._num_error_disconnects += 1
 
-            # Reconnecting this BMS has now failed ~40 cycles in a row without a
-            # single sample, so the fault is not in the peripheral. Optionally
-            # cycle the controller (#392). Counts *forced reconnects*, not errors,
-            # so the threshold cannot be reached by a device that is merely absent
-            # (that path backs off separately) - and it resets on any good sample,
-            # so a BMS that recovers never escalates.
+            # Two saturation rounds (~42 cycles) with no sample in between, on a
+            # BLE error rather than a downstream one, so it is not this battery
+            # having a bad minute. Optionally cycle the controller (#392). Absent
+            # devices cannot get here - BleakDeviceNotFoundError returns through
+            # its own backoff above - and any good sample resets the count, so a
+            # BMS that recovers never escalates.
             if (self._num_error_disconnects >= 2 and self.bt_power_cycle_on_error
+                    and isinstance(ex, short_trace_types)
                     and not bms.is_virtual and bms.address != 'serial'):
-                self._num_error_disconnects = 0
-                await bt_power_cycle(bms.name)
+                if await bt_power_cycle(bms.name):
+                    self._num_error_disconnects = 0  # keep the history if it was skipped
 
             raise
 
