@@ -89,6 +89,14 @@ configuration:
     description: >-
       Den Bluetooth-Adapter beim Start des Addons einmal aus- und
       wieder einschalten. Hilft manchmal gegen verklemmte Adapterzustände.
+  bt_power_cycle_on_error:
+    name: Bluetooth bei wiederholten Fehlern aus-/einschalten
+    description: >-
+      Letztes Mittel: Wenn das Neuverbinden eines BMS dauerhaft fehlschlägt,
+      den Bluetooth-Adapter aus- und wieder einschalten. Hilft bei verklemmtem
+      Host-Stack ("Operation already in progress"), trennt dabei aber kurz alle
+      Bluetooth-Verbindungen, auch funktionierende und die von Home Assistant
+      selbst. Standardmäßig aus.
 
   ble_stack:
     name: Bluetooth-Stack

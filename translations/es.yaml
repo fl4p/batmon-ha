@@ -94,6 +94,14 @@ configuration:
       Apagar y volver a encender el adaptador Bluetooth una vez al
       arrancar el complemento. A veces resuelve estados bloqueados del
       adaptador del host.
+  bt_power_cycle_on_error:
+    name: Apagar/encender Bluetooth ante errores repetidos
+    description: >-
+      Último recurso: si la reconexión de un BMS falla de forma persistente,
+      apagar y volver a encender el adaptador Bluetooth. Ayuda cuando la pila
+      del host está bloqueada ("Operation already in progress"), pero corta
+      brevemente todas las conexiones Bluetooth, incluidas las que funcionan y
+      las de Home Assistant. Desactivado por defecto.
 
   ble_stack:
     name: Stack Bluetooth

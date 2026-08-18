@@ -28,6 +28,49 @@ class SampleExpiredError(Exception):
     pass
 
 
+# bt_power_cycle_on_error (#392): all samplers share the host controller, so the
+# cycle is rate-limited process-wide - three wedged BMS must not cycle the radio
+# three times in a row. It also drops every *healthy* connection, which is why it
+# is opt-in and only reached after repeated reconnects of one BMS have failed.
+BT_POWER_CYCLE_MIN_INTERVAL = 600
+BT_POWER_CYCLE_SETTLE = 3  # seconds the controller stays down / gets to come back up
+_t_last_bt_power_cycle = 0.0
+
+
+async def bt_power_cycle(bms_name):
+    """Power the bluetooth controller(s) off and on, last-resort recovery for a
+    host stack that no longer completes connects (BlueZ answering every attempt
+    with 'Operation already in progress', #370).
+
+    Returns True if the cycle ran. Goes through bt_power() rather than hciconfig
+    so the ble_stack guards apply: with bumble the adapter is owned by bumble
+    itself, and with esphome there is no local adapter to cycle. bt_power shells
+    out to bluetoothctl, so it runs in a thread - other samplers share this loop.
+    """
+    global _t_last_bt_power_cycle
+    t_now = time.time()
+    dt = t_now - _t_last_bt_power_cycle
+    if _t_last_bt_power_cycle and dt < BT_POWER_CYCLE_MIN_INTERVAL:
+        logger.info('%s: skipping bt power cycle, last one was %.0fs ago (min %ds)',
+                    bms_name, dt, BT_POWER_CYCLE_MIN_INTERVAL)
+        return False
+
+    _t_last_bt_power_cycle = t_now
+    logger.warning('%s: still failing after repeated reconnects, power-cycling the '
+                   'bluetooth controller(s). This drops all BLE connections.', bms_name)
+    try:
+        await asyncio.to_thread(bmslib.bt.bt_power, False)
+        await asyncio.sleep(BT_POWER_CYCLE_SETTLE)  # settle before powering back up
+        await asyncio.to_thread(bmslib.bt.bt_power, True)
+        await asyncio.sleep(BT_POWER_CYCLE_SETTLE)
+    except Exception as e:
+        logger.error('bt power cycle failed: %s', str(e) or type(e).__name__)
+        return False
+
+    logger.info('bt power cycle done')
+    return True
+
+
 class PeriodicBoolSignal:
     def __init__(self, period):
         self.period = period
@@ -84,7 +127,8 @@ class BmsSampler:
                  algorithms: Optional[list] = None,
                  current_calibration_factor=1.0,
                  over_power=None,
-                 bms_group: Optional[BmsGroup] = None
+                 bms_group: Optional[BmsGroup] = None,
+                 bt_power_cycle_on_error=False
                  ):
 
         self.bms = bms
@@ -114,8 +158,10 @@ class BmsSampler:
 
         self._num_errors = 0
         self._num_not_found = 0  # consecutive device-not-found, drives the retry backoff
+        self._num_error_disconnects = 0  # consecutive error-forced reconnects, drives the power cycle
         self._time_next_retry = 0
         self._last_diag_t = 0
+        self.bt_power_cycle_on_error = bt_power_cycle_on_error
 
         self.algorithm = None
         if algorithms:
@@ -159,6 +205,7 @@ class BmsSampler:
             if s:
                 self._num_errors = 0
                 self._num_not_found = 0
+                self._num_error_disconnects = 0
             return s
         except (bmslib.bt.BleakDeviceNotFoundError, bmslib.bt.BleakNotFoundError) as e:
             # back off on the number of failed *connects*, not on _num_errors: the latter
@@ -226,6 +273,18 @@ class BmsSampler:
                 logger.warning("disconnecting %s due to too many errors %d", bms, self._num_errors)
                 await bms.disconnect()
                 self._num_errors = 0
+                self._num_error_disconnects += 1
+
+            # Reconnecting this BMS has now failed ~40 cycles in a row without a
+            # single sample, so the fault is not in the peripheral. Optionally
+            # cycle the controller (#392). Counts *forced reconnects*, not errors,
+            # so the threshold cannot be reached by a device that is merely absent
+            # (that path backs off separately) - and it resets on any good sample,
+            # so a BMS that recovers never escalates.
+            if (self._num_error_disconnects >= 2 and self.bt_power_cycle_on_error
+                    and not bms.is_virtual and bms.address != 'serial'):
+                self._num_error_disconnects = 0
+                await bt_power_cycle(bms.name)
 
             raise
 

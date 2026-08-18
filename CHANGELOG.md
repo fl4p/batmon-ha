@@ -5,6 +5,7 @@
 * Serial reader threads now stop on shutdown instead of holding the port open.
 * Fix: a BMS whose connect was interrupted after the link came up stayed half-initialized for good, reporting `num_cells not set` and no cell voltages on every cycle until the add-on was restarted — with `keep_alive` the surviving link counted as connected, so the rest of the connect routine never ran again. The link is now dropped and re-established (#391).
 * With `ble_stack: esphome`, `adapter:` is no longer reported as if it were used: habluetooth picks a proxy per connection by signal strength, so a per-BMS `adapter:` now warns instead of suggesting the BMS are split across proxies, and start-up discovery scans once instead of printing the same device list per adapter (#391).
+* New `bt_power_cycle_on_error` (off by default): when reconnecting one BMS keeps failing, toggle the Bluetooth controller off and on. For hosts whose stack wedges and answers every connect with `Operation already in progress`. It only escalates after repeated forced reconnects of the same BMS, resets as soon as that BMS delivers a sample, and is rate-limited to one cycle per 10 minutes — it drops all BLE connections, including Home Assistant's own (#392).
 * Docs: Daly RS485 wiring that works (XH 5-pin: 1 = B−, 2 = A+, 3 = GND — GND is required), and a correction — on some Daly the UART port and the Bluetooth module share one UART, but on others they run at the same time (#398).
 
 ## [2.15]

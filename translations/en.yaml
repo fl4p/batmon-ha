@@ -88,6 +88,13 @@ configuration:
     description: >-
       Toggle the Bluetooth adapter off/on once at addon startup. Sometimes
       clears stuck states on the host adapter.
+  bt_power_cycle_on_error:
+    name: Power-cycle Bluetooth on repeated errors
+    description: >-
+      Last resort: if reconnecting a BMS keeps failing, toggle the Bluetooth
+      adapter off/on. Helps when the host stack is wedged ("Operation already
+      in progress"), but it briefly drops all Bluetooth connections, including
+      healthy ones and Home Assistant's own. Off by default.
 
   ble_stack:
     name: Bluetooth stack

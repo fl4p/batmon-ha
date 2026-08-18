@@ -61,6 +61,7 @@ options:
   watchdog: true
   expire_values_after: 20
   bt_power_cycle: false
+  bt_power_cycle_on_error: false
   ble_stack: bleak
   # sample_period/publish_period/expire_values_after are kept here (and required
   # in the schema) so they render as normal, always-visible fields. They must NOT
@@ -106,6 +107,11 @@ schema:
   verbose_log: "bool?"
 
   bt_power_cycle: "bool?"
+
+  # Last-resort recovery: power-cycle the controller when reconnecting one BMS
+  # keeps failing. Drops every BLE connection, so it stays off by default and is
+  # rate-limited to one cycle per BT_POWER_CYCLE_MIN_INTERVAL (bmslib/sampling.py).
+  bt_power_cycle_on_error: "bool?"
 
   # "bleak" = stock BlueZ/D-Bus stack (default); "bumble" = bumble-bleak
   # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
