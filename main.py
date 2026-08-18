@@ -164,13 +164,27 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        for a in bmslib.bt.bt_adapters_info():
-            logger.info('Adapter %s  %s  %s', a['name'], a['mac'], a['bus'])
-        bl_ctrls = set(bmslib.bt.bt_controllers_hci() or [None])
-        # normalize so a device referenced by controller MAC dedupes against its hciN
-        bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
-                     for dev in user_config.get('devices', [])
-                     if dev.get('adapter') and not is_serial_device(dev)}
+        if bmslib.bt.scanner_is_proxy():
+            # every BleakScanner is the same proxy scanner here, so one scan per
+            # adapter would print the identical device list N times and read as
+            # proof that the BMS are on separate proxies (#391)
+            from bmslib.esphome_proxy import proxy_sources
+            logger.info('Scanning via esphome-proxy (proxies=%s)', proxy_sources())
+            pinned = sorted({str(dev.get('adapter')) for dev in user_config.get('devices', [])
+                             if dev.get('adapter') and not is_serial_device(dev)})
+            if pinned:
+                logger.warning('adapter=%s has no effect with ble_stack=esphome: the proxy for '
+                               'each connection is picked by signal strength, not by config',
+                               ', '.join(pinned))
+            bl_ctrls = {None}
+        else:
+            for a in bmslib.bt.bt_adapters_info():
+                logger.info('Adapter %s  %s  %s', a['name'], a['mac'], a['bus'])
+            bl_ctrls = set(bmslib.bt.bt_controllers_hci() or [None])
+            # normalize so a device referenced by controller MAC dedupes against its hciN
+            bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
+                         for dev in user_config.get('devices', [])
+                         if dev.get('adapter') and not is_serial_device(dev)}
         g = asyncio.gather(*[bmslib.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
         ble_devices = (await asyncio.wait_for(g, 30))[0]
     except Exception as e:
@@ -323,6 +337,7 @@ async def main():
         current_calibration_factor=float(dev_args[bms.name].get('current_calibration', 1.0)),
         bms_group=groups_by_bms.get(bms.name),
         sinks=sinks,
+        bt_power_cycle_on_error=user_config.get('bt_power_cycle_on_error', False),
     ) for bms in bms_list]
 
     # move groups to the end
