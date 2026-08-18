@@ -130,11 +130,13 @@ class DalyUart(DalyBt):
     # with timeout=None parks the reader thread forever and every command times
     # out with "got 0/N responses" (#398). feed_buffer() below does the framing.
     SERIAL_KWARGS = dict(eol=None, timeout=1)
-    # Gap inserted before every request. A poll sends ~5 commands back to back;
-    # without a pause Daly's firmware UART is still busy with the previous reply
+    # Gap inserted before every request, taken while holding the bus (see _q).
+    # Without a pause Daly's firmware UART is still busy with the previous reply
     # and simply drops the next request. dbus-serialbattery uses the same 20 ms
     # for the same reason ("else the Daly is not ready and throws a lot of no
-    # reply errors"). At the default 1 s polling period this costs ~100 ms.
+    # reply errors"). A poll sends 2 commands in steady state (0x90 soc, 0x95
+    # voltages) and 4 on the cycles where the 30 s status/temperature caches
+    # refresh, so this costs 40-80 ms per BMS per poll.
     # We deliberately do NOT flush the input buffer as it does: our reader thread
     # owns the port, so flushing from the event loop would race with it, and
     # feed_buffer() already resyncs on the 0xA5 header.
@@ -160,16 +162,27 @@ class DalyUart(DalyBt):
                                     addr_byte=daly_board_addr_byte(self.board),
                                     fill=UART_FILL)
 
-    async def _q(self, command: int, num_responses: int = 1):
+    async def _settle(self):
         if self.REQUEST_SETTLE:
             await asyncio.sleep(self.REQUEST_SETTLE)
+
+    async def _q(self, command: int, num_responses: int = 1):
         # RS485 is half duplex and the bus may carry several BMS. Hold it for the
         # whole request/response exchange, or with concurrent_sampling two units
         # transmit at once and both replies are lost.
         lock = getattr(self.client, 'bus_lock', None)
         if lock is None:
+            await self._settle()
             return await super()._q(command, num_responses)
         async with lock():
+            # The settle has to happen INSIDE the critical section. Sleeping
+            # before taking the lock lets a queued BMS burn its gap while another
+            # unit is still mid-exchange, so it transmits the instant the lock
+            # frees -- no gap at all after the previous reply, which is exactly
+            # what the settle exists to prevent. Invisible with one BMS; it only
+            # bites with several units on one bus, which is the case that needs
+            # it most (#398).
+            await self._settle()
             return await super()._q(command, num_responses)
 
     def _q_timeout_context(self) -> str:

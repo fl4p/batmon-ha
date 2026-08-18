@@ -15,10 +15,12 @@ rather than an error:
     other's replies
 """
 import asyncio
+import time
 
 import pytest
 
 import bmslib.wired
+import bmslib.models.daly
 from bmslib.models import daly_uart as du
 from bmslib.test.data import daly_uart_fixtures as fx
 
@@ -386,3 +388,41 @@ def test_two_daly_on_one_real_serial_port(monkeypatch):
     assert rb == bytes([0x77] * 8), 'board 7 got the wrong payload: %r' % (rb,)
     assert ra2 == bytes([0x44] * 8)
     assert _FakeTransport.instances == [], 'fake transport leaked into the e2e test'
+
+
+def test_settle_gap_is_kept_between_different_bms(monkeypatch):
+    """The 20 ms settle must survive bus contention.
+
+    Taking it *before* the lock lets a queued BMS elapse its gap while a sibling
+    is still mid-exchange, so it transmits the moment the lock frees -- zero gap
+    after the previous reply, which is the failure the settle exists to prevent.
+    Only reproducible with two units on one bus (#398).
+    """
+    a, b = _connect_both()
+
+    events = []
+
+    async def fake_super_q(self, command, num_responses=1):
+        events.append(('tx', self.board, time.monotonic()))
+        await asyncio.sleep(0.03)          # the exchange occupies the bus
+        events.append(('done', self.board, time.monotonic()))
+        return None
+
+    monkeypatch.setattr(bmslib.models.daly.DalyBt, '_q', fake_super_q, raising=True)
+
+    async def scenario():
+        # Both fire at once, exactly as two sampling loops on the same period do.
+        await asyncio.gather(a._q(0x90), b._q(0x90))
+
+    asyncio.run(scenario())
+
+    order = [(kind, board) for kind, board, _t in events]
+    assert order[0][0] == 'tx' and order[1] == ('done', order[0][1]), \
+        'the two exchanges overlapped: %r' % (order,)
+
+    first_done = next(t for kind, _b, t in events if kind == 'done')
+    second_tx = [t for kind, _b, t in events if kind == 'tx'][1]
+    gap = second_tx - first_done
+    assert gap >= a.REQUEST_SETTLE * 0.9, (
+        'second BMS transmitted %.1f ms after the previous exchange ended, '
+        'expected at least the %.0f ms settle' % (gap * 1e3, a.REQUEST_SETTLE * 1e3))
