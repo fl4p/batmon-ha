@@ -397,6 +397,21 @@ class QuestDBSink(InfluxDBSink):
             })
 
 
+def telemetry_address(bms) -> str:
+    """The address string telemetry derives its anonymous device id from.
+
+    Deliberately the *pre-canonicalization* spelling (`address_raw`). The
+    telemetry measurement name is `slug + '_' + hash(address)`, so switching to
+    the canonical address in #399 would have moved every user who had configured
+    a lower-case MAC onto a brand-new table and split their own history at the
+    upgrade. Hashing what they originally configured keeps that identity stable.
+
+    This is the one legitimate use of `address_raw`. Anything that scans,
+    connects or resolves must use `bms.address`.
+    """
+    return getattr(bms, 'address_raw', None) or bms.address
+
+
 def hash_urlsafe(s: str):
     if not s:
         return None
@@ -443,7 +458,7 @@ class TelemetrySink(QuestDBSink):
         except:
             self.did = None
 
-        self.addrh_by_name = {n: hash_urlsafe(bms.address) for n, bms in bms_by_name.items()}
+        self.addrh_by_name = {n: hash_urlsafe(telemetry_address(bms)) for n, bms in bms_by_name.items()}
         self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
         self.sample_interval = 15

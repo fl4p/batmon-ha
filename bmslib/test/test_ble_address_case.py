@@ -149,3 +149,34 @@ def test_an_alias_wins_over_normalization():
     aliased, other = _Dev('aliased'), _Dev('other')
     bms_by_name = {'d1:1a:04:01:01:b7': aliased, 'D1:1A:04:01:01:B7': other}
     assert resolve_member_ref(bms_by_name, 'd1:1a:04:01:01:b7') is aliased
+
+
+def test_telemetry_identity_survives_canonicalization():
+    """The anonymous telemetry id must not move when the address is canonicalized.
+
+    The measurement name is `slug + '_' + hash_urlsafe(address)`, so hashing the
+    canonical address would have started a *new table* for every user who had
+    configured a lower-case MAC, splitting their own history at the upgrade.
+    """
+    from bmslib.sinks import hash_urlsafe, telemetry_address
+
+    class _Bms(bmslib.bt.BtBms):
+        pass
+
+    bms = _Bms(REPORTED, 'battery1')
+    assert bms.address == CANONICAL              # what we connect with
+    assert bms.address_raw == REPORTED           # what telemetry stays keyed by
+    assert telemetry_address(bms) == REPORTED
+    assert hash_urlsafe(telemetry_address(bms)) == hash_urlsafe(REPORTED)
+    # and it must NOT silently follow the canonical spelling
+    assert hash_urlsafe(telemetry_address(bms)) != hash_urlsafe(CANONICAL)
+
+
+def test_telemetry_address_falls_back_when_raw_is_absent():
+    """Virtual/foreign BMS objects predate address_raw; they must not crash."""
+    from bmslib.sinks import telemetry_address
+
+    class _Legacy:
+        address = 'D1:1A:04:01:01:B7'
+
+    assert telemetry_address(_Legacy()) == 'D1:1A:04:01:01:B7'

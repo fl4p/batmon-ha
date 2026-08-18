@@ -411,6 +411,12 @@ class BtBms:
     def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False,
                  _uses_pin=False):
         self.address = normalize_ble_address(address)
+        # The address exactly as configured, before canonicalization. ONLY for
+        # keeping an identity that was already derived from the old spelling
+        # stable across the #399 upgrade -- see bmslib.sinks.telemetry_address().
+        # Never scan, connect or look anything up with this: on the proxy stack a
+        # non-canonical spelling matches nothing, which is the bug #399 fixed.
+        self.address_raw = address
         self.name = name
         self.keep_alive = keep_alive
         self.verbose_log = verbose_log

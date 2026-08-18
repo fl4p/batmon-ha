@@ -65,6 +65,8 @@ class BMS():
         # a Daly from `type: daly` to `type: daly_ble` traded habluetooth's
         # "no available connection slot" for this, same root cause both times.
         self.address = normalize_ble_address(address)
+        # see BtBms.address_raw -- telemetry identity only, never for connecting
+        self.address_raw = address
         self.adapter = adapter
         self.name = name
         self._type = type
