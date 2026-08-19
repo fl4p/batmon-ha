@@ -39,14 +39,12 @@ def _dev():
 def test_vanilla_tdt_drops_broken_crc():
     """Contrast: upstream tdt_bms silently discards the same frame."""
     bms = tdt_bms.BMS(_dev())
-    bms._valid_reply = 0x8C
     bms._notification_handler(None, _broken_crc(FRAME_8C))
     assert 0x8C not in bms._msg
 
 
 def test_nocrc_accepts_broken_crc():
     bms = tdt_nocrc_bms.BMS(_dev())
-    bms._valid_reply = 0x8C
     bms._notification_handler(None, _broken_crc(FRAME_8C))
     assert 0x8C in bms._msg
 
@@ -69,3 +67,11 @@ def test_nocrc_full_update_decodes():
     assert sample["cell_voltages"] == pytest.approx([3.297, 3.295, 3.297, 3.292])
     assert sample["chrg_mosfet"] is True
     assert sample["dischrg_mosfet"] is True
+
+
+def test_type_resolution():
+    """get_bms_model_class('tdt_nocrc') must resolve to the plugin class."""
+    from bmslib.models import get_bms_model_class
+
+    cls = get_bms_model_class('tdt_nocrc')
+    assert cls is not None, "tdt_nocrc type is unreachable — check plugin fallback path"
