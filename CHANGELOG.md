@@ -1,4 +1,4 @@
-## [Unreleased]
+## [2.17]
 
 * Bundled aiobmsble updated 0.25.0 → 0.27.0. For Seplos v2 this fixes a permanent bogus `problem_code`: alarm bits the app files under "Alarm" (not "Problem") were read from the wrong frame and reported as a fault (#400, aiobmsble#98/#240). Also adds the `pwrboozt_bms` type and a TDT firmware-v1.1 current/charge fix.
 
