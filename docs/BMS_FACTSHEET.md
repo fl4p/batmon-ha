@@ -936,7 +936,7 @@ No CRC validation (the ATORCH `XOR-with-0x44` checksum is skipped). Min frame 28
 The remaining aiobmsble plugins cover the BMSes below (paths under `aiobmsble/bms/`). Use `<name>_aiobmsble` or `<name>_ble` as the batmon device `type`. Most follow the patman15 conventions documented above; ping me if you want a deep-dive sheet on any of these.
 
 Off-brand LFP packs / rack BMSes:
-`ag_bms`, `braunpwr_bms`, `buknuwo_bms`, `dpwrcore_bms`, `ej_bms`, `eleksol_bms`, `humsienk_bms`, `lipower_bms`, `myvolta_bms`, `pro_bms`, `saihang_bms`, `ws_nova_bms`, `dummy_bms`.
+`ag_bms`, `braunpwr_bms`, `buknuwo_bms`, `dpwrcore_bms`, `ej_bms`, `eleksol_bms`, `humsienk_bms`, `lipower_bms`, `myvolta_bms`, `pro_bms`, `pwrboozt_bms`, `saihang_bms`, `ws_nova_bms`, `dummy_bms`.
 
 For any of these, the canonical references are:
 - aiobmsble plugin source: `https://github.com/patman15/aiobmsble/blob/main/aiobmsble/bms/<name>_bms.py`

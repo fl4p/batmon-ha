@@ -39,12 +39,16 @@ def _dev():
 def test_vanilla_tdt_drops_broken_crc():
     """Contrast: upstream tdt_bms silently discards the same frame."""
     bms = tdt_bms.BMS(_dev())
+    # _async_update sets this before every request; without it the frame is
+    # rejected as an unexpected reply and the CRC check is never reached.
+    bms._valid_reply = 0x8C
     bms._notification_handler(None, _broken_crc(FRAME_8C))
     assert 0x8C not in bms._msg
 
 
 def test_nocrc_accepts_broken_crc():
     bms = tdt_nocrc_bms.BMS(_dev())
+    bms._valid_reply = 0x8C
     bms._notification_handler(None, _broken_crc(FRAME_8C))
     assert 0x8C in bms._msg
 

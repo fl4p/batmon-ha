@@ -1,3 +1,7 @@
+## [Unreleased]
+
+* Bundled aiobmsble updated 0.25.0 → 0.27.0. For Seplos v2 this fixes a permanent bogus `problem_code`: alarm bits the app files under "Alarm" (not "Problem") were read from the wrong frame and reported as a fault (#400, aiobmsble#98/#240). Also adds the `pwrboozt_bms` type and a TDT firmware-v1.1 current/charge fix.
+
 ## [2.16]
 
 * Several Daly can share one RS485 bus and one USB adapter: point them at the same `adapter:` and give each a board number (`type: daly_uart:1`, `daly_uart:2`, …). Replies are routed by board number and requests serialized, so `concurrent_sampling` stays safe; duplicate board numbers, and two BMS families needing different baud rates on one port, are rejected instead of silently corrupting each other's readings (#398).

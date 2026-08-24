@@ -5,7 +5,6 @@ from typing import Final
 from aiobmsble import MatcherPattern, BMSDp, BMSSample, BMSValue, BMSInfo
 from aiobmsble.basebms import BaseBMS
 from bleak.backends.characteristic import BleakGATTCharacteristic
-from bleak.backends.device import BLEDevice
 from bleak.uuids import normalize_uuid_str
 
 
@@ -39,9 +38,10 @@ class BMS(BaseBMS):
         BMSDp("temperature", 24, 2, False, lambda x: x),          # °C
     )
 
-    def __init__(self, ble_device: BLEDevice, keep_alive: bool = True) -> None:
-        """Initialize CW20 BMS."""
-        super().__init__(ble_device, keep_alive)
+    # No __init__ override: the second positional argument of BaseBMS.__init__
+    # changed meaning in aiobmsble 0.26 (keep_alive: bool -> config: BMSConfig),
+    # and forwarding it here would silently hand a bool to `self._cfg`.
+    # BLE_BMS_wrap builds the right kwargs for the installed version.
 
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:
@@ -89,7 +89,10 @@ class BMS(BaseBMS):
         if len(data) < BMS.MIN_FRAME_LEN:
             self._log.debug("Frame too short: %s", len(data))
             return
-        self._frame = bytearray(data)
+        # Refill the base class' buffer in place rather than rebinding it:
+        # since aiobmsble 0.26 `_frame` is a BoundedByteArray, not a bytearray.
+        self._frame.clear()
+        self._frame.extend(data)
         # aiobmsble renamed _data_event → _msg_event; support both
         event = getattr(self, "_msg_event", None) or getattr(self, "_data_event", None)
         if event is not None:

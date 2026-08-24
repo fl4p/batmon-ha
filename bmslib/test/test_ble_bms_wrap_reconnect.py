@@ -35,9 +35,12 @@ class _FakeBaseBMS:
     notify_acquired = {"by": None}
     instances = []
 
-    def __init__(self, ble_device, keep_alive=False):
+    def __init__(self, ble_device, config=None, keep_alive=False):
+        # aiobmsble < 0.26 took `keep_alive=`, >= 0.26 takes `config=BMSConfig(...)`.
+        # Accept both so this fake does not pin the test to one of them; the
+        # wrapper picks the right one (see test_bms_config_kwargs_match_installed).
         self.ble_device = ble_device
-        self._keep_alive = keep_alive
+        self._keep_alive = config.keep_alive if config is not None else keep_alive
         self._connected = False
         self.disconnect_calls = []
 
@@ -133,3 +136,21 @@ def test_repeated_reconnects_never_wedge(monkeypatch):
         bms.ble_bms._client.is_connected = False
         asyncio.run(bms.connect())  # would raise on the 2nd iter without the fix
     assert _FakeBaseBMS.notify_acquired["by"] is bms.ble_bms
+
+
+def test_bms_config_kwargs_match_installed():
+    """The wrapper must construct a BaseBMS the *installed* aiobmsble accepts.
+
+    aiobmsble 0.26 replaced the `keep_alive` / `secret` constructor arguments
+    with a single frozen `config: BMSConfig`. Passing the wrong one raises
+    TypeError on every connect, for every `_ble` device — and nothing else in
+    this suite instantiates a real BaseBMS subclass.
+    """
+    import inspect
+
+    from aiobmsble.basebms import BaseBMS
+    from bmslib.models.BLE_BMS_wrap import _bms_config_kwargs
+
+    params = inspect.signature(BaseBMS.__init__).parameters
+    for kw in _bms_config_kwargs(keep_alive=True):
+        assert kw in params, f"BaseBMS.__init__ has no {kw!r} parameter: {list(params)}"

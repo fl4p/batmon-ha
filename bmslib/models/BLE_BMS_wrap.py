@@ -12,6 +12,24 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+
+def _bms_config_kwargs(*, keep_alive: bool) -> dict:
+    """Constructor kwargs for a BaseBMS, across the aiobmsble 0.26 API break.
+
+    Up to 0.25 the connection settings were plain keyword arguments
+    (``keep_alive=``, ``secret=``); 0.26 folded them into a frozen
+    ``BMSConfig`` dataclass passed as ``config=``. Passing the old kwarg to a
+    new BaseBMS raises TypeError, and passing the new one to an old BaseBMS
+    does too, so pick by what the installed package exports. venv_esphome may
+    resolve a different aiobmsble than the pinned one in the main venv.
+    """
+    try:
+        from aiobmsble import BMSConfig
+    except ImportError:
+        return dict(keep_alive=keep_alive)
+    return dict(config=BMSConfig(keep_alive=keep_alive))
+
+
 class BLEDeviceResolver:
     devices: Dict[Tuple[str, str], BLEDevice] = {}
 
@@ -154,7 +172,7 @@ class BMS():
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: BaseBMS = self._blebms_class(
             ble_device=ble_device,
-            keep_alive=self._keep_alive,
+            **_bms_config_kwargs(keep_alive=bool(self._keep_alive)),
         )
 
         # try:
