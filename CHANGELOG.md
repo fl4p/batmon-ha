@@ -1,6 +1,6 @@
 ## [2.18]
 
-* Fix (`ble_stack: bluek`): endless `[Errno 16] Resource busy: 'l2cap connect to …'` reported as `device not found`. EBUSY means something else on the same host — usually bluetoothd for Home Assistant's own Bluetooth integration — already holds the device's ATT channel, which bluek cannot share; retrying alone never clears it. bluek now drops that link before retrying and names the real cause instead of blaming range. The teardown fires only where a connect was actually refused, is throttled per device, and gives up rather than fighting an owner that keeps reconnecting (#403).
+* Fix (`ble_stack: bluek`): endless `[Errno 16] Resource busy: 'l2cap connect to …'`, reported as `device not found`. Something else on the host — usually bluetoothd for Home Assistant's own Bluetooth integration — held the device's ATT channel, which bluek cannot share and retrying never clears. bluek now drops that link before retrying, throttled per device and only where a connect was actually refused (#403).
 
 ## [2.17]
 
