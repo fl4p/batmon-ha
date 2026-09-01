@@ -65,7 +65,7 @@ RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak' || t
 # Pure-Python, no deps. Activated at runtime via PYTHONPATH (addon_main.sh), same
 # as bumble-bleak. Best-effort: if the install fails, ble_stack=bluek warns and
 # falls back to bleak.
-RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek@cbc01b5' || true
+RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek@36a6feb' || true
 # esphome (ble_stack: esphome): route BLE GATT through one or more ESPHome
 # Bluetooth Proxy devices. Uses habluetooth's BluetoothManager + bleak-esphome
 # and monkey-patches `bleak.BleakClient`/`BleakScanner` to habluetooth's
