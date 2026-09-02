@@ -1,5 +1,4 @@
 import asyncio
-import fcntl
 import logging
 import math
 import os
@@ -261,6 +260,7 @@ def _hci_dev_info(dev_id: int) -> Optional[dict]:
     """
     if not sys.platform.startswith('linux'):
         return None
+    import fcntl
     if not hasattr(socket, 'AF_BLUETOOTH'):
         socket.AF_BLUETOOTH = 31  # type: ignore[attr-defined]
     if not hasattr(socket, 'BTPROTO_HCI'):
