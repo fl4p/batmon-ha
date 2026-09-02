@@ -1,3 +1,8 @@
+## [unreleased]
+
+* New optional `reconnect_interval_minutes`: drop each `keep_alive` BLE link every N minutes (jittered) so the next connect re-picks the backend/proxy. Habluetooth only scores proxies at connect time, so on a multi-proxy ESPHome setup a device otherwise stays on whichever proxy answered first. Off by default (#406).
+* Fix: a BMS failing every cycle for ~5 days crashed its fetch loop with `OverflowError` from the `1.1 ** n` error backoff; the exponent is now clamped.
+
 ## [2.18]
 
 * Fix (`ble_stack: bluek`): endless `[Errno 16] Resource busy: 'l2cap connect to …'`, reported as `device not found`. Something else on the host — usually bluetoothd for Home Assistant's own Bluetooth integration — held the device's ATT channel, which bluek cannot share and retrying never clears. bluek now drops that link before retrying, throttled per device and only where a connect was actually refused (#403).

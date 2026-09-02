@@ -723,6 +723,11 @@ class BtBms:
         self._in_disconnect = False
         self._fetch_futures.clear()
 
+    async def force_disconnect(self):
+        """Public teardown for callers outside the connect flow (e.g. the sampler's
+        periodic reconnect). Call under ConnectLock; see _force_disconnect()."""
+        await self._force_disconnect()
+
     async def _force_disconnect(self, timeout=FORCE_DISCONNECT_TIMEOUT):
         """Tear the link down whatever the model's disconnect() does.
 

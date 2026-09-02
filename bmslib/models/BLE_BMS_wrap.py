@@ -196,6 +196,20 @@ class BMS():
         if self.ble_bms is not None:
             await self.ble_bms.disconnect()
 
+    async def force_disconnect(self):
+        """Teardown for callers outside connect() (periodic reconnect): the same
+        bounded disconnect(reset=True) + instance drop connect() does for a stale
+        instance, so the next connect() starts from a clean slate. A plain
+        disconnect() leaves the old instance referenced and, without connect()'s
+        cleanup running after it, the notify FD stays acquired (#384)."""
+        if self.ble_bms is None:
+            return
+        try:
+            await asyncio.wait_for(self.ble_bms.disconnect(reset=True), timeout=10)
+        except Exception as e:
+            logger.warning('%s: force disconnect failed: %s', self.name, str(e) or type(e).__name__)
+        self.ble_bms = None
+
     async def set_switch(self, switch: str, state: bool):
         # aiobmsble has no switch-write API — surface mosfet states as read-only.
         raise NotImplementedError(

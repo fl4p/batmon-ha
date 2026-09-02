@@ -77,3 +77,10 @@ def test_backoff_escalates_while_failing(slept):
     _run([True], max_errors=3, max_cycles=500)
     error_sleeps = [d for d in slept if d != 0]
     assert error_sleeps == [pytest.approx(1.1 ** n) for n in (1, 2, 3)]
+
+
+def test_backoff_exponent_is_clamped(slept):
+    # 1.1 ** 7448 raises OverflowError, which used to kill the loop after ~5 days
+    # of a permanently failing device; the exponent is clamped so it just hits the cap
+    assert _run([True], max_errors=0, max_cycles=7500) == 7500
+    assert max(slept) == 60

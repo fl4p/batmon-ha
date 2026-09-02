@@ -150,7 +150,8 @@ class BmsSampler:
                  current_calibration_factor=1.0,
                  over_power=None,
                  bms_group: Optional[BmsGroup] = None,
-                 bt_power_cycle_on_error=False
+                 bt_power_cycle_on_error=False,
+                 reconnect_interval_s: Optional[float] = None,
                  ):
 
         self.bms = bms
@@ -185,6 +186,17 @@ class BmsSampler:
         self._last_diag_t = 0
         self.bt_power_cycle_on_error = bt_power_cycle_on_error
 
+        # Periodic reconnect (reconnect_interval_minutes, off by default). With
+        # keep_alive a BMS stays on whichever backend/proxy it first connected
+        # through: habluetooth only scores backends inside connect(). On a
+        # multi-proxy esphome setup that first pick is often not the best one, so
+        # optionally drop the link now and then to let connect() choose again.
+        # Jittered +/-20% and re-rolled per connect, so a fleet that connected
+        # in the same startup window does not reconnect in one burst every cycle.
+        self._reconnect_interval_s = reconnect_interval_s if reconnect_interval_s and reconnect_interval_s > 0 else None
+        self._t_connected = 0.0
+        self._reconnect_due_s = math.inf
+
         self.algorithm = None
         if algorithms:
             assert len(algorithms) == 1, "currently only 1 algo supported"
@@ -214,6 +226,24 @@ class BmsSampler:
         temp_step = getattr(bms, 'TEMPERATURE_STEP', 0)
         temp_smooth = getattr(bms, 'TEMPERATURE_SMOOTH', 10)
         self._lhq_temp = defaultdict(lambda: LHQ(span=temp_smooth, inp_q=temp_step)) if temp_step else None
+
+    def _arm_periodic_reconnect(self):
+        self._t_connected = time.monotonic()  # immune to wall-clock steps, like estimate_runtime
+        if self._reconnect_interval_s:
+            self._reconnect_due_s = self._reconnect_interval_s * random.uniform(0.8, 1.2)
+
+    async def _periodic_reconnect(self):
+        """Drop a healthy keep_alive link once its jittered interval elapsed."""
+        bms = self.bms
+        if not self._reconnect_interval_s or bms.is_virtual or not bms.is_connected:
+            return
+        age = time.monotonic() - self._t_connected
+        if age < self._reconnect_due_s:
+            return
+        logger.info('%s periodic reconnect after %.0f s', bms.name, age)
+        self._reconnect_due_s = math.inf  # once per connect, even if the teardown fails
+        async with bmslib.bt.ConnectLock:
+            await bms.force_disconnect()
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
@@ -333,6 +363,8 @@ class BmsSampler:
         bms = self.bms
         mqtt_client = self.mqtt_client
 
+        await self._periodic_reconnect()
+
         was_connected = bms.is_connected
 
         # if not was_connected:
@@ -358,6 +390,7 @@ class BmsSampler:
 
             if not was_connected:
                 logger.info('connected bms %s!', bms)
+                self._arm_periodic_reconnect()
 
             if self.device_info is None and self.num_samples == 0:
                 # try to fetch device info first. if bms.fetch() fails we might have at least some details
@@ -685,5 +718,6 @@ async def fetch_loop(fn, period, max_errors, should_stop=None):
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
-            await asyncio.sleep(min(1.1 ** num_errors_row, 60))
+            # clamp the exponent: 1.1 ** 7448 raises OverflowError and kills the loop
+            await asyncio.sleep(min(1.1 ** min(num_errors_row, 100), 60))
         await asyncio.sleep(period)
