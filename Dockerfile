@@ -82,7 +82,7 @@ RUN python3 -m venv venv_esphome \
  && venv_esphome/bin/pip3 install 'bleak==3.0.2' 'habluetooth==6.26.11' 'bleak-esphome==4.1.0' \
     'aioesphomeapi==46.3.0' 'bleak-retry-connector==4.7.0' \
  && venv_esphome/bin/pip3 install influxdb \
- && venv_esphome/bin/pip3 install 'aiobmsble==0.27.0' \
+ && venv_esphome/bin/pip3 install --no-deps 'aiobmsble==0.27.0' \
  || true
 # Pinned as one set (#401). The former `bluetooth-data-tools<1.29` pin (only
 # x86_64 wheels at the time) silently held habluetooth at 6.1.0 / bleak-esphome
