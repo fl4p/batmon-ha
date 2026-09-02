@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* New optional `reconnect_interval_minutes`: drop each `keep_alive` BLE link every N minutes (jittered) so the next connect re-picks the backend/proxy. Habluetooth only scores proxies at connect time, so on a multi-proxy ESPHome setup a device otherwise stays on whichever proxy answered first. Off by default (#406).
+* New optional `reconnect_interval_minutes`: drop each `keep_alive` BLE link every N minutes (jittered) so the next connect re-picks the backend/proxy. Habluetooth only scores proxies at connect time, so on a multi-proxy ESPHome setup a device otherwise stays on whichever proxy answered first. Wired BMS are left alone. Off by default (#406).
 * `concurrent_sampling`: a device that keeps failing now backs off up to 10 min (was 60 s), so its retries stop starving healthy neighbours on the same ESPHome proxy. Serial mode keeps 60 s, where a longer wait would stall every device (#405).
 * Fix: a BMS failing every cycle for ~5 days crashed its fetch loop with `OverflowError` from the `1.1 ** n` error backoff; the exponent is now clamped.
 

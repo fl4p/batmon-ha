@@ -340,7 +340,7 @@ async def main():
         bms_group=groups_by_bms.get(bms.name),
         sinks=sinks,
         bt_power_cycle_on_error=user_config.get('bt_power_cycle_on_error', False),
-        reconnect_interval_s=(user_config.get('reconnect_interval_minutes') or 0) * 60 or None,  # <=0 -> off
+        reconnect_interval_s=float(user_config.get('reconnect_interval_minutes') or 0) * 60 or None,  # <=0 -> off
     ) for bms in bms_list]
 
     # move groups to the end

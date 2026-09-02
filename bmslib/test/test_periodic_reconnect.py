@@ -7,13 +7,23 @@ that kwarg (the PR #406 bug), and BLE_BMS_wrap is not a BtBms."""
 import asyncio
 import math
 
+import pytest
+
 import bmslib.bt
 from bmslib.sampling import BmsSampler
 
 
+@pytest.fixture(autouse=True)
+def _no_ble_scan(monkeypatch):
+    """The error handler runs a real 3 s BLE scan for a non-serial address."""
+    async def _noop(*a, **k):
+        pass
+    monkeypatch.setattr(bmslib.bt, 'bt_diagnostics', _noop)
+
+
 class _Bms:
     name = "fake"
-    address = 'serial'
+    address = 'AA:BB:CC:DD:EE:FF'
     is_virtual = False
     verbose_log = False
     connect_time = 0
@@ -99,6 +109,28 @@ def test_negative_interval_is_off():
     s._t_connected = 0
     _cycle(s)
     assert bms.forced == 0 and bms.connects == 1
+
+
+def test_wired_is_left_alone():
+    bms = _Bms()
+    bms.address = 'serial'
+    s = _sampler(bms, 600)
+    _cycle(s)
+    s._t_connected -= 10_000
+    _cycle(s)
+    assert bms.forced == 0 and bms.connects == 1
+
+
+def test_rearms_when_the_link_survived_a_failed_reconnect():
+    """BtBms.__aenter__ repairs a link left up by a connect() that raised half-way,
+    and was_connected is True in that cycle. The timer must still re-arm."""
+    bms = _Bms()
+    s = _sampler(bms, 600)
+    _cycle(s)
+    bms.is_connected = True  # pretend the teardown's follow-up connect left the link up
+    s._reconnect_due_s = math.inf
+    _cycle(s)
+    assert math.isfinite(s._reconnect_due_s)
 
 
 def test_only_when_connected():

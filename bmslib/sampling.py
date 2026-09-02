@@ -237,6 +237,8 @@ class BmsSampler:
         bms = self.bms
         if not self._reconnect_interval_s or bms.is_virtual or not bms.is_connected:
             return
+        if bms.address == 'serial':
+            return  # wired: nothing to re-pick
         age = time.monotonic() - self._t_connected
         if age < self._reconnect_due_s:
             return
@@ -390,6 +392,9 @@ class BmsSampler:
 
             if not was_connected:
                 logger.info('connected bms %s!', bms)
+            if math.isinf(self._reconnect_due_s):
+                # (re)arm on any fresh link, including one __aenter__ repaired after a
+                # connect that raised half-way (was_connected was True then, #391)
                 self._arm_periodic_reconnect()
 
             if self.device_info is None and self.num_samples == 0:
