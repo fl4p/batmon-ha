@@ -19,7 +19,7 @@ fix connection abort:
 import asyncio
 import time
 from collections import defaultdict
-from typing import List, Callable, Dict, Tuple
+from typing import List, Callable, Dict, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms, enumerate_services
@@ -94,15 +94,19 @@ def feed_frames(buf: bytearray, chunk: bytes) -> Tuple[List[bytes], int, List[by
             break  # header-aligned but incomplete, wait for more packets
 
         frame = bytes(buf[:FRAME_SIZE])
-        if calc_crc(frame[:-1]) == frame[-1] and frame[4] in RESPONSE_TYPES:
+        if (calc_crc(frame[:-1]) == frame[-1] and frame[4] in RESPONSE_TYPES
+                and frame.find(HEADER, 1) < 0):
             del buf[:FRAME_SIZE]
             frames.append(frame)
             continue
 
-        # Either a bad CRC (a real frame arrived corrupt) or a header-shaped
-        # sequence in junk whose window happened to pass the 8-bit sum. Neither
-        # is fixable by more data, and consuming FRAME_SIZE here would eat the
-        # real frame behind it. Resync on the next header instead.
+        # Either a bad CRC (a real frame arrived corrupt), a header-shaped
+        # sequence in junk whose window happened to pass the 8-bit sum, or a
+        # frame with a notify packet dropped mid-way (#391): the window then
+        # ends with the head of the *next* frame, header included, and passes
+        # the sum once in 256. Neither is fixable by more data, and consuming
+        # FRAME_SIZE here would eat the real frame behind it. Resync on the
+        # next header instead.
         corrupt.append(frame)
         nxt = buf.find(HEADER, len(HEADER))
         if nxt < 0:
@@ -191,9 +195,50 @@ class JKBt(BtBms):
             self._junk_count = 0
             self._decode_msg(bytearray(frame))
 
+    def _status_frame_implausible(self, buf: bytearray) -> Optional[str]:
+        """Physical sanity check on a 0x02 status frame; returns the reason or None.
+
+        calc_crc is an 8-bit sum, so a frame spliced from two status frames after a
+        dropped notify packet (a busy ESPHome proxy, #391) still passes the checksum
+        once in 256. Every field after the splice is then read at the wrong offset,
+        e.g. 1,216,000 V and 130 GW published to HA. The layout must be known.
+        """
+        if self.is_new_11fw_32s is None:
+            return None
+        offset = 32 if self.is_new_11fw_32s else 0
+        slots = 32 if self.is_new_11fw_32s else 24
+        cells = [int.from_bytes(buf[6 + 2 * i:8 + 2 * i], 'little') for i in range(slots)]
+        live = [mv for mv in cells if mv]
+        if any(not 500 <= mv <= 5000 for mv in live):
+            return 'cell voltage out of range: %s' % live
+        if self.num_cells and len(live) > self.num_cells:
+            return '%d cell voltages for a %d cell pack' % (len(live), self.num_cells)
+        voltage = int.from_bytes(buf[118 + offset:122 + offset], 'little') * 1e-3
+        cell_sum = sum(live) * 1e-3
+        # a cell reading 0 (broken sense wire) must not drop the whole pack from HA
+        if abs(voltage - cell_sum) > 0.15 * cell_sum + 1.0:
+            return 'pack %.2f V vs cell sum %.2f V' % (voltage, cell_sum)
+        current = int.from_bytes(buf[126 + offset:130 + offset], 'little', signed=True) * 1e-3
+        if abs(current) > 2000:
+            return 'current %.0f A' % current
+        # fields behind the splice: the next frame's cell voltages land here
+        for i in (130, 132):
+            t = int.from_bytes(buf[i + offset:i + offset + 2], 'little', signed=True)
+            if t != -2000 and not -500 <= t <= 1500:
+                return 'temperature %.1f C' % (t / 10)
+        if buf[141 + offset] > 100:
+            return 'SOC %d %%' % buf[141 + offset]
+        return None
+
     def _decode_msg(self, buf: bytearray):
         resp_type = buf[4]
         self.logger.debug('got response %d (len%d)', resp_type, len(buf))
+        if resp_type == 0x02:
+            why = self._status_frame_implausible(buf)
+            if why:
+                self.logger.error("%s implausible status frame, discarding (%s): %s...",
+                                  self.name, why, to_hex_str(buf[:32]))
+                return
         self._resp_table[resp_type] = buf, time.time()
         self._fetch_futures.set_result(resp_type, buf[:])
         callbacks = self._callbacks.get(resp_type, None)
