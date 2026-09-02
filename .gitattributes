@@ -1,0 +1,8 @@
+# Shell/entrypoint scripts must stay LF - they run inside the Alpine/HA-add-on
+# base image via a shebang (#!/bin/sh, #!/usr/bin/with-contenv bashio). A CRLF
+# checkout (e.g. Windows git core.autocrlf=true) corrupts the shebang line
+# itself, and the container fails to start with either "not found" (interpreter
+# path literally includes \r) or "no such file or directory" (exec can't
+# resolve the mangled shebang at all) - neither error mentions line endings,
+# so this is easy to lose time to on a Windows checkout without this rule.
+*.sh text eol=lf
