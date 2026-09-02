@@ -682,7 +682,7 @@ class Downsampler:
         return s
 
 
-async def fetch_loop(fn, period, max_errors, should_stop=None):
+async def fetch_loop(fn, period, max_errors, should_stop=None, max_backoff=60):
     """Drive `fn` every `period` seconds, aborting after `max_errors` consecutive failures.
 
     `num_errors_row` counts *consecutive* failing cycles: it drives the 1.1**n
@@ -692,6 +692,12 @@ async def fetch_loop(fn, period, max_errors, should_stop=None):
     count grew for the lifetime of the add-on: every error slept the full 60 s
     cap after ~44 lifetime errors, and the watchdog aborted a perfectly healthy
     add-on once it reached 200 (#391).
+
+    `max_backoff` caps the error sleep. 60 s suits the serial loop, where one
+    device's failure would stall every other device behind it. A per-device
+    loop (concurrent_sampling) can back off much further for a device that is
+    never coming back, so its retries stop starving healthy neighbours sharing
+    the same proxy (#405).
     """
     num_errors_row = 0
     while not (should_stop and should_stop()):
@@ -719,5 +725,5 @@ async def fetch_loop(fn, period, max_errors, should_stop=None):
                 logger.warning('too many errors, abort')
                 break
             # clamp the exponent: 1.1 ** 7448 raises OverflowError and kills the loop
-            await asyncio.sleep(min(1.1 ** min(num_errors_row, 100), 60))
+            await asyncio.sleep(min(1.1 ** min(num_errors_row, 100), max_backoff))
         await asyncio.sleep(period)

@@ -34,7 +34,7 @@ def slept(monkeypatch):
     return durations
 
 
-def _run(fail_pattern, max_errors, max_cycles):
+def _run(fail_pattern, max_errors, max_cycles, **kw):
     """Run fetch_loop with fn failing according to fail_pattern (cycled).
     Stops after max_cycles unless the loop aborts on its own first."""
     calls = []
@@ -48,7 +48,7 @@ def _run(fail_pattern, max_errors, max_cycles):
             raise TimeoutError('boom')
 
     asyncio.run(fetch_loop(fn, period=0, max_errors=max_errors,
-                           should_stop=lambda: stop['v']))
+                           should_stop=lambda: stop['v'], **kw))
     return len(calls)
 
 
@@ -84,3 +84,10 @@ def test_backoff_exponent_is_clamped(slept):
     # of a permanently failing device; the exponent is clamped so it just hits the cap
     assert _run([True], max_errors=0, max_cycles=7500) == 7500
     assert max(slept) == 60
+
+
+def test_backoff_cap_is_configurable(slept):
+    # concurrent mode passes 600 so a permanently dead device stops hammering
+    # its proxy; the serial loop keeps the 60 s default
+    _run([True], max_errors=0, max_cycles=200, max_backoff=600)
+    assert max(slept) == 600

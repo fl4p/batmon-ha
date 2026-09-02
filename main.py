@@ -56,9 +56,10 @@ shutdown = False
 t_last_store = 0
 
 
-async def fetch_loop(fn, period, max_errors):
+async def fetch_loop(fn, period, max_errors, max_backoff=60):
     # the loop itself lives in bmslib.sampling so it is testable (main.py runs asyncio.run at import)
-    await _fetch_loop(fn, period=period, max_errors=max_errors, should_stop=lambda: shutdown)
+    await _fetch_loop(fn, period=period, max_errors=max_errors, should_stop=lambda: shutdown,
+                      max_backoff=max_backoff)
 
     logger.debug("fetch_loop %s ends", fn)
     if isinstance(fn, BmsSampler):
@@ -385,7 +386,9 @@ async def main():
 
         # this outer while loop recovers from a cancelled task. this happens when a device disconnects (bleak bug?)
         while not shutdown:
-            loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors)) for fn in tasks]
+            # per-device loops: a dead device may back off up to 10 min without delaying the others (#405)
+            loops = [asyncio.create_task(fetch_loop(fn, period=sample_period, max_errors=max_errors, max_backoff=600))
+                     for fn in tasks]
             done, pending = await asyncio.wait(loops, return_when='FIRST_COMPLETED')
 
             logger.debug('Done= %s, Pending=%s', done, pending)
