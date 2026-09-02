@@ -150,7 +150,8 @@ class BmsSampler:
                  current_calibration_factor=1.0,
                  over_power=None,
                  bms_group: Optional[BmsGroup] = None,
-                 bt_power_cycle_on_error=False
+                 bt_power_cycle_on_error=False,
+                 reconnect_interval_s: Optional[float] = None,
                  ):
 
         self.bms = bms
@@ -184,6 +185,23 @@ class BmsSampler:
         self._time_next_retry = 0
         self._last_diag_t = 0
         self.bt_power_cycle_on_error = bt_power_cycle_on_error
+
+        # Periodic reconnect for connection-path re-evaluation (#opt-in, see
+        # reconnect_interval_minutes in config.yaml). keep_alive holds a device on
+        # whichever backend/proxy it first connected through for the rest of the
+        # session - habluetooth's own connect() returns immediately if already
+        # connected and never re-scores available backends on its own (confirmed by
+        # reading habluetooth/wrappers.py directly - _async_get_best_available_backend_
+        # and_device() only ever runs from inside connect()). On a multi-proxy
+        # ble_stack: esphome deployment this "sticky first connect" is provably
+        # suboptimal: two restarts of the same fleet ~15 minutes apart, with nothing
+        # about the devices' physical placement changed, produced two completely
+        # different "best" proxy assignments - whichever proxy happened to answer
+        # first/fastest at connect time won, not necessarily the best-scoring one long
+        # term. This periodically forces a clean disconnect so the next cycle's normal
+        # reconnect flow gets a fresh, current best-backend evaluation.
+        self._reconnect_interval_s = reconnect_interval_s
+        self._last_connect_time = 0.0
 
         self.algorithm = None
         if algorithms:
@@ -333,6 +351,15 @@ class BmsSampler:
         bms = self.bms
         mqtt_client = self.mqtt_client
 
+        if (self._reconnect_interval_s and bms.is_connected
+                and time.time() - self._last_connect_time > self._reconnect_interval_s):
+            logger.info('%s periodic reconnect for path re-evaluation (%.0fs since last connect)',
+                        bms.name, time.time() - self._last_connect_time)
+            try:
+                await bms.disconnect()
+            except Exception as e:
+                logger.warning('%s periodic reconnect: disconnect failed: %s', bms.name, e)
+
         was_connected = bms.is_connected
 
         # if not was_connected:
@@ -358,6 +385,7 @@ class BmsSampler:
 
             if not was_connected:
                 logger.info('connected bms %s!', bms)
+                self._last_connect_time = time.time()
 
             if self.device_info is None and self.num_samples == 0:
                 # try to fetch device info first. if bms.fetch() fails we might have at least some details

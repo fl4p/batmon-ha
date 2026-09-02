@@ -113,6 +113,23 @@ schema:
   # rate-limited to one cycle per BT_POWER_CYCLE_MIN_INTERVAL (bmslib/sampling.py).
   bt_power_cycle_on_error: "bool?"
 
+  # Opt-in, unset/0 = disabled. With keep_alive on, a device stays on whichever
+  # backend/proxy it first connected through for the rest of the session -
+  # habluetooth's own connect() never re-evaluates available backends once
+  # connected (confirmed by reading habluetooth/wrappers.py: the best-backend
+  # scoring only ever runs from inside connect() itself). On a multi-proxy
+  # ble_stack: esphome deployment this is provably suboptimal - two restarts of
+  # the same fleet ~15 minutes apart, nothing about physical placement changed,
+  # produced two completely different "best" proxy assignments, because whichever
+  # proxy answered first/fastest at connect time won, not necessarily the
+  # best-scoring one long term. Setting this forces each device to periodically
+  # disconnect and let the normal reconnect flow re-evaluate with current data.
+  # Each forced reconnect costs a real data gap (~4-8s observed) while it
+  # reconnects, so pick an interval that trades that cost against how often your
+  # RF environment/proxy fleet actually changes - minutes for testing/tuning,
+  # hours-to-a-day for steady-state production.
+  reconnect_interval_minutes: "float?"
+
   # "bleak" = stock BlueZ/D-Bus stack (default); "bumble" = bumble-bleak
   # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
   # adapter(s) it uses (brings them down), so they leave the HA Bluetooth pool;
