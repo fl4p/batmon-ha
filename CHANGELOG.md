@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix (`ble_stack: esphome`): a fresh 2.17 build failed every connect through ESPHome proxies (one path offered, then a timeout). The esphome venv was never "latest": a wheel workaround pinned `bluetooth-data-tools<1.29`, which silently held habluetooth at 6.1.0 from April while aioesphomeapi floated to 46.x. The four packages are now pinned as one current set (habluetooth 6.26.11, bleak-esphome 4.1.0, aioesphomeapi 46.3.0, bleak-retry-connector 4.7.0) (#401).
 * New optional `reconnect_interval_minutes`: drop each `keep_alive` BLE link every N minutes (jittered) so the next connect re-picks the backend/proxy. Habluetooth only scores proxies at connect time, so on a multi-proxy ESPHome setup a device otherwise stays on whichever proxy answered first. Wired BMS are left alone. Off by default (#406).
 * `concurrent_sampling`: a device that keeps failing now backs off up to 10 min (was 60 s), so its retries stop starving healthy neighbours on the same ESPHome proxy. Serial mode keeps 60 s, where a longer wait would stall every device (#405).
 * Fix: a BMS failing every cycle for ~5 days crashed its fetch loop with `OverflowError` from the `1.1 ** n` error backoff; the exponent is now clamped.

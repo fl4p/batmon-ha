@@ -21,6 +21,7 @@ the addon can fall back to plain bleak rather than crash.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any, Iterable, List
 
@@ -160,6 +161,9 @@ async def stop_proxies() -> None:
     _conns.clear()
     if _manager is not None:
         try:
-            await _manager.async_stop()
+            # habluetooth names it async_stop() but it is a plain function (6.1 and 6.26)
+            r = _manager.async_stop()
+            if inspect.isawaitable(r):
+                await r
         except Exception:
             pass

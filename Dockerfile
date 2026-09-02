@@ -79,14 +79,16 @@ RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek@36a6feb' || true
 # to bleak at runtime.
 RUN python3 -m venv venv_esphome \
  && venv_esphome/bin/pip3 install paho-mqtt==2.1.0 backoff crcmod pyserial \
- && venv_esphome/bin/pip3 install 'bleak>=3.0.2' habluetooth bleak-esphome aioesphomeapi \
-    'bluetooth-data-tools<1.29' \
+ && venv_esphome/bin/pip3 install 'bleak==3.0.2' 'habluetooth==6.26.11' 'bleak-esphome==4.1.0' \
+    'aioesphomeapi==46.3.0' 'bleak-retry-connector==4.7.0' \
  && venv_esphome/bin/pip3 install influxdb \
  && venv_esphome/bin/pip3 install 'aiobmsble==0.27.0' \
  || true
-# bluetooth-data-tools<1.29: 1.29.x ships only an x86_64 wheel (upstream
-# regression as of writing). Pin to 1.28.x to keep prebuilt aarch64/armv7
-# musl wheels. Revisit when upstream restores the matrix.
+# Pinned as one set (#401). The former `bluetooth-data-tools<1.29` pin (only
+# x86_64 wheels at the time) silently held habluetooth at 6.1.0 / bleak-esphome
+# 3.8.4 while aioesphomeapi floated; a rebuild that picked up aioesphomeapi 46
+# against that April habluetooth broke every proxy connect. bluetooth-data-tools
+# >= 1.29.22 ships musl aarch64/armv7 wheels again. Bump the four together.
 # armv7 caveat: cryptography/dbus-fast/bleak-esphome have no musl armv7
 # wheels — the install would have to compile, which needs `build-base
 # python3-dev libffi-dev openssl-dev cargo rust pkgconfig`. We don't pull
