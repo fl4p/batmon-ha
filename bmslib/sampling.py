@@ -200,7 +200,25 @@ class BmsSampler:
         # first/fastest at connect time won, not necessarily the best-scoring one long
         # term. This periodically forces a clean disconnect so the next cycle's normal
         # reconnect flow gets a fresh, current best-backend evaluation.
+        #
+        # JITTER (added 2026-09-02, same day, after live-testing the un-jittered version):
+        # every device in a fleet that all connected within the same narrow startup window
+        # stays locked in that same relative timing forever with a *fixed* interval - so
+        # every cycle, most of the fleet's forced reconnects land within a 1-2 minute span
+        # of each other instead of spreading across the full interval. Confirmed live this
+        # is not just cosmetic: cycle 3 of a 3-cycle test (10-minute interval) put 4 of 5
+        # devices into simultaneous reconnect attempts, and the proxies serving them
+        # degraded into repeatedly reporting "not scanning" across all of them at once -
+        # requiring a full proxy reboot to clear, the same failure signature seen from
+        # unrelated causes earlier in that session. The individual reconnect mechanism
+        # itself (reset=True) was not the problem - every reconnect that fired eventually
+        # either succeeded quickly or self-recovered; it was the *simultaneity* that
+        # degraded the shared proxy hardware. Re-rolling a random +/-20% jitter on every
+        # cycle (not just once at startup) means even an unlucky coincidence self-corrects
+        # on the very next cycle, rather than two devices' offsets staying pinned together
+        # forever if they ever happen to land close.
         self._reconnect_interval_s = reconnect_interval_s
+        self._next_reconnect_interval_s = self._jittered_interval()
         self._last_connect_time = 0.0
 
         self.algorithm = None
@@ -235,6 +253,12 @@ class BmsSampler:
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
+
+    def _jittered_interval(self):
+        """+/-20% jitter on the configured reconnect_interval_s - see the big comment
+        on self._reconnect_interval_s in __init__ for why this needs to be re-rolled
+        on every cycle rather than fixed once per device."""
+        return self._reconnect_interval_s * random.uniform(0.8, 1.2)
 
     async def __call__(self):
         self._num_errors += 1
@@ -352,9 +376,9 @@ class BmsSampler:
         mqtt_client = self.mqtt_client
 
         if (self._reconnect_interval_s and bms.is_connected
-                and time.time() - self._last_connect_time > self._reconnect_interval_s):
-            logger.info('%s periodic reconnect for path re-evaluation (%.0fs since last connect)',
-                        bms.name, time.time() - self._last_connect_time)
+                and time.time() - self._last_connect_time > self._next_reconnect_interval_s):
+            logger.info('%s periodic reconnect for path re-evaluation (%.0fs since last connect, jittered target %.0fs)',
+                        bms.name, time.time() - self._last_connect_time, self._next_reconnect_interval_s)
             # reset=True: the plain disconnect() (no reset) does NOT run the same
             # notify-FD/stale-BlueZ-link cleanup connect() itself does before
             # replacing an old instance - confirmed live (#periodic-reconnect
@@ -395,6 +419,7 @@ class BmsSampler:
             if not was_connected:
                 logger.info('connected bms %s!', bms)
                 self._last_connect_time = time.time()
+                self._next_reconnect_interval_s = self._jittered_interval()
 
             if self.device_info is None and self.num_samples == 0:
                 # try to fetch device info first. if bms.fetch() fails we might have at least some details
