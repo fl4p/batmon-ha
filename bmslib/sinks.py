@@ -128,6 +128,20 @@ class InfluxDBSink(BmsSampleSink):
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
         fields = flatten({**sample.values(), "timestamp": None})
+        # problem/problem_code are bitmask/status fields where aiobmsble reports
+        # None for "no problem" rather than 0. remove_none_values() below drops
+        # any None field outright, which silently erases a genuine clear - a
+        # transition from e.g. 131072 back to "no problem" becomes indistinguishable
+        # from "not sampled this round" to every downstream consumer (InfluxDB, MQTT,
+        # HA). Once a real problem fires, its last non-None value then sits there
+        # forever with no way to tell "still true" from "went stale", since nothing
+        # ever explicitly publishes the clear. Normalize to 0 first (0 == no bits
+        # set, a fully correct "healthy" value, not a lossy placeholder) so the
+        # field is always present and a real clear is a real, visible transition
+        # the equal-value dedup below won't suppress.
+        for k in ('problem', 'problem_code'):
+            if fields.get(k) is None:
+                fields[k] = 0
         remove_none_values(fields)
         for k, v in fields.items():
             if isinstance(v, int):

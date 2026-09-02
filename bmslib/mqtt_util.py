@@ -261,11 +261,16 @@ def publish_sample(client, device_topic, sample: BmsSample):
             topic = f"{device_topic}/switch/{switch_name}"
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
-    if sample.problem is not None:
-        mqtt_single_out(client, f"{device_topic}/problem",
-                        'ON' if sample.problem else 'OFF')
-    if sample.problem_code is not None:
-        mqtt_single_out(client, f"{device_topic}/problem_code", sample.problem_code)
+    # Same fix as sinks.py's publish_sample: aiobmsble reports None (not 0/False)
+    # for "no problem", and skipping the publish entirely on None means a genuine
+    # clear is never sent - HA's sensor just holds the last real problem_code
+    # forever with no way to tell "still true" from "went stale". Publish an
+    # explicit healthy value instead of skipping, so a real clear is a real,
+    # visible MQTT message.
+    mqtt_single_out(client, f"{device_topic}/problem",
+                    'ON' if sample.problem else 'OFF')
+    mqtt_single_out(client, f"{device_topic}/problem_code",
+                    sample.problem_code if sample.problem_code is not None else 0)
 
     if sample.battery_charging is not None:
         mqtt_single_out(client, f"{device_topic}/battery_charging",
