@@ -192,9 +192,28 @@ class BMS():
         #    await self._connect_with_scanner(timeout=timeout)
         # await self.start_notify(self.CHAR_UUID, self._notification_handler)
 
-    async def disconnect(self):
-        if self.ble_bms is not None:
+    async def disconnect(self, reset: bool = False):
+        """Disconnect. reset=True does the same thorough cleanup connect() itself
+        does before replacing a stale instance (see the big comment in connect()):
+        releases the notify FD, runs bleak-retry-connector's close_stale_connections
+        to drop any lingering BlueZ link, bounded by the same 10s timeout so a wedged
+        BlueZ can't hang the caller forever, and clears self.ble_bms so the object is
+        left exactly as if it had never connected (a plain reset=False disconnect
+        leaves the old instance referenced, which connect() would still clean up
+        properly on its own next call - but a caller forcing a disconnect *outside*
+        of connect(), e.g. for periodic connection-path re-evaluation, has no such
+        follow-up guarantee unless it asks for the thorough version explicitly).
+        """
+        if self.ble_bms is None:
+            return
+        if not reset:
             await self.ble_bms.disconnect()
+            return
+        try:
+            await asyncio.wait_for(self.ble_bms.disconnect(reset=True), timeout=10)
+        except Exception as e:
+            logger.warning('%s: reset disconnect failed: %s', self.name, str(e) or type(e).__name__)
+        self.ble_bms = None
 
     async def set_switch(self, switch: str, state: bool):
         # aiobmsble has no switch-write API — surface mosfet states as read-only.

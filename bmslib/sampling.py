@@ -355,8 +355,17 @@ class BmsSampler:
                 and time.time() - self._last_connect_time > self._reconnect_interval_s):
             logger.info('%s periodic reconnect for path re-evaluation (%.0fs since last connect)',
                         bms.name, time.time() - self._last_connect_time)
+            # reset=True: the plain disconnect() (no reset) does NOT run the same
+            # notify-FD/stale-BlueZ-link cleanup connect() itself does before
+            # replacing an old instance - confirmed live (#periodic-reconnect
+            # testing): a plain disconnect() here left a device unable to
+            # reconnect via ANY proxy (BleakOutOfConnectionSlotsError with 0 free
+            # slots everywhere) until the whole container was restarted, exactly
+            # the stale-notify-FD failure mode connect()'s own cleanup exists to
+            # prevent (#384) - this caller just wasn't going through connect()'s
+            # cleanup path at all. reset=True runs that same cleanup explicitly.
             try:
-                await bms.disconnect()
+                await bms.disconnect(reset=True)
             except Exception as e:
                 logger.warning('%s periodic reconnect: disconnect failed: %s', bms.name, e)
 

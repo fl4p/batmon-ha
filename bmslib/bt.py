@@ -716,7 +716,17 @@ class BtBms:
 
         await scanner.stop()
 
-    async def disconnect(self):
+    async def disconnect(self, reset: bool = False):
+        """Disconnect. reset=True uses _force_disconnect() (below) instead of the
+        plain client.disconnect() - the thorough, bounded teardown already built for
+        this exact situation (see its own docstring), for a caller forcing a
+        disconnect *outside* of connect()'s own reconnect flow (e.g. periodic
+        connection-path re-evaluation) that has no guarantee anything will clean up
+        after it otherwise.
+        """
+        if reset:
+            await self._force_disconnect()
+            return
         self._connect_complete = False
         self._in_disconnect = True
         await self.client.disconnect()
