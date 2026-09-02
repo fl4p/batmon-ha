@@ -37,6 +37,21 @@ BT_POWER_CYCLE_MIN_INTERVAL = 600
 BT_POWER_CYCLE_SETTLE = 3  # seconds the controller stays down / gets to come back up
 _t_last_bt_power_cycle = 0.0
 
+# fetch_loop's per-cycle error backoff ceiling. Was a flat 60s regardless of how many
+# consecutive failures had piled up - fine for a transient blip, but a *permanently*
+# broken device (dead battery/balancer BMS, no software fix possible until physically
+# replaced) then retries forever on a fixed ~60s cadence with no further backoff.
+# Confirmed live on a shared ble_stack: esphome deployment (6 devices, 3 ESP32
+# Bluetooth proxies): a chronically-failing device's repeated connection attempts
+# visibly starved a proxy of scan time for its *other* devices (captured via the
+# proxy's own VERY_VERBOSE BLE stack log - a GATT connect attempt to the broken
+# device was in progress while zero advertisements arrived from anything else that
+# proxy would otherwise reliably hear), on top of the more obvious connection-slot
+# contention. Raising the ceiling to 10 minutes still notices a device coming back
+# reasonably quickly, while cutting a permanently-broken device's contention with its
+# healthy neighbors roughly 10x.
+FETCH_ERROR_BACKOFF_CAP = 600
+
 
 async def bt_power_cycle(bms_name):
     """Power the bluetooth controller(s) off and on, last-resort recovery for a
@@ -685,5 +700,5 @@ async def fetch_loop(fn, period, max_errors, should_stop=None):
             if max_errors and num_errors_row > max_errors:
                 logger.warning('too many errors, abort')
                 break
-            await asyncio.sleep(min(1.1 ** num_errors_row, 60))
+            await asyncio.sleep(min(1.1 ** num_errors_row, FETCH_ERROR_BACKOFF_CAP))
         await asyncio.sleep(period)
