@@ -63,6 +63,7 @@ options:
   bt_power_cycle: false
   bt_power_cycle_on_error: false
   ble_stack: bleak
+  reconnect_interval_minutes: 240
   # sample_period/publish_period/expire_values_after are kept here (and required
   # in the schema) so they render as normal, always-visible fields. They must NOT
   # live in the collapsed "unused optional configuration options" section: edits
@@ -113,7 +114,7 @@ schema:
   # rate-limited to one cycle per BT_POWER_CYCLE_MIN_INTERVAL (bmslib/sampling.py).
   bt_power_cycle_on_error: "bool?"
 
-  # Opt-in, unset/0 = disabled. With keep_alive on, a device stays on whichever
+  # Defaults to 240 (4h). Unset/0 = disabled. With keep_alive on, a device stays on whichever
   # backend/proxy it first connected through for the rest of the session -
   # habluetooth's own connect() never re-evaluates available backends once
   # connected (confirmed by reading habluetooth/wrappers.py: the best-backend
