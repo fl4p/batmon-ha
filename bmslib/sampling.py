@@ -257,7 +257,13 @@ class BmsSampler:
     def _jittered_interval(self):
         """+/-20% jitter on the configured reconnect_interval_s - see the big comment
         on self._reconnect_interval_s in __init__ for why this needs to be re-rolled
-        on every cycle rather than fixed once per device."""
+        on every cycle rather than fixed once per device. Called unconditionally from
+        __init__ (and again after every periodic reconnect) regardless of whether the
+        feature is enabled, so it must tolerate reconnect_interval_s being None/0 -
+        the _sample_inner() check that actually uses the result already short-circuits
+        on `self._reconnect_interval_s and ...` first, so a None here is never read."""
+        if not self._reconnect_interval_s:
+            return None
         return self._reconnect_interval_s * random.uniform(0.8, 1.2)
 
     async def __call__(self):
