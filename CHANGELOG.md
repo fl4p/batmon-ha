@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* Daly (`daly`, `daly_uart`): a `set SOC` number entity writes the BMS' SOC gauge (command 0x21 with clock + SOC*10, the frame dbus-serialbattery has written to Daly packs since 2023), so a gauge that drifted because the BMS ignores small currents can be corrected from HA without disconnecting batmon; untested on hardware (#144).
+* A `set SOC` number entity writes the BMS' SOC gauge, so a gauge that drifted because the BMS ignores small currents can be corrected from HA without disconnecting batmon. Daly (`daly`, `daly_uart`): command 0x21 with clock + SOC*10, the frame dbus-serialbattery has written to Daly packs since 2023. JK with firmware >= 11 (`jk`, `jk_32s`): register 0x6E, the `soc_calibration` number of syssi/esphome-jk-bms. Both untested on hardware (#144).
 * Add `bm6` for the BM6 (and BM2-style) Bluetooth car battery monitor: voltage, temperature, SOC and charging/low-voltage state over its AES-encrypted FFF3/FFF4 protocol, ported from the tarball.ca write-up and Rafciq/BM6; untested on hardware (#160).
 * JBD: newer firmware (Liontron and other packs whose app asks for a 6-digit password) only answers after a passkey pairing; `pin:` now works for `type: jbd` without the "does not use a pairing PIN" warning, README updated (#217).
 * HA long-term statistics were missing for the capacity, remaining charge, charge throughput and the netted energy/charge and cycle-count meters because their MQTT discovery carried no `state_class`; they now declare `measurement`, `total` or `total_increasing` as appropriate (#232).

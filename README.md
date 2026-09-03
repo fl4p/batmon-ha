@@ -18,7 +18,7 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Energy consumption meters (using trapezoidal power integrators)
 * Integrates with Home Assistant Energy dashboard and [Utility Meter](doc/HA%20Energy%20Dashboard.md) sensor helper
 * Control BMS charging and discharging switches
-* Set the SOC gauge of a Daly BMS (`daly`, `daly_uart`) from HA, via a `set SOC` number entity, e.g. to reset a drifted gauge to 0 % after a low-voltage cut-off (#144)
+* Set the SOC gauge from HA via a `set SOC` number entity, e.g. to reset a drifted gauge to 0 % after a low-voltage cut-off: Daly (`daly`, `daly_uart`) and JK with firmware >= 11 (`jk`, `jk_32s`) (#144)
 * Home Assistant MQTT Discovery
 * Can run as stand-alone app without Home-Assistant and directly write to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups for parallel batteries, see [doc/Groups.md](doc/Groups.md)

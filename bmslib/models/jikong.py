@@ -501,6 +501,20 @@ class JKBt(BtBms):
         self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
         # await asyncio.sleep(0.2)  # not sure if this is needed
 
+    def supports_set_soc(self) -> bool:
+        # register 0x6E exists in the JK02_32S protocol only (fw >= 11), see syssi/esphome-jk-bms
+        # components/jk_bms_ble/number/__init__.py CONF_SOC_CALIBRATION (#144)
+        return bool(self.is_new_11fw_32s)
+
+    async def set_soc(self, soc: float):
+        if not self.is_new_11fw_32s:
+            raise NotImplementedError("JK SOC calibration needs the 32s protocol (firmware >= 11)")
+        if not (0 <= soc <= 100):
+            raise ValueError("soc must be within 0..100, got %r" % (soc,))
+        await self._write(0x6E, [int(round(soc))])  # 1-byte register, percent
+        await asyncio.sleep(.2)
+        self._resp_table.pop(0x01, None)  # settings frame is stale now
+
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
 

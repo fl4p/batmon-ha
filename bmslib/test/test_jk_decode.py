@@ -118,3 +118,24 @@ def test_jk_new11_16s_cell_voltages():
         int.from_bytes(status[6 + i * 2: 6 + i * 2 + 2], "little") for i in range(16)
     ]
     assert voltages == fx["expected_voltages_mv"]
+
+
+def test_jk_set_soc_register_write():
+    import asyncio
+    from bmslib.models.jikong import JKBt, _jk_command
+    bms = JKBt("00:11:22:33:44:55", name="jk")
+    assert not bms.supports_set_soc()  # protocol unknown until the first frame
+    bms.is_new_11fw_32s = True
+    assert bms.supports_set_soc()
+    writes = []
+
+    async def fake_write(address, value):
+        writes.append((address, list(value)))
+
+    bms._write = fake_write
+    asyncio.run(bms.set_soc(42.4))
+    assert writes == [(0x6E, [42])]
+    frame = _jk_command(0x6E, [42])
+    assert frame[:7] == bytes([0xAA, 0x55, 0x90, 0xEB, 0x6E, 0x01, 42]) and len(frame) == 20
+    bms.is_new_11fw_32s = False
+    assert not bms.supports_set_soc()
