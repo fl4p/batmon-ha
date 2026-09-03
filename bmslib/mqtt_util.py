@@ -176,7 +176,7 @@ sample_desc = {
     "soc/capacity": {
         "field": "capacity",
         "device_class": None,
-        "state_class": None,
+        "state_class": "measurement",
         "unit_of_measurement": "Ah"
     },
     "soc/aged_capacity": {
@@ -200,7 +200,7 @@ sample_desc = {
     "soc/cycle_capacity": {
         "field": "total_charge_throughput",
         "device_class": None,
-        "state_class": None,
+        "state_class": "total_increasing",
         "unit_of_measurement": "Ah"},
     "soc/num_cycles": {
         "field": "num_cycles",
@@ -211,7 +211,7 @@ sample_desc = {
     "mosfet_status/capacity_ah": {
         "field": "charge",
         "device_class": None,
-        "state_class": None,
+        "state_class": "measurement",
         "unit_of_measurement": "Ah"},
     "mosfet_status/temperature": {
         "field": "mos_temperature",
@@ -394,14 +394,15 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     meters = {
         # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics
         # this enables the meters to appear in HA Energy Grid
-        'total_energy': dict(device_class="energy", unit="kWh", icon="meter-electric", name="total energy netted"),
-        # state_class="total",
+        'total_energy': dict(device_class="energy", state_class="total", unit="kWh", icon="meter-electric",
+                             name="total energy netted"),
         'total_energy_charge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
                                     icon="meter-electric", name="total energy input"),
         'total_energy_discharge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
                                        icon="meter-electric", name="total energy output"),
-        'total_charge': dict(device_class=None, unit="Ah", name="total charge netted"),
-        'total_cycles': dict(device_class=None, unit="N", icon="battery-sync", name="total cycle count"),
+        'total_charge': dict(device_class=None, state_class="total", unit="Ah", name="total charge netted"),
+        'total_cycles': dict(device_class=None, state_class="total_increasing", unit="N", icon="battery-sync",
+                             name="total cycle count"),
     }
     for name, m in meters.items():
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
