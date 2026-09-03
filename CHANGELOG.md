@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.19]
 
 * JBD: report which cells the balancer is bleeding, as a `balancing` binary sensor and a `balancing cells` list (e.g. `1,5,18`), decoded from the balance status words of the basic-info frame (#283).
 * Fix (JBD): a basic-info frame whose NTC count byte overruns the payload is rejected instead of publishing hundreds of phantom -273 °C temperature sensors, which HA discovery then created as entities (#321).
