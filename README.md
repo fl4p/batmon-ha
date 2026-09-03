@@ -36,7 +36,11 @@ read-only access.
 batmon device connectors:
 
 * JK BMS / jikong with JK02 protocol (`jk` over BLE, `jk_uart` over RS485 — see [Serial / RS485](#serial--rs485))
+* JK-PB inverter BMS (PB1A16S, PB2A16S, ...; `jk` over BLE, `jk_pb_uart` over RS485)
 * Daly BMS (`daly`, `daly2`, `daly_ble` over BLE, `daly_uart` over RS485 — see [Serial / RS485](#serial--rs485))
+* JBD / Xiaoxiang / LLT BMS (`jbd` over BLE, `jbd_uart` over TTL UART or RS485)
+* Seplos V2 BMS, 48 V rack packs (`seplos_ble`, `seplos_v2_ble` over BLE, `seplos_uart` over RS485)
+* Renogy smart lithium batteries (`renogy_ble` over BLE via the BT-2 dongle, `renogy_uart` over RS485)
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * Supervolt BMS (`supervolt`)
@@ -105,8 +109,8 @@ Add an entry for each device, such as:
 find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
 displayed in the discovery list.
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jbd`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
+`pace_uart`, `seplos_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
@@ -159,9 +163,25 @@ Supported types (baud rate in parentheses):
   ([#276](https://github.com/fl4p/batmon-ha/issues/276)).
 * `basen_uart` (9600) — Basen binary `7E … 0D` protocol; distinct from the
   BLE `basen`.
+* `jbd_uart` (9600) — JBD / Xiaoxiang / LLT, same `DD … 77` frames as the BLE
+  `jbd` (the BLE module is a UART bridge); TTL UART header or RS485 port.
+* `jk_pb_uart` (115200) — JK-PB inverter BMS (PB1A16S, PB2A16S, ...) on its
+  RS485-1 port: a Modbus FC16 trigger, answered with the JK02_32S frame the BLE
+  driver decodes. `jk_pb_uart:<n>` selects the RS485 address set in the JK app
+  (default 1). The older `jk_uart` TLV protocol does not work on PB models.
+* `seplos_uart` (19200) — Seplos V2 (BMS 1.0/2.0 hardware) ASCII protocol
+  (`~2000 46 42 …\r`); `seplos_uart:<addr>` for the pack address (default 0),
+  `seplos_uart:<addr>:9600` for the RS232 console port. Seplos V3 (Modbus) is
+  not covered.
+* `renogy_uart` (9600) — Renogy smart lithium (RBT100LFP12, RBT200LFP12S, ...)
+  Modbus RTU; `renogy_uart:<id>` for the slave id (default `0x30`; the
+  RBT100LFP12SH-G1 uses `0xF7`).
 
-`pace_uart` and `basen_uart` decoders are unit-tested against captured
-frames but not yet confirmed on live hardware — feedback welcome.
+`pace_uart`, `basen_uart`, `jbd_uart`, `jk_pb_uart`, `seplos_uart` and
+`renogy_uart` decoders are unit-tested against captured or reference frames but
+not yet confirmed on live hardware — feedback welcome. The protocols were ported
+from dbus-serialbattery, aiobmsble and the syssi ESPHome components; see the
+module docstrings for the exact sources.
 
 Example config:
 

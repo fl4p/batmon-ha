@@ -42,6 +42,10 @@ def get_bms_model_class(name: str):
         jk_32s='models.jikong.JKBt_32s',
         jk_uart='models.jikong_uart.JKUart',  # RS485/UART TLV protocol; use with address=serial
         daly_uart='models.daly_uart.DalyUart',  # RS485/USB-UART; same A5/04 frames as BLE
+        jbd_uart='models.jbd_uart.JbdUart',  # JBD over TTL UART / RS485; same DD..77 frames as BLE
+        jk_pb_uart='models.jk_pb_uart.JkPbUart',  # JK-PB inverter BMS over RS485 (Modbus trigger, JK02_32S frame)
+        seplos_uart='models.seplos_uart.SeplosUart',  # Seplos V2 ASCII protocol over RS485
+        renogy_uart='models.renogy_uart.RenogyUart',  # Renogy smart lithium over RS485 Modbus RTU
         pace_uart='models.pace.PaceUart',  # PACE "paceic" RS232/RS485 ASCII protocol (#276)
         ant='models.ant.AntBt',
         victron='models.victron.SmartShuntBt',
