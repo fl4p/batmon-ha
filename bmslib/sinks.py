@@ -439,18 +439,43 @@ def get_disk_id():
     return str(r['data']['data_disk']) or None
 
 
+TELEMETRY_HOST = "tm.fabi.me"
+
+
+def telemetry_transport(probe_timeout=5) -> dict:
+    """Connection kwargs for the telemetry server.
+
+    Prefer TLS: Traefik on :443 fronts the write endpoint with a Let's Encrypt
+    cert (#379). If that probe fails (cert lapsed, port filtered, no CA bundle
+    on an odd build) fall back to the plain :8086 endpoint that older add-on
+    versions use, and say so, rather than silently losing telemetry.
+    """
+    try:
+        import requests
+        r = requests.get("https://%s/ping" % TELEMETRY_HOST, timeout=probe_timeout)
+        if r.status_code in (200, 204):
+            return dict(host=TELEMETRY_HOST, port=443, ssl=True, verify_ssl=True)
+        why = "HTTP %d" % r.status_code
+    except Exception as e:
+        why = str(e) or type(e).__name__
+    logger.warning("telemetry: TLS endpoint https://%s unreachable (%s), "
+                   "falling back to plain http on :8086", TELEMETRY_HOST, why)
+    return dict(host=TELEMETRY_HOST, port=8086, ssl=False)
+
+
 class TelemetrySink(QuestDBSink):
 
-    def __init__(self, bms_by_name: Dict[str, BtBms]):
+    def __init__(self, bms_by_name: Dict[str, BtBms], transport: dict = None):
         super().__init__(
             flush_interval=120,
             backoff_interval=3600,
-            host="tm.fabi.me",
             username="batmon_wo",
             password="no" + "secret",
             database="batmon_tele",
-            ssl=False
+            **(transport or telemetry_transport()),
         )
+        self.url = "%s://%s:%d" % ("https" if self.influxdb_client._scheme == "https" else "http",
+                                   self.influxdb_client._host, self.influxdb_client._port)
         bms_by_name = {n: bms for n, bms in bms_by_name.items() if not bms.is_virtual}
         self.uid = get_user_id()
         try:

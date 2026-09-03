@@ -40,8 +40,10 @@ No MAC address, no location, no host name, no personal data. Uploads are batched
 
 ## Transport
 
-Currently InfluxDB line protocol over plain HTTP on port 8086 (#379). TLS is planned and
-requires a change on the server side first.
+InfluxDB line protocol over HTTPS to `tm.fabi.me:443` (Let's Encrypt certificate, verified).
+If that endpoint is unreachable at startup, batmon falls back to plain HTTP on port 8086 and
+logs a warning; the startup line `Anonymous telemetry is ON (https://...)` shows which one is
+in use. Add-on versions before 2.19 always used the plain endpoint (#379).
 
 ## Purpose
 
