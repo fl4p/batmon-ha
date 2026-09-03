@@ -258,7 +258,10 @@ class DalyBt(BtBms):
         with await self._fetch_futures.acquire_timeout(0x21, timeout=self.TIMEOUT / 2):
             await self.client.write_gatt_char(self.UUID_TX, msg)
             try:
-                await self._fetch_futures.wait_for(0x21, self.TIMEOUT)
+                resp = await self._fetch_futures.wait_for(0x21, self.TIMEOUT)
+                # dbus-serialbattery treats byte 0 == 1 as success
+                if resp[0] != 1:
+                    self.logger.warning('%s set soc rejected, reply %s', self.name, bytes(resp).hex())
             except TimeoutError:
                 self.logger.warning('%s no reply to set soc, it may still have been applied', self.name)
         self._fetch_status.invalidate(self)
