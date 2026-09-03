@@ -58,3 +58,39 @@ def test_bm6_notification_routes_by_command_byte():
 def test_bm6_rejects_wrong_length():
     with pytest.raises(ValueError):
         bm6_decrypt(b'\x00' * 15)
+
+
+# BM2 frames from KrystianD/bm2-battery-monitor and doubleagent.net (plaintext after AES)
+BM2_PLAIN_A = bytes.fromhex('F550816400FA00000000000000000000')
+BM2_PLAIN_B = bytes.fromhex('f54f414c0b0f00000000000000000000')
+
+
+def test_bm2_decode_realtime():
+    from bmslib.models.bm6 import decode_bm2_realtime, Bm2Bt, BM2_KEY
+    assert decode_bm2_realtime(BM2_PLAIN_A) == dict(voltage=12.88, status=1, soc=100)
+    d = decode_bm2_realtime(BM2_PLAIN_B)
+    assert d['voltage'] == pytest.approx(12.68) and d['soc'] == 76
+    assert BM2_KEY == b'leagend\xff\xfe1882466'
+    # the doubleagent post decrypted f54f514c09cf... from a captured packet; round-trip our AES
+    assert bm6_decrypt(bm6_encrypt(BM2_PLAIN_B, BM2_KEY), BM2_KEY) == BM2_PLAIN_B
+
+    async def run():
+        bms = Bm2Bt("00:11:22:33:44:55", name="bm2")
+        with bms._fetch_futures.acquire(0xF5):
+            bms._notification_handler(None, bm6_encrypt(BM2_PLAIN_B, BM2_KEY))
+            return await bms._fetch_futures.wait_for(0xF5, 1)
+
+    assert asyncio.run(run()) == BM2_PLAIN_B
+
+
+def test_bm2_fetch_sample():
+    from bmslib.models.bm6 import Bm2Bt, BM2_KEY
+
+    async def run():
+        bms = Bm2Bt("00:11:22:33:44:55", name="bm2")
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.05, bms._notification_handler, None, bm6_encrypt(BM2_PLAIN_A, BM2_KEY))
+        return await bms.fetch()
+
+    sample = asyncio.run(run())
+    assert sample.voltage == pytest.approx(12.88) and sample.soc == 100

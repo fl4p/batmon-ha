@@ -51,6 +51,7 @@ def get_bms_model_class(name: str):
         sok_legacy='models.sok.SokBt',  # pre-2023 SOK/ABC firmware; `sok` -> aiobmsble abc_bms (see alias above)
         litime='models.litime.LitimeBt',
         bm6='models.bm6.Bm6Bt',  # BM6/BM2-style AES-encrypted 12 V car battery monitor (#160)
+        bm2='models.bm6.Bm2Bt',  # Quicklynks BM2 / Ancel BM200, other key, pushes frames unsolicited (#41)
         basen='models.basen.BasenBt',  # Basen BLE (0xFA00/01/02), ported from syssi/esphome-basen-bms
         basen_uart='models.basen_uart.BasenUart',  # Basen RS232/RS485 (paceic-unrelated), ported from GHswitt/esphome-basen
         noname_modbus='models.noname_modbus.NoNameModbusBt',  # generic Modbus-RTU-over-NUS

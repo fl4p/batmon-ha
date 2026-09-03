@@ -30,7 +30,10 @@ import math
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
-BM6_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 57])
+BM6_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 57])  # "leagend\xff\xfe0100009"
+# BM2 (Quicklynks, rebranded as Ancel BM200 etc., #41): "leagend\xff\xfe1882466", from
+# KrystianD/bm2-battery-monitor and doubleagent.net's BM2 write-up.
+BM2_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 49, 56, 56, 50, 52, 54, 54])
 
 CMD_REALTIME = bytes.fromhex('d1550700000000000000000000000000')
 CMD_VERSION = bytes.fromhex('d1550100000000000000000000000000')
@@ -138,15 +141,27 @@ def aes128_decrypt_block(key: bytes, block: bytes) -> bytes:
     return bytes(s)
 
 
-def bm6_encrypt(plain: bytes) -> bytes:
+def bm6_encrypt(plain: bytes, key: bytes = BM6_KEY) -> bytes:
     assert len(plain) == 16
-    return aes128_encrypt_block(BM6_KEY, plain)
+    return aes128_encrypt_block(key, plain)
 
 
-def bm6_decrypt(cipher: bytes) -> bytes:
+def bm6_decrypt(cipher: bytes, key: bytes = BM6_KEY) -> bytes:
     if len(cipher) != 16:
         raise ValueError(f"BM6 frame must be 16 bytes, got {len(cipher)}")
-    return aes128_decrypt_block(BM6_KEY, bytes(cipher))
+    return aes128_decrypt_block(key, bytes(cipher))
+
+
+def decode_bm2_realtime(plain: bytes) -> dict:
+    """BM2 realtime frame, pushed by the device without a request:
+    f5 | 12-bit voltage*100 | 4-bit status | SOC % byte | ...  (e.g. f5 50 81 64 -> 12.88 V, 100 %)."""
+    if plain[0] != 0xF5:
+        raise ValueError(f"not a BM2 realtime frame: {plain.hex()}")
+    return dict(
+        voltage=(int.from_bytes(plain[1:3], 'big') >> 4) / 100,
+        status=plain[2] & 0x0F,
+        soc=plain[3],
+    )
 
 
 def decode_realtime(plain: bytes) -> dict:
@@ -168,6 +183,7 @@ class Bm6Bt(BtBms):
     UUID_RX = '0000fff4-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000fff3-0000-1000-8000-00805f9b34fb'
     TIMEOUT = 8
+    KEY = BM6_KEY
 
     def __init__(self, address, **kwargs):
         kwargs.setdefault('_uses_pin', False)
@@ -176,12 +192,15 @@ class Bm6Bt(BtBms):
 
     def _notification_handler(self, sender, data):
         try:
-            plain = bm6_decrypt(data)
+            plain = bm6_decrypt(data, self.KEY)
         except Exception as e:
-            self.logger.warning("BM6 undecodable notification %s: %s", bytes(data).hex(), e)
+            self.logger.warning("%s undecodable notification %s: %s", self.name, bytes(data).hex(), e)
             return
         self._last_response = plain
-        self.logger.debug("BM6 notify plain %s", plain.hex())
+        self.logger.debug("%s notify plain %s", self.name, plain.hex())
+        self._route(plain)
+
+    def _route(self, plain: bytes):
         if plain[:2] == b'\xd1\x55':
             self._fetch_futures.set_result(plain[2], plain)
 
@@ -203,7 +222,7 @@ class Bm6Bt(BtBms):
     async def _q(self, cmd: int):
         plain = {0x07: CMD_REALTIME, 0x01: CMD_VERSION}[cmd]
         with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain))
+            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY))
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
@@ -229,6 +248,28 @@ class Bm6Bt(BtBms):
 
     def debug_data(self):
         return self._last_response
+
+
+class Bm2Bt(Bm6Bt):
+    """Quicklynks BM2 / Ancel BM200 (#41). Same GATT layout as the BM6 with another key; the
+    device pushes an F5 realtime frame on FFF4 every second or so on its own, so fetch() just
+    waits for the next one. No temperature in that frame."""
+    KEY = BM2_KEY
+    TIMEOUT = 15
+
+    def _route(self, plain: bytes):
+        if plain[0] == 0xF5:
+            self._fetch_futures.set_result(0xF5, plain)
+
+    async def fetch(self) -> BmsSample:
+        with self._fetch_futures.acquire(0xF5):
+            plain = await self._fetch_futures.wait_for(0xF5, self.TIMEOUT)
+        d = decode_bm2_realtime(plain)
+        return BmsSample(
+            voltage=d['voltage'],
+            current=math.nan,
+            soc=d['soc'],
+        )
 
 
 async def main():
