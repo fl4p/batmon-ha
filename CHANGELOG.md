@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix (JBD): a basic-info frame whose NTC count byte overruns the payload is rejected instead of publishing hundreds of phantom -273 °C temperature sensors, which HA discovery then created as entities (#321).
 * `type: snoop`: add the `ej` probe family (E&J Technology `:`…`~` ASCII framing, incl. the Fogstar Drift app's poll) and fingerprint its replies (#351).
 * Telemetry: `doc/Telemetry.md` still claimed it was off by default, three releases after it went on by default in 1.96; the doc now states the default, lists exactly what is sent and how to opt out, and the add-on logs `Anonymous telemetry is ON` at startup. Uploads now go over HTTPS with certificate verification; if the TLS endpoint is unreachable at startup batmon falls back to the old plain-HTTP port and logs a warning, so a lapsed certificate never silences telemetry (#379).
 * Fix (JK): a status frame with a BLE notify packet dropped mid-way (a busy ESPHome proxy) passes the 8-bit sum checksum once in 256 and was decoded at shifted offsets, publishing values like 1,216,000 V, 107 kA and SOC 0% to HA. The framer now rejects a frame that contains the next frame's header, and the decoder rejects physically impossible cell/pack voltages, current, temperatures and SOC (#391).

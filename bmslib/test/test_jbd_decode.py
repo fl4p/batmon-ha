@@ -71,6 +71,20 @@ def test_jbd_voltage_decode_rejects_truncated_frame_instead_of_fabricating_zeros
         _fetch_voltages(bms, truncated)
 
 
+def test_jbd_decode_rejects_ntc_count_overrunning_payload():
+    """#321: a frame whose NTC count byte exceeds the payload must not fabricate
+    253 sensors at -273.1 C."""
+    frame = bytearray(_jbd_frame(0.0, num_temp=3))
+    frame[4 + 22] = 253  # num_temp byte, header is 4 bytes
+    checksum = (0x10000 - sum(frame[2:-3])) & 0xFFFF
+    frame[-3:-1] = checksum.to_bytes(2, 'big')
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    with pytest.raises(ValueError, match="253 NTC"):
+        run_fetch_with_response(bms, bytes(frame))
+    sample = run_fetch_with_response(bms, _jbd_frame(0.0, num_temp=3))
+    assert len(sample.temperatures) == 3
+
+
 def test_jbd_voltage_decode_rejects_bad_checksum():
     bms = JbdBt("00:11:22:33:44:55", name="jbd")
     frame = bytearray(_jbd_voltage_frame([3300, 3301]))

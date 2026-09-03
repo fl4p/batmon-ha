@@ -136,6 +136,16 @@ class JbdBt(BtBms):
         num_cell = int.from_bytes(buf[21:22], 'big')
         num_temp = int.from_bytes(buf[22:23], 'big')
 
+        # The NTC count byte must fit the payload. A frame that passes the
+        # length and checksum check but declares more sensors than it carries
+        # would otherwise decode empty slices to -273.1 C and make HA discovery
+        # create one entity per phantom sensor (253 of them in #321).
+        if len(buf) < 23 + num_temp * 2:
+            raise ValueError(
+                f"JBD basic-info declares {num_temp} NTC sensors but payload has "
+                f"room for {(len(buf) - 23) // 2}"
+            )
+
         mos_byte = int.from_bytes(buf[20:21], 'big')
 
         # JBD protection-status bitmask (header-stripped offset 16:18). Bits
