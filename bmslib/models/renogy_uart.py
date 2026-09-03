@@ -72,11 +72,13 @@ def decode_alarm_block(data: bytes) -> dict:
         raise ValueError(f"renogy alarm block too short: {len(data)} bytes")
     # 7 alarm registers; aiobmsble masks bits 1-3 of the last byte (status noise)
     problem_code = int.from_bytes(data[0:14], 'big') & ~0xE
+    # aiobmsble reads the flags at full-frame offsets 16/17, i.e. payload 13/14:
+    # the low byte of the 7th register and the high byte of the 8th.
     return dict(
         problem_code=problem_code,
-        charge_mosfet=bool(data[14] & 0x02),
-        discharge_mosfet=bool(data[14] & 0x04),
-        heater=bool(data[15] & 0x20),
+        charge_mosfet=bool(data[13] & 0x02),
+        discharge_mosfet=bool(data[13] & 0x04),
+        heater=bool(data[14] & 0x20),
     )
 
 
@@ -130,6 +132,9 @@ class RenogyUart(BtBms):
         req = build_read(self.slave, reg, count, FC_READ_HOLDING)
 
         async def exchange():
+            # Start every exchange clean: an echoed request or a stale partial
+            # frame must not be able to shift where the reply is looked for.
+            self._buffer.clear()
             with self._fetch_futures.acquire(self._KEY):
                 await self.client.write_gatt_char(self.UUID_TX, data=req)
                 res = await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)

@@ -174,6 +174,8 @@ class SeplosUart(BtBms):
         fields = await exchange() if lock is None else await _locked(lock, exchange)
         if fields['cid2'] != CID2_OK:
             raise ValueError(f"seplos returned error code 0x{fields['cid2']:02X} for request 0x{cid2:02X}")
+        if fields['cid1'] != CID1:
+            raise ValueError(f"seplos response CID1 mismatch: got 0x{fields['cid1']:02X}, want 0x{CID1:02X}")
         return fields
 
     async def fetch(self) -> BmsSample:

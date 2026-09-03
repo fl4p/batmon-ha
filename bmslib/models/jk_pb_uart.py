@@ -73,7 +73,13 @@ class JkPbUart(JKBt):
         data = bytes(data)
         frames, dropped, corrupt = feed_frames(self._buffer, data)
         if len(self._buffer) >= FRAME_SIZE:
+            self.logger.error("%s framing invariant broken, %d byte(s) buffered after parsing, resyncing",
+                              self.name, len(self._buffer))
             self._buffer.clear()
+        # The 8-byte FC16 ACK trailing every frame is expected junk; anything more
+        # than that per read is worth seeing at debug level.
+        if dropped > 8:
+            self.logger.debug("%s dropped %d junk byte(s) between frames", self.name, dropped)
         for frame in corrupt:
             self.logger.warning("%s crc check failed, discarding frame: %s...", self.name, to_hex_str(frame[:16]))
         for frame in frames:
@@ -168,3 +174,7 @@ class JkPbUart(JKBt):
 
     def supports_set_soc(self) -> bool:
         return False
+
+    def debug_data(self):
+        return dict(resp=self._resp_table, bus_addr=self.bus_addr, pending=self._pending,
+                    buffered=len(self._buffer))

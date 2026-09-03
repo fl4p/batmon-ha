@@ -252,7 +252,8 @@ def test_renogy_decode_and_fetch(serial_stub):
                  + (48_200).to_bytes(4, 'big') + (100_000).to_bytes(4, 'big') + (12).to_bytes(2, 'big'))
     cell_block = (4).to_bytes(2, 'big') + b''.join(v.to_bytes(2, 'big') for v in (33, 33, 34, 32)) + b'\x00' * 24
     cell_block += (2).to_bytes(2, 'big') + b''.join(v.to_bytes(2, 'big') for v in (251, 249)) + b'\x00' * 28
-    alarm_block = b'\x00' * 14 + bytes([0x06, 0x00])
+    # flags at payload 13 (charge bit1, discharge bit2) and 14 (heater bit5), per aiobmsble frame[16]/[17]
+    alarm_block = b'\x00' * 13 + bytes([0x06, 0x20, 0x00])
     blocks = {REG_SOC: soc_block, REG_CELLS: cell_block, REG_ALARM: alarm_block}
 
     async def run():
@@ -282,6 +283,16 @@ def test_renogy_decode_and_fetch(serial_stub):
     assert list(sample.temperatures) == pytest.approx([25.1, 24.9])
     assert sample.switches == dict(charge=True, discharge=True)
     assert sample.problem is False
+
+
+def test_renogy_alarm_flags_match_aiobmsble_offsets():
+    from bmslib.models.renogy_uart import decode_alarm_block
+    # aiobmsble: chrg = frame[16] & 2, dischrg = frame[16] & 4, heater = frame[17] & 0x20, frame = 3-byte header + payload
+    frame = bytearray(3 + 16)
+    frame[16] = 0x04
+    frame[17] = 0x20
+    d = decode_alarm_block(bytes(frame[3:]))
+    assert d == dict(problem_code=0, charge_mosfet=False, discharge_mosfet=True, heater=True)
 
 
 def test_renogy_slave_id_from_type_spec(serial_stub):
