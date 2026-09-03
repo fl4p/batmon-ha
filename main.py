@@ -276,9 +276,41 @@ async def main():
 
         mqtt_client.on_message = mqtt_message_handler
 
+        # A refused CONNACK (wrong user/password, ACL) used to be invisible: the
+        # TCP connect succeeds, every publish then fails with MQTT_ERR_NO_CONN
+        # and the watchdog exits after 300 s without ever naming the cause (#269).
+        mqtt_connected = threading.Event()
+
+        def _on_connect(client, userdata, flags, reason_code, properties):
+            if reason_code.is_failure:
+                logger.error("MQTT broker %s refused the connection: %s. Check mqtt_user/mqtt_password "
+                             "(for the Mosquitto add-on this is a HA user, see README)",
+                             user_config.mqtt_broker, reason_code)
+            else:
+                logger.info("mqtt connected to %s", user_config.mqtt_broker)
+                mqtt_connected.set()
+
+        def _on_disconnect(client, userdata, flags, reason_code, properties):
+            # a refused CONNACK is followed by a disconnect too; only report
+            # the loss of a session that was actually established
+            if reason_code.is_failure and mqtt_connected.is_set():
+                logger.warning("mqtt disconnected: %s (reconnecting)", reason_code)
+            mqtt_connected.clear()
+
+        mqtt_client.on_connect = _on_connect
+        mqtt_client.on_disconnect = _on_disconnect
+
         try:
             mqtt_client.connect(user_config.mqtt_broker, port=mqtt_port)
             mqtt_client.loop_start()
+            # Let the CONNACK land before the first sample is published;
+            # otherwise the very first batch fails with MQTT_ERR_NO_CONN.
+            for _ in range(50):
+                if mqtt_connected.is_set():
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                logger.warning("mqtt not connected after 5 s, publishes will fail until the broker accepts")
         except Exception as ex:
             logger.error('mqtt connection error %s', ex)
 

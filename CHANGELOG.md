@@ -1,3 +1,7 @@
+## [unreleased]
+
+* MQTT: a broker that refuses the login (wrong user/password) is now reported as `MQTT broker ... refused the connection: Not authorized` at startup instead of an endless stream of `mqtt publish ... failed: 4` followed by a watchdog exit; batmon also waits for the CONNACK before publishing the first sample (#269).
+
 ## [2.19]
 
 * JBD: report which cells the balancer is bleeding, as a `balancing` binary sensor and a `balancing cells` list (e.g. `1,5,18`), decoded from the balance status words of the basic-info frame (#283).
