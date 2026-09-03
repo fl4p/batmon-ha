@@ -1,33 +1,49 @@
 # Telemetry
 
-This is disabled by default. When enabled, batmon will send anonymized battery data to my private influxdb server.
-It will help me to develop & test a battery resistance algorithm, you can read more about this in [Impedance.md](dev/Impedance.md).
-I highly appreciate your contribution.
+Batmon sends anonymized battery samples to my private time-series server at `tm.fabi.me`.
+It is **on by default** (since v1.96). The data helps me develop and test the battery
+impedance / state-of-health algorithm, see [Impedance.md](dev/Impedance.md).
 
-You can optionally share your email with me (only I will be able to see it). Then I can check back with you in case
-I need to, which is unlikely. 
+## Opting out
 
-The data collection here is for research purposes only.
-I am not trying to spy you, or collect for any commercial intent. I'll never sell this data.
-I might release a free data set of your anonymized battery data only with your consent.
-We live in times of data collection and privacy became scarce. I highly respect your privacy.
+Set in the add-on options:
 
-## Collected Data 
-* Bat current
-* Bat voltage
-* cell voltages
-* temperatures
-* num cycles
-* bms model name
-* anonymized (through sha1 hash) MAC address 
+```yaml
+telemetry: false
+```
 
+Batmon then never opens the connection and logs `Anonymous telemetry is OFF` at debug level.
+With telemetry on, the startup log shows `Anonymous telemetry is ON`.
 
-When you disable telemetry batmon will stop sending any more data. Samples it has sent will not be deleted automatically.
-Please contact me (email address in my github profile) if you want me to delete your data.
+Samples already sent are not deleted automatically. Contact me (email in my GitHub profile)
+if you want your data removed.
 
-[
+## What is sent
 
-# HA Analytics
-https://analytics.home-assistant.io/custom_integrations.json
-https://community.home-assistant.io/t/custom-integration-sonnenbatterie/181781?page=4
-https://analytics.home-assistant.io/addons.json
+Per BMS, throttled to one sample every 15 s:
+
+* pack voltage, current, power, balance current
+* state of charge, state of health, capacity, remaining charge, charge throughput, cycle count
+* per-cell voltages
+* temperatures (sensors and MOSFET)
+* switch and protection states, BMS problem code, uptime
+* the BMS type (e.g. `jk`, `daly`)
+
+Identifiers, all anonymized:
+
+* a SHA-1 hash of the device address as written in the config (never the address itself)
+* a random 6-character user id generated once and stored in the add-on data directory
+* a hash of the Home Assistant data-disk id, when running under the Supervisor
+
+No MAC address, no location, no host name, no personal data. Uploads are batched every
+2 minutes; if the server is unreachable batmon backs off for an hour and drops the batch.
+
+## Transport
+
+Currently InfluxDB line protocol over plain HTTP on port 8086 (#379). TLS is planned and
+requires a change on the server side first.
+
+## Purpose
+
+Research only. I do not sell this data and have no commercial intent with it. I might
+release a free, anonymized data set, and only with the consent of the contributors.

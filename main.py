@@ -323,6 +323,8 @@ async def main():
         try:
             from bmslib.sinks import TelemetrySink
             sinks.append(TelemetrySink(bms_by_name=bms_by_name))
+            logger.info("Anonymous telemetry is ON (tm.fabi.me, hashed ids, no MAC). "
+                        "Set 'telemetry: false' to opt out, see doc/Telemetry.md (#379)")
         except:
             pass
             #logger.info("failed to init telemetry", exc_info=True)
