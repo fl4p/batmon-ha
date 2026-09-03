@@ -92,7 +92,7 @@ Add an entry for each device, such as:
 - address: CC:44:8C:F7:AD:BB
   type: jk
   alias: battery1            # MQTT topic prefix (regex [\w_.-/])
-  pin: "12345"               # pairing PSK, victron only (optional)
+  pin: "12345"               # pairing PIN, victron and newer JBD firmware (optional)
   adapter: "hci0"            # switch the bluetooth hw adapter (optional)
   debug: true                # verbose log for this device only (optional)
   current_calibration: 1.0   # current [I] correction factor (optional)
@@ -109,8 +109,10 @@ For a mock BMS use `dummy`.
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.
 
-If the device requires a PIN when pairing (currently Victron SmartShunt only) add `pin: "123456"` (and replace 123456
-with device's PIN).
+If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with the device's PIN). This is the
+case for the Victron SmartShunt and for newer JBD firmware (Liontron and other packs whose app asks for a 6-digit
+password): those BMS only answer after a passkey pairing, batmon pairs with the given `pin` and then talks the normal
+JBD protocol (#217).
 
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 

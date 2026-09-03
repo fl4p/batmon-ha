@@ -70,6 +70,8 @@ class JbdBt(BtBms):
     TIMEOUT = 16
 
     def __init__(self, address, **kwargs):
+        # newer JBD firmware gates the protocol behind a passkey pairing (#217)
+        kwargs.setdefault('_uses_pin', True)
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._switches = None

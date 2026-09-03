@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* JBD: newer firmware (Liontron and other packs whose app asks for a 6-digit password) only answers after a passkey pairing; `pin:` now works for `type: jbd` without the "does not use a pairing PIN" warning, README updated (#217).
 * HA long-term statistics were missing for the capacity, remaining charge, charge throughput and the netted energy/charge and cycle-count meters because their MQTT discovery carried no `state_class`; they now declare `measurement`, `total` or `total_increasing` as appropriate (#232).
 * MQTT: a broker that refuses the login (wrong user/password) is now reported as `MQTT broker ... refused the connection: Not authorized` at startup instead of an endless stream of `mqtt publish ... failed: 4` followed by a watchdog exit; batmon also waits for the CONNACK before publishing the first sample (#269).
 
