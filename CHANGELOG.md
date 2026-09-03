@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* JBD: report which cells the balancer is bleeding, as a `balancing` binary sensor and a `balancing cells` list (e.g. `1,5,18`), decoded from the balance status words of the basic-info frame (#283).
 * Fix (JBD): a basic-info frame whose NTC count byte overruns the payload is rejected instead of publishing hundreds of phantom -273 °C temperature sensors, which HA discovery then created as entities (#321).
 * `type: snoop`: add the `ej` probe family (E&J Technology `:`…`~` ASCII framing, incl. the Fogstar Drift app's poll) and fingerprint its replies (#351).
 * Telemetry: `doc/Telemetry.md` still claimed it was off by default, three releases after it went on by default in 1.96; the doc now states the default, lists exactly what is sent and how to opt out, and the add-on logs `Anonymous telemetry is ON` at startup. Uploads now go over HTTPS with certificate verification; if the TLS endpoint is unreachable at startup batmon falls back to the old plain-HTTP port and logs a warning, so a lapsed certificate never silences telemetry (#379).

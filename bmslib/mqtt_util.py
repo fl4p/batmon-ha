@@ -267,11 +267,22 @@ def publish_sample(client, device_topic, sample: BmsSample):
     if sample.problem_code is not None:
         mqtt_single_out(client, f"{device_topic}/problem_code", sample.problem_code)
 
+    if sample.balancing_cells is not None:
+        mqtt_single_out(client, f"{device_topic}/balancing", 'ON' if sample.balancing_cells else 'OFF')
+        mqtt_single_out(client, f"{device_topic}/balancing_cells", balancing_cells_str(sample.balancing_cells))
+
     if sample.battery_charging is not None:
         mqtt_single_out(client, f"{device_topic}/battery_charging",
                         'ON' if sample.battery_charging else 'OFF')
     if sample.battery_mode is not None:
         mqtt_single_out(client, f"{device_topic}/battery_mode", sample.battery_mode)
+
+
+def balancing_cells_str(mask: int) -> str:
+    """Bitmask (bit 0 = cell 1) -> "1,5,12", or "none" so the HA sensor never
+    gets an empty payload (which it ignores)."""
+    cells = [str(i + 1) for i in range(32) if mask & (1 << i)]
+    return ','.join(cells) if cells else 'none'
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -414,6 +425,26 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "expire_after": expire_after_seconds,
             "device": device_json,
             "icon": "mdi:alert-circle-outline",
+        }
+
+    if sample.balancing_cells is not None:
+        discovery_msg[f"homeassistant/binary_sensor/{node_id}/balancing/config"] = {
+            "unique_id": f"{device_topic}__balancing",
+            "name": "balancing",
+            "entity_category": "diagnostic",
+            "state_topic": f"{device_topic}/balancing",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+            "icon": "mdi:scale-balance",
+        }
+        discovery_msg[f"homeassistant/sensor/{node_id}/balancing_cells/config"] = {
+            "unique_id": f"{device_topic}__balancing_cells",
+            "name": "balancing cells",
+            "entity_category": "diagnostic",
+            "state_topic": f"{device_topic}/balancing_cells",
+            "expire_after": expire_after_seconds,
+            "device": device_json,
+            "icon": "mdi:scale-balance",
         }
 
     if sample.battery_charging is not None:

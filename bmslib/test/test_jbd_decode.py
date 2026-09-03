@@ -12,7 +12,7 @@ from bmslib.test._decode_helpers import run_fetch_with_response
 from bmslib.test.data import jbd_fixtures
 
 
-def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0):
+def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0, balance=0):
     """Build a minimal JBD 0x03 response frame.
 
     jbd_current uses JBD wire sign (positive=charging, negative=discharging);
@@ -25,7 +25,8 @@ def _jbd_frame(jbd_current, charge_ah=100.0, capacity_ah=100.0, num_temp=0):
     data += int(capacity_ah * 100).to_bytes(2, 'big')
     data += (0).to_bytes(2, 'big')       # cycles
     data += (0).to_bytes(2, 'big')       # production date
-    data += (0).to_bytes(4, 'big')       # balancer
+    data += (balance & 0xFFFF).to_bytes(2, 'big')   # balance status cells 1-16
+    data += (balance >> 16).to_bytes(2, 'big')       # balance status cells 17-32
     data += (0).to_bytes(2, 'big')       # protection
     data += bytes([0x80])                # version
     data += bytes([100])                 # SOC
@@ -69,6 +70,18 @@ def test_jbd_voltage_decode_rejects_truncated_frame_instead_of_fabricating_zeros
 
     with pytest.raises(ValueError, match="length mismatch"):
         _fetch_voltages(bms, truncated)
+
+
+def test_jbd_decode_balancing_cells_bitmask():
+    """#283: balance status words -> bitmask, bit 0 = cell 1, cells 17+ in the high word."""
+    from bmslib.mqtt_util import balancing_cells_str
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    mask = (1 << 0) | (1 << 4) | (1 << 17)
+    sample = run_fetch_with_response(bms, _jbd_frame(0.0, balance=mask))
+    assert sample.balancing_cells == mask
+    assert balancing_cells_str(sample.balancing_cells) == "1,5,18"
+    assert run_fetch_with_response(bms, _jbd_frame(0.0)).balancing_cells == 0
+    assert balancing_cells_str(0) == "none"
 
 
 def test_jbd_decode_rejects_ntc_count_overrunning_payload():

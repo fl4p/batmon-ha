@@ -46,6 +46,7 @@ class BmsSample:
                  battery_charging: Optional[bool] = None,
                  battery_mode: Optional[str] = None,
                  total_charge_net: float = math.nan,
+                 balancing_cells: Optional[int] = None,
                  uptime=math.nan, timestamp: Optional[float] = None):
         """
 
@@ -121,6 +122,9 @@ class BmsSample:
         # directions). Some BMSes derive cycle count from this divided by
         # design capacity.
         self.total_charge_net: float = total_charge_net
+        # ``balancing_cells``: bitmask of cells the passive balancer is currently
+        # bleeding, bit 0 = cell 1. None if the BMS does not report it (#283).
+        self.balancing_cells: Optional[int] = balancing_cells
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
 

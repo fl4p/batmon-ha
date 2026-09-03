@@ -154,6 +154,10 @@ class JbdBt(BtBms):
         # "any alarm" boolean so HA can show a problem indicator.
         problem_code = int.from_bytes(buf[16:18], byteorder='big', signed=False)
 
+        # Balance status: bytes 12-13 cells 1-16, bytes 14-15 cells 17-32, one
+        # bit per cell, set while that cell is being bled (#283).
+        balancing_cells = int.from_bytes(buf[12:14], 'big') | (int.from_bytes(buf[14:16], 'big') << 16)
+
         current = -int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100
         charge = int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100
 
@@ -178,6 +182,7 @@ class JbdBt(BtBms):
             ),
 
             problem_code=problem_code,
+            balancing_cells=balancing_cells,
 
             # charge_enabled
             # discharge_enabled
@@ -188,7 +193,6 @@ class JbdBt(BtBms):
         # print(dict(num_cell=num_cell, num_temp=num_temp))
 
         # self.rawdat['P']=round(self.rawdat['Vbat']*self.rawdat['Ibat'], 1)
-        # self.rawdat['Bal'] = int.from_bytes(self.response[12:14], byteorder='big', signed=False)
 
         product_date = int.from_bytes(buf[10:12], byteorder='big', signed=True)
         # productDate = convertByteToUInt16(data1: data[14], data2: data[15])
