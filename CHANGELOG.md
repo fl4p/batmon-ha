@@ -1,12 +1,12 @@
-## [unreleased]
+## [2.20]
 
-* Four new wired types closing the gap to dbus-serialbattery's list: `jbd_uart` (JBD/LLT over TTL UART or RS485, same frames as BLE), `jk_pb_uart` (JK-PB inverter BMS over RS485, Modbus trigger + JK02_32S frame shared with the BLE decoder), `seplos_uart` (Seplos V2 ASCII protocol over RS485) and `renogy_uart` (Renogy smart lithium, Modbus RTU). All take a bus address via `type: <name>:<addr>` and share one port under the RS485 bus lock. Unit-tested against reference frames, untested on hardware.
-* A `set SOC` number entity writes the BMS' SOC gauge, so a gauge that drifted because the BMS ignores small currents can be corrected from HA without disconnecting batmon. Daly (`daly`, `daly_uart`): command 0x21 with clock + SOC*10, the frame dbus-serialbattery has written to Daly packs since 2023. JK with firmware >= 11 (`jk`, `jk_32s`): register 0x6E, the `soc_calibration` number of syssi/esphome-jk-bms. Both untested on hardware (#144).
-* Add `bm2` for the Quicklynks BM2 car battery monitor and its rebrands (Ancel BM200): voltage and SOC from the AES-encrypted frames the device pushes on FFF4, key and layout from KrystianD/bm2-battery-monitor and doubleagent.net; untested on hardware (#41).
-* Add `bm6` for the BM6 (and BM2-style) Bluetooth car battery monitor: voltage, temperature, SOC and charging/low-voltage state over its AES-encrypted FFF3/FFF4 protocol, ported from the tarball.ca write-up and Rafciq/BM6; untested on hardware (#160).
-* JBD: newer firmware (Liontron and other packs whose app asks for a 6-digit password) only answers after a passkey pairing; `pin:` now works for `type: jbd` without the "does not use a pairing PIN" warning, README updated (#217).
-* HA long-term statistics were missing for the capacity, remaining charge, charge throughput and the netted energy/charge and cycle-count meters because their MQTT discovery carried no `state_class`; they now declare `measurement`, `total` or `total_increasing` as appropriate (#232).
-* MQTT: a broker that refuses the login (wrong user/password) is now reported as `MQTT broker ... refused the connection: Not authorized` at startup instead of an endless stream of `mqtt publish ... failed: 4` followed by a watchdog exit; batmon also waits for the CONNACK before publishing the first sample (#269).
+* New wired types: `jbd_uart` (JBD over UART/RS485), `jk_pb_uart` (JK-PB inverter BMS, RS485), `seplos_uart` (Seplos V2, RS485) and `renogy_uart` (Renogy smart lithium, Modbus RTU). Bus address via `type: <name>:<addr>`, several can share one port. Tested against reference frames only.
+* `set SOC` number entity to correct a drifted SOC gauge from HA. Daly: command 0x21 as dbus-serialbattery writes it. JK firmware >= 11: register 0x6E as esphome-jk-bms. Untested on hardware (#144).
+* Add `bm2` (Quicklynks BM2, Ancel BM200): voltage and SOC from the AES-encrypted pushed frames. Untested on hardware (#41).
+* Add `bm6` car battery monitor: voltage, temperature, SOC and charging/low-voltage state over its AES-encrypted protocol. Untested on hardware (#160).
+* JBD: newer firmware (Liontron etc.) only answers after passkey pairing; `pin:` now works for `type: jbd` (#217).
+* MQTT discovery: `state_class` on capacity, remaining charge, throughput and the meters, so HA keeps long-term statistics for them (#232).
+* MQTT: a refused login is reported once as `refused the connection: Not authorized` instead of endless `publish failed: 4` and a watchdog exit; the first sample waits for the CONNACK (#269).
 
 ## [2.19]
 
