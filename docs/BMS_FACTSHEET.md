@@ -946,20 +946,52 @@ For any of these, the canonical references are:
 
 ---
 
+## BM6 / BM2 car battery monitors — `models/bm6.py`
+
+**Vendor / variants.** 12 V lead-acid "battery health" dongles clamped to the car battery, sold under many names. `bm6`: BM6 (Leagend/Quicklynks, also Sealey BT2020). `bm2`: Quicklynks BM2, Ancel BM200 and other rebrands using the reskinned BM2 app. Not a BMS: no cells, no current sensor, no switches.
+
+**Transport.** BLE GATT service `0xfff0`, write on `0xfff3`, notify on `0xfff4`. Every 16-byte frame in either direction is AES-128 with a fixed per-model key and a zero IV (one block, so effectively ECB). Batmon carries a tiny pure-Python AES for this; the keys are in the module (`BM6_KEY` = `leagend\xff\xfe0100009`, `BM2_KEY` = `leagend\xff\xfe1882466`).
+
+**Wire protocol.** BM6: request `d1 55 07 00…` encrypted, reply `d1 55 07 | sign | temp | state | soc | voltage*100 (u16) | …`. BM2: no request, the device pushes `f5 | voltage*100 (12 bit) | status (4 bit) | soc | …` about once a second.
+
+**Fields decoded by batmon.** `voltage`, `soc`; BM6 also `temperatures=[t]`, `battery_mode` (`ok` / `low_voltage` / `charging`), `battery_charging`, `problem` (low voltage). `current` is NaN, so no power and no Ah/kWh meters.
+
+**Known on the wire but NOT decoded by batmon.** BM6 rapid acceleration/deceleration counters, the firmware-version reply (`d1 55 01`), BM2 status nibble, BM2 history download (`e7 01`, cranking voltage log).
+
+**Caveats.** One BLE connection at a time; the phone app must be closed. Untested on hardware as of the port (#160, #41), the decoders are verified against captured frames from the write-ups only.
+
+**Links.**
+- [tarball.ca — Reverse engineering the BM6 BLE battery monitor](https://www.tarball.ca/posts/reverse-engineering-the-bm6-ble-battery-monitor/) — key, frames, known-answer pair
+- [Rafciq/BM6](https://github.com/Rafciq/BM6) — HA integration, state / SOC bytes
+- [JeffWDH/bm6-battery-monitor](https://github.com/JeffWDH/bm6-battery-monitor) — Python tool + ESPHome
+- [KrystianD/bm2-battery-monitor](https://github.com/KrystianD/bm2-battery-monitor) — BM2 key, client, history protocol
+- [doubleagent.net — BM2: reversing the BLE protocol](https://doubleagent.net/bm2-reversing-the-ble-protocol-of-the-bm2-battery-monitor/) — BM2 frame parsing (dealRealData)
+- No syssi component. Not in aiobmsble. Not in YamBMS.
+
+---
+
 ## Appendix: where each BMS lives in this repo
 
 ```
 bmslib/models/
-├── ant.py          ANT new-protocol (7E A1)
-├── daly.py         Daly legacy UART (a5 80 …)
-├── daly2.py        Daly Modbus (D2 03)
-├── jbd.py          JBD / Xiaoxiang / Overkill
-├── jikong.py       JK BMS (Jikong) — JK02_24S and JK02_32S
-├── litime.py       LiTime / Ampere Time
-├── sok.py          SOK / ABC-BMS
-├── supervolt.py    SuperVolt + SX150P variant
-├── victron.py      Victron SmartShunt GATT
-└── BLE_BMS_wrap.py wrapper for any aiobmsble plugin
+├── ant.py            ANT new-protocol (7E A1)
+├── basen.py          Basen BLE (0xFA00), ported from syssi/esphome-basen-bms
+├── basen_uart.py     Basen RS232/RS485
+├── bm6.py            BM6 and BM2/Ancel BM200 car battery monitors (AES, no current)
+├── daly.py           Daly legacy protocol over BLE (a5 80 …), incl. set SOC (0x21)
+├── daly_uart.py      Daly over RS485/UART, multi-board bus
+├── daly2.py          Daly Modbus BLE module (D2 03)
+├── jbd.py            JBD / Xiaoxiang / Overkill, balancing bitmask, pin pairing for new fw
+├── jikong.py         JK BMS (Jikong) — JK02_24S and JK02_32S, set SOC (0x6E) on 32S
+├── jikong_uart.py    JK over RS485/UART
+├── litime.py         LiTime / Ampere Time
+├── noname_modbus.py  generic Modbus-RTU-over-NUS Chinese BMS (#131)
+├── pace.py           PACE "paceic" RS232/RS485 (SOK, SunGoldPower, Sunsynk rebrands)
+├── snoop.py          GATT dumper / protocol prober for unknown BMS (doc/SNOOP.md)
+├── sok.py            SOK / ABC-BMS legacy firmware
+├── supervolt.py      SuperVolt + SX150P variant
+├── victron.py        Victron SmartShunt GATT
+└── BLE_BMS_wrap.py   wrapper for any aiobmsble plugin
 ```
 
 aiobmsble plugins ship as a separate PyPI package. The local `bmslib/bms_ble/plugins/` directory holds batmon-only plugins (currently `cw20_bms` for the CW20 power meter).
