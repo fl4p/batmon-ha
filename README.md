@@ -135,7 +135,7 @@ For verbose logs of particular BMS add `debug: true`.
   after it exits)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
   =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
-* type `daly2` is for a newer Daly BMS version which is untested
+* type `daly2` is for Daly BMS with the newer Bluetooth module (Modbus-over-BLE, GATT service `fff0` with `fff1/fff2`; the `daly` type logs `Characteristic ... was not found` on these). Reads, cell voltages and MOSFET switches work, see [issue #356](https://github.com/fl4p/batmon-ha/issues/356)
 
 ## Serial / RS485
 
