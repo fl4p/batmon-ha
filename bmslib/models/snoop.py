@@ -74,6 +74,11 @@ PROBE_FRAMES = {
     'cbtpwr_vb': [
         bytes.fromhex('7e3131303134363432453030323031464433350d'),  # cmd 0x42
     ],
+    'ej': [  # E&J Technology ASCII-hex framing ':' .. '~' (aiobmsble ej_bms; Fogstar Drift 628Ah app, #351)
+        b':000250000E03~',  # RT data, version 0x50 (aiobmsble)
+        b':001031000E05~',  # CAP data (aiobmsble)
+        b':000200000ee8~',  # RT data, version 0x00 (Fogstar Drift app, decompiled)
+    ],
     'felicity': [
         # b'wifilocalMonitor:get dev real infor'
         bytes.fromhex('776966696c6f63616c4d6f6e69746f723a67657420646576207265616c20696e666f72'),
@@ -149,6 +154,7 @@ RESPONSE_SIGNATURES = [
     ('cbtpwr', b'\xaa\x55', 0x0d),
     ('tdt / seplos_v2 / cbtpwr_vb', b'\x7e', 0x0d),
     ('ant_leg', b'\xaa\x55\xaa', None),
+    ('ej / ws_nova / pwrboozt', b':', 0x7e),
 ]
 
 

@@ -58,6 +58,7 @@ the exact bytes):
 | `braunpwr`   | BraunPower BMS                                             |
 | `cbtpwr`     | CBTPWR                                                     |
 | `cbtpwr_vb`  | CBTPWR-VB (Seplos V2 framing variant)                      |
+| `ej`         | E&J Technology (`:` ASCII-hex `~`; Fogstar Drift, LiTime)  |
 | `felicity`   | Felicity racks (ASCII `wifilocalMonitor:…`)                |
 | `lipower`    | Lipower (Modbus read)                                      |
 | `neey`       | Neey balancer                                              |
