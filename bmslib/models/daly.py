@@ -83,6 +83,16 @@ def daly_command_message(command: int, extra="", address: int = 8,
     return message_bytes
 
 
+def daly_set_soc_payload(soc: float, now: Optional[time.struct_time] = None) -> str:
+    """Payload hex for command 0x21 (set SOC): BMS clock yy mm dd HH MM SS, then SOC*10 as a
+    16-bit big-endian value. Same layout as the Daly app and dbus-serialbattery (#144)."""
+    if not (0 <= soc <= 100):
+        raise ValueError("soc must be within 0..100, got %r" % (soc,))
+    now = now or time.localtime()
+    return bytes([now.tm_year - 2000, now.tm_mon, now.tm_mday,
+                  now.tm_hour, now.tm_min, now.tm_sec]).hex() + struct.pack('>H', round(soc * 10)).hex()
+
+
 class DalyBt(BtBms):
     TIMEOUT = 12
 
@@ -241,6 +251,17 @@ class DalyBt(BtBms):
         #if switch == "charge" and state != status['discharging_mosfet']:
         #   msg = daly_command_message(fet_addr["discharge"], extra="01" if status['discharging_mosfet'] else "00")
         #    await self.client.write_gatt_char(self.UUID_TX, msg)
+
+    async def set_soc(self, soc: float):
+        msg = self._build_request(0x21, extra=daly_set_soc_payload(soc))
+        self.logger.info('write soc %.1f%%: %s', soc, msg.hex())
+        with await self._fetch_futures.acquire_timeout(0x21, timeout=self.TIMEOUT / 2):
+            await self.client.write_gatt_char(self.UUID_TX, msg)
+            try:
+                await self._fetch_futures.wait_for(0x21, self.TIMEOUT)
+            except TimeoutError:
+                self.logger.warning('%s no reply to set soc, it may still have been applied', self.name)
+        self._fetch_status.invalidate(self)
 
     async def fetch(self) -> BmsSample:
         status = await self._fetch_status()

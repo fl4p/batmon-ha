@@ -857,6 +857,15 @@ class BtBms:
         """
         raise NotImplementedError()
 
+    async def set_soc(self, soc: float):
+        """
+        Overwrite the BMS' state-of-charge gauge (percent). Only some BMS support this.
+        """
+        raise NotImplementedError()
+
+    def supports_set_soc(self) -> bool:
+        return type(self).set_soc is not BtBms.set_soc
+
     def __str__(self):
         return f'{self.__class__.__name__}({self.address},{self.name})'
 

@@ -71,3 +71,24 @@ def test_daly_soc(fx):
     assert sample.voltage == pytest.approx(exp["voltage"], abs=0.01)
     assert sample.current == pytest.approx(exp["current"], abs=0.01)
     assert sample.soc == pytest.approx(exp["soc"], abs=0.1)
+
+
+def test_daly_set_soc_payload():
+    import time
+    from bmslib.models.daly import daly_set_soc_payload, daly_command_message
+    now = time.struct_time((2026, 9, 3, 21, 7, 5, 0, 0, 0))
+    payload = daly_set_soc_payload(37.5, now)
+    assert payload == '1a0903150705' + '0177'  # 375 = 0x0177
+    msg = daly_command_message(0x21, extra=payload, address=8)
+    assert msg[:4] == bytes([0xA5, 0x80, 0x21, 0x08])
+    assert msg[4:12] == bytes.fromhex(payload)
+    assert msg[12] == sum(msg[:12]) & 0xFF
+    with pytest.raises(ValueError):
+        daly_set_soc_payload(101, now)
+
+
+def test_daly_supports_set_soc():
+    from bmslib.models.daly import DalyBt
+    from bmslib.models.jbd import JbdBt
+    assert DalyBt("00:11:22:33:44:55", name="d").supports_set_soc()
+    assert not JbdBt("00:11:22:33:44:55", name="j").supports_set_soc()

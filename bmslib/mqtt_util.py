@@ -322,7 +322,7 @@ def publish_temperatures(client, device_topic, temperatures):
 
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
-                           device_info: DeviceInfo = None):
+                           device_info: DeviceInfo = None, set_soc=False):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -494,6 +494,20 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                 "command_topic": f"homeassistant/switch/{node_id}/{switch_name}/set",
             }
 
+    if set_soc:
+        # HA `number` that writes the BMS' SOC gauge (Daly, #144). State follows the reported SOC.
+        discovery_msg[f"homeassistant/number/{node_id}/set_soc/config"] = {
+            "unique_id": f"{device_topic}__set_soc",
+            "name": "set SOC",
+            "entity_category": "config",
+            "icon": "mdi:battery-sync",
+            "unit_of_measurement": "%",
+            "min": 0, "max": 100, "step": 1, "mode": "box",
+            "state_topic": f"{device_topic}/soc/soc_percent",
+            "command_topic": f"homeassistant/number/{node_id}/set_soc/set",
+            "device": device_json,
+        }
+
     for topic, data in discovery_msg.items():
         j = json.dumps(data)
         logger.debug('discovery msg %s: %s', topic, j)
@@ -530,6 +544,19 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
         mqtt_client.subscribe(state_topic, qos=2)
         _switch_callbacks[state_topic] = \
             lambda msg, sn=switch_name: set_switch(sn, msg.lower() == "on")
+
+
+def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms):
+    async def set_soc(payload: str):
+        soc = float(payload)
+        logger.info('Set %s SOC gauge to %.1f%%', bms.name, soc)
+        await bms.set_soc(soc)
+
+    node_id = device_topic.replace('/', '_')
+    topic = f"homeassistant/number/{node_id}/set_soc/set"
+    logger.debug("subscribe %s", topic)
+    mqtt_client.subscribe(topic, qos=2)
+    _switch_callbacks[topic] = set_soc
 
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):

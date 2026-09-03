@@ -18,7 +18,7 @@ from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, mqtt_single_out
+    subscribe_switches, subscribe_set_soc, mqtt_single_out
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -487,6 +487,8 @@ class BmsSampler:
                 logger.info("%s subscribing for %s switch change", bms.name, sample.switches)
                 subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                    switches=sample.switches.keys())
+            if self.num_samples == 0 and mqtt_client and getattr(bms, 'supports_set_soc', lambda: False)():
+                subscribe_set_soc(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms)
 
             for sink in self.sinks:
                 try:
@@ -588,6 +590,7 @@ class BmsSampler:
                     num_cells=len(voltages) if voltages else 0,
                     temperatures=sample.temperatures,
                     device_info=self.device_info,
+                    set_soc=getattr(bms, 'supports_set_soc', lambda: False)(),
                 )
 
                 # publish sample again after discovery
