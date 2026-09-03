@@ -17,7 +17,7 @@ from bmslib.algorithm import create_algorithm
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
-from bmslib.mqtt_util import publish_sample, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
+from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, mqtt_single_out
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
@@ -619,8 +619,10 @@ class BmsSampler:
         device_topic = self.mqtt_topic_prefix
         for meter in self.meters:
             topic = f"{device_topic}/meter/{meter.name}"
-            s = round(meter.get(), 3)
-            mqtt_single_out(self.mqtt_client, topic, s)
+            s = meter.get()
+            if is_none_or_nan(s):
+                continue  # e.g. a monitor without current sensor (bm6) never feeds the Ah/kWh meters
+            mqtt_single_out(self.mqtt_client, topic, round(s, 3))
 
         if self.sinks:
             readings = {m.name: m.get() for m in self.meters}
