@@ -1,3 +1,7 @@
+## [2.21]
+
+* Fix (`ble_stack: bumble`): every aiobmsble BMS was skipped as `Unknown device type`, because the bundled `bleak_retry_connector` shim was missing `MAX_CONNECT_ATTEMPTS` and `close_stale_connections`, which aiobmsble >= 0.25 imports at module level. Same bug as #385 fixed for bluek; the bumble shim was never updated (#407).
+
 ## [2.20]
 
 * New wired types: `jbd_uart` (JBD over UART/RS485), `jk_pb_uart` (JK-PB inverter BMS, RS485), `seplos_uart` (Seplos V2, RS485) and `renogy_uart` (Renogy smart lithium, Modbus RTU). Bus address via `type: <name>:<addr>`, several can share one port. Tested against reference frames only.
