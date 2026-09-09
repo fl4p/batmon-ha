@@ -59,7 +59,9 @@ RUN venv/bin/pip3 install --no-deps 'aiobmsble==0.27.0' || true
 # dir to PYTHONPATH when `ble_stack: bumble`, which redirects `import bleak`
 # (incl. inside aiobmsble) to bumble-bleak. Best-effort install; if it fails the
 # addon simply runs on real bleak.
-RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak' || true
+# Pinned like bluek below: an unpinned git URL is not reproducible, and Docker
+# layer caching happily reuses a stale clone of it (measured).
+RUN venv/bin/pip3 install bumble 'git+https://github.com/fl4p/bumble-bleak@1df849c' || true
 # bluek (ble_stack: bluek): bleak-compatible stack over the kernel BlueZ stack
 # via L2CAP/mgmt sockets — no D-Bus, no exclusive HCI, coexists with bluetoothd.
 # Pure-Python, no deps. Activated at runtime via PYTHONPATH (addon_main.sh), same
