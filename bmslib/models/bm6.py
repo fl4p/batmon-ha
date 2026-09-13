@@ -210,7 +210,6 @@ class Bm6Bt(BtBms):
         except Exception as e:
             self.logger.info("normal connect failed (%s), connecting with scanner", e)
             await self._connect_with_scanner(**kwargs)
-        await self.client.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
         try:
@@ -222,7 +221,15 @@ class Bm6Bt(BtBms):
     async def _q(self, cmd: int):
         plain = {0x07: CMD_REALTIME, 0x01: CMD_VERSION}[cmd]
         with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY))
+            await self.client.write_gatt_char(
+                self.UUID_TX,
+                data=bm6_encrypt(plain, self.KEY),
+                response=True,
+            )
+            await self.start_notify(
+                self.UUID_RX,
+                self._notification_handler,
+            )
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
