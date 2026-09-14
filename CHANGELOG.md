@@ -1,5 +1,6 @@
 ## [2.21]
 
+* `bm6`/`bm2`: write the realtime request with `response=True` and subscribe to notifications through `BtBms.start_notify`, which clears an orphan subscription first. Thanks @travel-and-cache, who confirmed a BM6 / intAct Battery Guard reporting voltage, SOC and temperature on BlueZ 5.86 (#408, #160).
 * Fix (`ble_stack: bumble`): every aiobmsble BMS was skipped as `Unknown device type`, because the bundled `bleak_retry_connector` shim was missing `MAX_CONNECT_ATTEMPTS` and `close_stale_connections`, which aiobmsble >= 0.25 imports at module level. Same bug as #385 fixed for bluek; the bumble shim was never updated (#407).
 * `ble_stack: bluek`: a dropped BLE link now logs `link lost (…)` with the kernel's reason, e.g. `Connection timed out` when the BMS stopped answering over the air. It used to surface only as a later `TX BLE request error (BleakError)` plus `TimeoutError`, with no cause (#403).
 

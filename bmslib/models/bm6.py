@@ -210,26 +210,19 @@ class Bm6Bt(BtBms):
         except Exception as e:
             self.logger.info("normal connect failed (%s), connecting with scanner", e)
             await self._connect_with_scanner(**kwargs)
+        # subscribe once per connection, before any request: the device answers a realtime
+        # request with a single frame, and the BM2 subclass never writes at all (#408)
+        await self.start_notify(self.UUID_RX, self._notification_handler)
 
     async def disconnect(self):
-        try:
-            await self.client.stop_notify(self.UUID_RX)
-        except Exception:
-            pass
+        await self.stop_notify(self.UUID_RX)
         await super().disconnect()
 
     async def _q(self, cmd: int):
         plain = {0x07: CMD_REALTIME, 0x01: CMD_VERSION}[cmd]
         with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(
-                self.UUID_TX,
-                data=bm6_encrypt(plain, self.KEY),
-                response=True,
-            )
-            await self.start_notify(
-                self.UUID_RX,
-                self._notification_handler,
-            )
+            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
+                                              response=True)
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
