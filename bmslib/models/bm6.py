@@ -37,6 +37,7 @@ BM2_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 49, 56, 56, 50, 52,
 
 CMD_REALTIME = bytes.fromhex('d1550700000000000000000000000000')
 CMD_VERSION = bytes.fromhex('d1550100000000000000000000000000')
+EMPTY_REALTIME = bytes.fromhex('d15507ff000000000000000000000000')
 
 _STATES = {0: 'ok', 1: 'low_voltage', 2: 'charging'}
 
@@ -166,8 +167,14 @@ def decode_bm2_realtime(plain: bytes) -> dict:
 
 def decode_realtime(plain: bytes) -> dict:
     """Decode a decrypted realtime reply (d1 55 07 ...)."""
-    if plain[:3] != b'\xd1\x55\x07':
+    if len(plain) != 16 or plain[:3] != b'\xd1\x55\x07':
         raise ValueError(f"not a BM6 realtime frame: {plain.hex()}")
+    # Some Battery Guard devices emit this exact empty sentinel while
+    # notifications are being initialized. Reject only the observed sentinel,
+    # not every unknown value in byte 3: this decoder serves other BM6 variants
+    # whose status extensions we cannot test here.
+    if plain == EMPTY_REALTIME:
+        raise ValueError(f"empty BM6 realtime frame: {plain.hex()}")
     temp = plain[4]
     if plain[3] == 1:
         temp = -temp
@@ -189,6 +196,7 @@ class Bm6Bt(BtBms):
         kwargs.setdefault('_uses_pin', False)
         super().__init__(address, **kwargs)
         self._last_response = None
+        self._empty_realtime = asyncio.Event()
 
     def _notification_handler(self, sender, data):
         try:
@@ -201,8 +209,20 @@ class Bm6Bt(BtBms):
         self._route(plain)
 
     def _route(self, plain: bytes):
-        if plain[:2] == b'\xd1\x55':
-            self._fetch_futures.set_result(plain[2], plain)
+        if plain[:2] != b'\xd1\x55':
+            return
+
+        cmd = plain[2]
+        if cmd == 0x07:
+            try:
+                decode_realtime(plain)
+            except ValueError as e:
+                self.logger.debug("%s ignoring invalid realtime notification: %s", self.name, e)
+                if plain == EMPTY_REALTIME:
+                    self._empty_realtime.set()
+                return
+
+        self._fetch_futures.set_result(cmd, plain)
 
     async def connect(self, **kwargs):
         try:
@@ -220,9 +240,41 @@ class Bm6Bt(BtBms):
 
     async def _q(self, cmd: int):
         plain = {0x07: CMD_REALTIME, 0x01: CMD_VERSION}[cmd]
+
+        # Most BM6 variants expect notifications to be active before the request.
+        # The Battery Guard variant from #408 instead returns EMPTY_REALTIME for
+        # that ordering and only supplies measurements when the request is written
+        # before subscribing. Switch only devices that exhibit that exact reply.
+        if cmd == 0x07 and self._empty_realtime.is_set():
+            return await self._q_write_before_notify(cmd, plain)
+
         with self._fetch_futures.acquire(cmd):
             await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
                                               response=True)
+            if cmd != 0x07:
+                return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+
+            response_waiter = asyncio.create_task(self._fetch_futures.wait_for(cmd, self.TIMEOUT))
+            empty_waiter = asyncio.create_task(self._empty_realtime.wait())
+            done, pending = await asyncio.wait(
+                (response_waiter, empty_waiter), return_when=asyncio.FIRST_COMPLETED)
+            for waiter in pending:
+                waiter.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+            if response_waiter in done:
+                return response_waiter.result()
+
+        self.logger.debug("%s retrying realtime request before notify subscription", self.name)
+        return await self._q_write_before_notify(cmd, plain)
+
+    async def _q_write_before_notify(self, cmd: int, plain: bytes):
+        await self.stop_notify(self.UUID_RX)
+        with self._fetch_futures.acquire(cmd):
+            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
+                                              response=True)
+            await self.start_notify(self.UUID_RX, self._notification_handler)
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
     async def fetch(self) -> BmsSample:
