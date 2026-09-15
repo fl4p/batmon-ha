@@ -5,13 +5,19 @@ from typing import Dict, List
 from bmslib.bms import BmsSample
 from bmslib.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
-from bmslib.wire.aggregate import is_finite, finite_or_fallback, sum_parallel  # noqa: F401
+from bmslib.wire.aggregate import (  # noqa: F401
+    is_finite,
+    finite_or_fallback,
+    sum_parallel,
+    sum_series,
+)
 
 
 class BmsGroup:
 
-    def __init__(self, name):
+    def __init__(self, name, kind='parallel'):
         self.name = name
+        self.kind = kind
         self.bms_names = list()
         self.samples: Dict[str, BmsSample] = {}
         self.voltages: Dict[str, List[int]] = {}
@@ -28,7 +34,11 @@ class BmsGroup:
     def fetch(self) -> BmsSample:
         # ts_expire = time.time() - self.max_sample_age
         # expired = set(k for k,s in self.samples.items() if s.timestamp < ts_expire)
-        return sum_parallel(self.samples.values())
+        if set(self.samples) != set(self.bms_names) or not self.samples:
+            missing = set(self.bms_names) - set(self.samples.keys())
+            raise GroupNotReady("group %s missing %s" % (self.name, missing))
+        fn = sum_series if self.kind == 'series' else sum_parallel
+        return fn(self.samples.values())
 
     def fetch_voltages(self):
         try:
@@ -63,17 +73,22 @@ class GroupNotReady(Exception):
 
 
 class VirtualGroupBms:
+    KIND = 'parallel'
+
     # TODO inherit from bms base class
     def __init__(self, address: str, name=None, verbose_log=False, **kwargs):
         self.address = address
         self.name = name
-        self.group = BmsGroup(name)
+        self.group = BmsGroup(name, kind=type(self).KIND)
         self.verbose_log = verbose_log
         self.members: List[BtBms] = []
         self.logger = get_logger(verbose_log)
 
     def __str__(self):
-        return 'VirtualGroupBms(%s,[%s])' % (self.name, self.address)
+        return '%s(%s,[%s])' % (type(self).__name__, self.name, self.address)
+
+    def supports_set_soc(self):
+        return False
 
     @property
     def slug(self):
@@ -143,3 +158,8 @@ class VirtualGroupBms:
 
     async def fetch_device_info(self):
         raise NotImplementedError()
+
+
+class SeriesGroupBms(VirtualGroupBms):
+    KIND = 'series'
+

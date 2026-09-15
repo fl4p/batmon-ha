@@ -50,7 +50,7 @@ def get_bms_model_class(name: str):
         ant='models.ant.AntBt',
         victron='models.victron.SmartShuntBt',
         group_parallel='bmslib.group.VirtualGroupBms',
-        # group_serial=bmslib.group.VirtualGroupBms, # TODO
+        group_serial='bmslib.group.SeriesGroupBms',
         supervolt='models.supervolt.SuperVoltBt',
         sok_legacy='models.sok.SokBt',  # pre-2023 SOK/ABC firmware; `sok` -> aiobmsble abc_bms (see alias above)
         litime='models.litime.LitimeBt',

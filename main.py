@@ -248,6 +248,12 @@ async def main():
                     logger.warning('Please choose one of these names: %s', set(bms_by_name.keys()))
                     raise Exception("unknown bms '%s' in group %s" % (member_ref, group_bms))
 
+                if getattr(member, 'is_virtual', False):
+                    raise Exception(
+                        "group %s contains group %s: nested groups are not supported (topology is one level deep)"
+                        % (group_bms, member)
+                    )
+
                 member_name = member.name
                 if member_name in groups_by_bms:
                     raise Exception("can't add bms %s to multiple groups %s %s", member_name,

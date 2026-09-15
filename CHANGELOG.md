@@ -1,5 +1,8 @@
 ## [2.21]
 
+* New `type: group_serial` for battery strings wired in series, alongside the existing `group_parallel`. Voltage sums, current is the string current (mean of the members), power is derived from those aggregates, and charge/capacity/SOC/SOH come from the pack with the least remaining charge — the one that actually limits discharge, which is not always the lowest-SOC pack. See doc/Groups.md.
+* A group no longer publishes a partial sum. `BmsGroup.fetch()` aggregated whatever members had reported so far — only `fetch_voltages()` raised — so a group could emit plausible but wrong totals while a member was still connecting. It now waits for every member, which shows as a gap instead of a wrong number.
+* A group now reports its members' alarms. `sum_parallel()` dropped `problem` entirely, so a group device hid a failure any of its BMSes was flagging. Group devices gain a `problem` binary sensor; unknown stays unknown rather than becoming "no problem".
 * Fix: with `watchdog: true` and no MQTT broker configured, batmon killed itself a few minutes after start. The watchdog measures the time since the last MQTT publish, but `mqtt_single_out()` returns early when there is no client and never advances that time, so the check always tripped. It now only applies when a broker is configured, which matters for standalone setups.
 * Fix: the "move groups to the end" sort of the sampler list never took effect — its sort key closed over a leaked loop variable and was constant for every entry. A `group_parallel` could therefore be sampled before its members and waste the cycle raising `GroupNotReady`.
 
