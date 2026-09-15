@@ -80,3 +80,60 @@ series group and one standalone pack — no BLE, no broker:
 cp doc/options.json.gui-demo options.json
 python3 main.py
 ```
+
+
+---
+
+# Android app for a JK BMS
+
+`/jk.html` talks to a JK BMS **directly from Android Chrome over Web Bluetooth**.
+No add-on, no server, no MQTT — the phone is the BLE client. Open it, tap
+**Connect**, pick your JK, and you get pack voltage/current/power/SOC, per-cell
+voltages with the low and high cell marked, temperatures, SOH, cycles and the
+MOSFET states.
+
+It is a single self-contained file. You can also just copy
+`bmslib/gui/web/jk.html` anywhere you can serve it from.
+
+## The one catch: Chrome needs a secure context
+
+Web Bluetooth is refused on a plain `http://` origin, so `http://<batmon-ip>:8099`
+will not work as-is — the page says so at the top rather than failing at the tap.
+`localhost` and `https://` are both fine. Three ways, easiest first:
+
+**1. Allow the origin in Chrome (no cables, no certs).**
+On the phone open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add
+`http://<batmon-ip>:8099`, set it to *Enabled*, and relaunch Chrome. Then open
+`http://<batmon-ip>:8099/jk.html`.
+
+**2. USB, and use localhost.** With the phone plugged into a machine that has adb:
+
+```
+adb reverse tcp:8099 tcp:8099
+```
+
+then open `http://localhost:8099/jk.html` on the phone. `localhost` is a secure
+context, so nothing else is needed.
+
+**3. Serve it over HTTPS** from anywhere you like — the file is standalone and
+needs no batmon instance at all.
+
+## Scope
+
+Read-only, matching the rest of the GUI. The JK protocol supports switching the
+charge/discharge/balance MOSFETs (`bmslib/models/jikong.py:set_switch`, addresses
+0x1D/0x1E/0x1F) and that is a small addition, but writes are deliberately not
+shipped before the auth story is settled.
+
+Only JK is implemented. The decoder is a hand port of `bmslib/models/jikong.py`
+covering the 11.x/32S frame layout.
+
+## Keeping the two decoders honest
+
+`bmslib/test/test_jk_webapp_parity.py` runs the JavaScript (under node) and the
+Python driver against the **same captured frames** and compares every field,
+the cell voltages, the command bytes, and the reassembly of a 300-byte response
+from 20-byte notify packets. Two implementations of one wire format drift
+silently — a firmware offset fixed on one side only yields plausible wrong
+numbers, not an error — so the test fails the build instead. It skips when node
+is not installed.

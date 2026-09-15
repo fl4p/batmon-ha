@@ -1,0 +1,307 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JK BMS</title>
+<!--
+  Talks to a JK BMS directly from Android Chrome over Web Bluetooth.
+  No add-on, no server, no MQTT - the phone is the client.
+
+  The protocol here is ported from bmslib/models/jikong.py. Keep the two in
+  sync; the offsets are firmware-specific and hard-won.
+
+  REQUIRES A SECURE CONTEXT. Web Bluetooth is refused on plain http://, so
+  see doc/GUI.md ("Android app") for the three ways to get one.
+-->
+<style>
+  :root { color-scheme: light dark; --ok:#2a7; --warn:#c80; --bad:#c33; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 0;
+         padding: calc(12px + env(safe-area-inset-top,0px)) 12px
+                  calc(12px + env(safe-area-inset-bottom,0px)); }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid #8886;
+           background: #8881; min-height: 44px; }
+  button:disabled { opacity: .45; }
+  #bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  #st { font-size: 13px; opacity: .8; }
+  .big { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .kpi { flex: 1 1 100px; border: 1px solid #8884; border-radius: 8px; padding: 8px; }
+  .kpi .l { font-size: 11px; opacity: .65; }
+  .kpi .v { font-size: 20px; font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+  td { padding: 2px 0; font-variant-numeric: tabular-nums; }
+  td.k { opacity: .65; } td.v { text-align: right; }
+  .cells { display: flex; flex-wrap: wrap; gap: 4px; }
+  .cell { font-size: 12px; padding: 3px 6px; border: 1px solid #8884; border-radius: 4px;
+          font-variant-numeric: tabular-nums; min-width: 58px; text-align: center; }
+  .cell.lo { border-color: var(--bad); color: var(--bad); }
+  .cell.hi { border-color: var(--ok); color: var(--ok); }
+  .cell i { display: block; font-size: 9px; opacity: .55; font-style: normal; }
+  .sw { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px;
+        border: 1px solid #8884; margin-right: 6px; }
+  .sw.on { color: var(--ok); border-color: var(--ok); }
+  .sw.off { color: var(--bad); border-color: var(--bad); }
+  #err { color: var(--bad); font-size: 13px; white-space: pre-wrap; margin-bottom: 8px; }
+  #warn { font-size: 13px; color: var(--warn); margin-bottom: 8px; }
+</style>
+
+<h1>JK BMS</h1>
+<div id="warn" hidden></div>
+<div id="bar">
+  <button id="btn">Connect</button>
+  <button id="disc" disabled>Disconnect</button>
+  <span id="st">idle</span>
+</div>
+<div id="err" hidden></div>
+<div class="big" id="kpis"></div>
+<table id="rows"></table>
+<div class="cells" id="cells"></div>
+<div id="sws" style="margin-top:10px"></div>
+
+<script>
+'use strict';
+const SERVICE = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const CHAR    = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+const HEADER = [0x55, 0xAA, 0xEB, 0x90];
+const FRAME_SIZE = 300;
+const RESPONSE_TYPES = new Set([0x01, 0x02, 0x03]);
+
+const $ = id => document.getElementById(id);
+const esc = v => String(v).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const setStatus = t => $('st').textContent = t;
+function showErr(e) { const d = $('err'); d.hidden = false; d.textContent = String(e && e.message || e); }
+function clearErr() { $('err').hidden = true; }
+
+// ---------- protocol (ported from bmslib/models/jikong.py) ----------
+
+const crc = b => b.reduce((a, x) => (a + x) & 0xFF, 0);
+
+function jkCommand(address, value = []) {
+  if (value.length > 13) throw new Error('value too long');
+  const f = new Uint8Array(20);
+  f.set([0xAA, 0x55, 0x90, 0xEB, address, value.length], 0);
+  f.set(value, 6);                       // remainder stays zero-padded
+  f[19] = crc(f.subarray(0, 19));
+  return f;
+}
+
+function indexOfSeq(buf, seq, from = 0) {
+  outer: for (let i = from; i <= buf.length - seq.length; i++) {
+    for (let j = 0; j < seq.length; j++) if (buf[i + j] !== seq[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/* The JK notify endpoint is a UART bridge: packets do NOT respect frame
+   boundaries, one packet can hold the tail of one frame and the head of the
+   next, and some firmwares splice junk into the stream. So resync on HEADER
+   and consume frame by frame rather than assuming a packet starts a frame. */
+function feedFrames(state, chunk) {
+  let buf = new Uint8Array(state.buf.length + chunk.length);
+  buf.set(state.buf, 0); buf.set(chunk, state.buf.length);
+  const frames = [];
+  const keep = HEADER.length - 1;
+
+  for (;;) {
+    if (buf.length < HEADER.length) break;
+    let idx = indexOfSeq(buf, HEADER);
+    if (idx < 0) { buf = buf.slice(Math.max(0, buf.length - keep)); break; }
+    if (idx > 0) buf = buf.slice(idx);
+    if (buf.length < FRAME_SIZE) break;
+
+    const frame = buf.slice(0, FRAME_SIZE);
+    const ok = crc(frame.subarray(0, FRAME_SIZE - 1)) === frame[FRAME_SIZE - 1]
+               && RESPONSE_TYPES.has(frame[4])
+               && indexOfSeq(frame, HEADER, 1) < 0;
+    if (ok) { frames.push(frame); buf = buf.slice(FRAME_SIZE); continue; }
+
+    // Bad CRC, or a header-shaped window in junk that passed the 8-bit sum.
+    // Consuming FRAME_SIZE here would eat the real frame behind it.
+    const nxt = indexOfSeq(buf, HEADER, HEADER.length);
+    if (nxt < 0) { buf = buf.slice(Math.max(0, buf.length - keep)); break; }
+    buf = buf.slice(nxt);
+  }
+  state.buf = buf;
+  return frames;
+}
+
+const dv = b => new DataView(b.buffer, b.byteOffset, b.byteLength);
+const i16 = (b, i) => dv(b).getInt16(i, true);
+const u16 = (b, i) => dv(b).getUint16(i, true);
+const u32 = (b, i) => dv(b).getUint32(i, true);
+const i32 = (b, i) => dv(b).getInt32(i, true);
+const f32u = (b, i) => u32(b, i) * 1e-3;
+const f32s = (b, i) => i32(b, i) * 1e-3;
+const temp = x => x === -2000 ? NaN : x / 10;
+
+function decodeSample(status, settings) {
+  const OFF = 32;                      // 11.x firmware layout
+  const agedCapacity = f32u(status, 146 + OFF);
+  const chargeRemaining = f32u(status, 142 + OFF);
+  const soc = (agedCapacity > 0 && chargeRemaining > 0)
+      ? Math.round(chargeRemaining / agedCapacity * 1e4) / 100   // sub-1% precision
+      : status[141 + OFF];
+
+  const temps = [temp(i16(status, 130 + OFF)), temp(i16(status, 132 + OFF)),
+                 temp(i16(status, 224 + OFF)), temp(i16(status, 226 + OFF))];
+
+  const voltage = f32u(status, 118 + OFF);
+  const current = -f32s(status, 126 + OFF);   // negative = charging, as batmon
+  return {
+    voltage, current, power: voltage * current, soc,
+    charge: chargeRemaining,
+    capacity: u32(settings, 130) * 1e-3,
+    soh: status[158 + OFF],
+    agedCapacity,
+    cycles: u32(status, 150 + OFF),
+    throughput: f32u(status, 154 + OFF),
+    mosTemp: i16(status, 112 + OFF) / 10,
+    balanceCurrent: i16(status, 138 + OFF) / 1000,
+    temps: temps.filter(t => !Number.isNaN(t)),
+    switches: { charge: !!settings[118], discharge: !!settings[122], balance: !!settings[126] },
+  };
+}
+
+const cellVoltages = (status, n) =>
+  Array.from({ length: n }, (_, i) => u16(status, 6 + i * 2));
+
+// ---------- BLE ----------
+
+let dev = null, chWrite = null, chNotify = null, poll = null;
+const frameState = { buf: new Uint8Array(0) };
+const resp = {};                    // type -> Uint8Array
+let numCells = null;
+
+async function pickChar(service, wanted) {
+  // Some JK units expose TWO characteristics with UUID ffe1 - one write, one
+  // notify. Address by PROPERTY, exactly as bmslib's find_char() does; a
+  // getCharacteristic() singular call would silently take the first.
+  let list;
+  try { list = await service.getCharacteristics(CHAR); }
+  catch (e) { list = [await service.getCharacteristic(CHAR)]; }
+  for (const c of list) {
+    if (wanted === 'notify' && (c.properties.notify || c.properties.indicate)) return c;
+    if (wanted === 'write' && (c.properties.write || c.properties.writeWithoutResponse)) return c;
+  }
+  return null;
+}
+
+async function write(frame) {
+  if (chWrite.properties.writeWithoutResponse && chWrite.writeValueWithoutResponse)
+    return chWrite.writeValueWithoutResponse(frame);
+  return chWrite.writeValue(frame);
+}
+
+function onNotify(ev) {
+  const chunk = new Uint8Array(ev.target.value.buffer);
+  for (const f of feedFrames(frameState, chunk)) {
+    resp[f[4]] = f;
+    if (f[4] === 0x01 && numCells === null) {
+      const n = f[114];
+      if (n > 0 && n <= 32) numCells = n;
+    }
+    if (resp[0x02] && resp[0x01]) render();
+  }
+}
+
+async function connect() {
+  clearErr();
+  if (!navigator.bluetooth) throw new Error(
+    'No Web Bluetooth in this browser. Use Chrome on Android.');
+  setStatus('choosing device…');
+  dev = await navigator.bluetooth.requestDevice({
+    filters: [{ services: [SERVICE] }, { namePrefix: 'JK' }],
+    optionalServices: [SERVICE],
+  });
+  dev.addEventListener('gattserverdisconnected', onDisconnected);
+
+  setStatus('connecting…');
+  const gatt = await dev.gatt.connect();
+  const service = await gatt.getPrimaryService(SERVICE);
+  chNotify = await pickChar(service, 'notify');
+  chWrite = await pickChar(service, 'write');
+  if (!chNotify || !chWrite) throw new Error('JK characteristics not found on ffe0/ffe1');
+
+  await chNotify.startNotifications();
+  chNotify.addEventListener('characteristicvaluechanged', onNotify);
+
+  setStatus('handshake…');
+  await write(jkCommand(0x97));           // device info -> 0x03
+  await new Promise(r => setTimeout(r, 300));
+  await write(jkCommand(0x96));           // device state -> 0x01 settings + 0x02 status
+  // after 0x96 the BMS streams 0x02 frames continuously; re-poke periodically
+  poll = setInterval(() => write(jkCommand(0x96)).catch(() => {}), 5000);
+
+  $('btn').disabled = true; $('disc').disabled = false;
+  setStatus('connected to ' + (dev.name || 'JK'));
+}
+
+function onDisconnected() {
+  clearInterval(poll); poll = null;
+  $('btn').disabled = false; $('disc').disabled = true;
+  setStatus('disconnected');
+}
+
+async function disconnect() {
+  try { clearInterval(poll); poll = null; if (dev && dev.gatt.connected) dev.gatt.disconnect(); }
+  finally { onDisconnected(); }
+}
+
+// ---------- render ----------
+
+const fmt = (v, p, u) => (v === undefined || v === null || Number.isNaN(v))
+  ? '–' : v.toFixed(p) + (u ? ' ' + u : '');
+
+function render() {
+  const s = decodeSample(resp[0x02], resp[0x01]);
+  const n = numCells || 0;
+
+  $('kpis').innerHTML = [
+    ['Voltage', fmt(s.voltage, 2, 'V')],
+    ['Current', fmt(s.current, 2, 'A')],
+    ['Power', fmt(s.power, 0, 'W')],
+    ['SOC', fmt(s.soc, 1, '%')],
+  ].map(([l, v]) => `<div class="kpi"><div class="l">${esc(l)}</div><div class="v">${esc(v)}</div></div>`).join('');
+
+  $('rows').innerHTML = [
+    ['Charge', fmt(s.charge, 1, 'Ah')],
+    ['Capacity', fmt(s.capacity, 1, 'Ah')],
+    ['Aged capacity', fmt(s.agedCapacity, 1, 'Ah')],
+    ['SOH', fmt(s.soh, 0, '%')],
+    ['Cycles', fmt(s.cycles, 0, '')],
+    ['Throughput', fmt(s.throughput, 0, 'Ah')],
+    ['MOSFET temp', fmt(s.mosTemp, 1, '°C')],
+    ['Temps', s.temps.map(t => t.toFixed(1)).join(', ') + ' °C'],
+    ['Balance current', fmt(s.balanceCurrent, 3, 'A')],
+  ].map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('');
+
+  if (n) {
+    const mv = cellVoltages(resp[0x02], n);
+    const lo = mv.indexOf(Math.min(...mv)), hi = mv.indexOf(Math.max(...mv));
+    $('cells').innerHTML = mv.map((v, i) =>
+      `<span class="cell ${i === lo ? 'lo' : i === hi ? 'hi' : ''}">${esc(v)}<i>#${i + 1}</i></span>`
+    ).join('') + `<span class="cell">Δ ${esc(Math.max(...mv) - Math.min(...mv))}<i>mV</i></span>`;
+  }
+
+  $('sws').innerHTML = Object.entries(s.switches).map(([k, v]) =>
+    `<span class="sw ${v ? 'on' : 'off'}">${esc(k)}: ${v ? 'on' : 'off'}</span>`).join('');
+}
+
+// ---------- boot ----------
+
+if (!window.isSecureContext) {
+  const w = $('warn'); w.hidden = false;
+  w.textContent = 'This page is not a secure context, so Chrome will refuse Bluetooth. '
+    + 'Serve it over HTTPS, or allow this origin under '
+    + 'chrome://flags/#unsafely-treat-insecure-origin-as-secure. See doc/GUI.md.';
+} else if (!navigator.bluetooth) {
+  const w = $('warn'); w.hidden = false;
+  w.textContent = 'This browser has no Web Bluetooth. Use Chrome on Android.';
+}
+
+$('btn').onclick = () => connect().catch(e => { showErr(e); setStatus('failed'); });
+$('disc').onclick = disconnect;
+</script>
