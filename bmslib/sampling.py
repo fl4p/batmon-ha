@@ -122,6 +122,11 @@ class PeriodicBoolSignal:
 class BmsSampleSink:
     """ Interface of an arbitrary data sink of battery samples """
 
+    # Whether this sink needs cell voltages on every sample, or is happy to
+    # receive whatever the sampler already fetched. Existing sinks keep today's
+    # behaviour; the GUI sets it False so enabling the GUI adds no BLE traffic.
+    wants_voltages_every_sample = True
+
     def publish_sample(self, bms_name: str, sample: BmsSample, tags=None):
         raise NotImplementedError()
 
@@ -166,6 +171,8 @@ class BmsSampler:
         self.over_power = over_power or math.nan
 
         self.sinks = sinks or []
+        self._last_error = None
+        self._last_error_type = None
 
         self.downsampler = Downsampler()
 
@@ -247,6 +254,25 @@ class BmsSampler:
         async with bmslib.bt.ConnectLock:
             await bms.force_disconnect()
 
+    def status(self) -> dict:
+        """Read-only health for the GUI, so it never reaches into privates."""
+        try:
+            dd = self.bms.debug_data()
+        except Exception:
+            dd = None
+        return dict(
+            connected=self.bms.is_connected,
+            num_samples=self.num_samples,
+            num_errors=self._num_errors,
+            t_next_retry=self._time_next_retry,
+            last_error=self._last_error,
+            last_error_type=self._last_error_type,
+            device_info=self.device_info,
+            is_virtual=self.bms.is_virtual,
+            debug_data=dd,
+            expire_after=self.expire_after_seconds,
+        )
+
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
 
@@ -258,6 +284,8 @@ class BmsSampler:
             s = await self._sample_inner()
             if s:
                 self._num_errors = 0
+                self._last_error = None
+                self._last_error_type = None
                 self._num_not_found = 0
                 self._num_error_disconnects = 0
             return s
@@ -277,6 +305,8 @@ class BmsSampler:
             return None
 
         except GroupNotReady as e:
+            self._last_error_type = 'GroupNotReady'
+            self._last_error = str(e)
             log_data = (t_now - self._last_time_log) >= (60 if self.num_samples < 1000 else 300) or self.bms.verbose_log
             if log_data:
                 self._last_time_log = t_now
@@ -284,6 +314,8 @@ class BmsSampler:
             return None
 
         except Exception as ex:
+            self._last_error_type = type(ex).__name__
+            self._last_error = summarize_exc(ex) if 'summarize_exc' in globals() else str(ex)
             # Collapse the multi-page asyncio.wait_for traceback that masks the
             # real cause for connect/notify timeouts (see #367, #324). Full
             # exc_info kept for unexpected types where the trace is informative.

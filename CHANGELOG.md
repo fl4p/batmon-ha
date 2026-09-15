@@ -1,5 +1,6 @@
 ## [2.21]
 
+* New built-in web GUI showing every pack, its BMS data and the topology of any groups. In Home Assistant it appears as an ingress panel in the sidebar; standalone it serves on `http://<host>:8099/`. Read-only for now. See doc/GUI.md, and doc/options.json.gui-demo to try it with simulated packs and no hardware.
 * New `type: group_serial` for battery strings wired in series, alongside the existing `group_parallel`. Voltage sums, current is the string current (mean of the members), power is derived from those aggregates, and charge/capacity/SOC/SOH come from the pack with the least remaining charge — the one that actually limits discharge, which is not always the lowest-SOC pack. See doc/Groups.md.
 * A group no longer publishes a partial sum. `BmsGroup.fetch()` aggregated whatever members had reported so far — only `fetch_voltages()` raised — so a group could emit plausible but wrong totals while a member was still connecting. It now waits for every member, which shows as a gap instead of a wrong number.
 * A group now reports its members' alarms. `sum_parallel()` dropped `problem` entirely, so a group device hid a failure any of its BMSes was flagging. Group devices gain a `problem` binary sensor; unknown stays unknown rather than becoming "no problem".

@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>batmon</title>
+<!-- %%BATMON_BASE%% is substituted by the server; it must NOT be the same
+     string as the variable name, or the replace clobbers the name too. -->
+<script>window.__BATMON_BASE__ = "%%BATMON_BASE%%";</script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px system-ui, sans-serif; margin: 0; padding: 12px; }
+  h1 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+  #conn { font-size: 12px; opacity: .7; margin-bottom: 12px; }
+  .group { border: 1px solid #8884; border-radius: 6px; padding: 8px; margin: 0 0 12px; }
+  .group > .glabel { font-size: 12px; opacity: .7; margin-bottom: 6px; }
+  .packs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pack { border: 1px solid #8884; border-radius: 6px; padding: 8px; min-width: 210px; flex: 1 1 210px; }
+  .pack h2 { font-size: 14px; margin: 0 0 4px; font-weight: 600; }
+  .st { font-size: 11px; padding: 1px 5px; border-radius: 3px; background: #8883; }
+  .st.connected { background: #2a02; color: #2a7; }
+  .st.stale, .st.connecting, .st.waiting { background: #fa02; color: #a70; }
+  .st.error, .st.disconnected, .st.never { background: #f002; color: #c33; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  td { padding: 1px 0; font-variant-numeric: tabular-nums; }
+  td.k { opacity: .65; padding-right: 8px; }
+  td.v { text-align: right; }
+  .cells { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
+  .cell { font-size: 10px; padding: 1px 4px; border: 1px solid #8884; border-radius: 3px;
+          font-variant-numeric: tabular-nums; }
+  .cell.lo { border-color: #c33; color: #c33; }
+  .cell.hi { border-color: #2a7; color: #2a7; }
+  .sw { font-size: 11px; margin-top: 6px; }
+  .sw b { font-weight: 600; }
+  .prob { color: #c33; font-weight: 600; font-size: 12px; margin-top: 4px; }
+</style>
+
+<h1>batmon</h1>
+<div id="conn">connecting…</div>
+<div id="root"></div>
+
+<script>
+const RAW = window.__BATMON_BASE__ || "";
+const BASE = RAW.indexOf("%%") === 0 ? "" : RAW;   // unsubstituted => standalone
+const api  = p => BASE + p;
+
+let SYSTEM = null;          // system document data
+let NODES  = {};            // node id -> node state (whole-node replacement)
+
+const conn = document.getElementById('conn');
+const root = document.getElementById('root');
+
+function fmt(field, v) {
+  if (v === undefined || v === null) return '–';
+  const m = (SYSTEM && SYSTEM.fields && SYSTEM.fields[field]) || {};
+  const p = (m.precision === undefined) ? 2 : m.precision;
+  const s = (typeof v === 'number') ? v.toFixed(p) : String(v);
+  return m.unit ? s + ' ' + m.unit : s;
+}
+
+const ROWS = ['voltage', 'current', 'power', 'soc', 'charge', 'capacity',
+              'soh', 'mos_temperature', 'num_cycles'];
+
+function renderPack(id) {
+  const n = NODES[id] || {};
+  const meta = (SYSTEM.nodes || []).find(x => x.id === id) || {};
+  const link = n.link || { status: 'never' };
+  const v = n.values || {};
+
+  const el = document.createElement('div');
+  el.className = 'pack';
+
+  let h = `<h2>${id} <span class="st ${link.status}">${link.status}</span></h2>`;
+  if (meta.driver_type) h += `<div style="font-size:11px;opacity:.6">${meta.driver_type}</div>`;
+  if (link.detail) h += `<div style="font-size:11px;opacity:.7">${link.detail}</div>`;
+
+  h += '<table>';
+  for (const f of ROWS) if (v[f] !== undefined) h += `<tr><td class="k">${f}</td><td class="v">${fmt(f, v[f])}</td></tr>`;
+  h += '</table>';
+
+  if (n.cells_mv && n.cells_mv.length) {
+    const cs = n.cell_stats || {};
+    h += '<div class="cells">' + n.cells_mv.map((mv, i) => {
+      if (mv === null) return `<span class="cell">?</span>`;
+      const cls = (cs.min_index === i + 1) ? ' lo' : (cs.max_index === i + 1) ? ' hi' : '';
+      return `<span class="cell${cls}">${mv}</span>`;
+    }).join('') + '</div>';
+    if (cs.delta_mv !== undefined) h += `<div style="font-size:11px;opacity:.7">Δ ${cs.delta_mv} mV</div>`;
+  }
+  if (n.temperatures_c && n.temperatures_c.length)
+    h += `<div style="font-size:11px;opacity:.7">temps: ${n.temperatures_c.map(t => t === null ? '?' : t).join(', ')} °C</div>`;
+  if (n.switches)
+    h += '<div class="sw">' + Object.entries(n.switches)
+      .map(([k, s]) => `${k}: <b>${s ? 'on' : 'off'}</b>`).join(' &middot; ') + '</div>';
+  if (n.problem) h += '<div class="prob">PROBLEM</div>';
+
+  el.innerHTML = h;
+  return el;
+}
+
+function render() {
+  if (!SYSTEM) return;
+  root.innerHTML = '';
+  const childrenOf = {};
+  for (const e of SYSTEM.edges || []) (childrenOf[e.parent] ||= []).push(e.child);
+
+  for (const rid of SYSTEM.roots || []) {
+    const meta = (SYSTEM.nodes || []).find(x => x.id === rid) || {};
+    if (meta.kind === 'group') {
+      const g = document.createElement('div');
+      g.className = 'group';
+      g.innerHTML = `<div class="glabel">${rid} — ${meta.group_kind || 'group'}</div>`;
+      g.appendChild(renderPack(rid));
+      const inner = document.createElement('div');
+      inner.className = 'packs';
+      for (const c of childrenOf[rid] || []) inner.appendChild(renderPack(c));
+      g.appendChild(inner);
+      root.appendChild(g);
+    } else {
+      const wrap = document.createElement('div');
+      wrap.className = 'packs';
+      wrap.appendChild(renderPack(rid));
+      root.appendChild(wrap);
+    }
+  }
+}
+
+function applyState(data) {
+  // whole-node replacement, never a merge into values: an absent field means
+  // "not reported now", so merging would resurrect a stale reading.
+  for (const [id, st] of Object.entries(data.nodes || {})) NODES[id] = st;
+  render();
+}
+
+let ws, backoff = 1000;
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + api('/ws'));
+  ws.onopen = () => { conn.textContent = 'live'; backoff = 1000; };
+  ws.onmessage = ev => {
+    const doc = JSON.parse(ev.data);
+    if (doc.type === 'system') { SYSTEM = doc.data; render(); }
+    else if (doc.type === 'state') applyState(doc.data);
+  };
+  ws.onclose = () => {
+    conn.textContent = 'disconnected — retrying';
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 30000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+}
+
+fetch(api('/api/system')).then(r => r.json()).then(d => { SYSTEM = d.data; render(); })
+  .catch(e => conn.textContent = 'api/system failed: ' + e);
+connect();
+</script>

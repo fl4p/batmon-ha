@@ -30,6 +30,17 @@ privileged:
 # the serial port the user configures simply isn't visible inside the add-on.
 uart: true
 
+# Web GUI. Ingress works with host_network: true -- the Supervisor builds the
+# destination from the add-on's ip_address, and a host-network add-on reports the
+# Docker network gateway, not a nonexistent container IP.
+# The port is declared but NOT published: with host_network the socket is on the
+# host anyway, so `gui_allow_direct` (default false under HA) is what actually
+# gates non-ingress access. Ingress requests are authenticated by Home Assistant.
+ingress: true
+ingress_port: 8099
+panel_icon: "mdi:car-battery"
+panel_title: "Batmon"
+
 homeassistant_api: true # http://supervisor/core/api
 hassio_api: true        # http://supervisor
 
@@ -63,6 +74,8 @@ options:
   bt_power_cycle: false
   bt_power_cycle_on_error: false
   ble_stack: bleak
+  gui: true
+  gui_port: 8099
   # sample_period/publish_period/expire_values_after are kept here (and required
   # in the schema) so they render as normal, always-visible fields. They must NOT
   # live in the collapsed "unused optional configuration options" section: edits
@@ -126,6 +139,14 @@ schema:
   # "esphome" routes GATT through one or more ESPHome Bluetooth Proxy devices
   # (no local adapter touched — see `bluetooth_proxies:`).
   ble_stack: "list(bleak|bumble|bluek|esphome)?"
+
+  # Web GUI (see doc/GUI.md). `gui_port` is only used standalone -- under HA the
+  # Supervisor proxies to `ingress_port` above, so changing gui_port there would
+  # silently break ingress. `gui_allow_direct` defaults to false under HA.
+  gui: "bool?"
+  gui_port: "int(1,65535)?"
+  gui_push_period: "float?"
+  gui_allow_direct: "bool?"
 
   bluetooth_proxies:
     - host: str

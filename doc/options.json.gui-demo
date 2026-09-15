@@ -1,0 +1,51 @@
+{
+  "devices": [
+    {
+      "address": "test_jk",
+      "type": "dummy",
+      "alias": "pack1"
+    },
+    {
+      "address": "test_jk",
+      "type": "dummy",
+      "alias": "pack2"
+    },
+    {
+      "address": "test_jk",
+      "type": "dummy",
+      "alias": "pack3"
+    },
+    {
+      "address": "test_jk",
+      "type": "dummy",
+      "alias": "pack4"
+    },
+    {
+      "address": "test_jk",
+      "type": "dummy",
+      "alias": "solo"
+    },
+    {
+      "address": "pack1,pack2",
+      "type": "group_parallel",
+      "alias": "bank_parallel"
+    },
+    {
+      "address": "pack3,pack4",
+      "type": "group_serial",
+      "alias": "string_a"
+    }
+  ],
+  "sample_period": 1.0,
+  "publish_period": 1.0,
+  "expire_values_after": 20,
+  "invert_current": false,
+  "keep_alive": true,
+  "watchdog": false,
+  "concurrent_sampling": false,
+  "verbose_log": false,
+  "telemetry": false,
+  "gui": true,
+  "gui_port": 8099,
+  "gui_allow_direct": true
+}

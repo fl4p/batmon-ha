@@ -74,6 +74,13 @@ def store_states(samplers: list[BmsSampler]):
     store_meter_states(meter_states)
 
 
+def _runtime_kind():
+    """How batmon is running, for the GUI system document."""
+    if os.environ.get('SUPERVISOR_TOKEN'):
+        return 'addon'
+    return 'standalone'
+
+
 def bg_checks(sampler_list, timeout, t_start):
     global shutdown
 
@@ -370,6 +377,17 @@ async def main():
             pass
             #logger.info("failed to init telemetry", exc_info=True)
 
+    # GUI state sink. Lazily imported and guarded: a broken GUI must degrade to
+    # "no GUI", never to a dead add-on (same shape as the InfluxDB sink above).
+    gui_state = None
+    if user_config.get('gui', True):
+        try:
+            from bmslib.gui.state import GuiState, GuiStateSink
+            gui_state = GuiState(app_version=ver, runtime=_runtime_kind())
+            sinks.append(GuiStateSink(gui_state))
+        except Exception as e:
+            logger.warning('GUI state disabled: %s', e)
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),
@@ -388,6 +406,46 @@ async def main():
 
     # move groups to the end
     sampler_list = sorted(sampler_list, key=lambda s: s.bms.is_virtual)
+
+    gui_server = None
+    if gui_state is not None:
+        try:
+            samplers_by_name = {s_.bms.name: s_ for s_ in sampler_list}
+            for bms in bms_list:
+                if getattr(bms, 'is_virtual', False):
+                    gui_state.register_node(
+                        bms.name, kind='group',
+                        group_kind=getattr(type(bms), 'KIND', 'parallel'),
+                        members=list(bms.get_member_names()),
+                        meta=dict(driver_type=dev_args[bms.name].get('type'),
+                                  address_kind='virtual',
+                                  note=dev_args[bms.name].get('note')))
+                else:
+                    dev = dev_args[bms.name]
+                    gui_state.register_node(
+                        bms.name, kind='pack',
+                        meta=dict(driver=bms.slug, driver_type=dev.get('type'),
+                                  address=bms.address,
+                                  address_kind='serial' if bms.address == 'serial' else 'ble',
+                                  note=dev.get('note')))
+            gui_state.set_status_source(
+                lambda nid: samplers_by_name[nid].status() if nid in samplers_by_name else None)
+
+            from bmslib.gui.server import GuiServer
+            gui_server = GuiServer(
+                gui_state,
+                port=int(os.environ.get('INGRESS_PORT') or user_config.get('gui_port', 8099) or 8099),
+                push_period=float(user_config.get('gui_push_period', 0) or publish_period),
+                allow_direct=bool(user_config.get('gui_allow_direct',
+                                                  os.environ.get('SUPERVISOR_TOKEN') is None)),
+            )
+            await gui_server.start()
+            logger.info('GUI on %s (direct access %s)', gui_server.url,
+                        'allowed' if gui_server.allow_direct else 'refused, ingress only')
+        except Exception as e:
+            logger.warning('GUI server disabled (%s). batmon runs normally without it.', e,
+                           exc_info=True)
+            gui_server = None
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
@@ -472,6 +530,12 @@ async def main():
         try:
             sink.close()
         except:
+            pass
+
+    if gui_server is not None:
+        try:
+            await gui_server.stop()
+        except Exception:
             pass
 
     for bms in bms_list:
