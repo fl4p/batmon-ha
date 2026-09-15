@@ -206,7 +206,9 @@ sample_desc = {
         "field": "num_cycles",
         "device_class": None,
         "state_class": "measurement",
-        "unit_of_measurement": "N",
+        # Counts are dimensionless. "N" is the SI symbol for newton and HA
+        # displays it literally as a unit.
+        "unit_of_measurement": None,
         "icon": "battery-sync"},
     "mosfet_status/capacity_ah": {
         "field": "charge",
@@ -243,7 +245,7 @@ sample_desc = {
         "field": "num_samples",
         "device_class": None,
         "state_class": "measurement",
-        "unit_of_measurement": "N",
+        "unit_of_measurement": None,
         "icon": "counter"},
 }
 
@@ -260,6 +262,12 @@ def publish_sample(client, device_topic, sample: BmsSample):
             assert isinstance(switch_state, bool)
             topic = f"{device_topic}/switch/{switch_name}"
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
+
+    if sample.alarms:
+        for alarm_name, alarm_state in sample.alarms.items():
+            assert isinstance(alarm_state, bool)
+            topic = f"{device_topic}/alarm/{alarm_name}"
+            mqtt_single_out(client, topic, 'ON' if alarm_state else 'OFF')
 
     if sample.problem is not None:
         mqtt_single_out(client, f"{device_topic}/problem",
@@ -401,7 +409,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         'total_energy_discharge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
                                        icon="meter-electric", name="total energy output"),
         'total_charge': dict(device_class=None, state_class="total", unit="Ah", name="total charge netted"),
-        'total_cycles': dict(device_class=None, state_class="total_increasing", unit="N", icon="battery-sync",
+        'total_cycles': dict(device_class=None, state_class="total_increasing", unit=None, icon="battery-sync",
                              name="total cycle count"),
     }
     for name, m in meters.items():
@@ -427,6 +435,18 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "device": device_json,
             "icon": "mdi:alert-circle-outline",
         }
+
+    if sample.alarms:
+        for alarm_name in sample.alarms:
+            discovery_msg[f"homeassistant/binary_sensor/{node_id}/alarm_{alarm_name}/config"] = {
+                "unique_id": f"{device_topic}__alarm_{alarm_name}",
+                "name": alarm_name.upper(),
+                "device_class": "problem",
+                "entity_category": "diagnostic",
+                "state_topic": f"{device_topic}/alarm/{alarm_name}",
+                "expire_after": expire_after_seconds,
+                "device": device_json,
+            }
 
     if sample.balancing_cells is not None:
         discovery_msg[f"homeassistant/binary_sensor/{node_id}/balancing/config"] = {
