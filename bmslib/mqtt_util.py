@@ -8,7 +8,6 @@ import asyncio
 import json
 import math
 import queue
-import statistics
 import time
 import traceback
 from unittest.mock import patch
@@ -18,6 +17,8 @@ import paho.mqtt.client as paho
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
 from bmslib.bt import BtBms
 from bmslib.util import get_logger
+from bmslib.wire.fields import (round_to_n, capitalize_words, is_none_or_nan,
+                                balancing_cells_str, sample_desc, meter_desc, cell_stats)  # noqa: F401
 
 logger = get_logger()
 
@@ -38,28 +39,6 @@ def json_dumps_with_round_n(some_object, n=7):
 
     with patch('json.encoder._make_iterencode', wraps=inner):
         return json.dumps(some_object)
-
-
-def round_to_n(x, n):
-    # todo compare to np.format_float_positional
-    if isinstance(x, str) or not math.isfinite(x) or not x:
-        return x
-
-    if n == 0:
-        return str(round(x, None))
-
-    digits = -int(math.floor(math.log10(abs(x)))) + (n - 1)
-
-    try:
-        # return ('%.*f' % (digits, x))
-        return str(round(x, digits or None))  # digits=0 will output 12.0, digits=None => 12
-    except ValueError as e:
-        print('error', x, n, e)
-        raise e
-
-
-def capitalize_words(s):
-    return ' '.join(word[0].upper() + word[1:] for word in s.split())
 
 
 def disable_warnings():
@@ -123,131 +102,6 @@ def mqtt_last_publish_time():
     return _last_publish_time
 
 
-def is_none_or_nan(val):
-    if val is None:
-        return True
-    if isinstance(val, float) and (math.isnan(val) or not math.isfinite(val)):
-        return True
-    return False
-
-
-# units: https://github.com/home-assistant/core/blob/d7ac4bd65379e11461c7ce0893d3533d8d8b8cbf/homeassistant/const.py#L384
-sample_desc = {
-    "soc/total_voltage": {
-        "field": "voltage",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "unit_of_measurement": "V",
-        "precision": 2,
-        "significant_digits": 4,  # round_to_n
-        "icon": "meter-electric"},
-    "soc/current": {
-        "field": "current",
-        "device_class": "current",
-        "state_class": "measurement",
-        "unit_of_measurement": "A",
-        "precision": 2,
-        "significant_digits": 4,
-    },
-    "soc/balance_current": {
-        "field": "balance_current",
-        "device_class": "current",
-        "state_class": "measurement",
-        "unit_of_measurement": "A",
-        "precision": 2,
-        "significant_digits": 4,
-        "icon": "scale-unbalanced"},
-    "soc/soc_percent": {
-        "field": "soc",
-        "device_class": "battery",
-        "state_class": "measurement",
-        "unit_of_measurement": "%",
-        "precision": 2,
-        "significant_digits": 4,
-        "icon": "battery"},
-    "soc/power": {
-        "field": "power",
-        "device_class": "power",
-        "state_class": "measurement",
-        "unit_of_measurement": "W",
-        "precision": 1,
-        "significant_digits": 4,
-        "icon": "flash"},
-    "soc/capacity": {
-        "field": "capacity",
-        "device_class": None,
-        "state_class": "measurement",
-        "unit_of_measurement": "Ah"
-    },
-    "soc/aged_capacity": {
-        "field": "aged_capacity",
-        "device_class": None,
-        "state_class": None,
-        "unit_of_measurement": "Ah",
-        "precision": 2,
-        "icon": "battery-heart-variant"},
-    "soc/soh": {
-        "field": "soh",
-        "device_class": None,
-        "state_class": "measurement",
-        "unit_of_measurement": "%",
-        "precision": 1,
-        "icon": "battery-heart-variant"},
-    # Topic key kept as ``soc/cycle_capacity`` (and therefore HA's unique_id /
-    # entity_id) so existing user automations and long-term statistics keep
-    # working across the rename. The HA display name is auto-derived from
-    # ``field`` and will refresh to "Total Charge Throughput".
-    "soc/cycle_capacity": {
-        "field": "total_charge_throughput",
-        "device_class": None,
-        "state_class": "total_increasing",
-        "unit_of_measurement": "Ah"},
-    "soc/num_cycles": {
-        "field": "num_cycles",
-        "device_class": None,
-        "state_class": "measurement",
-        "unit_of_measurement": "N",
-        "icon": "battery-sync"},
-    "mosfet_status/capacity_ah": {
-        "field": "charge",
-        "device_class": None,
-        "state_class": "measurement",
-        "unit_of_measurement": "Ah"},
-    "mosfet_status/temperature": {
-        "field": "mos_temperature",
-        "device_class": "temperature",
-        "state_class": "measurement",
-        "unit_of_measurement": "°C",
-        "icon": "thermometer"},
-    "bms/uptime": {
-        "field": "uptime",
-        "device_class": "duration",
-        "state_class": "measurement",
-        "unit_of_measurement": "s",
-        "precision": 0,
-        "icon": "clock"},
-    "bms/runtime": {
-        "field": "runtime",
-        "device_class": "duration",
-        "state_class": "measurement",
-        "unit_of_measurement": "s",
-        "precision": 0,
-        "icon": "timer-sand"},
-    "soc/total_charge_net": {
-        "field": "total_charge_net",
-        "device_class": None,
-        "state_class": "total_increasing",
-        "unit_of_measurement": "Ah",
-        "icon": "battery-arrow-down"},
-    "meter/sample_count": {
-        "field": "num_samples",
-        "device_class": None,
-        "state_class": "measurement",
-        "unit_of_measurement": "N",
-        "icon": "counter"},
-}
-
-
 def publish_sample(client, device_topic, sample: BmsSample):
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
@@ -278,13 +132,6 @@ def publish_sample(client, device_topic, sample: BmsSample):
         mqtt_single_out(client, f"{device_topic}/battery_mode", sample.battery_mode)
 
 
-def balancing_cells_str(mask: int) -> str:
-    """Bitmask (bit 0 = cell 1) -> "1,5,12", or "none" so the HA sensor never
-    gets an empty payload (which it ignores)."""
-    cells = [str(i + 1) for i in range(32) if mask & (1 << i)]
-    return ','.join(cells) if cells else 'none'
-
-
 def publish_cell_voltages(client, device_topic, voltages):
     # "highest_voltage": parts[0] / 1000,
     # "highest_cell": parts[1],
@@ -298,17 +145,15 @@ def publish_cell_voltages(client, device_topic, voltages):
         topic = f"{device_topic}/cell_voltages/{i + 1}"
         mqtt_single_out(client, topic, voltages[i] / 1000)
 
-    if len(voltages) > 1:
-        x = range(len(voltages))
-        high_i = max(x, key=lambda i: voltages[i])
-        low_i = min(x, key=lambda i: voltages[i])
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/min", voltages[low_i] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", low_i + 1)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/max", voltages[high_i] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", high_i + 1)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", (voltages[high_i] - voltages[low_i]) / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/average", round(sum(voltages) / len(voltages)) / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", statistics.median(voltages) / 1000)
+    stats = cell_stats(voltages)
+    if stats:
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min", stats['min_mv'] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", stats['min_index'])
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max", stats['max_mv'] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", stats['max_index'])
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", stats['delta_mv'] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/average", stats['avg_mv'] / 1000)
+        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", stats['median_mv'] / 1000)
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -391,20 +236,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         if not is_none_or_nan(temperatures[i]):
             _hass_discovery(k, "temperature", state_class="measurement", unit="°C", precision=1)
 
-    meters = {
-        # state_class see https://developers.home-assistant.io/docs/core/entity/sensor/#long-term-statistics
-        # this enables the meters to appear in HA Energy Grid
-        'total_energy': dict(device_class="energy", state_class="total", unit="kWh", icon="meter-electric",
-                             name="total energy netted"),
-        'total_energy_charge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
-                                    icon="meter-electric", name="total energy input"),
-        'total_energy_discharge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
-                                       icon="meter-electric", name="total energy output"),
-        'total_charge': dict(device_class=None, state_class="total", unit="Ah", name="total charge netted"),
-        'total_cycles': dict(device_class=None, state_class="total_increasing", unit="N", icon="battery-sync",
-                             name="total cycle count"),
-    }
-    for name, m in meters.items():
+    for name, m in meter_desc.items():
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
 
     if sample.problem is not None:

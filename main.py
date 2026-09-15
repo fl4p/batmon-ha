@@ -54,6 +54,7 @@ user_config = load_user_config()
 
 shutdown = False
 t_last_store = 0
+mqtt_configured = False
 
 
 async def fetch_loop(fn, period, max_errors, max_backoff=60):
@@ -78,7 +79,7 @@ def bg_checks(sampler_list, timeout, t_start):
 
     now = time.time()
 
-    if timeout:
+    if timeout and mqtt_configured:
         # compute time since last successful publish
         pdt = now - (mqtt_last_publish_time() or t_start)
         if pdt > timeout:
@@ -131,7 +132,7 @@ async def background_loop(timeout: float, sampler_list: List[BmsSampler]):
 
 
 async def main():
-    global shutdown
+    global shutdown, mqtt_configured
 
     pair_only = len(sys.argv) > 1 and sys.argv[1] == "pair-only"
     if pair_only:
@@ -270,6 +271,7 @@ async def main():
         logger.info('connecting mqtt %s@%s:%s', user_config.mqtt_user, user_config.mqtt_broker, mqtt_port)
         # paho_monkey_patch()
         mqtt_client = paho.mqtt.client.Client(CallbackAPIVersion.VERSION2)
+        mqtt_configured = True
         mqtt_client.enable_logger(logger)
         if user_config.get('mqtt_user', None):
             mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
@@ -379,7 +381,7 @@ async def main():
     ) for bms in bms_list]
 
     # move groups to the end
-    sampler_list = sorted(sampler_list, key=lambda s: bms.is_virtual)
+    sampler_list = sorted(sampler_list, key=lambda s: s.bms.is_virtual)
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
