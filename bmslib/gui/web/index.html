@@ -42,6 +42,12 @@ const RAW = window.__BATMON_BASE__ || "";
 const BASE = RAW.indexOf("%%") === 0 ? "" : RAW;   // unsubstituted => standalone
 const api  = p => BASE + p;
 
+// Everything below reaches innerHTML. Device names, device_info strings and
+// error text originate off-box -- any BLE device in radio range can advertise
+// any name -- so nothing is interpolated raw.
+const esc = v => String(v).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 let SYSTEM = null;          // system document data
 let NODES  = {};            // node id -> node state (whole-node replacement)
 
@@ -68,12 +74,12 @@ function renderPack(id) {
   const el = document.createElement('div');
   el.className = 'pack';
 
-  let h = `<h2>${id} <span class="st ${link.status}">${link.status}</span></h2>`;
-  if (meta.driver_type) h += `<div style="font-size:11px;opacity:.6">${meta.driver_type}</div>`;
-  if (link.detail) h += `<div style="font-size:11px;opacity:.7">${link.detail}</div>`;
+  let h = `<h2>${esc(id)} <span class="st ${esc(link.status)}">${esc(link.status)}</span></h2>`;
+  if (meta.driver_type) h += `<div style="font-size:11px;opacity:.6">${esc(meta.driver_type)}</div>`;
+  if (link.detail) h += `<div style="font-size:11px;opacity:.7">${esc(link.detail)}</div>`;
 
   h += '<table>';
-  for (const f of ROWS) if (v[f] !== undefined) h += `<tr><td class="k">${f}</td><td class="v">${fmt(f, v[f])}</td></tr>`;
+  for (const f of ROWS) if (v[f] !== undefined) h += `<tr><td class="k">${esc(f)}</td><td class="v">${esc(fmt(f, v[f]))}</td></tr>`;
   h += '</table>';
 
   if (n.cells_mv && n.cells_mv.length) {
@@ -81,15 +87,15 @@ function renderPack(id) {
     h += '<div class="cells">' + n.cells_mv.map((mv, i) => {
       if (mv === null) return `<span class="cell">?</span>`;
       const cls = (cs.min_index === i + 1) ? ' lo' : (cs.max_index === i + 1) ? ' hi' : '';
-      return `<span class="cell${cls}">${mv}</span>`;
+      return `<span class="cell${cls}">${esc(mv)}</span>`;
     }).join('') + '</div>';
-    if (cs.delta_mv !== undefined) h += `<div style="font-size:11px;opacity:.7">Δ ${cs.delta_mv} mV</div>`;
+    if (cs.delta_mv !== undefined) h += `<div style="font-size:11px;opacity:.7">Δ ${esc(cs.delta_mv)} mV</div>`;
   }
   if (n.temperatures_c && n.temperatures_c.length)
-    h += `<div style="font-size:11px;opacity:.7">temps: ${n.temperatures_c.map(t => t === null ? '?' : t).join(', ')} °C</div>`;
+    h += `<div style="font-size:11px;opacity:.7">temps: ${esc(n.temperatures_c.map(t => t === null ? '?' : t).join(', '))} °C</div>`;
   if (n.switches)
     h += '<div class="sw">' + Object.entries(n.switches)
-      .map(([k, s]) => `${k}: <b>${s ? 'on' : 'off'}</b>`).join(' &middot; ') + '</div>';
+      .map(([k, s]) => `${esc(k)}: <b>${s ? 'on' : 'off'}</b>`).join(' &middot; ') + '</div>';
   if (n.problem) h += '<div class="prob">PROBLEM</div>';
 
   el.innerHTML = h;
@@ -107,7 +113,7 @@ function render() {
     if (meta.kind === 'group') {
       const g = document.createElement('div');
       g.className = 'group';
-      g.innerHTML = `<div class="glabel">${rid} — ${meta.group_kind || 'group'}</div>`;
+      g.innerHTML = `<div class="glabel">${esc(rid)} — ${esc(meta.group_kind || 'group')}</div>`;
       g.appendChild(renderPack(rid));
       const inner = document.createElement('div');
       inner.className = 'packs';
@@ -149,6 +155,6 @@ function connect() {
 }
 
 fetch(api('/api/system')).then(r => r.json()).then(d => { SYSTEM = d.data; render(); })
-  .catch(e => conn.textContent = 'api/system failed: ' + e);
+  .catch(e => conn.textContent = 'api/system failed: ' + e);  // textContent, not HTML
 connect();
 </script>

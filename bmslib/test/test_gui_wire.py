@@ -261,3 +261,49 @@ def test_oversized_control_frame_is_rejected():
 def test_accept_key_matches_rfc_example():
     """RFC 6455 1.3 worked example."""
     assert gsrv._accept_key('dGhlIHNhbXBsZSBub25jZQ==') == 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
+
+
+# ---------------- websocket origin (CSWSH) ----------------
+
+def test_origin_same_host_allowed():
+    assert gsrv.GuiServer._origin_ok(
+        {'origin': 'http://192.168.1.5:8099', 'host': '192.168.1.5:8099'})
+
+
+def test_origin_cross_site_refused():
+    """Browsers do not apply same-origin policy to WebSocket handshakes, so
+    without this an attacker page could read the whole state stream."""
+    assert not gsrv.GuiServer._origin_ok(
+        {'origin': 'https://evil.example', 'host': '192.168.1.5:8099'})
+    # a look-alike prefix must not pass either
+    assert not gsrv.GuiServer._origin_ok(
+        {'origin': 'http://192.168.1.5:8099.evil.example', 'host': '192.168.1.5:8099'})
+
+
+def test_origin_absent_allowed_for_non_browser_clients():
+    """curl / scripts / the mobile app send no Origin and are not subject to
+    CSWSH -- an attacker who can set arbitrary headers needs no victim browser."""
+    assert gsrv.GuiServer._origin_ok({'host': '192.168.1.5:8099'})
+
+
+def test_origin_ingress_allowed_despite_mismatch():
+    """Under HA ingress the browser sends the frontend origin while Host is the
+    add-on's, so they legitimately differ. A page cannot set custom headers on a
+    WebSocket handshake, so X-Ingress-Path cannot be forged by an attacking page."""
+    assert gsrv.GuiServer._origin_ok({
+        'origin': 'https://ha.local:8123', 'host': '172.30.32.1:8099',
+        'x-ingress-path': '/api/hassio_ingress/abc'})
+
+
+# ---------------- UI escaping ----------------
+
+def test_ui_escapes_every_interpolation():
+    """Device names and error text originate off-box (any BLE device in range can
+    advertise any name) and reach innerHTML."""
+    import pathlib, re
+    html = pathlib.Path(__file__).resolve().parents[1] / 'gui' / 'web' / 'index.html'
+    src = html.read_text()
+    assert 'const esc =' in src
+    bad = [l.strip() for l in src.splitlines()
+           if '${' in l and 'esc(' not in l and '${cls}' not in l]
+    assert not bad, "unescaped interpolation reaching innerHTML: %s" % bad

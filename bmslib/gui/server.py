@@ -21,6 +21,7 @@ import os
 import struct
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 from bmslib.util import get_logger
 
@@ -326,10 +327,41 @@ class GuiServer:
 
     # ---------------- WebSocket ----------------
 
+    @staticmethod
+    def _origin_ok(headers) -> bool:
+        """Reject cross-site WebSocket hijacking.
+
+        Browsers do NOT apply the same-origin policy to WebSocket handshakes, so
+        without this check any page the user visits could open ws://<host>:8099/ws
+        and read the whole state stream -- battery telemetry, BLE addresses,
+        device info. (The REST endpoints are not equally exposed: with no
+        Access-Control-Allow-Origin, a cross-origin fetch gets an opaque response.)
+
+        No Origin at all means a non-browser client (curl, a script, the mobile
+        app). Those are not subject to CSWSH -- an attacker who can set arbitrary
+        headers does not need a victim's browser -- so they are allowed.
+
+        Under HA ingress the browser sends the *frontend's* origin while Host is
+        the add-on's, so they legitimately differ. X-Ingress-Path distinguishes
+        that case: it is not a credential, but a browser cannot set custom headers
+        on a WebSocket handshake, so an attacking page cannot forge it.
+        """
+        origin = headers.get('origin')
+        if not origin:
+            return True
+        if headers.get('x-ingress-path'):
+            return True
+        return urlparse(origin).netloc == headers.get('host', '')
+
     async def _ws_handshake(self, reader, writer, headers):
         key = headers.get('sec-websocket-key')
         if not key or headers.get('upgrade', '').lower() != 'websocket':
             await self._respond(writer, 400 if key else 404, b'bad upgrade', 'text/plain')
+            return
+        if not self._origin_ok(headers):
+            logger.warning('GUI: refused websocket from cross-site origin %r',
+                           headers.get('origin'))
+            await self._respond(writer, 403, b'bad origin', 'text/plain')
             return
         if len(self._clients) >= MAX_CLIENTS:
             await self._respond(writer, 503, b'too many viewers', 'text/plain')

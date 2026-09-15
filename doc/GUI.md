@@ -34,6 +34,13 @@ is **not**. `X-Ingress-Path` is a request header any client can set, so it is ne
 used as a credential — the only real control is `gui_allow_direct`, which defaults to
 false under Home Assistant.
 
+The WebSocket handshake validates `Origin`. Browsers do **not** apply the
+same-origin policy to WebSockets, so without that check any page you visited could
+open `ws://<host>:8099/ws` and read your battery data. Requests with no `Origin`
+(curl, scripts) are allowed — they are not subject to cross-site hijacking. Ingress
+requests are allowed even though the origin differs, because a page cannot set
+custom headers on a WebSocket handshake.
+
 Note that with `host_network: true` the socket is on the host regardless of any
 `ports:` mapping, so `gui_allow_direct: true` exposes read-only battery state to the
 whole LAN. The UI is read-only today; **write support will not ship without
