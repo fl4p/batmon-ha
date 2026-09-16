@@ -127,6 +127,88 @@ def test_bm6_valid_reply_keeps_master_notify_order():
     assert asyncio.run(run()) == NOTIFY_PLAIN
 
 
+def test_bm6_stray_sentinel_does_not_latch():
+    """A sentinel outside a pending request (connect() subscribes before any write) must
+    not pin the device onto the write-before-notify ordering."""
+
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                bms._notification_handler(None, NOTIFY_CIPHER)
+
+        async def unexpected_notify_change(_uuid, *_args):
+            pytest.fail("a stray empty frame must not change the notification subscription")
+
+        bms._notification_handler(None, bm6_encrypt(INVALID_INITIAL_PLAIN))  # no request pending
+        bms.client = Client()
+        bms.stop_notify = unexpected_notify_change
+        bms.start_notify = unexpected_notify_change
+        return await bms._q(0x07), bms._write_before_notify
+
+    assert asyncio.run(run()) == (NOTIFY_PLAIN, False)
+
+
+def test_bm6_write_before_notify_reverts_when_it_stops_answering():
+    """The fallback is not one-way: a device that stops answering it goes back to the
+    default ordering instead of timing out on every poll forever."""
+
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+        bms.TIMEOUT = 0.05
+        bms._write_before_notify = True
+        calls = []
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                calls.append("write")
+                if len(calls) > 2:  # the default ordering answers again
+                    bms._notification_handler(None, NOTIFY_CIPHER)
+
+        async def stop_notify(_uuid):
+            calls.append("stop_notify")
+
+        async def start_notify(_uuid, _callback):
+            calls.append("start_notify")
+
+        bms.client = Client()
+        bms.stop_notify = stop_notify
+        bms.start_notify = start_notify
+        return await bms._q(0x07), bms._write_before_notify, calls
+
+    result, write_before_notify, calls = asyncio.run(run())
+    assert result == NOTIFY_PLAIN
+    assert write_before_notify is False
+    assert calls == ["stop_notify", "write", "start_notify", "write"]
+
+
+def test_bm6_failed_write_leaves_the_subscription_up():
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+        bms._write_before_notify = True
+        subscribed = []
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                raise IOError("write failed")
+
+        async def stop_notify(_uuid):
+            subscribed.append(False)
+
+        async def start_notify(_uuid, _callback):
+            subscribed.append(True)
+
+        bms.client = Client()
+        bms.stop_notify = stop_notify
+        bms.start_notify = start_notify
+        with pytest.raises(IOError):
+            await bms._q(0x07)
+        return subscribed
+
+    assert asyncio.run(run())[-1] is True
+
+
 def test_bm6_rejects_wrong_length():
     with pytest.raises(ValueError):
         bm6_decrypt(b'\x00' * 15)

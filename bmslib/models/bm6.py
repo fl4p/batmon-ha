@@ -191,12 +191,14 @@ class Bm6Bt(BtBms):
     UUID_TX = '0000fff3-0000-1000-8000-00805f9b34fb'
     TIMEOUT = 8
     KEY = BM6_KEY
+    EMPTY_REALTIME_GRACE = 0.5  # s to keep waiting for a real frame after the sentinel
 
     def __init__(self, address, **kwargs):
         kwargs.setdefault('_uses_pin', False)
         super().__init__(address, **kwargs)
         self._last_response = None
         self._empty_realtime = asyncio.Event()
+        self._write_before_notify = False
 
     def _notification_handler(self, sender, data):
         try:
@@ -233,6 +235,7 @@ class Bm6Bt(BtBms):
         # subscribe once per connection, before any request: the device answers a realtime
         # request with a single frame, and the BM2 subclass never writes at all (#408)
         await self.start_notify(self.UUID_RX, self._notification_handler)
+        self._empty_realtime.clear()
 
     async def disconnect(self):
         await self.stop_notify(self.UUID_RX)
@@ -241,41 +244,69 @@ class Bm6Bt(BtBms):
     async def _q(self, cmd: int):
         plain = {0x07: CMD_REALTIME, 0x01: CMD_VERSION}[cmd]
 
-        # Most BM6 variants expect notifications to be active before the request.
-        # The Battery Guard variant from #408 instead returns EMPTY_REALTIME for
-        # that ordering and only supplies measurements when the request is written
-        # before subscribing. Switch only devices that exhibit that exact reply.
-        if cmd == 0x07 and self._empty_realtime.is_set():
-            return await self._q_write_before_notify(cmd, plain)
-
-        with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
-                                              response=True)
-            if cmd != 0x07:
+        if cmd != 0x07:
+            with self._fetch_futures.acquire(cmd):
+                await self._write(plain)
                 return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
-            response_waiter = asyncio.create_task(self._fetch_futures.wait_for(cmd, self.TIMEOUT))
-            empty_waiter = asyncio.create_task(self._empty_realtime.wait())
-            done, pending = await asyncio.wait(
-                (response_waiter, empty_waiter), return_when=asyncio.FIRST_COMPLETED)
-            for waiter in pending:
-                waiter.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+        # Most BM6 variants expect notifications to be active before the request.
+        # The Battery Guard variant from #412 instead answers EMPTY_REALTIME for that
+        # ordering and only measures when the request is written before subscribing.
+        # Devices that showed the sentinel keep using that ordering, but a device that
+        # stops answering it falls back to the default one rather than staying stuck.
+        self._empty_realtime.clear()
+        if self._write_before_notify:
+            try:
+                return await self._q_write_before_notify(cmd, plain)
+            except asyncio.TimeoutError:
+                self.logger.info("%s write-before-notify stopped answering, back to the "
+                                 "default ordering", self.name)
+                self._write_before_notify = False
+                self._empty_realtime.clear()
 
-            if response_waiter in done:
-                return response_waiter.result()
+        with self._fetch_futures.acquire(cmd):
+            await self._write(plain)
+            response = asyncio.ensure_future(self._fetch_futures.wait_for(cmd, self.TIMEOUT))
+            empty = asyncio.ensure_future(self._empty_realtime.wait())
+            try:
+                done, _ = await asyncio.wait((response, empty), return_when=asyncio.FIRST_COMPLETED)
+                if response not in done:
+                    # the sentinel came first; a real frame may still follow it
+                    await asyncio.wait((response,), timeout=self.EMPTY_REALTIME_GRACE)
+                if response.done():
+                    return response.result()
+            finally:
+                for task in (response, empty):
+                    task.cancel()
+                await asyncio.gather(response, empty, return_exceptions=True)
 
-        self.logger.debug("%s retrying realtime request before notify subscription", self.name)
-        return await self._q_write_before_notify(cmd, plain)
+        self.logger.debug("%s empty realtime reply, retrying with the request written "
+                          "before the notify subscription", self.name)
+        sample = await self._q_write_before_notify(cmd, plain)
+        self._write_before_notify = True
+        return sample
+
+    async def _write(self, plain: bytes):
+        await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
+                                          response=True)
 
     async def _q_write_before_notify(self, cmd: int, plain: bytes):
         await self.stop_notify(self.UUID_RX)
-        with self._fetch_futures.acquire(cmd):
-            await self.client.write_gatt_char(self.UUID_TX, data=bm6_encrypt(plain, self.KEY),
-                                              response=True)
-            await self.start_notify(self.UUID_RX, self._notification_handler)
-            return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+        subscribed = False
+        try:
+            with self._fetch_futures.acquire(cmd):
+                await self._write(plain)
+                await self.start_notify(self.UUID_RX, self._notification_handler)
+                subscribed = True
+                return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+        finally:
+            if not subscribed:
+                # the write raised: never leave the connection unsubscribed
+                try:
+                    await self.start_notify(self.UUID_RX, self._notification_handler)
+                except Exception as e:
+                    self.logger.warning("%s re-subscribe after a failed write failed: %s",
+                                        self.name, e)
 
     async def fetch(self) -> BmsSample:
         plain = await self._q(0x07)
