@@ -42,6 +42,18 @@ EMPTY_REALTIME = bytes.fromhex('d15507ff000000000000000000000000')
 _STATES = {0: 'ok', 1: 'low_voltage', 2: 'charging'}
 
 
+def _cancellation_requested() -> bool:
+    """True if the running task has a pending cancellation.
+
+    FuturesPool.wait_for() catches CancelledError and re-raises it as
+    asyncio.TimeoutError, so a caller that retries on a timeout would swallow the
+    cancellation and put another request on the air.
+    """
+    task = asyncio.current_task()
+    cancelling = getattr(task, 'cancelling', None)  # 3.11+
+    return bool(cancelling and cancelling())
+
+
 # --- minimal AES-128 (single block) ------------------------------------------------
 
 def _xtime(a):
@@ -220,7 +232,12 @@ class Bm6Bt(BtBms):
                 decode_realtime(plain)
             except ValueError as e:
                 self.logger.debug("%s ignoring invalid realtime notification: %s", self.name, e)
-                if plain == EMPTY_REALTIME:
+                # Only a sentinel belonging to a request in flight may steer the
+                # ordering. This still cannot tell a late sentinel of the previous
+                # request from this one's - the protocol carries no sequence
+                # number - but the fallback reverts on timeout, so the worst case
+                # is one wasted poll.
+                if plain == EMPTY_REALTIME and self._fetch_futures.is_waiting(cmd):
                     self._empty_realtime.set()
                 return
 
@@ -259,6 +276,9 @@ class Bm6Bt(BtBms):
             try:
                 return await self._q_write_before_notify(cmd, plain)
             except asyncio.TimeoutError:
+                if _cancellation_requested():
+                    # FuturesPool.wait_for reports a cancellation as a timeout
+                    raise asyncio.CancelledError from None
                 self.logger.info("%s write-before-notify stopped answering, back to the "
                                  "default ordering", self.name)
                 self._write_before_notify = False

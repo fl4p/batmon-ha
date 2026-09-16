@@ -254,14 +254,29 @@ def test_notification_drains_every_record_in_a_burst():
 
 
 def test_decode_keeps_a_record_with_an_out_of_range_cell():
-    """An over-voltage cell or a dead sense line must still be published: dropping
-    the record makes the device, and its alarm sensors, go unavailable exactly when
-    they matter."""
+    """An over- or under-voltage cell must still be published: dropping the record
+    makes the device, and its alarm sensors, go unavailable exactly when they
+    matter."""
     bms = _bms()
-    for cells in ([3349, 3354, 4650, 3359], [3349, 0, 3357, 3359], [1200, 3354, 3357, 3359]):
+    for cells in ([3349, 3354, 4650, 3359], [1200, 3354, 3357, 3359]):
         record = bms._decode_record(_with_cells(TRACE_FIXTURES[0], cells))
         assert record is not None, cells
         assert record["cells"] == cells
+
+
+def test_decode_keeps_a_record_with_a_dead_sense_line():
+    """A zero cell slot leaves the pack voltage where it is - it is measured at the
+    terminals - so the cell sum is short by a whole cell. The record must survive
+    that, which _with_cells() cannot show because it rewrites the pack voltage too."""
+    bms = _bms()
+    raw = bytearray(_raw(TRACE_FIXTURES[0]))
+    raw[24:26] = b"\x00\x00"  # second cell slot, pack voltage untouched
+    raw[54:56] = (sum(raw[:54]) & 0xFFFF).to_bytes(2, "big")
+
+    record = bms._decode_record(bytes(raw))
+    assert record is not None
+    assert record["cells"] == [3349, 0, 3357, 3359]
+    assert record["voltage"] == pytest.approx(13.422)  # unchanged, as measured
 
 
 def test_decode_keeps_a_record_measured_under_load():
@@ -275,14 +290,21 @@ def test_decode_keeps_a_record_measured_under_load():
     assert bms._decode_record(bytes(raw)) is not None
 
 
-def test_decode_rejects_a_misaligned_record():
-    """The pack-voltage cross-check still has to catch a decode that is off by
-    volts, which is all it was ever able to catch."""
+def test_decode_rejects_a_pack_voltage_that_is_off_by_volts():
+    """A decode that is off by volts is all the cross-check was ever able to catch."""
     bms = _bms()
     raw = bytearray(_with_cells(TRACE_FIXTURES[0], [3349, 3354, 3357, 3359]))
     raw[0:4] = (6000).to_bytes(4, "little")
     raw[54:56] = (sum(raw[:54]) & 0xFFFF).to_bytes(2, "big")
     assert bms._decode_record(bytes(raw)) is None
+
+
+@pytest.mark.parametrize("shift", [-2, -1, 1, 2])
+def test_decode_rejects_a_rotated_record(shift):
+    """Whole-record misalignment is caught by the checksum, at every shift."""
+    bms = _bms()
+    raw = _raw(TRACE_FIXTURES[0])
+    assert bms._decode_record(raw[shift:] + raw[:shift]) is None
 
 
 def test_notification_skips_bad_checksum_and_resynchronizes():

@@ -183,6 +183,37 @@ def test_bm6_write_before_notify_reverts_when_it_stops_answering():
     assert calls == ["stop_notify", "write", "start_notify", "write"]
 
 
+def test_bm6_cancelling_a_fetch_does_not_start_another_request():
+    """FuturesPool.wait_for() re-raises a cancellation as asyncio.TimeoutError, so the
+    write-before-notify revert must not mistake it for the device going quiet and put
+    another request on the air."""
+
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+        bms._write_before_notify = True
+        writes = []
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                writes.append("write")
+
+        async def noop(*_args):
+            pass
+
+        bms.client = Client()
+        bms.stop_notify = noop
+        bms.start_notify = noop
+
+        task = asyncio.ensure_future(bms._q(0x07))
+        await asyncio.sleep(0)  # let it reach the wait
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return writes
+
+    assert asyncio.run(run()) == ["write"]
+
+
 def test_bm6_failed_write_leaves_the_subscription_up():
     async def run():
         bms = Bm6Bt("00:11:22:33:44:55", name="bm6")

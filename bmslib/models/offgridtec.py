@@ -156,13 +156,22 @@ class OffgridtecBt(BtBms):
         if any(cell > 5000 for cell in cells):
             return None
 
-        # Pack voltage is measured after the shunt and the MOSFETs, so the sum of
-        # the cells drifts from it under load (3-14 mV at the ~4 A of the captures,
-        # proportionally more at high current). The additive checksum already covers
-        # integrity; this only has to catch a misaligned decode, which is off by
-        # volts, not millivolts.
-        if abs(sum(cells) - voltage_mv) > max(500, voltage_mv * 0.05):
-            return None
+        # A zero slot inside the pack is a sense line reading nothing, so the sum is
+        # short by a whole cell and cannot be compared with the pack voltage - which
+        # is measured at the terminals and does not follow it. The checksum still
+        # covers integrity, and the record has to reach HA for the alarm bits.
+        if all(cells):
+            # Pack voltage is measured after the shunt and the MOSFETs, so the cell sum
+            # drifts from it under load (0-3 mV at the ~4 A of the captures,
+            # proportionally more at high current). This only has to catch a decode
+            # that is off by volts, not millivolts.
+            #
+            # It cannot catch every misframing: a cell region rotated by one slot keeps
+            # both the checksum and the sum intact. Records are length-delimited and
+            # checksummed on the wire, so that is a property of the cross-check, not an
+            # observed failure mode.
+            if abs(sum(cells) - voltage_mv) > max(500, voltage_mv * 0.05):
+                return None
 
         app_current = raw_current / 1000.0
         return {
