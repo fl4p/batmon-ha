@@ -232,6 +232,59 @@ def test_notification_reassembles_fragmented_wire_record():
     assert record["raw_current"] == pytest.approx(3.927)
 
 
+def test_notification_drains_every_record_in_a_burst():
+    """A 244-byte MTU carries two 121-byte records per notify. Stopping after the
+    first one leaked the rest into the buffer, one record per burst forever, and
+    published an ever-staler reading."""
+
+    async def run():
+        bms = _bms()
+        first, last = _raw(TRACE_FIXTURES[0]), _raw(TRACE_FIXTURES[-1])
+
+        with bms._fetch_futures.acquire("realtime"):
+            for _ in range(20):
+                bms._notification_handler(None, _wire(first) * 9 + _wire(last))
+            record = await bms._fetch_futures.wait_for("realtime", 0.1)
+        return record, len(bms._buffer)
+
+    record, buffered = asyncio.run(run())
+    assert buffered == 0
+    # the newest record of the burst, not the first one
+    assert record["voltage"] == pytest.approx(13.275)
+
+
+def test_decode_keeps_a_record_with_an_out_of_range_cell():
+    """An over-voltage cell or a dead sense line must still be published: dropping
+    the record makes the device, and its alarm sensors, go unavailable exactly when
+    they matter."""
+    bms = _bms()
+    for cells in ([3349, 3354, 4650, 3359], [3349, 0, 3357, 3359], [1200, 3354, 3357, 3359]):
+        record = bms._decode_record(_with_cells(TRACE_FIXTURES[0], cells))
+        assert record is not None, cells
+        assert record["cells"] == cells
+
+
+def test_decode_keeps_a_record_measured_under_load():
+    """Pack voltage is measured after the shunt and the MOSFETs, so at high current
+    it drifts from the sum of the cells by far more than the captures' 3-14 mV."""
+    bms = _bms()
+    raw = bytearray(_with_cells(TRACE_FIXTURES[0], [3349, 3354, 3357, 3359]))
+    cell_sum = 3349 + 3354 + 3357 + 3359
+    raw[0:4] = (cell_sum - 400).to_bytes(4, "little")  # ~0.4 V of sag
+    raw[54:56] = (sum(raw[:54]) & 0xFFFF).to_bytes(2, "big")
+    assert bms._decode_record(bytes(raw)) is not None
+
+
+def test_decode_rejects_a_misaligned_record():
+    """The pack-voltage cross-check still has to catch a decode that is off by
+    volts, which is all it was ever able to catch."""
+    bms = _bms()
+    raw = bytearray(_with_cells(TRACE_FIXTURES[0], [3349, 3354, 3357, 3359]))
+    raw[0:4] = (6000).to_bytes(4, "little")
+    raw[54:56] = (sum(raw[:54]) & 0xFFFF).to_bytes(2, "big")
+    assert bms._decode_record(bytes(raw)) is None
+
+
 def test_notification_skips_bad_checksum_and_resynchronizes():
     async def run():
         bms = _bms()

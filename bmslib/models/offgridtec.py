@@ -59,6 +59,14 @@ class OffgridtecBt(BtBms):
         )
 
     def _process_buffer(self):
+        """Drain every complete record the buffer holds.
+
+        A 244-byte MTU (normal on BlueZ >= 5.5 and on ESPHome proxies) carries two
+        121-byte wire records per notification, so stopping after the first one grew
+        the backlog by one record per burst: unbounded memory and a monotonically
+        staler reading. Only the newest record resolves the pending fetch.
+        """
+        newest = None
         while True:
             try:
                 start = self._buffer.index(self.FRAME_MARKER)
@@ -66,14 +74,14 @@ class OffgridtecBt(BtBms):
                 # B6 is a single-byte marker, so no partial prefix needs to be
                 # retained. This also bounds noise received before a record.
                 self._buffer.clear()
-                return
+                break
 
             if start:
                 del self._buffer[:start]
 
             wire_len = 1 + self.RECORD_HEX_LEN
             if len(self._buffer) < wire_len:
-                return
+                break
 
             candidate = bytes(self._buffer[1:wire_len])
             if not self._is_ascii_hex(candidate):
@@ -87,16 +95,19 @@ class OffgridtecBt(BtBms):
                 continue
 
             del self._buffer[:wire_len]
-            self._last_record = record
-            self._fetch_futures.set_result("realtime", record)
+            newest = record
 
-            # One record satisfies one fetch. Leave any following complete
-            # record buffered; the next notification will resume processing.
-            return
+        if newest is not None:
+            self._last_record = newest
+            # The device keeps pushing after a fetch is served. set_result() removes a
+            # future that is already done, which would lose the result for a wait_for()
+            # that has not looked it up yet, so only resolve one that is still waiting.
+            if self._fetch_futures.is_waiting("realtime"):
+                self._fetch_futures.set_result("realtime", newest)
 
     @staticmethod
-    def _u16(raw: bytes, word: int) -> int:
-        offset = word * 2
+    def _u16(raw: bytes, offset: int) -> int:
+        # byte offset, like _u32/_i32 below
         return int.from_bytes(raw[offset:offset + 2], "little", signed=False)
 
     @staticmethod
@@ -118,9 +129,9 @@ class OffgridtecBt(BtBms):
         voltage_mv = self._u32(raw, 0)
         raw_current = self._i32(raw, 4)
         capacity_mah = self._u32(raw, 8)
-        cycles = self._u16(raw, 6)
-        soc = self._u16(raw, 7)
-        temperature = self._u16(raw, 8) / 10.0 - 273.15
+        cycles = self._u16(raw, 12)
+        soc = self._u16(raw, 14)
+        temperature = self._u16(raw, 16) / 10.0 - 273.15
         problem_code = raw[18]
         alarms = {
             name: bool(problem_code & (1 << bit))
@@ -130,19 +141,27 @@ class OffgridtecBt(BtBms):
         if not 0 <= soc <= 100 or not -40 <= temperature <= 100:
             return None
 
-        cell_slots = [self._u16(raw, word) for word in range(11, 11 + self.MAX_CELLS)]
+        cell_slots = [self._u16(raw, offset)
+                      for offset in range(22, 22 + 2 * self.MAX_CELLS, 2)]
         try:
             cell_count = max(index for index, value in enumerate(cell_slots) if value) + 1
         except ValueError:
             return None
 
         cells = cell_slots[:cell_count]
-        if not all(2000 <= cell <= 4500 for cell in cells):
+        # Only reject what no lithium cell can read. A genuine over- or
+        # under-voltage cell, or one dead sense line in a non-trailing slot, must
+        # still be published - that is exactly when the alarm bits matter - so the
+        # window is not the normal operating range.
+        if any(cell > 5000 for cell in cells):
             return None
 
-        # This validation scales naturally from a 4S 12 V pack through 8S
-        # 24 V and up to the 16 slots present on the wire.
-        if abs(sum(cells) - voltage_mv) > max(20, 5 * cell_count):
+        # Pack voltage is measured after the shunt and the MOSFETs, so the sum of
+        # the cells drifts from it under load (3-14 mV at the ~4 A of the captures,
+        # proportionally more at high current). The additive checksum already covers
+        # integrity; this only has to catch a misaligned decode, which is off by
+        # volts, not millivolts.
+        if abs(sum(cells) - voltage_mv) > max(500, voltage_mv * 0.05):
             return None
 
         app_current = raw_current / 1000.0

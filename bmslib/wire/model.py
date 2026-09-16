@@ -166,6 +166,9 @@ def node_state(node_id, sample=None, voltages_mv=None, temperatures_c=None,
         sw = getattr(sample, 'switches', None)
         if sw:
             st['switches'] = {k: bool(v) for k, v in sw.items()}
+        al = getattr(sample, 'alarms', None)
+        if al:
+            st['alarms'] = {k: bool(v) for k, v in al.items()}
         for f in ('problem', 'problem_code', 'battery_charging', 'battery_mode'):
             v = getattr(sample, f, None)
             if v is not None:

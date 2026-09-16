@@ -58,6 +58,17 @@ class FuturesPool:
             else:
                 fut.set_result(value)
 
+    def is_waiting(self, name) -> bool:
+        """True if a future of that name exists and is still unresolved.
+
+        set_result() *removes* a future that is already done, which loses the result
+        for a wait_for() that has not looked it up yet. A caller that can resolve the
+        same name several times before the waiter runs (an unsolicited BLE burst)
+        checks this first.
+        """
+        fut = self._futures.get(name, None)
+        return fut is not None and not fut.done()
+
     def clear(self):
         for fut in self._futures.values():
             fut.cancel()
