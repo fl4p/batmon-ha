@@ -61,6 +61,7 @@ def get_bms_model_class(name: str):
         noname_modbus='models.noname_modbus.NoNameModbusBt',  # generic Modbus-RTU-over-NUS
         dummy='models.dummy.DummyBt',
         snoop='models.snoop.SnoopBt',  # GATT dumper for reverse-engineering new BMS
+        offgridtec='models.offgridtec.OffgridtecBt',
     )
 
     mod_class = bms_registry.get(name)

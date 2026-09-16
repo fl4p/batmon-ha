@@ -47,6 +47,7 @@ batmon device connectors:
 * SOK / ABC-BMS (`sok`, routed through the aiobmsble `abc_bms` decoder; use `sok_legacy` for the pre-2023 native driver)
 * Basen BMS (`basen`), ported from [syssi/esphome-basen-bms](https://github.com/syssi/esphome-basen-bms)
 * LiTime BMS (`litime`)
+* Legacy Offgridtec OGT-12200 / Topband batteries (`offgridtec`): unsolicited FFE4 ASCII-hex protocol
 * BM6 Bluetooth car battery monitor (`bm6`): voltage, temperature, SOC and charging/low-voltage state, no current (#160)
 * Quicklynks BM2 and rebrands such as the Ancel BM200 (`bm2`): voltage and SOC (#41)
 * Generic no-name Chinese BMS with Modbus RTU over Nordic UART (`noname_modbus`) — see [issue #131](https://github.com/fl4p/batmon-ha/issues/131)
@@ -110,7 +111,7 @@ find a list of visible Bluetooth devices in the add-on log. Alternatively you ca
 displayed in the discovery list.
 
 `type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `seplos_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`pace_uart`, `seplos_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.

@@ -115,6 +115,12 @@ def publish_sample(client, device_topic, sample: BmsSample):
             topic = f"{device_topic}/switch/{switch_name}"
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
 
+    if sample.alarms:
+        for alarm_name, alarm_state in sample.alarms.items():
+            assert isinstance(alarm_state, bool)
+            topic = f"{device_topic}/alarm/{alarm_name}"
+            mqtt_single_out(client, topic, 'ON' if alarm_state else 'OFF')
+
     if sample.problem is not None:
         mqtt_single_out(client, f"{device_topic}/problem",
                         'ON' if sample.problem else 'OFF')
@@ -259,6 +265,18 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "device": device_json,
             "icon": "mdi:alert-circle-outline",
         }
+
+    if sample.alarms:
+        for alarm_name in sample.alarms:
+            discovery_msg[f"homeassistant/binary_sensor/{node_id}/alarm_{alarm_name}/config"] = {
+                "unique_id": f"{device_topic}__alarm_{alarm_name}",
+                "name": alarm_name.upper(),
+                "device_class": "problem",
+                "entity_category": "diagnostic",
+                "state_topic": f"{device_topic}/alarm/{alarm_name}",
+                "expire_after": expire_after_seconds,
+                "device": device_json,
+            }
 
     if sample.balancing_cells is not None:
         discovery_msg[f"homeassistant/binary_sensor/{node_id}/balancing/config"] = {

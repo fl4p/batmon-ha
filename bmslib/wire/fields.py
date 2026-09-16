@@ -107,7 +107,9 @@ sample_desc = {
         "field": "num_cycles",
         "device_class": None,
         "state_class": "measurement",
-        "unit_of_measurement": "N",
+        # Counts are dimensionless. "N" is the SI symbol for newton and HA
+        # displays it literally as a unit.
+        "unit_of_measurement": None,
         "icon": "battery-sync"},
     "mosfet_status/capacity_ah": {
         "field": "charge",
@@ -144,7 +146,7 @@ sample_desc = {
         "field": "num_samples",
         "device_class": None,
         "state_class": "measurement",
-        "unit_of_measurement": "N",
+        "unit_of_measurement": None,
         "icon": "counter"},
 }
 
@@ -158,7 +160,7 @@ meter_desc = {
     'total_energy_discharge': dict(device_class="energy", state_class="total_increasing", unit="kWh",
                                    icon="meter-electric", name="total energy output"),
     'total_charge': dict(device_class=None, state_class="total", unit="Ah", name="total charge netted"),
-    'total_cycles': dict(device_class=None, state_class="total_increasing", unit="N", icon="battery-sync",
+    'total_cycles': dict(device_class=None, state_class="total_increasing", unit=None, icon="battery-sync",
                          name="total cycle count"),
 }
 
