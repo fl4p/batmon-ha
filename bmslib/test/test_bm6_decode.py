@@ -11,6 +11,7 @@ CMD_CIPHER = bytes.fromhex('697ea0b5d54cf024e794772355554114')
 CMD_PLAIN = bytes.fromhex('d1550700000000000000000000000000')
 NOTIFY_CIPHER = bytes.fromhex('5a7a41c3a57ca1fa9247f76557c5d618')
 NOTIFY_PLAIN = bytes.fromhex('d155070017010004ab00000000020000')
+INVALID_INITIAL_PLAIN = bytes.fromhex('d15507ff000000000000000000000000')
 
 
 def test_aes_fips197_vector():
@@ -34,6 +35,18 @@ def test_bm6_decode_realtime():
     assert decode_realtime(bytes(neg))['temperature'] == -5
 
 
+def test_bm6_rejects_invalid_initial_realtime_frame():
+    with pytest.raises(ValueError, match="empty BM6 realtime frame"):
+        decode_realtime(INVALID_INITIAL_PLAIN)
+
+
+def test_bm6_keeps_unknown_nonempty_status_compatible():
+    variant = bytearray(NOTIFY_PLAIN)
+    variant[3] = 0x02
+
+    assert decode_realtime(bytes(variant))["temperature"] == 23
+
+
 def test_bm6_fetch_sample():
     bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
     sample = run_fetch_with_response(bms, NOTIFY_PLAIN)
@@ -51,6 +64,65 @@ def test_bm6_notification_routes_by_command_byte():
         with bms._fetch_futures.acquire(0x07):
             bms._notification_handler(None, NOTIFY_CIPHER)
             return await bms._fetch_futures.wait_for(0x07, 1)
+
+    assert asyncio.run(run()) == NOTIFY_PLAIN
+
+
+def test_bm6_ignores_initial_frame_and_waits_for_measurement():
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+        with bms._fetch_futures.acquire(0x07):
+            bms._notification_handler(None, bm6_encrypt(INVALID_INITIAL_PLAIN))
+            bms._notification_handler(None, NOTIFY_CIPHER)
+            return await bms._fetch_futures.wait_for(0x07, 1)
+
+    assert asyncio.run(run()) == NOTIFY_PLAIN
+
+
+def test_bm6_empty_reply_switches_to_write_before_notify():
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+        calls = []
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                calls.append("write")
+                if calls.count("write") == 1:
+                    bms._notification_handler(None, bm6_encrypt(INVALID_INITIAL_PLAIN))
+
+        async def stop_notify(_uuid):
+            calls.append("stop_notify")
+
+        async def start_notify(_uuid, callback):
+            calls.append("start_notify")
+            callback(None, NOTIFY_CIPHER)
+
+        bms.client = Client()
+        bms.stop_notify = stop_notify
+        bms.start_notify = start_notify
+        result = await bms._q(0x07)
+        return result, calls
+
+    result, calls = asyncio.run(run())
+    assert result == NOTIFY_PLAIN
+    assert calls == ["write", "stop_notify", "write", "start_notify"]
+
+
+def test_bm6_valid_reply_keeps_master_notify_order():
+    async def run():
+        bms = Bm6Bt("00:11:22:33:44:55", name="bm6")
+
+        class Client:
+            async def write_gatt_char(self, *_args, **_kwargs):
+                bms._notification_handler(None, NOTIFY_CIPHER)
+
+        async def unexpected_notify_change(_uuid, *_args):
+            pytest.fail("valid BM6 replies must not change the notification subscription")
+
+        bms.client = Client()
+        bms.stop_notify = unexpected_notify_change
+        bms.start_notify = unexpected_notify_change
+        return await bms._q(0x07)
 
     assert asyncio.run(run()) == NOTIFY_PLAIN
 
