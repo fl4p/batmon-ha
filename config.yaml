@@ -131,6 +131,13 @@ schema:
   # proxies; each reconnect costs a few seconds of data. 0/unset = off.
   reconnect_interval_minutes: "float?"
 
+  # Default `adapter:` for devices that don't set their own (see the per-device
+  # `adapter:` in the devices schema above). A BlueZ controller ("hci1") is
+  # inherited by BLE devices, a port ("/dev/ttyUSB0") by wired ones. Users set
+  # this at the top level expecting exactly that, so it is honoured instead of
+  # ignored (#414).
+  adapter: "str?"
+
   # "bleak" = stock BlueZ/D-Bus stack (default); "bumble" = bumble-bleak
   # (pure-Python HCI, no BlueZ/D-Bus) which takes exclusive ownership of the
   # adapter(s) it uses (brings them down), so they leave the HA Bluetooth pool;

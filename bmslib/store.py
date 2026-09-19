@@ -68,7 +68,59 @@ def load_user_config():
         logger.warning('error reading /data/options.json, trying options.json %s', e)
         with open('options.json') as f:
             conf = dotdict(json.load(f))
+    _user_config_apply_global_adapter(conf)
     return conf
+
+
+def _user_config_apply_global_adapter(conf):
+    """Let a top-level `adapter:` act as the default for devices that have none.
+
+    `adapter:` is documented as a per-BMS option, so a top-level one used to be
+    read by nobody at all: the add-on kept using the default controller and
+    never said why, which is exactly how it looks when the chosen adapter fails
+    (#414). Inheriting it is what the setting plainly means, and the log line
+    makes the inheritance visible instead of magic.
+
+    The value means two different things depending on the transport -- a BlueZ
+    controller (`hci1`) for a BLE device, a tty path (`/dev/ttyUSB0`) for a
+    wired one -- so it is only handed to devices of the matching kind. A
+    top-level value that fits no device is reported rather than dropped: that is
+    the silent-ignore bug again, just with a different cause.
+    """
+    from bmslib.models import device_address, is_serial_device
+
+    adapter = conf.get('adapter')
+    if not isinstance(adapter, str) or not adapter.strip():
+        return
+    adapter = adapter.strip()
+    # A serial port is a path, a BlueZ controller never is. Same discriminator
+    # the two meanings have in the docs.
+    is_port = '/' in adapter
+
+    applied = []
+    skipped = []
+    for dev in (conf.get('devices') or []):
+        if not isinstance(dev, dict) or dev.get('adapter'):
+            continue
+        name = dev.get('alias') or device_address(dev) or '?'
+        if is_serial_device(dev) != is_port:
+            skipped.append(name)
+            continue
+        dev['adapter'] = adapter
+        applied.append(name)
+
+    if applied:
+        logger.info('applying top-level adapter=%s to %s (devices without their own `adapter:`)',
+                    adapter, ', '.join(applied))
+    else:
+        if skipped:
+            why = ('it looks like a serial port, but no wired device (address: serial) needs one'
+                   if is_port else
+                   'it looks like a Bluetooth controller, but no BLE device needs one')
+        else:
+            why = 'no configured device is missing an `adapter:`'
+        logger.warning('top-level adapter=%s has no effect: %s. `adapter:` is a per-BMS option -- '
+                       'put it inside the device entry under `devices:`.', adapter, why)
 
 
 def _user_config_migrate_addresses(conf):

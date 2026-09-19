@@ -341,6 +341,12 @@ adapter:
 (For `address: serial` / RS-485 BMSes, `adapter:` is the serial port path like `/dev/ttyUSB0`,
 independent of `ble_stack`.)
 
+`adapter:` can also be set once at the top level of the configuration, next to `ble_stack:`. It
+is then the default for every device that doesn't carry its own, and the log says which devices
+inherited it. Because the value means two different things, only matching devices inherit: a
+controller name like `hci1` goes to BLE devices, a port like `/dev/ttyUSB0` to wired ones. A
+top-level `adapter:` that reaches no device is reported as having no effect (#414).
+
 ## Energy Meters
 
 Batmon implements energy metering by computing the integral of power values from the BMS with the trapezoidal rule. You
