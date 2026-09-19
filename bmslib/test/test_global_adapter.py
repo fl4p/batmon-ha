@@ -29,6 +29,48 @@ def test_per_device_adapter_wins():
     assert [d['adapter'] for d in conf['devices']] == ['hci0', 'hci1']
 
 
+def test_controller_mac_is_a_bluetooth_adapter():
+    """normalize_adapter() resolves a controller MAC to hciN, so it is a BLE value."""
+    conf = dict(adapter='0C:EF:15:47:4A:46', devices=[dict(BLE), dict(SERIAL)])
+    _user_config_apply_global_adapter(conf)
+    assert conf['devices'][0]['adapter'] == '0C:EF:15:47:4A:46'
+    assert 'adapter' not in conf['devices'][1]
+
+
+def test_relative_port_name_is_refused_not_given_to_ble(caplog):
+    """`ttyUSB0` is a port serial.Serial accepts. "not a path -> Bluetooth" would
+    have handed it to every BLE device instead, which is the silent breakage the
+    whole change is about."""
+    conf = dict(adapter='ttyUSB0', devices=[dict(BLE), dict(SERIAL)])
+    with caplog.at_level(logging.WARNING):
+        _user_config_apply_global_adapter(conf)
+    assert 'ttyUSB0' in caplog.text and 'ignoring' in caplog.text
+    assert not any('adapter' in d for d in conf['devices'])
+
+
+def test_every_device_overriding_the_default_is_not_a_warning(caplog):
+    """A default that every device overrides is a legitimate config."""
+    conf = dict(adapter='hci1', devices=[dict(BLE, adapter='hci0')])
+    with caplog.at_level(logging.INFO):
+        _user_config_apply_global_adapter(conf)
+    assert 'hci1' in caplog.text
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_disabled_and_group_devices_do_not_inherit():
+    """They open no link; an adapter on them only pollutes the discovery sweep
+    (main.py builds it from the per-device `adapter:` keys)."""
+    conf = dict(adapter='hci1', devices=[
+        dict(BLE, address='#CC:44:8C:F7:AD:BB', alias='disabled'),
+        dict(address='', type='jk', alias='empty'),
+        dict(type='group_parallel', address='group1', alias='pack'),
+        dict(type='group_serial:2', address='group2', alias='string'),
+        dict(BLE),
+    ])
+    _user_config_apply_global_adapter(conf)
+    assert ['adapter' in d for d in conf['devices']] == [False, False, False, False, True]
+
+
 def test_controller_is_not_handed_to_a_wired_device():
     """`adapter:` on a serial BMS is a tty path; "hci1" would open nothing."""
     conf = dict(adapter='hci1', devices=[dict(SERIAL), dict(BLE)])
@@ -73,8 +115,22 @@ def test_inheritance_is_logged(caplog):
     assert 'hci1' in caplog.text and 'battery1' in caplog.text
 
 
-def test_no_top_level_adapter_changes_nothing():
-    for value in (None, '', '   ', 0, True):
+def test_no_top_level_adapter_changes_nothing(caplog):
+    for value in (None, ''):
         conf = dict(adapter=value, devices=[dict(BLE)])
-        _user_config_apply_global_adapter(conf)
+        with caplog.at_level(logging.WARNING):
+            _user_config_apply_global_adapter(conf)
         assert 'adapter' not in conf['devices'][0], value
+    assert not caplog.records
+
+
+def test_a_non_string_adapter_is_reported(caplog):
+    """The failure mode of #414 was silence, so an unusable value must not be
+    dropped either -- it is a value the user did set."""
+    for value in (0, 1, True, ['hci1'], dict(hci1=1), '   '):
+        conf = dict(adapter=value, devices=[dict(BLE)])
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            _user_config_apply_global_adapter(conf)
+        assert 'adapter' not in conf['devices'][0], value
+        assert caplog.records, value

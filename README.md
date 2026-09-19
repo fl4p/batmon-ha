@@ -344,8 +344,10 @@ independent of `ble_stack`.)
 `adapter:` can also be set once at the top level of the configuration, next to `ble_stack:`. It
 is then the default for every device that doesn't carry its own, and the log says which devices
 inherited it. Because the value means two different things, only matching devices inherit: a
-controller name like `hci1` goes to BLE devices, a port like `/dev/ttyUSB0` to wired ones. A
-top-level `adapter:` that reaches no device is reported as having no effect (#414).
+controller (`hci1`, or its MAC) goes to BLE devices, an absolute port path (`/dev/ttyUSB0`) to
+wired ones. Groups and commented-out devices never inherit. A top-level `adapter:` that reaches
+no device — or that is neither a controller nor an absolute path — is reported instead of
+quietly doing nothing (#414).
 
 ## Energy Meters
 

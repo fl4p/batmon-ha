@@ -82,29 +82,53 @@ def _user_config_apply_global_adapter(conf):
     makes the inheritance visible instead of magic.
 
     The value means two different things depending on the transport -- a BlueZ
-    controller (`hci1`) for a BLE device, a tty path (`/dev/ttyUSB0`) for a
-    wired one -- so it is only handed to devices of the matching kind. A
-    top-level value that fits no device is reported rather than dropped: that is
-    the silent-ignore bug again, just with a different cause.
+    controller (`hci1` or its MAC) for a BLE device, a serial port
+    (`/dev/ttyUSB0`) for a wired one -- so it is only handed to devices of the
+    matching kind, recognized by _global_adapter_kind(). Anything this function
+    cannot place -- an unrecognizable value, a value whose kind no device needs,
+    a non-string -- is reported rather than dropped: staying quiet is the
+    silent-ignore bug again, just with a different cause.
     """
     from bmslib.models import device_address, is_serial_device
 
     adapter = conf.get('adapter')
+    if adapter is None:
+        return
     if not isinstance(adapter, str) or not adapter.strip():
+        # A number, a bool, a list, or "" -- the user did set something.
+        if adapter != '':
+            logger.warning('ignoring top-level adapter=%r: expected a Bluetooth controller '
+                           '("hci1" or its MAC) or a serial port ("/dev/ttyUSB0")', adapter)
         return
     adapter = adapter.strip()
-    # A serial port is a path, a BlueZ controller never is. Same discriminator
-    # the two meanings have in the docs.
-    is_port = '/' in adapter
+
+    kind = _global_adapter_kind(adapter)
+    if kind is None:
+        logger.warning('ignoring top-level adapter=%s: not recognizable as a Bluetooth controller '
+                       '("hci1" or its MAC) or as a serial port (an absolute path like '
+                       '"/dev/ttyUSB0"). Set it per device under `devices:` if you mean something '
+                       'else.', adapter)
+        return
 
     applied = []
-    skipped = []
+    overridden = []
+    mismatched = []
     for dev in (conf.get('devices') or []):
-        if not isinstance(dev, dict) or dev.get('adapter'):
+        if not isinstance(dev, dict):
             continue
-        name = dev.get('alias') or device_address(dev) or '?'
-        if is_serial_device(dev) != is_port:
-            skipped.append(name)
+        address = device_address(dev)
+        # Same skip rules as construct_bms(): a commented-out or empty address is
+        # not a device, and a group has no transport of its own (its members do).
+        # Handing those an adapter would put a controller nobody connects with
+        # into main.py's start-up discovery sweep.
+        if not address or address.startswith('#') or _is_group_device(dev):
+            continue
+        if dev.get('adapter'):
+            overridden.append(dev.get('alias') or address)
+            continue
+        name = dev.get('alias') or address
+        if is_serial_device(dev) != (kind == 'port'):
+            mismatched.append(name)
             continue
         dev['adapter'] = adapter
         applied.append(name)
@@ -112,15 +136,44 @@ def _user_config_apply_global_adapter(conf):
     if applied:
         logger.info('applying top-level adapter=%s to %s (devices without their own `adapter:`)',
                     adapter, ', '.join(applied))
+    elif overridden and not mismatched:
+        # A default that every device overrides is a legitimate config, not a mistake.
+        logger.info('top-level adapter=%s is unused: %s set their own `adapter:`',
+                    adapter, ', '.join(overridden))
     else:
-        if skipped:
-            why = ('it looks like a serial port, but no wired device (address: serial) needs one'
-                   if is_port else
-                   'it looks like a Bluetooth controller, but no BLE device needs one')
-        else:
-            why = 'no configured device is missing an `adapter:`'
-        logger.warning('top-level adapter=%s has no effect: %s. `adapter:` is a per-BMS option -- '
-                       'put it inside the device entry under `devices:`.', adapter, why)
+        why = ('it is a serial port, but no wired device (address: serial) is missing one'
+               if kind == 'port' else
+               'it is a Bluetooth controller, but no BLE device is missing one')
+        logger.warning('top-level adapter=%s has no effect: %s. `adapter:` can also be set per '
+                       'BMS inside the device entry under `devices:`.', adapter, why)
+
+
+# "hci1" or the controller MAC that normalize_adapter() resolves to one (bt.py).
+_BT_ADAPTER_RE = re.compile(r'^(hci\d+|([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})$')
+
+
+def _global_adapter_kind(adapter: str):
+    """'bt', 'port', or None when the value fits neither.
+
+    Deliberately not "a path means serial, anything else means Bluetooth": a
+    relative port name like `ttyUSB0` is a path serial.Serial accepts, and under
+    that rule it would have been handed to every BLE device instead, silently.
+    An unplaceable value is refused out loud rather than guessed at.
+    """
+    if _BT_ADAPTER_RE.match(adapter):
+        return 'bt'
+    if adapter.startswith('/'):
+        return 'port'
+    return None
+
+
+def _is_group_device(dev: dict) -> bool:
+    """True for `type: group_parallel` / `group_serial` (bmslib.models.BMS_TYPES).
+
+    A group is an aggregate over other devices; it opens no link of its own, so
+    `adapter:` means nothing to it (bmslib/group.py).
+    """
+    return str(dev.get('type') or '').strip().split(':', 1)[0].startswith('group_')
 
 
 def _user_config_migrate_addresses(conf):
