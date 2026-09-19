@@ -154,6 +154,21 @@ startup log: batmon prints the stack it selected (`BLE stack: ...`) as its first
 line. Build from `entrypoint.sh` (the image's `CMD`) instead of invoking
 `addon_main.sh` directly.
 
+**An option seems to have no effect at all.** `options.json` is JSON, so one
+missing comma makes the whole file unparseable and *everything* in it is
+ignored. Batmon refuses to start on that, naming the file, the line and the
+column and quoting the offending line:
+
+```
+/data/options.json is not valid JSON: Expecting ',' delimiter (line 5, column 3)
+      "adapter": "hci1"
+      ^
+A missing or extra comma between two options is the usual cause.
+```
+
+It never falls back to another configuration file — running settings you did
+not edit hides the mistake instead of showing it (#414).
+
 **No such device / `EAFNOSUPPORT` with `bluek` or `bumble`.** Missing
 `--net=host`, or missing `NET_ADMIN`/`NET_RAW`.
 

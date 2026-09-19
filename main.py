@@ -45,12 +45,19 @@ from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler, fetch_loop as _fetch_loop
 from bmslib.scan import stop_all_scanners
-from bmslib.store import load_user_config
+from bmslib.store import ConfigError, load_user_config
 from bmslib.util import get_logger, exit_process
 
 logger = get_logger(verbose=False)
 
-user_config = load_user_config()
+try:
+    user_config = load_user_config()
+except ConfigError as e:
+    # A broken config is the user's to fix, so print what is wrong and stop.
+    # A traceback here only buries the one line that matters (#414).
+    for line in str(e).splitlines():
+        logger.error('%s', line)
+    sys.exit(1)
 
 shutdown = False
 t_last_store = 0

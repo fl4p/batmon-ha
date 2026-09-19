@@ -59,17 +59,74 @@ def store_algorithm_state(bms_name, algorithm_name, state=None):
             return bms_state['algorithm_state'].get(algorithm_name, None)
 
 
+CONFIG_PATHS = ('/data/options.json', 'options.json')
+
+
+class ConfigError(Exception):
+    """A configuration file that cannot be used. Carries a message meant for the
+    add-on log verbatim -- main.py prints it and exits, no traceback."""
+
+
 def load_user_config():
-    try:
-        with open('/data/options.json') as f:
-            conf = dotdict(json.load(f))
-            _user_config_migrate_addresses(conf)
-    except Exception as e:
-        logger.warning('error reading /data/options.json, trying options.json %s', e)
-        with open('options.json') as f:
-            conf = dotdict(json.load(f))
-    _user_config_apply_global_adapter(conf)
-    return conf
+    """Read the first configuration file that exists, or raise ConfigError.
+
+    A file that exists but does not parse ABORTS: it used to be logged as a
+    warning and then skipped in favour of the next path, which is how a typo in
+    `/data/options.json` surfaced as `No such file or directory: 'options.json'`
+    -- an error naming a file the user never wrote, with the actual syntax error
+    (a missing comma, in #414) buried in an earlier warning line. Where a second
+    file does exist, silently running a different configuration than the one that
+    was edited is worse still.
+    """
+    tried = []
+    for path in CONFIG_PATHS:
+        if not isfile(path):
+            tried.append('%s (not found)' % path)
+            continue
+        if not access(path, R_OK):
+            raise ConfigError('cannot read configuration file %s: permission denied' % path)
+        with open(path) as f:
+            text = f.read()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ConfigError(_json_error_report(path, text, e)) from None
+        if not isinstance(parsed, dict):
+            raise ConfigError('%s must contain a JSON object ({...}), found %s'
+                              % (path, type(parsed).__name__))
+        conf = dotdict(parsed)
+        logger.info('reading configuration from %s', path)
+        # Runs for every path now. The legacy `<slug>_address` keys it migrates
+        # are not specific to the add-on file, and a standalone options.json
+        # carrying them used to be skipped for no reason.
+        _user_config_migrate_addresses(conf)
+        _user_config_apply_global_adapter(conf)
+        return conf
+
+    raise ConfigError('no configuration file: tried %s. See doc/Docker.md for how to mount one.'
+                      % ', '.join(tried))
+
+
+def _json_error_report(path: str, text: str, e: json.JSONDecodeError) -> str:
+    """Point at the offending character, the way a compiler would.
+
+    json's own message ("Expecting ',' delimiter: line 7 column 3 (char 142)")
+    is accurate but easy to lose in a log; the quoted line and caret are what
+    make a missing comma obvious without opening an editor.
+    """
+    lines = text.splitlines()
+    src = lines[e.lineno - 1] if 0 < e.lineno <= len(lines) else ''
+    report = ['%s is not valid JSON: %s (line %d, column %d)' % (path, e.msg, e.lineno, e.colno)]
+    if src:
+        report.append('    %s' % src)
+        report.append('    %s^' % (' ' * (e.colno - 1)))
+    if "','" in e.msg or "':'" in e.msg:
+        # The overwhelmingly common cause, and the one behind #414.
+        report.append('A missing or extra comma between two options is the usual cause. '
+                      'Every entry but the last needs a trailing comma.')
+    report.append('Fix the file and restart. Nothing was loaded -- batmon does not fall back to '
+                  'another configuration, that would run settings you did not edit.')
+    return '\n'.join(report)
 
 
 def _user_config_apply_global_adapter(conf):
