@@ -39,6 +39,10 @@ prototype produced a plausible wrong number without it:
  * Missing inputs are never replaced by plausible values: no SoC means no DOD
    tag and a failed drift gate; no temperature means temp None.
 
+Each accepted window is tagged with DOD, the median BMS temperature probe
+(`temp`) and, when pack_temp_estimator runs, the median RC pack-temperature
+estimate (`pack_temp`). Both temperatures are None when unknown.
+
 The gates were tuned on large (about 280 Ah) LFP packs with Daly/JK BMSes. A
 small pack rarely draws the 8 A current swing a window needs, so it may never
 produce an estimate. That is by design: no estimate beats a wrong one.
@@ -315,9 +319,10 @@ def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None):
 
 
 def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
-    """Evaluate one window. `rows` are (t, i_charge, soc, voltages, temp) in
-    time order; i_charge/soc/temp may be NaN/None, voltages a tuple (NaN for a
-    missing cell) or None. Returns (window result, None) or (None, reason)."""
+    """Evaluate one window. `rows` are (t, i_charge, soc, voltages, temp[,
+    pack_temp]) in time order; i_charge/soc/temps may be NaN/None, voltages a
+    tuple (NaN for a missing cell) or None. Returns (window result, None) or
+    (None, reason)."""
     real = [r for r in rows if _finite(r[1]) and r[3] and any(v == v for v in r[3])]
     if len(real) < MIN_PAIRS:
         return None, 'pairs'
@@ -357,6 +362,7 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
     if 2 * len(accepted) <= n_cells:
         return None, 'cells'
     temps = [r[4] for r in rows if _finite(r[4])]
+    pack_temps = [r[5] for r in rows if len(r) > 5 and _finite(r[5])]
     return dict(
         t=rows[-1][0],
         r=median(accepted),
@@ -365,6 +371,7 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
         n_pairs=len(real),
         dod=100.0 - median(socs),
         temp=median(temps) if temps else None,
+        pack_temp=median(pack_temps) if pack_temps else None,
         i_range=max(ir) - min(ir),
     ), None
 
@@ -402,13 +409,15 @@ class CellResistanceEstimator:
         self.windows.clear()
 
     def add(self, t: float, current: float, voltages: Optional[List[float]],
-            soc: Optional[float] = None, temp: Optional[float] = None) -> Optional[float]:
+            soc: Optional[float] = None, temp: Optional[float] = None,
+            pack_temp: Optional[float] = None) -> Optional[float]:
         """Feed one sampler iteration.
 
         t: sample timestamp [s]; current: [A], BmsSample sign (positive =
         discharging) before invert_current; voltages: cell voltages [mV] from
-        the same iteration, or None if they could not be fetched; soc [%] and
-        temp [degC] may be None/NaN when unknown.
+        the same iteration, or None if they could not be fetched; soc [%],
+        temp (BMS probes) and pack_temp (RC estimate) [degC] may be None/NaN
+        when unknown.
 
         Returns the new rolling value when this call accepted a window and at
         least PUBLISH_MIN_WINDOWS are in, else None -- so a caller that
@@ -450,8 +459,9 @@ class CellResistanceEstimator:
             self.counts[why or 'accepted'] += 1
             if res is not None:
                 self.windows.append(res)
-                logger.debug('%s: cell resistance window R=%.3f mOhm (%d/%d cells, dod=%.0f, temp=%s)',
-                             self.name, res['r'], res['n_accepted'], res['n_cells'], res['dod'], res['temp'])
+                logger.debug('%s: cell resistance window R=%.3f mOhm (%d/%d cells, dod=%.0f, temp=%s, '
+                             'pack_temp=%s)', self.name, res['r'], res['n_accepted'], res['n_cells'], res['dod'],
+                             res['temp'], res['pack_temp'])
                 v = self.value
                 if v is not None:
                     if not self._announced:
@@ -466,7 +476,8 @@ class CellResistanceEstimator:
         i_chg = -float(current) if _finite(current) else math.nan
         s = float(soc) if _finite(soc) else math.nan
         tc = float(temp) if _finite(temp) else None
-        self._rows.append((t, i_chg, s, vt, tc))
+        tp = float(pack_temp) if _finite(pack_temp) else None
+        self._rows.append((t, i_chg, s, vt, tc, tp))
         return new_value
 
     def _log_summary(self):

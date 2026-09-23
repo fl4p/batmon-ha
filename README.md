@@ -161,6 +161,10 @@ For verbose logs of particular BMS add `debug: true`.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
 * `impedance_estimator` (experimental, off by default) estimates the per-cell resistance of LiFePO4 packs and publishes
   it as a `Cell Resistance` sensor in mΩ. See [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
+* `pack_temp_estimator` (experimental, off by default) estimates the cell temperature of packs whose BMS only reports a
+  MOSFET temperature, as a `Pack Temp (RC est.)` sensor. `pack_temp_room_topic` / `pack_temp_outdoor_topic` are MQTT
+  topics carrying ambient temperatures (e.g. from HA's `mqtt_statestream`); both are optional, without them the
+  estimate follows the MOSFET temperature, damped. See [bmslib/PACK_TEMP_RC_INTEGRATION.md](bmslib/PACK_TEMP_RC_INTEGRATION.md).
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exits)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>

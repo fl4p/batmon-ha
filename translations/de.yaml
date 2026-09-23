@@ -181,3 +181,23 @@ configuration:
       Zellspannungen, als Sensor "Cell Resistance" in mOhm. Braucht große
       Stromsprünge (8 A und mehr), kleine Akkus bekommen daher eventuell nie
       einen Wert. Schaltet sich bei Akkus ab, die nicht LiFePO4 sind.
+  pack_temp_estimator:
+    name: Akkutemperatur schätzen (experimentell)
+    description: >-
+      Schätzt die Zelltemperatur aus der MOSFET-Temperatur des BMS und, falls
+      eingerichtet, Raum- und Außentemperatur, als Sensor "Pack Temp (RC
+      est.)". Für BMS, die nur eine MOSFET-Temperatur melden, die unter Last
+      springt.
+  pack_temp_room_topic:
+    name: Akkutemperatur, Topic Raumtemperatur
+    description: >-
+      MQTT-Topic mit einer Raumtemperatur in °C, z. B. von Home Assistants
+      mqtt_statestream. Optional.
+  pack_temp_outdoor_topic:
+    name: Akkutemperatur, Topic Außentemperatur
+    description: MQTT-Topic mit einer Außentemperatur in °C. Optional.
+  pack_temp_ambient_max_age:
+    name: Akkutemperatur, max. Alter Umgebungswert (s)
+    description: >-
+      Ein älterer Umgebungswert gilt als fehlend. Standard 600. Größer als das
+      Sendeintervall der Temperatursensoren wählen.

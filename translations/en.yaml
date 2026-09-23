@@ -172,3 +172,23 @@ configuration:
       sampled current and cell voltages, as a "Cell Resistance" sensor in
       mOhm. Needs large current steps (8 A or more), so small packs may never
       get a value. Turns itself off for packs that are not LiFePO4.
+  pack_temp_estimator:
+    name: Pack temperature estimator (experimental)
+    description: >-
+      Estimate the cell temperature from the BMS MOSFET temperature and, if
+      configured, room and outdoor temperatures, as a "Pack Temp (RC est.)"
+      sensor. For BMSes that only report a MOSFET temperature, which spikes
+      under load.
+  pack_temp_room_topic:
+    name: Pack temperature, room topic
+    description: >-
+      MQTT topic carrying a room (indoor) temperature in °C, e.g. published by
+      Home Assistant's mqtt_statestream. Optional.
+  pack_temp_outdoor_topic:
+    name: Pack temperature, outdoor topic
+    description: MQTT topic carrying an outdoor temperature in °C. Optional.
+  pack_temp_ambient_max_age:
+    name: Pack temperature, max ambient age (s)
+    description: >-
+      An ambient reading older than this counts as missing. Default 600. Set
+      it above the update interval of your temperature sensors.

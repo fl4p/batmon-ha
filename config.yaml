@@ -179,3 +179,12 @@ schema:
   # sampled current and cell voltages, published as a `cell_resistance` sensor
   # (mOhm). See doc/Cell Resistance.md.
   impedance_estimator: "bool?"
+
+  # Experimental: estimate the cell temperature of packs whose BMS only reports
+  # a MOSFET temperature, as a `pack_temp_est` sensor. Room/outdoor topics are
+  # MQTT state topics (e.g. from HA's mqtt_statestream); either may be left
+  # out, the estimate then runs on what is there. See bmslib/PACK_TEMP_RC_INTEGRATION.md.
+  pack_temp_estimator: "bool?"
+  pack_temp_room_topic: "str?"
+  pack_temp_outdoor_topic: "str?"
+  pack_temp_ambient_max_age: "float?"

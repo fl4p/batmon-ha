@@ -1,6 +1,7 @@
 ## [unreleased]
 
 * Experimental `impedance_estimator` (off by default): estimates the per-cell resistance of LiFePO4 packs from sampled current and cell voltages and publishes it as a `Cell Resistance` sensor in mΩ; small packs may never draw the current steps it needs (doc/Cell Resistance.md).
+* Experimental `pack_temp_estimator` (off by default): a `Pack Temp (RC est.)` sensor estimating the cell temperature from the MOSFET temperature and optional room/outdoor MQTT topics, for BMSes that report only a MOSFET temperature.
 * New wired type `braunpwr_uart` for BraunPWR packs with the KS48100 rack BMS (YD/T 1363, `>…\r` frames, 9600 baud), whose FC41D WiFi/BLE module keeps dropping the BLE link. Built from a user's working ESPHome config and the manufacturer's protocol PDF; untested on hardware (#403).
 * Fix: telemetry uploaded either a device's pack samples or its cell voltages, rarely both, because the two shared one 15 s slot. Each now has its own.
 

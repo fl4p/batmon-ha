@@ -183,7 +183,8 @@ def publish_cell_resistance(client, device_topic, value_mohm: float):
 
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
-                           device_info: DeviceInfo = None, set_soc=False, cell_resistance=False):
+                           device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
+                           pack_temp_est=False):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -259,6 +260,12 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         # experimental, see bmslib/impedance.py: median per-cell resistance [mOhm]
         _hass_discovery('cell_resistance', None, "mΩ", state_class="measurement", icon="resistor",
                         name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S)
+
+    if pack_temp_est:
+        # pack_temp_estimator: RC estimate of the cell temperature from MOS + ambient
+        # (bmslib/pack_temp_publisher.py publishes the state on this topic)
+        _hass_discovery('pack_temp_est', "temperature", "°C", state_class="measurement",
+                        name="Pack Temp (RC est.)", precision=1)
 
     if sample.problem is not None:
         discovery_msg[f"homeassistant/binary_sensor/{node_id}/problem/config"] = {
@@ -382,6 +389,24 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 _switch_callbacks = {}
 _message_queue = queue.Queue()
 
+# Topics we only READ (e.g. ambient temperatures for the pack-temp estimator).
+# Unlike _switch_callbacks these are plain functions, called directly on the
+# paho network thread: the callee must be thread-safe and must not block.
+_state_callbacks = {}
+
+
+def register_state_topic(topic: str, callback):
+    """Route messages on `topic` to `callback(payload: str)`. Takes effect for the
+    broker at the next subscribe_state_topics() -- call that from on_connect, so
+    the subscription survives a broker restart (clean session)."""
+    _state_callbacks[topic] = callback
+
+
+def subscribe_state_topics(mqtt_client: paho.Client):
+    for topic in _state_callbacks:
+        logger.debug("subscribe %s", topic)
+        mqtt_client.subscribe(topic, qos=0)
+
 
 async def mqtt_process_action_queue():
     while not _message_queue.empty():
@@ -426,6 +451,14 @@ def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms):
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     payload = message.payload.decode("utf-8")
+    state_cb = _state_callbacks.get(message.topic)
+    if state_cb is not None:
+        logger.debug("received state %s: %s", message.topic, payload)
+        try:
+            state_cb(payload)
+        except Exception as e:
+            logger.warning('state callback for %s failed: %s', message.topic, e)
+        return
     logger.info("received msg %s: %s", message.topic, payload)
     callback = _switch_callbacks.get(message.topic, None)
     if callback:

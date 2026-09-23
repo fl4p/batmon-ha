@@ -158,6 +158,7 @@ class BmsSampler:
                  bt_power_cycle_on_error=False,
                  reconnect_interval_s: Optional[float] = None,
                  impedance_estimator=False,
+                 ambient_cache=None,
                  ):
 
         self.bms = bms
@@ -239,6 +240,18 @@ class BmsSampler:
             from bmslib.impedance import CellResistanceEstimator
             self.impedance = CellResistanceEstimator(bms.name)
             logger.info('%s: cell resistance estimator enabled (experimental)', bms.name)
+
+        # pack_temp_estimator (off by default): one RC estimator per real pack,
+        # all sharing the ambient cache. Runs without MQTT too (mqtt_single_out
+        # ignores a None client), so the impedance windows still get the tag.
+        self._pack_temp_publisher = None
+        self._pack_temp = None  # this iteration's estimate, None when it had no MOS reading
+        if ambient_cache is not None and not bms.is_virtual:
+            from functools import partial
+            from bmslib.pack_temp_publisher import PackTempRCPublisher
+            self._pack_temp_publisher = PackTempRCPublisher(
+                device_topic=self.mqtt_topic_prefix, ambient=ambient_cache,
+                publish_fn=partial(mqtt_single_out, mqtt_client))
 
         temp_step = getattr(bms, 'TEMPERATURE_STEP', 0)
         temp_smooth = getattr(bms, 'TEMPERATURE_SMOOTH', 10)
@@ -474,6 +487,13 @@ class BmsSampler:
             if not math.isnan(sample.mos_temperature) and self._lhq_temp is not None:
                 sample.mos_temperature = self._lhq_temp['mos'].add(sample.mos_temperature)
 
+            if self._pack_temp_publisher is not None:
+                try:
+                    self._pack_temp = self._pack_temp_publisher.update_from_sample(sample)
+                except Exception as e:
+                    self._pack_temp = None
+                    logger.error('%s pack temp estimator: %s', bms.name, summarize_exc(e))
+
             if self.bms_group:
                 # update before invert current
                 self.bms_group.update(bms, sample)
@@ -645,6 +665,7 @@ class BmsSampler:
                     device_info=self.device_info,
                     set_soc=getattr(bms, 'supports_set_soc', lambda: False)(),
                     cell_resistance=self.impedance is not None and self.impedance.enabled,
+                    pack_temp_est=self._pack_temp_publisher is not None,
                 )
 
                 # publish sample again after discovery
@@ -676,7 +697,8 @@ class BmsSampler:
         temps = [t for t in (sample.temperatures or []) if isinstance(t, (int, float)) and -40 < t < 100]
         temp = sorted(temps)[len(temps) // 2] if temps else None  # BMS probes; None if none, never a default
         try:
-            r = self.impedance.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp)
+            r = self.impedance.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp,
+                                   pack_temp=self._pack_temp)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: cell resistance estimator failed, disabled: %s', self.bms.name, summarize_exc(e),

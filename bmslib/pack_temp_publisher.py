@@ -22,6 +22,45 @@ if TYPE_CHECKING:
     from bmslib.bms import BmsSample
 
 
+# Options (flat, like every other key in config.yaml):
+#   pack_temp_estimator: true
+#   pack_temp_room_topic: "<MQTT state topic of a room temperature>"
+#   pack_temp_outdoor_topic: "<MQTT state topic of an outdoor temperature>"
+#   pack_temp_ambient_max_age: 600   # s; an older ambient reading counts as missing
+AMBIENT_MAX_AGE_DEFAULT_S = 600.0
+AMBIENT_CHANNEL_KEYS = (("room", "pack_temp_room_topic"), ("outdoor", "pack_temp_outdoor_topic"))
+
+
+def ambient_cache_from_config(conf, register_topic, log=None) -> Optional[AmbientCache]:
+    """The shared AmbientCache when `pack_temp_estimator` is on, else None.
+
+    Registers one state topic per configured ambient channel through
+    `register_topic(topic, callback)`. A channel without a topic stays empty:
+    the estimator then runs on what it has (MOS alone at worst) and never
+    receives a made-up ambient value."""
+    if not conf.get("pack_temp_estimator"):
+        return None
+    try:
+        max_age = float(conf.get("pack_temp_ambient_max_age") or AMBIENT_MAX_AGE_DEFAULT_S)
+    except (TypeError, ValueError):
+        max_age = math.nan
+    if not (math.isfinite(max_age) and max_age > 0):
+        if log:
+            log.warning("pack_temp_ambient_max_age=%r is not a positive number, using %.0f s",
+                        conf.get("pack_temp_ambient_max_age"), AMBIENT_MAX_AGE_DEFAULT_S)
+        max_age = AMBIENT_MAX_AGE_DEFAULT_S
+    cache = AmbientCache(max_age_s=max_age)
+    for channel, key in AMBIENT_CHANNEL_KEYS:
+        topic = (conf.get(key) or "").strip()
+        if topic:
+            register_topic(topic, cache.topic_callback(channel))
+            if log:
+                log.info("pack temp estimator: %s ambient from MQTT %s (max age %.0f s)", channel, topic, max_age)
+        elif log:
+            log.info("pack temp estimator: no %s ambient topic (%s), running without it", channel, key)
+    return cache
+
+
 class PackTempRCPublisher:
     """One per BMS. Wraps an RC estimator and emits the result over MQTT.
 

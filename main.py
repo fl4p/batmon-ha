@@ -327,6 +327,12 @@ async def main():
         if not user_config.get(k) and os.environ.get(en):
             user_config[k] = os.environ[en]
 
+    # pack_temp_estimator (off by default): the ambient topics are registered
+    # before the broker connection, so on_connect subscribes them -- on the first
+    # connect and again after every reconnect.
+    from bmslib.pack_temp_publisher import ambient_cache_from_config
+    ambient_cache = ambient_cache_from_config(user_config, bmslib.mqtt_util.register_state_topic, log=logger)
+
     if user_config.get('mqtt_broker'):
         port_idx = user_config.mqtt_broker.rfind(':')
         if port_idx > 0:
@@ -356,6 +362,7 @@ async def main():
             else:
                 logger.info("mqtt connected to %s", user_config.mqtt_broker)
                 mqtt_connected.set()
+                bmslib.mqtt_util.subscribe_state_topics(client)
 
         def _on_disconnect(client, userdata, flags, reason_code, properties):
             # a refused CONNACK is followed by a disconnect too; only report
@@ -455,6 +462,7 @@ async def main():
         bt_power_cycle_on_error=user_config.get('bt_power_cycle_on_error', False),
         reconnect_interval_s=float(user_config.get('reconnect_interval_minutes') or 0) * 60 or None,  # <=0 -> off
         impedance_estimator=bool(user_config.get('impedance_estimator', False)),
+        ambient_cache=ambient_cache,
     ) for bms in bms_list]
 
     # move groups to the end

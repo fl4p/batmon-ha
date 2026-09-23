@@ -192,3 +192,23 @@ configuration:
       mOhm. Necesita saltos de corriente grandes (8 A o más), por lo que una
       batería pequeña puede no obtener nunca un valor. Se desactiva sola en
       baterías que no son LiFePO4.
+  pack_temp_estimator:
+    name: Estimar la temperatura de la batería (experimental)
+    description: >-
+      Estima la temperatura de las celdas a partir de la temperatura del
+      MOSFET del BMS y, si están configuradas, de las temperaturas interior y
+      exterior, como sensor "Pack Temp (RC est.)". Para BMS que solo informan
+      la temperatura del MOSFET, que se dispara bajo carga.
+  pack_temp_room_topic:
+    name: Temperatura de batería, topic interior
+    description: >-
+      Topic MQTT con una temperatura interior en °C, p. ej. publicada por
+      mqtt_statestream de Home Assistant. Opcional.
+  pack_temp_outdoor_topic:
+    name: Temperatura de batería, topic exterior
+    description: Topic MQTT con una temperatura exterior en °C. Opcional.
+  pack_temp_ambient_max_age:
+    name: Temperatura de batería, antigüedad máx. del ambiente (s)
+    description: >-
+      Una lectura ambiente más antigua cuenta como ausente. Por defecto 600.
+      Elija un valor mayor que el intervalo de envío de sus sensores.

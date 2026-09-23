@@ -4,107 +4,71 @@ Three self-contained, fully-tested modules (`pack_temp_rc.py`,
 `ambient_cache.py`, `pack_temp_publisher.py`, see `test_pack_temp_rc.py` and
 `test_pack_temp_pipeline.py`) implement an online lumped-RC estimator that
 turns `MOSFET temp + room ambient + outdoor ambient` into a damped
-`pack_temp_est` MQTT sensor for HA. This document tells you how to wire it
-into the addon's existing sample loop and MQTT plumbing.
+`pack_temp_est` MQTT sensor for HA. This document describes how it is wired
+into the add-on's sample loop and MQTT plumbing.
 
-The estimator is **bit-exactly equivalent** to the offline simulator in
-`tools/impedance/thermal_rc.py` (verified by
+The estimator is **bit-exactly equivalent** to the offline simulator
+`thermal_rc.py` of the bat-impedance project (verified by
 `test_online_matches_offline_simulator_at_fixed_dt`), which itself beat a
 gradient-boosting regressor on a held-out test split (RMSE 1.42 °C / R²
 0.65 vs GB 1.68/0.59). Coefficients in `RC_COEFFS_DEFAULT` are fitted on
 bat_caravan 2023 data; same chemistry → directly applicable to ant24-class
 packs.
 
-## What you need to add
+## How it is wired
 
-### 1. Config (in `config.yaml` schema + `options.json`)
+Off by default. The options are flat keys, like every other option in
+`config.yaml`:
 
-```yaml
-# Optional. When enabled, a per-BMS "pack_temp_est" sensor is published.
-pack_temp_estimator:
-  enabled: true
-  room_topic: "homeassistant/sensor/esp32s3_devy_room_temperature/state"
-  outdoor_topic: "homeassistant/sensor/ht_w_260e_temperature/state"
-  # max_age_s: 600   # optional; how stale ambient may be before treated as missing
+```json
+"pack_temp_estimator": true,
+"pack_temp_room_topic": "homeassistant/sensor/esp32s3_devy_room_temperature/state",
+"pack_temp_outdoor_topic": "homeassistant/sensor/ht_w_260e_temperature/state",
+"pack_temp_ambient_max_age": 600
 ```
 
-Topics are the HA-published MQTT state topics for the room and outdoor
-temperature entities. If only one is set, the other is treated as missing
-and the model degrades gracefully (room-only or outdoor-only or even
-mos-only — the safety properties are tested).
+The topics are MQTT state topics carrying a temperature in °C (plain number or
+a small JSON object, see `ambient_cache._parse_payload`). Home Assistant does
+not publish entity states to MQTT by itself; `mqtt_statestream` or the sensor's
+own MQTT integration does. Either topic may be left out: that channel then
+stays empty and the model runs on what it has, down to the MOSFET alone. A
+reading older than `pack_temp_ambient_max_age` counts as missing, so set it
+above the sensor's update interval (statestream publishes on change only). A
+missing ambient value is never replaced by a default.
 
-### 2. main.py — set up the cache + subscribe (one-time, at startup)
+* `main.py` builds the shared `AmbientCache` with
+  `pack_temp_publisher.ambient_cache_from_config()` before the broker
+  connection and registers each topic with `mqtt_util.register_state_topic()`.
+  `on_connect` calls `mqtt_util.subscribe_state_topics()`, so the subscriptions
+  come back after a broker restart.
+* `mqtt_message_handler` calls state-topic callbacks directly on the paho
+  thread (`AmbientCache` is locked for that).
+* `BmsSampler` gets `ambient_cache=` and creates one `PackTempRCPublisher` per
+  real pack (not for groups). It is updated right after the MOSFET temperature
+  is filtered and publishes `<device>/pack_temp_est`.
+* HA discovery comes from `publish_hass_discovery(..., pack_temp_est=True)`,
+  the same pattern and device block as every other sensor.
+* With `impedance_estimator` on, each accepted window also records the median
+  estimate as its `pack_temp` tag (None when there was no MOSFET reading).
 
-After `mqtt_client.connect(...) / loop_start()`, before creating samplers:
+### Where this differs from the first draft of this guide
 
-```python
-from functools import partial
-from bmslib.ambient_cache import AmbientCache
-from bmslib.mqtt_util import mqtt_single_out
-
-# Shared by all BmsSamplers
-ambient_cache = None
-pte_cfg = user_config.get("pack_temp_estimator") or {}
-if pte_cfg.get("enabled"):
-    ambient_cache = AmbientCache(max_age_s=float(pte_cfg.get("max_age_s", 600)))
-    # Register topic -> callback in mqtt_util's existing dispatcher
-    from bmslib.mqtt_util import _switch_callbacks       # internal-but-fine
-    for channel, key in (("room", "room_topic"), ("outdoor", "outdoor_topic")):
-        topic = pte_cfg.get(key)
-        if topic:
-            # The dispatcher wraps payload in a queue and calls cb(payload).
-            _switch_callbacks[topic] = ambient_cache.topic_callback(channel)
-            mqtt_client.subscribe(topic, qos=0)
-            logger.info("pack-temp estimator: subscribed %s -> %s", topic, channel)
-```
-
-NOTE: `_switch_callbacks` is the existing dispatch dict used by switch
-subscribes. If you'd rather keep estimator-callbacks separate, add a
-sibling dict (`_state_callbacks`) and extend `mqtt_message_handler` to
-check both. Either works.
-
-### 3. sampling.py — wire one publisher per BmsSampler
-
-In `BmsSampler.__init__`, accept the cache + an optional publisher:
-
-```python
-def __init__(self, bms, mqtt_client, ..., ambient_cache=None, ...):
-    ...
-    self._pack_temp_publisher = None
-    if ambient_cache is not None and mqtt_client is not None:
-        from bmslib.pack_temp_publisher import PackTempRCPublisher
-        from bmslib.mqtt_util import mqtt_single_out
-        publish_fn = partial(mqtt_single_out, mqtt_client, retain=False)
-        # device_topic is whatever this sampler already uses for publishing:
-        self._pack_temp_publisher = PackTempRCPublisher(
-            device_topic=self.mqtt_topic_prefix,
-            ambient=ambient_cache,
-            publish_fn=publish_fn,
-        )
-```
-
-In the sample loop (right after `sample.mos_temperature` is filtered and
-before/after `publish_sample`):
-
-```python
-if self._pack_temp_publisher is not None:
-    self._pack_temp_publisher.update_from_sample(sample)
-```
-
-For HA discovery, after the existing `publish_hass_discovery(...)` call:
-
-```python
-if self._pack_temp_publisher is not None:
-    topic, payload = self._pack_temp_publisher.hass_discovery_payload(
-        expire_after_seconds=self.expire_after_seconds,
-    )
-    import json
-    mqtt_single_out(mqtt_client, topic, json.dumps(payload), retain=True)
-```
-
-### 4. main.py — pass the cache to each BmsSampler
-
-In the `BmsSampler(...)` construction, add `ambient_cache=ambient_cache`.
+* The draft registered the ambient callbacks in `_switch_callbacks`. Those are
+  queued and awaited on the asyncio loop as coroutines, and
+  `AmbientCache.topic_callback()` returns a plain function, so every message
+  would have raised. State topics now have their own `_state_callbacks`.
+* The draft subscribed once after `connect()`. A clean-session reconnect drops
+  subscriptions, so they are made in `on_connect`.
+* The draft nested the options under `pack_temp_estimator: {enabled: ...}`;
+  they are flat keys now, each optional in the add-on schema.
+* The draft published discovery from `PackTempRCPublisher.hass_discovery_payload()`
+  with `retain=True`. That payload has no `device` block, so HA would not
+  attach the entity to the BMS device, and its `unique_id` scheme differs
+  from the rest. Discovery goes through `publish_hass_discovery()` instead,
+  unretained and re-sent every 5 minutes like the other entities.
+* The draft required an MQTT client. The publisher now runs without one
+  (`mqtt_single_out` ignores a None client), so the impedance tag works in a
+  setup without MQTT.
 
 ## What the user sees
 
@@ -124,28 +88,20 @@ It updates at the sample rate (typically every 1–5 s) and:
 
 ## Validation in production
 
-Run the existing diagnostic on the addon's logged data to compare predicted
-pack temp vs MOSFET temp:
-
-```bash
-PYTHONPATH=/Users/fab/dev/pv/micropython-blebms:. /tmp/impedance-venv/bin/python \
-    tools/impedance/apply_true_temp.py
-```
+Run the diagnostic `apply_true_temp.py` of the bat-impedance project on the
+add-on's logged data to compare predicted pack temp vs MOSFET temp.
 
 You should see `mean(MOS - pred) ≈ +1.7 °C` and predicted pack-temp range
 about half the width of the MOS range — the same numbers we measured
 offline. If those numbers drift over time, the estimator coefficients can
-be re-fitted by re-running `tools/impedance/thermal_rc.py` and updating
+be re-fitted by re-running `thermal_rc.py` (bat-impedance) and updating
 `RC_COEFFS_DEFAULT` in `bmslib/pack_temp_rc.py`.
 
 ## Tests
 
-All 21 tests pass:
-
 ```bash
-PYTHONPATH=. /tmp/impedance-venv/bin/python -m pytest \
-    bmslib/test/test_pack_temp_rc.py \
-    bmslib/test/test_pack_temp_pipeline.py -v
+python -m pytest bmslib/test/test_pack_temp_rc.py bmslib/test/test_pack_temp_pipeline.py \
+    bmslib/test/test_pack_temp_wiring.py -v
 ```
 
 Critical guarantees:
