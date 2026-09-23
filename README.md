@@ -111,7 +111,7 @@ find a list of visible Bluetooth devices in the add-on log. Alternatively you ca
 displayed in the discovery list.
 
 `type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `seplos_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
@@ -192,15 +192,23 @@ Supported types (baud rate in parentheses):
   (`~2000 46 42 …\r`); `seplos_uart:<addr>` for the pack address (default 0),
   `seplos_uart:<addr>:9600` for the RS232 console port. Seplos V3 (Modbus) is
   not covered.
+* `braunpwr_uart` (9600) — BraunPWR packs with the KS48100 rack BMS: YD/T 1363
+  ASCII protocol (`>22 01 4A 42 …\r`, command 42H). `braunpwr_uart:<addr>` for
+  the pack address (default 1). It follows the DIP switch, but how is
+  unverified; if nothing answers, try 1 to 16. Built from a user's
+  working ESPHome config (an ESP32 fitted in place of the BMS's FC41D WiFi/BLE
+  module) and the manufacturer's protocol PDF. Wiring is unconfirmed: the
+  FC41D module's header or the BMS's RS485 port
+  ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
 * `renogy_uart` (9600) — Renogy smart lithium (RBT100LFP12, RBT200LFP12S, ...)
   Modbus RTU; `renogy_uart:<id>` for the slave id (default `0x30`; the
   RBT100LFP12SH-G1 uses `0xF7`).
 
-`pace_uart`, `basen_uart`, `jbd_uart`, `jk_pb_uart`, `seplos_uart` and
-`renogy_uart` decoders are unit-tested against captured or reference frames but
-not yet confirmed on live hardware — feedback welcome. The protocols were ported
-from dbus-serialbattery, aiobmsble and the syssi ESPHome components; see the
-module docstrings for the exact sources.
+`pace_uart`, `basen_uart`, `jbd_uart`, `jk_pb_uart`, `seplos_uart`,
+`braunpwr_uart` and `renogy_uart` decoders are unit-tested against captured or
+reference frames but not yet confirmed on live hardware — feedback welcome. The
+protocols were ported from dbus-serialbattery, aiobmsble and the syssi ESPHome
+components; see the module docstrings for the exact sources.
 
 Example config:
 

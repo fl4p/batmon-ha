@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* New wired type `braunpwr_uart` for BraunPWR packs with the KS48100 rack BMS (YD/T 1363, `>…\r` frames, 9600 baud), whose FC41D WiFi/BLE module keeps dropping the BLE link. Built from a user's working ESPHome config and the manufacturer's protocol PDF; untested on hardware (#403).
 * Fix: telemetry uploaded either a device's pack samples or its cell voltages, rarely both, because the two shared one 15 s slot. Each now has its own.
 
 ## [2.21]

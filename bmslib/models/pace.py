@@ -76,16 +76,21 @@ def _checksum(payload: bytes) -> int:
     return (0x10000 - (sum(payload) & 0xFFFF)) & 0xFFFF
 
 
-def build_frame(ver: int, adr: int, cid1: int, cid2: int, info: bytes = b'') -> bytes:
-    """Assemble a complete paceic request frame (ready to write to the port)."""
+def build_frame(ver: int, adr: int, cid1: int, cid2: int, info: bytes = b'', soi: int = SOI) -> bytes:
+    """Assemble a complete paceic request frame (ready to write to the port).
+
+    ``soi`` is for the YD/T 1363 relatives that frame the same text with a
+    different start byte (braunpwr_uart sends '>' = 0x3E)."""
     lenid = len(info)
     length = (_lchksum(lenid) << 12) | lenid
     body = b'%02X%02X%02X%02X%04X' % (ver, adr, cid1, cid2, length) + info
-    return bytes([SOI]) + body + b'%04X' % _checksum(body) + bytes([EOI])
+    return bytes([soi]) + body + b'%04X' % _checksum(body) + bytes([EOI])
 
 
-def parse_frame(frame: bytes) -> dict:
+def parse_frame(frame: bytes, sois: tuple = (SOI,)) -> dict:
     """Validate a complete paceic frame and return its decoded header + INFO.
+
+    ``sois`` lists the accepted start bytes (default: '~' only).
 
     Raises ValueError on any structural or checksum failure. A malformed or
     truncated frame must never decode to a zero/empty reading — the caller must
@@ -93,8 +98,8 @@ def parse_frame(frame: bytes) -> dict:
     """
     if len(frame) < 18:  # SOI + 12 header chars + 4 chksum + EOI
         raise ValueError(f"paceic frame too short: {len(frame)} bytes")
-    if frame[0] != SOI:
-        raise ValueError("paceic frame missing SOI (~)")
+    if frame[0] not in sois:
+        raise ValueError("paceic frame missing SOI (%s)" % '/'.join(chr(c) for c in sois))
     if frame[-1] != EOI:
         raise ValueError("paceic frame missing EOI (\\r)")
 
