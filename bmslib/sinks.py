@@ -487,16 +487,20 @@ class TelemetrySink(QuestDBSink):
         self.slug_by_name = {n: bms.slug for n, bms in bms_by_name.items()}
 
         self.sample_interval = 15
-        self._last_pub: Dict[str, float] = {}
+        # keyed (bms_name, kind): sample and voltages each get their own slot.
+        # With a shared one, whichever call first crossed the 15 s mark took the
+        # slot and kept that phase, so a device sent pack samples or cell
+        # voltages, rarely both.
+        self._last_pub: Dict[tuple, float] = {}
 
         # logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
         self.silent = True
 
-    def _should_sample(self, bms_name) -> bool:
+    def _should_sample(self, bms_name, kind) -> bool:
         now = time.time()
-        if now - self._last_pub.get(bms_name, 0) < self.sample_interval:
+        if now - self._last_pub.get((bms_name, kind), 0) < self.sample_interval:
             return False
-        self._last_pub[bms_name] = now
+        self._last_pub[(bms_name, kind)] = now
         return True
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
@@ -504,7 +508,7 @@ class TelemetrySink(QuestDBSink):
             return
         if 'dummy' in self.slug_by_name[bms_name]:
             return
-        if not self._should_sample(bms_name):
+        if not self._should_sample(bms_name, 'sample'):
             return
         tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)
@@ -520,7 +524,9 @@ class TelemetrySink(QuestDBSink):
             return
         if 'dummy' in self.slug_by_name[bms_name]:
             return
-        if not self._should_sample(bms_name):
+        if not voltages:
+            return  # a failed fetch must not use up the slot
+        if not self._should_sample(bms_name, 'voltages'):
             return
         tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
         tags and tags_.update(tags)

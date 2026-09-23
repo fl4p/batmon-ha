@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix: telemetry uploaded either a device's pack samples or its cell voltages, rarely both, because the two shared one 15 s slot. Each now has its own.
+
 ## [2.21]
 
 * New `ble_request_timeout`: how long an aiobmsble (`_ble`) device gets to answer one request, default 5 s over three attempts (doubled while the write mode is still unpinned). Raise it for a pack that times out in `_await_msg` while others share the adapter. Global, because aiobmsble holds it on its base class (#415).
