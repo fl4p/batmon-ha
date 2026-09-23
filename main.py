@@ -454,6 +454,7 @@ async def main():
         sinks=sinks,
         bt_power_cycle_on_error=user_config.get('bt_power_cycle_on_error', False),
         reconnect_interval_s=float(user_config.get('reconnect_interval_minutes') or 0) * 60 or None,  # <=0 -> off
+        impedance_estimator=bool(user_config.get('impedance_estimator', False)),
     ) for bms in bms_list]
 
     # move groups to the end

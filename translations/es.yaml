@@ -184,3 +184,11 @@ configuration:
       algoritmos de estado de salud (SoH) y resistencia de celda. Los
       identificadores son aleatorios o con hash; sin dirección MAC, sin
       ubicación, sin datos personales.
+  impedance_estimator:
+    name: Estimar la resistencia de celda (experimental)
+    description: >-
+      Estima la resistencia interna por celda de baterías LiFePO4 a partir de
+      la corriente y las tensiones de celda, como sensor "Cell Resistance" en
+      mOhm. Necesita saltos de corriente grandes (8 A o más), por lo que una
+      batería pequeña puede no obtener nunca un valor. Se desactiva sola en
+      baterías que no son LiFePO4.

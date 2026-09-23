@@ -159,6 +159,8 @@ For verbose logs of particular BMS add `debug: true`.
   plots in HA.
 * `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
 * `expire_values_after` time span in seconds when sensor values become "Unavailable"
+* `impedance_estimator` (experimental, off by default) estimates the per-cell resistance of LiFePO4 packs and publishes
+  it as a `Cell Resistance` sensor in mΩ. See [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exits)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>

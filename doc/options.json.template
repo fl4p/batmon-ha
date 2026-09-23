@@ -27,5 +27,6 @@
   "keep_alive": true,
   "watchdog": true,
   "concurrent_sampling": false,
-  "verbose_log": false
+  "verbose_log": false,
+  "impedance_estimator": false
 }

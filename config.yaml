@@ -89,6 +89,7 @@ options:
   #       name: "garage-proxy"
   bluetooth_proxies: []
   telemetry: true
+  impedance_estimator: false
 
 schema:
   devices:
@@ -173,3 +174,8 @@ schema:
   influxdb_database: "str?"
 
   telemetry: "bool?"
+
+  # Experimental: estimate the per-cell resistance of LiFePO4 packs from the
+  # sampled current and cell voltages, published as a `cell_resistance` sensor
+  # (mOhm). See doc/Cell Resistance.md.
+  impedance_estimator: "bool?"

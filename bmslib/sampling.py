@@ -18,7 +18,7 @@ from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, subscribe_set_soc, mqtt_single_out
+    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -157,6 +157,7 @@ class BmsSampler:
                  bms_group: Optional[BmsGroup] = None,
                  bt_power_cycle_on_error=False,
                  reconnect_interval_s: Optional[float] = None,
+                 impedance_estimator=False,
                  ):
 
         self.bms = bms
@@ -229,6 +230,15 @@ class BmsSampler:
                 meter.restore(meter_state[meter.name]['reading'])
 
         # self.power_stats = EWM(span=120, std_regularisation=0.1)
+
+        # Experimental cell-resistance estimator (impedance_estimator, off by
+        # default). Only for real packs: a group's current and cell list are
+        # aggregates of its members, which are estimated on their own.
+        self.impedance = None
+        if impedance_estimator and not bms.is_virtual:
+            from bmslib.impedance import CellResistanceEstimator
+            self.impedance = CellResistanceEstimator(bms.name)
+            logger.info('%s: cell resistance estimator enabled (experimental)', bms.name)
 
         temp_step = getattr(bms, 'TEMPERATURE_STEP', 0)
         temp_smooth = getattr(bms, 'TEMPERATURE_SMOOTH', 10)
@@ -468,6 +478,11 @@ class BmsSampler:
                 # update before invert current
                 self.bms_group.update(bms, sample)
 
+            # BmsSample sign (discharge > 0) after calibration, before the
+            # user's display preference flips it: the impedance fit needs a
+            # sign that does not depend on invert_current.
+            current_native = sample.current
+
             if self.invert_current:
                 sample = sample.invert_current()
 
@@ -560,6 +575,12 @@ class BmsSampler:
                 for sink in self.sinks:
                     sink.publish_voltages(bms.name, voltages)
 
+            if self.impedance is not None and self.impedance.enabled:
+                # needs this iteration's cell voltages next to its current, so
+                # fetch them even when no sink asked for them
+                voltages = await cached_fetch_voltages()
+                self._feed_impedance(sample, current_native, voltages)
+
             # z_score = self.power_stats.z_score(sample.power)
             # if abs(z_score) > 12:
             #    logger.info('%s Power z_score %.1f (avg=%.0f std=%.2f last=%.0f)', bms.name, z_score, self.power_stats.avg.value, self.power_stats.stddev, sample.power)
@@ -623,6 +644,7 @@ class BmsSampler:
                     temperatures=sample.temperatures,
                     device_info=self.device_info,
                     set_soc=getattr(bms, 'supports_set_soc', lambda: False)(),
+                    cell_resistance=self.impedance is not None and self.impedance.enabled,
                 )
 
                 # publish sample again after discovery
@@ -649,6 +671,20 @@ class BmsSampler:
 
         # pass "light" errors to the caller to trigger a re-connect after too many
         return sample if not err else None
+
+    def _feed_impedance(self, sample: BmsSample, current: float, voltages):
+        temps = [t for t in (sample.temperatures or []) if isinstance(t, (int, float)) and -40 < t < 100]
+        temp = sorted(temps)[len(temps) // 2] if temps else None  # BMS probes; None if none, never a default
+        try:
+            r = self.impedance.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp)
+        except Exception as e:
+            # an estimator bug must neither kill sampling nor keep publishing
+            logger.error('%s: cell resistance estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
+                         exc_info=True)
+            self.impedance.disable('internal error')
+            return
+        if r is not None:
+            publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix

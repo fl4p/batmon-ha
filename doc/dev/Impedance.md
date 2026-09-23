@@ -1,5 +1,8 @@
 *this is a draft and personal notes*
 
+* the online estimator in the add-on (`impedance_estimator`): [Cell Resistance](../Cell%20Resistance.md),
+  code in `bmslib/impedance.py`
+
 * see tools/impedance for code
 * [tools/impedance/README](../../tools/impedance/README.md)
 

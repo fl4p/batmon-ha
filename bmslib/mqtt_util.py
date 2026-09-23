@@ -171,9 +171,19 @@ def publish_temperatures(client, device_topic, temperatures):
             mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
 
 
+# An accepted impedance window is published once, not refreshed every cycle, so
+# the entity needs an expiry of its own: a day without a new accepted window and
+# HA shows it unavailable instead of an old number that looks current.
+CELL_RESISTANCE_EXPIRE_S = 24 * 3600
+
+
+def publish_cell_resistance(client, device_topic, value_mohm: float):
+    mqtt_single_out(client, f"{device_topic}/cell_resistance", round_to_n(value_mohm, 3))
+
+
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
-                           device_info: DeviceInfo = None, set_soc=False):
+                           device_info: DeviceInfo = None, set_soc=False, cell_resistance=False):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -190,7 +200,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     }
 
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
-                        precision=None):
+                        precision=None, expire_after=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": name or capitalize_words(k.replace('/', ' ')),
@@ -202,7 +212,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "suggested_display_precision": precision,
             # "json_attributes_topic": f"{device_topic}/{k}",
             "state_topic": f"{device_topic}/{k}",
-            "expire_after": max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds,
+            "expire_after": expire_after or (max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds),
             "device": device_json,
         }
         if icon:
@@ -244,6 +254,11 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     for name, m in meter_desc.items():
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
+
+    if cell_resistance:
+        # experimental, see bmslib/impedance.py: median per-cell resistance [mOhm]
+        _hass_discovery('cell_resistance', None, "mΩ", state_class="measurement", icon="resistor",
+                        name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S)
 
     if sample.problem is not None:
         discovery_msg[f"homeassistant/binary_sensor/{node_id}/problem/config"] = {
