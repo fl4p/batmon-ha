@@ -228,6 +228,33 @@ async def main():
                 bmslib.bt.bleak_version(),
                 bmslib.bt.bt_stack_version())
 
+    if pair_only:
+        # Bond by address, before any model is constructed. Pairing is a
+        # property of the device, not of the BMS protocol, and going through the
+        # models would tie it to what this venv can import: venv_bleak_pairing
+        # (the only one whose bleak has a PIN agent) deliberately has no
+        # aiobmsble, so every `_ble` type -- `felicity` among them -- is an
+        # "Unknown device type" here and would never be reached (#415).
+        from bmslib.pairing import FAILED, bond_with_pin
+        for dev in user_config.get('devices', []):
+            pin = dev.get('pin')
+            addr = str(dev.get('address') or '')
+            if not pin or not addr or addr[0] == '#' or is_serial_device(dev):
+                continue
+            # `address:` may be a device NAME (README), and BlueZ only knows
+            # MACs -- resolve it the same way construct_bms() does, or the bond
+            # would fail as "not visible to BlueZ" for a device that is right
+            # there in the discovery list.
+            addr = next((d.address for d in ble_devices
+                         if (d.name or '').strip() == addr.strip()), addr)
+            res = await bond_with_pin(bmslib.bt.normalize_ble_address(addr), pin,
+                                      adapter=bmslib.bt.normalize_adapter(dev.get('adapter')),
+                                      name=dev.get('alias') or addr)
+            if res == FAILED:
+                # keep going: one pack that refuses to bond must not stop the
+                # others, and addon_main.sh aborts the add-on on a non-zero exit
+                logger.warning('%s: not bonded, it may not answer', dev.get('alias') or addr)
+
     names = set()
     dev_args: Dict[str, dict] = {}
 

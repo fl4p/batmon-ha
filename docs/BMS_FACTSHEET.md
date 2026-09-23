@@ -439,11 +439,21 @@ These plugins follow the same wrap-loss pattern as the top-tier set: every key i
 
 **Fields decoded by aiobmsble (forwarded by wrap).** `voltage` (`Batt[0][0]/1000`), `current` (`Batt[1][0]/10`, sign-flipped on the way into `BmsSample`), `soc` ← `BatsocList[0][0]/100`, `charge` ← `cycle_charge` derived as `SoC × capacity / 1e7`, `temperatures[0]` (first entry of `BtemList/10`), per-cell mV (`BatcelList[0]`).
 
+**`SolarB_*` firmware (2026).** A vendor firmware update (FLB48314TG1 and siblings, OUI `A4:05:FD`) renames the advertisement from `F07…`/`F10…` to `SolarB_<4 hex>_<serial>` and makes the pack require a BLE **bond**: an unbonded central gets `Insufficient authentication` on the first ATT op, or is dropped while BlueZ is still resolving services (`failed to discover services, device disconnected`). The upstream matcher no longer catches these names, so the HA integration cannot even offer them; in batmon the type is forced by config, and the bond comes from `pin:` (reported PIN `123456`) — see #415, upstream #735 / #801. `ble_stack: esphome` has no agent to answer a PIN prompt, so these need a local adapter.
+
+**Confirmed on hardware (2026-09-22, #415).** Three FLB48314TG1-H (51.2 V, 314 Ah nominal, ~350 Ah reported) on
+`hci0`/bluez-5.86: the JSON protocol is unchanged by the rename, so `type: felicity` decodes the renamed packs as-is
+(83 % SoC, 54.2 V, ~100 A each, cells within 20 mV). The bond is necessary but not sufficient: a pack that was already
+bonded still failed at service discovery until HA's Bluetooth integration was disabled (adapter scan contention), with
+`keep_alive: true` and `sample_period: 10`. `mos_temperature` is NaN — the Felicity JSON carries no MOSFET probe.
+
 **Decoded by plugin but DROPPED by wrap.** `problem_code` (combined `Bwarn + Bfault` — full alarm surface lost), `temp_values[1..N]` (Felicity racks typically report 4 probes). Felicity does **not** emit `battery_health`, `cycles`, `design_capacity`, `balancer`, `chrg_mosfet`, `dischrg_mosfet`, `runtime`, or `pack_*` arrays — so `soh` / `num_cycles` / `capacity` will be NaN unless user-configured.
 
 **Links.**
 - [aiobmsble — felicity_bms.py](https://github.com/patman15/aiobmsble/blob/main/aiobmsble/bms/felicity_bms.py)
 - [patman15/BMS_BLE-HA #161 — Felicity Solar LUX-Y-48300LG01](https://github.com/patman15/BMS_BLE-HA/issues/161) — RE seed
+- [patman15/BMS_BLE-HA #735 — FLB48314TG1 bluetooth authentication](https://github.com/patman15/BMS_BLE-HA/issues/735) — the bonding requirement, PIN `123456`
+- [patman15/BMS_BLE-HA #801 — Problem with Felicity batteries after Firmware Upgrade](https://github.com/patman15/BMS_BLE-HA/issues/801) — the `F07…` → `SolarB_…` rename
 - [SirkoVZ/BMS_BLE-HA_felicity](https://github.com/SirkoVZ/BMS_BLE-HA_felicity) — Felicity-only fork that the upstream plugin grew out of
 - [Felicity LPBF12300 BMS manual (PDF)](https://www.felicitysolar.com/wp-content/uploads/2025/05/358-010412-00-LPBF12300.pdf)
 - [Felicity LUX-Y product page](https://us.felicitysolar.com/lux-y-series/)

@@ -12,6 +12,11 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+#: how often a failed bond is retried before the device is connected unbonded.
+#: _pair_psk() runs under the process-wide ConnectLock, so an endless retry
+#: would stall every other device's connect once per poll (#415).
+PSK_MAX_ATTEMPTS = 3
+
 
 def _bms_config_kwargs(*, keep_alive: bool) -> dict:
     """Constructor kwargs for a BaseBMS, across the aiobmsble 0.26 API break.
@@ -72,7 +77,8 @@ class BLEDeviceResolver:
 
 class BMS():
 
-    def __init__(self, address, type, blebms_class=None, keep_alive=False, adapter=None, name=None, **kwargs):
+    def __init__(self, address, type, blebms_class=None, keep_alive=False, adapter=None, name=None, psk=None,
+                 **kwargs):
         # This class does NOT subclass BtBms, so it does not inherit the
         # normalization in BtBms.__init__ -- and it needs it just as much:
         # BLEDeviceResolver.resolve() below caches by `(adapter, d.address)` with
@@ -90,6 +96,17 @@ class BMS():
         self._type = type
         self._blebms_class = blebms_class
         self._keep_alive = keep_alive
+
+        # `pin:` from the config, same field the native BtBms path takes as psk.
+        # construct_bms() passes it to every model, and until #415 this class
+        # swallowed it in **kwargs: for every aiobmsble-backed type `pin:` was a
+        # silent no-op, so a BMS that only answers a bonded central could not be
+        # read at all and the log never said why. aiobmsble does no SMP of its
+        # own (BMSConfig.secret is an application-level password, not a passkey),
+        # so the bond has to exist before its _connect() runs -- see _pair_psk().
+        self._psk = psk
+        self._psk_paired = False
+        self._psk_attempts = 0
 
         self._last_sample: Optional[BMSSample] = None
 
@@ -132,6 +149,66 @@ class BMS():
     def __await__(self):
         return self.__aexit__().__await__()
 
+    async def _pair_psk(self) -> None:
+        """Bond with the BMS before the aiobmsble driver opens its own connection.
+
+        Some firmware only serves GATT to a bonded central: Felicity packs
+        renamed `F07*` -> `SolarB_*` by a vendor firmware update answer reads and
+        notifies with `Insufficient authentication`, or drop the link outright
+        while BlueZ is still discovering services (#415, upstream
+        patman15/BMS_BLE-HA#735). aiobmsble never pairs, so nothing can recover
+        once its _connect() is under way -- the bond has to be in BlueZ
+        beforehand.
+
+        The bond is BlueZ's own Pair(), see bmslib/pairing.py for why
+        `BleakClient.pair()` cannot do this job. `main.py pair-only` bonds every
+        configured device before the add-on starts sampling; this is the
+        fallback for a device that was not bonded then (added to the config
+        later, or asleep during the pre-step).
+
+        Stops after PSK_MAX_ATTEMPTS: this runs under the process-wide
+        ConnectLock, so a pack that never bonds must not keep every other
+        device's connect waiting once per poll. A bond is persistent in BlueZ,
+        so a success is never repeated either.
+        """
+        if self._psk_paired:
+            return
+
+        from bmslib.bt import scanner_is_proxy
+        if scanner_is_proxy():
+            # A proxy can ask its ESPHome node to pair (bleak_esphome's
+            # bluetooth_device_pair, firmware >= 2024.3 with the PAIRING feature
+            # flag), but there is no agent on the node to answer a PIN request,
+            # so a `pin:` cannot be delivered over this stack.
+            logger.warning('%s: `pin:` cannot be delivered over the esphome-proxy stack (no '
+                           'pairing agent on the node) -- bond via a local adapter instead',
+                           self.name)
+            self._psk_paired = True
+            return
+
+        import bmslib.pairing as pairing
+        self._psk_attempts += 1
+        try:
+            res = await pairing.bond_with_pin(self.address, self._psk,
+                                              adapter=self.adapter, name=self.name)
+        except Exception as e:
+            # bond_with_pin() is written not to raise; if it ever does, that is
+            # still not a reason to skip the connect
+            logger.error('%s: pairing failed: %s', self.name, str(e) or type(e).__name__)
+            res = pairing.FAILED
+
+        if res in (pairing.PAIRED, pairing.ALREADY_PAIRED):
+            self._psk_paired = True
+        elif res == pairing.UNSUPPORTED:
+            # this stack has no BlueZ at all, so re-asking would only repeat the
+            # warning on every connect
+            self._psk_paired = True
+        elif self._psk_attempts >= PSK_MAX_ATTEMPTS:
+            logger.warning('%s: giving up on pairing after %d attempts, connecting unbonded '
+                           '(bond it with `bluetoothctl pair %s` and restart)',
+                           self.name, self._psk_attempts, self.address)
+            self._psk_paired = True
+
     async def connect(self, timeout=20, **kwargs):
 
         ble_device = await BLEDeviceResolver.resolve(self.address, adapter=self.adapter or None)
@@ -139,6 +216,9 @@ class BMS():
         if ble_device is None:
             raise BleakDeviceNotFoundError(
                 "device %s not found (adapter=%s)" % (self.address, self.adapter or 'default'))
+
+        if self._psk:
+            await self._pair_psk()
 
         # A previous BaseBMS instance — left over from a dropped keep-alive link
         # or an earlier failed connect — may still hold an acquired notify FD on

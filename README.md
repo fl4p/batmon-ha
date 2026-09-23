@@ -120,7 +120,15 @@ Otherwise, the name as found in Bluetooth discovery is used.
 If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with the device's PIN). This is the
 case for the Victron SmartShunt and for newer JBD firmware (Liontron and other packs whose app asks for a 6-digit
 password): those BMS only answer after a passkey pairing, batmon pairs with the given `pin` and then talks the normal
-JBD protocol (#217).
+JBD protocol (#217). Felicity packs whose firmware update renamed them from `F07…` to `SolarB_…` need this too (#415, upstream
+[BMS_BLE-HA#735](https://github.com/patman15/BMS_BLE-HA/issues/735)). Three FLB48314TG1-H packs were confirmed
+working once every pack was bonded — but bonding alone was not enough there: one pack was already bonded and still
+failed with `failed to discover services, device disconnected` until Home Assistant's own Bluetooth integration was
+disabled, which frees the adapter from scan contention. If a bonded pack still fails, try that next.
+
+The bond is made by BlueZ (the same operation as `bluetoothctl pair`), before the add-on starts sampling, and stays in
+place afterwards. It needs a local Bluetooth adapter: an ESPHome proxy can be asked to pair, but has no agent to answer
+a PIN prompt, so a device with a `pin:` has to be reached through an adapter on the machine running the add-on.
 
 Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
 
