@@ -24,16 +24,25 @@ inflates R by 1/r^2 when u is in fact noisy.
 Guards, from the review of the prototype. Each one exists because the
 prototype produced a plausible wrong number without it:
 
- * Zero or non-finite noise estimate (quantised / piecewise-constant signal):
-   lam cannot be formed, so the cell is unevaluable in that window. No default
-   lam, no clipping -- the prototype clipped lam to 1e-3 and silently turned
-   Deming into inverse regression.
- * Count gates count REAL paired measurements. Nothing is resampled onto a grid
-   or interpolated; a missing voltage stays missing.
+ * Noise estimates have a physical floor: a reading quantised to steps of q
+   carries at least q/sqrt(12) of noise, whatever the 2nd-difference MAD says.
+   The MAD is 0 on quantised, mostly-flat data (1 mV cells at sub-second
+   cadence), and the prototype then clipped lam to 1e-3, silently turning
+   Deming into inverse regression. q is learnt from the data (the smallest
+   non-zero step seen per signal), never assumed. With no step seen at all the
+   signal has no variation and the cell is unevaluable -- no default lam.
+ * Count gates count REAL paired measurements. Nothing is interpolated or
+   filled; a missing voltage stays missing. Samples are averaged into 1 s bins
+   (BIN_S) before fitting, which is what the prototype's 1 s grid did minus the
+   interpolation: a bin exists only where there was a real pair, and the count
+   gates count bins, i.e. seconds with data. It also keeps a window at <= 150
+   rows at any sampling rate, which bounds the CPU time per window.
  * r^2 is computed on every finite pair the fit was given, not only on the
    points the outlier trimming kept.
  * The lag search skips non-finite differences instead of giving up and
-   returning lag 0.
+   returning lag 0. A cell whose best lag correlates positively while lag 0
+   does not is rejected, and the cells of a window must agree on the lag (see
+   the sign convention below).
  * Coarse cadence: a window whose real pairs are spaced wider than
    MAX_MEDIAN_DT_S is unevaluable.
  * Missing inputs are never replaced by plausible values: no SoC means no DOD
@@ -43,18 +52,29 @@ Each accepted window is tagged with DOD, the median BMS temperature probe
 (`temp`) and, when pack_temp_estimator runs, the median RC pack-temperature
 estimate (`pack_temp`). Both temperatures are None when unknown.
 
+Chemistry: the gates only hold for LFP. A sample with any cell outside
+LFP_MV_LO..LFP_MV_HI is dropped (a BLE decode glitch, a runner cell at the
+end of a charge, a -1 mV "no reading"); the estimator switches itself off only
+when the MEDIAN cell stays outside that band for CHEM_PERSIST_S and
+CHEM_PERSIST_N samples in a row.
+
 The gates were tuned on large (about 280 Ah) LFP packs with Daly/JK BMSes. A
 small pack rarely draws the 8 A current swing a window needs, so it may never
 produce an estimate. That is by design: no estimate beats a wrong one.
 
 Sign convention: `current` is batmon's BmsSample convention (positive =
 discharging), BEFORE `invert_current` is applied. The fit uses the charge
-current -current, so a healthy cell has R > 0. A BMS driver that reports the
-opposite sign produces negative slopes, which the R range gate rejects.
+current -current, so a healthy cell has R > 0. A driver that reports the
+opposite sign mostly produces negative slopes, which the R range gate rejects.
+Not always: under a periodic load (an induction hob pulsing every ~5 samples)
+a lag of about half a period makes the flipped current correlate positively,
+and the replay of real Daly data published 0.85 mOhm that way. The lag-0 sign
+check and the cross-cell lag agreement exist for that case; the replay then
+publishes nothing with the sign flipped. It remains a heuristic, not a proof.
 """
 import math
 from collections import Counter, deque
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeGuard
 
 from bmslib.util import get_logger
 
@@ -85,25 +105,53 @@ MIN_R2 = 0.80  # u must actually be linear in i
 # arriving in bunches pass the count while most of the window is unsampled.
 MAX_MEDIAN_DT_S = 5.0
 
-# U-vs-I sampling skew search, in samples (+/-4 s at the default 1 s cadence).
+# Samples are averaged into bins of this length before fitting. The lag, the
+# noise estimates and the count gates all work on bins.
+BIN_S = 1.0
+
+# U-vs-I sampling skew search, in bins (+/-4 s at <= 1 s cadence, +/-4 samples
+# at a slower one).
 MAX_LAG = 4
 MIN_LAG_DIFFS = 20  # finite (du, di) pairs a lag candidate needs to be scored
+MAX_LAG_SPREAD = 1  # cells of one window must agree on the lag within +/-1 bin
+
+# A step smaller than this, relative to the value, is float round-off (bin
+# means of integer readings), not a quantisation step.
+ROUNDOFF_REL = 1e-9
 
 # Deming with residual-MAD outlier trimming (as in estimators.deming_irls)
 IRLS_ITERS = 2
 IRLS_K = 4.0
 
-# Chemistry guard: only LFP-looking packs. Any cell reading outside this band
-# disables the estimator for the BMS (logged once).
+# Chemistry guard: only LFP-looking packs. A sample with any cell outside this
+# band is dropped; the estimator is disabled for the BMS (warning, once) when
+# the median cell voltage stays outside it for CHEM_PERSIST_S seconds AND
+# CHEM_PERSIST_N samples in a row.
+# Why 10 minutes / 30 samples: the out-of-band readings seen on real LFP data
+# are single decode glitches lasting a few frames (2023-11-14: 3732/3119 mV,
+# then 3329/3512/2798/2926, then normal, within 5 s) and single runner cells
+# at the top of a charge, which never move the median. A non-LFP pack (NMC
+# rests at 3.7-4.1 V per cell) sits outside the band for hours, so waiting 10
+# minutes costs nothing; the per-cell 2700-3600 mV window gate already keeps
+# its samples out of any fit meanwhile. The sample count keeps two readings
+# either side of a 10-minute outage from counting as "persistent".
 LFP_MV_LO, LFP_MV_HI = 2500.0, 3700.0
+CHEM_PERSIST_S = 600.0
+CHEM_PERSIST_N = 30
 
 # --- output ---
 ROLLING_WINDOWS = 20  # published value = median over the last N accepted windows
 PUBLISH_MIN_WINDOWS = 5  # publish nothing before this many windows were accepted
+# ... and only windows from the last 7 days count. R changes by ~1.5x per 10 C,
+# so a median that mixes windows from different seasons describes no actual
+# state of the pack (on ANT24 the last 20 windows spanned months). Seven days
+# still lets a pack with a few heavy loads per week collect 5 windows, and
+# ageing is far slower than a week.
+MAX_WINDOW_AGE_S = 7 * 86400.0
 SUMMARY_PERIOD_S = 3600.0  # info-level summary of what the gates did
 
 
-def _finite(x) -> bool:
+def _finite(x) -> TypeGuard[float]:
     return isinstance(x, (int, float)) and math.isfinite(x)
 
 
@@ -120,8 +168,8 @@ def noise_std(xs: Sequence[float]) -> Optional[float]:
     """Robust white-noise std via the second difference (removes a linear
     trend): for x = trend + white(sigma), var(diff2) = 6 sigma^2. `xs` are
     finite values in time order. Returns None for fewer than 5 values.
-    Can return 0.0 on quantised / piecewise-constant data -- callers must treat
-    that as unevaluable, not as "noise-free"."""
+    Returns 0.0 on quantised / piecewise-constant data, which is not
+    "noise-free": combine it with the quantisation floor (effective_noise)."""
     n = len(xs)
     if n < 5:
         return None
@@ -129,6 +177,25 @@ def noise_std(xs: Sequence[float]) -> Optional[float]:
     med = median(d2)
     mad = median([abs(d - med) for d in d2])
     return 1.4826 * mad / math.sqrt(6.0)
+
+
+def quant_step(prev: Optional[float], cur: float) -> Optional[float]:
+    """|cur - prev| if it is a real step: non-zero beyond float round-off."""
+    if prev is None or not (_finite(prev) and _finite(cur)):
+        return None
+    d = abs(cur - prev)
+    return d if d > ROUNDOFF_REL * max(1.0, abs(cur), abs(prev)) else None
+
+
+def effective_noise(ns: Optional[float], q: Optional[float]) -> Optional[float]:
+    """Noise std with the quantisation floor q/sqrt(12) of a reading quantised
+    to steps of q. None when ns is missing or non-finite; 0.0 stays 0.0 only
+    when no step was ever seen (q None), i.e. the signal never varied."""
+    if not _finite(ns):
+        return None
+    if _finite(q) and q > 0:
+        return max(ns, q / math.sqrt(12.0))
+    return ns if ns > ROUNDOFF_REL else 0.0
 
 
 def noise_ratio(ns_u: Optional[float], ns_i: Optional[float]) -> Optional[float]:
@@ -233,7 +300,8 @@ def best_lag(u: Sequence[float], i: Sequence[float], max_lag=None, min_diffs=Non
     the SIGNED correlation (u rises with charge current), ties go to the smaller
     |lag|. Returns (lag, corr), or (None, nan) when no candidate had min_diffs
     finite pairs with non-zero spread -- unevaluable, not "lag 0"."""
-    return _best_lag_diffs(_diffs(u), _diffs(i), max_lag, min_diffs)
+    lag, c, _ = _best_lag_diffs(_diffs(u), _diffs(i), max_lag, min_diffs)
+    return lag, c
 
 
 def _diffs(x):
@@ -252,7 +320,7 @@ def _best_lag_diffs(du, di, max_lag=None, min_diffs=None):
     if order is None:
         order = _LAG_ORDER_CACHE[max_lag] = sorted(range(-max_lag, max_lag + 1), key=lambda v: (abs(v), -v))
     m = min(len(du), len(di))
-    best, best_c = None, -math.inf
+    best, best_c, c0 = None, -math.inf, None
     for L in order:
         if L >= 0:
             pa, pb = du[L:m], di[:m - L]
@@ -276,23 +344,54 @@ def _best_lag_diffs(du, di, max_lag=None, min_diffs=None):
         if not (va > 1e-9 * n * saa and vb > 1e-9 * n * sbb):
             continue  # no spread in du or di (up to rounding): this lag cannot be scored
         c = (n * sab - sa * sb) / math.sqrt(va * vb)
+        if L == 0:
+            c0 = c
         if c > best_c:
             best, best_c = L, c
-    return (best, best_c) if best is not None else (None, math.nan)
+    return (best, best_c, c0) if best is not None else (None, math.nan, c0)
 
 
-def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None):
-    """Fit one cell in one window. Sequences are in sample order with NaN for
+def _corr(pairs) -> Optional[float]:
+    """Pearson correlation of (x, y) pairs, None without spread."""
+    n = len(pairs)
+    if n < 3:
+        return None
+    mx = sum(p[0] for p in pairs) / n
+    my = sum(p[1] for p in pairs) / n
+    sxx = syy = sxy = 0.0
+    for x, y in pairs:
+        dx = x - mx
+        dy = y - my
+        sxx += dx * dx
+        syy += dy * dy
+        sxy += dx * dy
+    if not (sxx > 0 and syy > 0):
+        return None
+    return sxy / math.sqrt(sxx * syy)
+
+
+def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None, q_i=None, q_u=None):
+    """Fit one cell in one window. Sequences are in bin order with NaN for
     missing values; `di` optionally the precomputed _diffs(i_seq), shared by all
-    cells of a window. Returns (result dict, None) or (None, reject reason)."""
+    cells of a window; q_i / q_u the learnt quantisation steps (None: unknown).
+    Returns (result dict, None) or (None, reject reason)."""
     uf = [v for v in u_seq if v == v]
     if len(uf) < MIN_PAIRS:
         return None, 'cell_pairs'
     if min(uf) < CELL_MV_LO or max(uf) > CELL_MV_HI:
         return None, 'cell_voltage'
-    lag, corr = _best_lag_diffs(_diffs(u_seq), _diffs(i_seq) if di is None else di)
+    lag, best_c, _ = _best_lag_diffs(_diffs(u_seq), _diffs(i_seq) if di is None else di)
     if lag is None:
         return None, 'lag'
+    # u must rise with charge current before any shifting: the LEVELS of u and
+    # i, paired as sampled (lag 0), must correlate positively. A lag that only
+    # correlates positively because a periodic load flips sign every half
+    # period is what a wrong current sign looks like. (Levels, not differences:
+    # the differences of a correct pair with a one-sample skew barely correlate
+    # at lag 0, the levels do, since loads are held for many samples.)
+    c0 = _corr([(x, y) for x, y in zip(i_seq, u_seq) if x == x and y == y])
+    if not (best_c > 0 and c0 is not None and c0 > 0):
+        return None, 'lag_sign'
     n = len(i_seq)
     ip, up = [], []
     for k in range(max(0, -lag), min(n, n - lag)):
@@ -302,7 +401,7 @@ def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None):
             up.append(y)
     if len(ip) < MIN_PAIRS:
         return None, 'cell_pairs'
-    lam = noise_ratio(noise_std(up), noise_std(ip))
+    lam = noise_ratio(effective_noise(noise_std(up), q_u), effective_noise(noise_std(ip), q_i))
     if lam is None:
         return None, 'noise'
     fit = deming_irls(ip, up, lam)
@@ -318,10 +417,12 @@ def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None):
     return dict(r=r, u0=u0, r2=r2, n=len(ip), n_kept=n_kept, lag=lag, lam=lam), None
 
 
-def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
-    """Evaluate one window. `rows` are (t, i_charge, soc, voltages, temp[,
+def evaluate_window(rows, cell_reasons: Optional[Counter] = None, q_i=None,
+                    q_u=None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Evaluate one window. `rows` are bins (t, i_charge, soc, voltages, temp[,
     pack_temp]) in time order; i_charge/soc/temps may be NaN/None, voltages a
-    tuple (NaN for a missing cell) or None. Returns (window result, None) or
+    tuple (NaN for a missing cell) or None. q_i is the current's quantisation
+    step, q_u a per-cell list (None: unknown). Returns (window result, None) or
     (None, reason)."""
     real = [r for r in rows if _finite(r[1]) and r[3] and any(v == v for v in r[3])]
     if len(real) < MIN_PAIRS:
@@ -341,21 +442,33 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
     if max(socs) - min(socs) > MAX_SOC_DRIFT:
         return None, 'soc_drift'
 
-    # Per-cell sequences run over EVERY row of the window, missing values NaN,
-    # so the lag shift moves by real samples and never pairs across a hole.
+    # Per-cell sequences run over every bin of the window, missing values NaN,
+    # so the lag shift moves by real bins and never pairs across a hole.
     nan = math.nan
     i_seq = [r[1] if _finite(r[1]) else nan for r in rows]
     di = _diffs(i_seq)
     n_cells = max(len(r[3]) for r in real)
-    accepted = []
+    fits = []
     for c in range(n_cells):
         u_seq = [r[3][c] if r[3] and c < len(r[3]) else nan for r in rows]
-        res, why = fit_cell(i_seq, u_seq, di)
+        qu = q_u[c] if q_u is not None and c < len(q_u) else None
+        res, why = fit_cell(i_seq, u_seq, di, q_i=q_i, q_u=qu)
         if res is None:
             if cell_reasons is not None:
                 cell_reasons[why] += 1
             continue
-        accepted.append(res['r'])
+        fits.append(res)
+
+    # The cells are read by one BMS loop, so their U-vs-I skew is the same up to
+    # a bin. Cells that picked a far-off lag found a coincidental alignment.
+    accepted = []
+    if fits:
+        lag_med = median([f['lag'] for f in fits])
+        for f in fits:
+            if abs(f['lag'] - lag_med) <= MAX_LAG_SPREAD:
+                accepted.append(f['r'])
+            elif cell_reasons is not None:
+                cell_reasons['lag_spread'] += 1
 
     # A window counts only when most cells agree it is evaluable: a window where
     # one cell passes and fifteen fail is a marginal window, not a measurement.
@@ -376,6 +489,49 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None):
     ), None
 
 
+class _Bin:
+    """Accumulates the real pairs of one BIN_S interval."""
+    __slots__ = ('idx', 'n', 'st', 'si', 'su', 'nu', 'soc', 'soc_ok', 'temp', 'ptemp')
+
+    def __init__(self, idx, n_cells):
+        self.idx = idx
+        self.n = 0
+        self.st = self.si = 0.0
+        self.su = [0.0] * n_cells
+        self.nu = [0] * n_cells
+        self.soc = 0.0
+        self.soc_ok = True
+        self.temp = []
+        self.ptemp = []
+
+    def add(self, t, i, soc, vt, temp, ptemp):
+        self.n += 1
+        self.st += t
+        self.si += i
+        if len(vt) > len(self.su):
+            self.su.extend([0.0] * (len(vt) - len(self.su)))
+            self.nu.extend([0] * (len(vt) - len(self.nu)))
+        for c, v in enumerate(vt):
+            if v == v:
+                self.su[c] += v
+                self.nu[c] += 1
+        if soc == soc:
+            self.soc += soc
+        else:
+            self.soc_ok = False
+        if temp is not None:
+            self.temp.append(temp)
+        if ptemp is not None:
+            self.ptemp.append(ptemp)
+
+    def row(self):
+        n = self.n
+        volts = tuple(s / k if k else math.nan for s, k in zip(self.su, self.nu))
+        return (self.st / n, self.si / n, self.soc / n if self.soc_ok else math.nan, volts,
+                sum(self.temp) / len(self.temp) if self.temp else None,
+                sum(self.ptemp) / len(self.ptemp) if self.ptemp else None)
+
+
 class CellResistanceEstimator:
     """Streaming per-BMS estimator. Feed add() once per sampler iteration."""
 
@@ -383,30 +539,88 @@ class CellResistanceEstimator:
         self.name = name
         self.enabled = True
         self.disabled_reason: Optional[str] = None
-        self._rows = deque()
+        self._rows = deque()  # closed bins
+        self._bin: Optional[_Bin] = None
         self._next_end: Optional[float] = None
         self._last_t: Optional[float] = None
+        # learnt quantisation steps (smallest real step seen), a property of the
+        # BMS, so they survive a window restart
+        self.q_i: Optional[float] = None
+        self.q_u: List[Optional[float]] = []
+        self._prev_i: Optional[float] = None
+        self._prev_u: Optional[tuple] = None
+        self._oob_since: Optional[float] = None
+        self._oob_n = 0
         self.windows = deque(maxlen=ROLLING_WINDOWS)  # accepted window results
         self.counts = Counter()  # window outcomes since the last summary
         self.cell_reasons = Counter()
+        self.n_dropped = 0  # samples with a cell outside the LFP band, since the last summary
         self._t_summary: Optional[float] = None
         self._announced = False
 
     @property
     def value(self) -> Optional[float]:
-        """Median over the last ROLLING_WINDOWS accepted windows [mOhm per cell],
-        or None before PUBLISH_MIN_WINDOWS were accepted."""
+        """Median over the accepted windows kept (last ROLLING_WINDOWS, none
+        older than MAX_WINDOW_AGE_S) [mOhm per cell], or None with fewer than
+        PUBLISH_MIN_WINDOWS."""
         if len(self.windows) < PUBLISH_MIN_WINDOWS:
             return None
         return median([w['r'] for w in self.windows])
 
     def disable(self, reason: str):
         if self.enabled:
-            logger.info('%s: cell resistance estimator disabled: %s', self.name, reason)
+            logger.warning('%s: cell resistance estimator disabled: %s', self.name, reason)
         self.enabled = False
         self.disabled_reason = reason
         self._rows.clear()
+        self._bin = None
         self.windows.clear()
+
+    def _restart(self):
+        self._rows.clear()
+        self._bin = None
+        self._next_end = None
+        self._prev_i = None
+        self._prev_u = None
+
+    def _chemistry(self, t, vt) -> bool:
+        """True if the sample may be used. Tracks a persistently non-LFP pack."""
+        fin = [v for v in vt if v == v]
+        if not fin:
+            return True
+        med = median(fin)
+        if LFP_MV_LO <= med <= LFP_MV_HI:
+            self._oob_since = None
+            self._oob_n = 0
+        else:
+            if self._oob_since is None:
+                self._oob_since = t
+            self._oob_n += 1
+            if t - self._oob_since >= CHEM_PERSIST_S and self._oob_n >= CHEM_PERSIST_N:
+                self.disable('the median cell voltage has been outside %.0f..%.0f mV for %.0f s (%d samples, '
+                             'now %.0f mV); the gates are only valid for LiFePO4'
+                             % (LFP_MV_LO, LFP_MV_HI, t - self._oob_since, self._oob_n, med))
+                return False
+        if min(fin) < LFP_MV_LO or max(fin) > LFP_MV_HI:
+            self.n_dropped += 1
+            return False
+        return True
+
+    def _learn_quantisation(self, i, vt):
+        d = quant_step(self._prev_i, i)
+        if d is not None and (self.q_i is None or d < self.q_i):
+            self.q_i = d
+        if len(self.q_u) < len(vt):
+            self.q_u.extend([None] * (len(vt) - len(self.q_u)))
+        pu = self._prev_u
+        if pu is not None:
+            for c in range(min(len(vt), len(pu))):
+                d = quant_step(pu[c], vt[c])
+                q = self.q_u[c]
+                if d is not None and (q is None or d < q):
+                    self.q_u[c] = d
+        self._prev_i = i
+        self._prev_u = vt
 
     def add(self, t: float, current: float, voltages: Optional[List[float]],
             soc: Optional[float] = None, temp: Optional[float] = None,
@@ -425,23 +639,24 @@ class CellResistanceEstimator:
         if not self.enabled or not _finite(t):
             return None
 
-        vt = None
-        if voltages:
-            vt = tuple(float(v) if _finite(v) else math.nan for v in voltages)
-            for c, v in enumerate(vt):
-                if v == v and not LFP_MV_LO <= v <= LFP_MV_HI:
-                    self.disable('cell %d reads %.0f mV, outside %.0f..%.0f mV; the gates are only '
-                                 'valid for LiFePO4' % (c + 1, v, LFP_MV_LO, LFP_MV_HI))
-                    return None
-
         if self._last_t is not None:
             if t == self._last_t:
                 return None  # the BMS re-served the same measurement: not a new pair
             if t < self._last_t or t - self._last_t > WINDOW_S:
-                # clock stepped back, or a gap longer than a window: start over
-                self._rows.clear()
-                self._next_end = None
+                self._restart()  # clock stepped back, or a gap longer than a window
         self._last_t = t
+
+        vt = None
+        if voltages:
+            vt = tuple(float(v) if _finite(v) else math.nan for v in voltages)
+            if not self._chemistry(t, vt):
+                if not self.enabled:
+                    return None
+                vt = None  # dropped: not a pair, but time still moves on
+        i_chg = -float(current) if _finite(current) else math.nan
+        use = vt is not None and i_chg == i_chg and any(v == v for v in vt)
+        if use:
+            self._learn_quantisation(i_chg, vt)
 
         if self._t_summary is None:
             self._t_summary = t
@@ -449,16 +664,24 @@ class CellResistanceEstimator:
             self._log_summary()
             self._t_summary = t
 
+        idx = math.floor(t / BIN_S)
+        if self._bin is not None and self._bin.idx != idx:
+            self._rows.append(self._bin.row())
+            self._bin = None
+
         new_value = None
         if self._next_end is None:
-            self._next_end = t + WINDOW_S
+            self._next_end = idx * BIN_S + WINDOW_S  # on the bin grid, as are all later ends
         while t >= self._next_end:
             end = self._next_end
             rows = [r for r in self._rows if end - WINDOW_S <= r[0] < end]
-            res, why = evaluate_window(rows, self.cell_reasons) if rows else (None, 'pairs')
+            res, why = evaluate_window(rows, self.cell_reasons, self.q_i, self.q_u) if rows else (None, 'pairs')
             self.counts[why or 'accepted'] += 1
             if res is not None:
+                res_t = res['t']
                 self.windows.append(res)
+                while self.windows[0]['t'] < res_t - MAX_WINDOW_AGE_S:
+                    self.windows.popleft()
                 logger.debug('%s: cell resistance window R=%.3f mOhm (%d/%d cells, dod=%.0f, temp=%s, '
                              'pack_temp=%s)', self.name, res['r'], res['n_accepted'], res['n_cells'], res['dod'],
                              res['temp'], res['pack_temp'])
@@ -473,23 +696,28 @@ class CellResistanceEstimator:
             while self._rows and self._rows[0][0] < self._next_end - WINDOW_S:
                 self._rows.popleft()
 
-        i_chg = -float(current) if _finite(current) else math.nan
-        s = float(soc) if _finite(soc) else math.nan
-        tc = float(temp) if _finite(temp) else None
-        tp = float(pack_temp) if _finite(pack_temp) else None
-        self._rows.append((t, i_chg, s, vt, tc, tp))
+        if use and vt is not None:  # (use implies vt; spelt out for the type checker)
+            if self._bin is None:
+                self._bin = _Bin(idx, len(vt))
+            s = float(soc) if _finite(soc) else math.nan
+            tc = float(temp) if _finite(temp) else None
+            tp = float(pack_temp) if _finite(pack_temp) else None
+            self._bin.add(t, i_chg, s, vt, tc, tp)
         return new_value
 
     def _log_summary(self):
         n = sum(self.counts.values())
-        if n:
+        if n or self.n_dropped:
             rej = ', '.join('%s=%d' % kv for kv in sorted(self.counts.items()) if kv[0] != 'accepted')
             cells = ', '.join('%s=%d' % kv for kv in self.cell_reasons.most_common(3))
             v = self.value
-            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s), estimate %s',
+            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s)%s, estimate %s',
                         self.name, n, self.counts['accepted'], rej or 'none rejected',
                         ('; cells: ' + cells) if cells else '',
+                        ('; %d samples dropped with a cell outside %.0f..%.0f mV'
+                         % (self.n_dropped, LFP_MV_LO, LFP_MV_HI)) if self.n_dropped else '',
                         ('%.3f mOhm' % v) if v is not None else
                         'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS))
         self.counts.clear()
         self.cell_reasons.clear()
+        self.n_dropped = 0

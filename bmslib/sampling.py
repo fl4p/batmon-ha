@@ -572,7 +572,13 @@ class BmsSampler:
 
             voltages = []
 
-            async def cached_fetch_voltages():
+            async def cached_fetch_voltages(optional=False):
+                """`optional`: only the impedance estimator wants them this cycle.
+                Its failure is not an error of the cycle: before the estimator
+                existed nothing fetched voltages then, so it must not push a
+                healthy link towards the error disconnect / power cycle. A
+                fetch a sink or the publish path needs still counts (it retries
+                after a failed optional one)."""
                 nonlocal voltages, err
                 if voltages:
                     return voltages
@@ -583,9 +589,13 @@ class BmsSampler:
 
                     if self.bms_group:
                         self.bms_group.update_voltages(bms, voltages)
-                except:
-                    logger.error("%s error fetching voltage", bms.name, exc_info=1)
-                    err = True
+                except Exception as e:
+                    if optional:
+                        logger.warning("%s error fetching voltage for the resistance estimator: %s", bms.name,
+                                       summarize_exc(e))
+                    else:
+                        logger.error("%s error fetching voltage", bms.name, exc_info=1)
+                        err = True
                     voltages = None
 
                 return voltages
@@ -598,7 +608,7 @@ class BmsSampler:
             if self.impedance is not None and self.impedance.enabled:
                 # needs this iteration's cell voltages next to its current, so
                 # fetch them even when no sink asked for them
-                voltages = await cached_fetch_voltages()
+                voltages = await cached_fetch_voltages(optional=True)
                 self._feed_impedance(sample, current_native, voltages)
 
             # z_score = self.power_stats.z_score(sample.power)

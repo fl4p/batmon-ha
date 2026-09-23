@@ -185,11 +185,15 @@ def test_no_pack_temp_without_the_option_or_for_groups():
     assert _sampler(_Group(), ambient_cache=AmbientCache())._pack_temp_publisher is None
 
 
+def _impedance_rows(s):
+    return list(s.impedance._rows) + ([s.impedance._bin.row()] if s.impedance._bin else [])
+
+
 def test_impedance_rows_carry_the_pack_temp_tag_or_none():
     s = _sampler(_Bms(mos=(40.0, 40.0, math.nan)), ambient_cache=AmbientCache(), impedance_estimator=True)
     for _ in range(3):
         asyncio.run(s())
-    tags = [r[5] for r in s.impedance._rows]
+    tags = [r[5] for r in _impedance_rows(s)]
     assert tags[0] == pytest.approx(40.0) and tags[1] == pytest.approx(40.0)
     assert tags[2] is None  # no MOS reading this iteration: unknown, not the last value
 
@@ -197,4 +201,19 @@ def test_impedance_rows_carry_the_pack_temp_tag_or_none():
 def test_impedance_without_pack_temp_has_no_tag():
     s = _sampler(_Bms(), impedance_estimator=True)
     asyncio.run(s())
-    assert s.impedance._rows[-1][5] is None
+    assert _impedance_rows(s)[-1][5] is None
+
+
+def test_a_failed_voltage_fetch_for_the_estimator_alone_is_not_a_cycle_error():
+    """With publish_period long and no sinks, only the estimator asks for cell
+    voltages; its failed fetch must not count towards reconnects."""
+
+    class _Flaky(_Bms):
+        async def fetch_voltages(self):
+            raise TimeoutError('no answer')
+
+    s = _sampler(_Flaky(), impedance_estimator=True)
+    assert asyncio.run(s()) is None  # first cycle publishes: that fetch counts, as before
+    assert s._num_errors == 1
+    assert asyncio.run(s()) is not None  # later: estimator-only, the sample is still good
+    assert s._num_errors == 0

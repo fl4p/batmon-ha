@@ -207,3 +207,25 @@ advertisement parser),
    (Daly quirk).
 4. Update this file with provenance (URL + a one-line description of the
    capture).
+
+---
+
+## Cell-resistance estimator — `daly_2023-11-14_impedance.csv.gz`
+
+A real capture, the maintainer's own pack (Daly BMS, 4 LFP cells), from the
+batmon InfluxDB, 2023-11-14 08:20–13:30 UTC (84 kB gzip'd, 7354 rows). Source:
+`report/cache/daly_bms_rdt_2023-11-14.parquet` of the bat-impedance project.
+
+The Influx sink drops unchanged fields, so the rows are reconstructed sampler
+iterations (the pairing the review's `replay2.py` does): a sample row followed
+by its cell-voltage row is one iteration, unchanged cells are carried from the
+previous voltage row, and a voltage row without a sample row gets the last
+current/SoC/temp at the median sample-to-voltage delay. `current` is the
+BmsSample sign (discharge > 0), i.e. the negated stored current, which was
+recorded after `invert_current`.
+
+It contains the multi-frame BLE decode glitch at 08:33:21 (cell 1 at
+3732 mV, then 3329/3512/2798/2926 mV), which disabled the first version of the
+estimator for good, and enough load steps for 6 accepted windows.
+Columns: `t` (unix s), `current` (A), `soc` (%), `temp` (°C), `u1`..`u4` (mV),
+empty = missing.
