@@ -6,6 +6,7 @@ test_pack_temp_pipeline.py; this is about how they are plugged in.
 """
 import asyncio
 import json
+import logging
 import math
 import time
 
@@ -110,6 +111,27 @@ def test_a_failing_state_callback_does_not_escape_the_paho_thread():
     mqtt_util.mqtt_message_handler(None, None, _Msg('a/b', '1'))
 
 
+def test_a_non_utf8_payload_does_not_escape_the_paho_thread():
+    got = []
+    mqtt_util.register_state_topic('a/b', got.append)
+    msg = _Msg('a/b', '')
+    msg.payload = b'\xff\xfe21.5'
+    mqtt_util.mqtt_message_handler(None, None, msg)
+    assert got == []
+
+
+@pytest.mark.parametrize('topic', ['sensors/+/temperature', 'sensors/#'])
+def test_wildcard_ambient_topics_are_refused_at_config_time(topic, caplog):
+    reg = []
+    with caplog.at_level('WARNING'):
+        cache = ambient_cache_from_config({'pack_temp_estimator': True, 'pack_temp_room_topic': topic},
+                                          lambda *a: reg.append(a), log=logging.getLogger('t'))
+    assert reg == [] and cache is not None and cache.get('room') is None
+    assert any('wildcard' in r.getMessage() for r in caplog.records)
+    with pytest.raises(ValueError):
+        mqtt_util.register_state_topic(topic, lambda p: None)
+
+
 # ------------------------------------------------------------------ sampler
 
 class _Bms:
@@ -189,13 +211,29 @@ def _impedance_rows(s):
     return list(s.impedance._rows) + ([s.impedance._bin.row()] if s.impedance._bin else [])
 
 
-def test_impedance_rows_carry_the_pack_temp_tag_or_none():
-    s = _sampler(_Bms(mos=(40.0, 40.0, math.nan)), ambient_cache=AmbientCache(), impedance_estimator=True)
+@pytest.mark.parametrize('bad_mos', [math.nan, 1648.0, float('inf')])
+def test_impedance_rows_carry_the_pack_temp_tag_or_none(bad_mos):
+    s = _sampler(_Bms(mos=(40.0, 40.0, bad_mos)), ambient_cache=AmbientCache(), impedance_estimator=True)
     for _ in range(3):
         asyncio.run(s())
     tags = [r[5] for r in _impedance_rows(s)]
     assert tags[0] == pytest.approx(40.0) and tags[1] == pytest.approx(40.0)
-    assert tags[2] is None  # no MOS reading this iteration: unknown, not the last value
+    assert tags[2] is None  # no usable MOS reading this iteration: unknown, not the last value
+
+
+def test_an_implausible_mos_reading_publishes_nothing_new():
+    """A finite but impossible MOS reading (1648 C, seen on a Daly) used to make
+    the RC estimator hand back its previous state, which was republished as if
+    it were new."""
+    client = _Client()
+    s = _sampler(_Bms(mos=(40.0, 1648.0)), client, ambient_cache=AmbientCache())
+    asyncio.run(s())
+    assert 'pt_fake/pack_temp_est' in client.published
+    del client.published['pt_fake/pack_temp_est']
+    mqtt_util._last_values.pop('pt_fake/pack_temp_est', None)  # defeat the unchanged-value dedup
+    asyncio.run(s())
+    assert 'pt_fake/pack_temp_est' not in client.published
+    assert s._pack_temp is None
 
 
 def test_impedance_without_pack_temp_has_no_tag():

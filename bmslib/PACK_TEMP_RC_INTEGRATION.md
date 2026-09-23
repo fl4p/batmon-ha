@@ -34,7 +34,15 @@ own MQTT integration does. Either topic may be left out: that channel then
 stays empty and the model runs on what it has, down to the MOSFET alone. A
 reading older than `pack_temp_ambient_max_age` counts as missing, so set it
 above the sensor's update interval (statestream publishes on change only). A
-missing ambient value is never replaced by a default.
+missing ambient value is never replaced by a default. Topics must be exact:
+a `+`/`#` wildcard would mix several sensors into one channel, so it is
+refused at start-up with a warning and that channel stays empty.
+
+A MOSFET reading that is missing, NaN or implausible (outside -100..200 °C,
+e.g. a 1648 °C glitch) is treated as missing: nothing new is published and
+the impedance tag is None. (The first wiring passed a finite but implausible
+reading to the estimator, which returns its previous state for it, and that
+state was republished as a new estimate.)
 
 * `main.py` builds the shared `AmbientCache` with
   `pack_temp_publisher.ambient_cache_from_config()` before the broker

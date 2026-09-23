@@ -15,7 +15,7 @@ sampler's main loop only sees one method call.
 import math
 from typing import Optional, TYPE_CHECKING
 
-from bmslib.pack_temp_rc import PackTempRCEstimator
+from bmslib.pack_temp_rc import PackTempRCEstimator, _valid
 from bmslib.ambient_cache import AmbientCache
 
 if TYPE_CHECKING:
@@ -52,6 +52,13 @@ def ambient_cache_from_config(conf, register_topic, log=None) -> Optional[Ambien
     cache = AmbientCache(max_age_s=max_age)
     for channel, key in AMBIENT_CHANNEL_KEYS:
         topic = (conf.get(key) or "").strip()
+        if '+' in topic or '#' in topic:
+            # one channel is one sensor; a wildcard would mix several into it
+            # (and the exact-topic dispatch would never match it anyway)
+            if log:
+                log.warning("pack temp estimator: %s=%r contains an MQTT wildcard; set the exact state topic "
+                            "of one temperature sensor. Running without %s ambient.", key, topic, channel)
+            continue
         if topic:
             register_topic(topic, cache.topic_callback(channel))
             if log:
@@ -89,9 +96,13 @@ class PackTempRCPublisher:
     def update_from_sample(self, sample: "BmsSample") -> Optional[float]:
         """Advance the estimator with this sample's MOS temp + current ambients,
         publish the result, return the estimate. Returns None and skips publish
-        if MOS temp is missing (the estimator's hard requirement)."""
+        if the MOS temp is missing or implausible (the estimator's hard
+        requirement)."""
         mos = sample.mos_temperature
-        if mos is None or (isinstance(mos, float) and math.isnan(mos)):
+        if not _valid(mos):
+            # missing, NaN or out of range (a 1648 C glitch): the estimator
+            # would not advance and hand back its previous state, which must
+            # not be published -- or tagged -- as a new estimate
             return None
         room = self.ambient.get(self.room_channel)
         outdoor = self.ambient.get(self.outdoor_channel)
@@ -104,7 +115,7 @@ class PackTempRCPublisher:
         self.publish_fn(topic, f"{t_est:.2f}")
         return t_est
 
-    def hass_discovery_payload(self, expire_after_seconds: int) -> dict:
+    def hass_discovery_payload(self, expire_after_seconds: int) -> tuple:
         """Returns the (topic, payload) HA-discovery entry to publish once on
         startup. Mirrors the pattern in mqtt_util.publish_hass_discovery."""
         node_id = self.device_topic.replace('/', '_')

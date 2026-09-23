@@ -398,7 +398,10 @@ _state_callbacks = {}
 def register_state_topic(topic: str, callback):
     """Route messages on `topic` to `callback(payload: str)`. Takes effect for the
     broker at the next subscribe_state_topics() -- call that from on_connect, so
-    the subscription survives a broker restart (clean session)."""
+    the subscription survives a broker restart (clean session). Exact topics
+    only: dispatch is a dict lookup on the message topic."""
+    if '+' in topic or '#' in topic:
+        raise ValueError('wildcards are not supported in a state topic: %r' % topic)
     _state_callbacks[topic] = callback
 
 
@@ -450,7 +453,13 @@ def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms):
 
 
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
-    payload = message.payload.decode("utf-8")
+    # runs on paho's network thread: an exception here would end that thread,
+    # and a state topic carries whatever the user pointed it at
+    try:
+        payload = message.payload.decode("utf-8")
+    except UnicodeDecodeError:
+        logger.warning('ignoring a non-UTF-8 message on %s', message.topic)
+        return
     state_cb = _state_callbacks.get(message.topic)
     if state_cb is not None:
         logger.debug("received state %s: %s", message.topic, payload)
