@@ -119,6 +119,11 @@ schema:
   concurrent_sampling: "bool?"
   verbose_log: "bool?"
 
+  # How long an aiobmsble (`_ble`) device gets to answer one request, in
+  # seconds, split over 3 attempts with doubling waits. Library default 5.
+  # Necessarily global: aiobmsble holds it on the class (#415).
+  ble_request_timeout: "float(0.5,120)?"
+
   bt_power_cycle: "bool?"
 
   # Last-resort recovery: power-cycle the controller when reconnecting one BMS

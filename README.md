@@ -144,6 +144,16 @@ For verbose logs of particular BMS add `debug: true`.
 * `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect
   to the BMS from your phone anymore while the add-on is running.
 * `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
+  It does *not* change how long a BMS is given to answer — see `ble_request_timeout` for that.
+* `ble_request_timeout` is how long an `aiobmsble` device (`felicity`, `daly_ble`, any tag from
+  [Supported BLE Devices](#supported-ble-devices)) gets to answer one request, in seconds. The default is the library's
+  5 s, split over three attempts with doubling waits (0.71 s, 1.43 s, 2.86 s), so a pack slower than 0.71 s only
+  answers on a retry. Raise it (e.g. `12`) if a device times out in `_await_msg` while others on the same adapter are
+  being polled. Note that a device whose write mode aiobmsble has not pinned down yet runs that sequence twice (once
+  per mode), so a fully silent pack takes about **twice** the configured value before it gives up — and a slow poll
+  pushes out the whole cycle, since `sample_period` is slept *after* the poll, not instead of it. It is necessarily
+  global: aiobmsble holds the value on its base class, so it applies to every `_ble` device at once, and a per-device
+  setting would be a lie (#415).
 * Set `publish_period` to a higher value than `sample_period` to throttle MQTT data, while sampling BMS for accurate
   energy meters. On publish, samples since previous publish are averaged. Periods shorter than 2s can slow down history
   plots in HA.

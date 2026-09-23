@@ -255,6 +255,24 @@ async def main():
                 # others, and addon_main.sh aborts the add-on on a non-zero exit
                 logger.warning('%s: not bonded, it may not answer', dev.get('alias') or addr)
 
+    if user_config.get('ble_request_timeout') is not None:
+        # Process-wide: aiobmsble reads its retry budget off the BaseBMS class,
+        # so this cannot be per-device (#415). Applied before any device is
+        # constructed, and reported so the log says what is actually in force.
+        try:
+            from bmslib.models.BLE_BMS_wrap import apply_request_timeout
+            eff = apply_request_timeout(user_config['ble_request_timeout'])
+        except ImportError as e:
+            eff = None
+            if not pair_only:
+                # venv_bleak_pairing deliberately has no aiobmsble, so this is
+                # expected in the pre-step and only worth saying in the real run
+                logger.warning('ble_request_timeout needs aiobmsble (%s)', e)
+        if eff:
+            logger.info('aiobmsble request timeout %.2fs per write mode for every _ble '
+                        'device (%d attempts waiting %s)', eff['total'], eff['attempts'],
+                        ', '.join('%.2fs' % w for w in eff['waits']))
+
     names = set()
     dev_args: Dict[str, dict] = {}
 

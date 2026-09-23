@@ -35,6 +35,58 @@ def _bms_config_kwargs(*, keep_alive: bool) -> dict:
     return dict(config=BMSConfig(keep_alive=keep_alive))
 
 
+#: bounds for `ble_request_timeout`. Below half a second no BMS could answer
+#: even the first attempt; above two minutes a stuck poll would outlast any
+#: sensible sample period and look like a hang.
+REQUEST_TIMEOUT_RANGE = (0.5, 120.0)
+
+
+def apply_request_timeout(seconds) -> Optional[dict]:
+    """Set how long aiobmsble waits for a BMS to answer one request.
+
+    aiobmsble gives a poll `BaseBMS.TIMEOUT` (5 s by default: BLEAK_TIMEOUT/4)
+    split over `MAX_RETRY` attempts with doubling waits -- 0.71 s, then 1.43 s,
+    then 2.86 s. A pack that is slower than the first wait relies on the
+    retries, which re-send the command while it is still working on the
+    previous one. The Felicity master in #415 times out this way when the
+    adapter is busy with its two siblings (why it is slow there is a
+    hypothesis, not something the report established).
+
+    The returned total is one pass. `_await_msg()` runs the whole sequence once
+    per write mode while `_inv_wr_mode` is still None, so a device that never
+    answers takes about twice this before raising.
+
+    `_await_msg()` reads these off the CLASS (`BaseBMS._RETRY_TIMEOUT`,
+    `BaseBMS.MAX_RETRY`), not off the instance, so this knob is necessarily
+    process-wide: it applies to every aiobmsble-backed device. That is why the
+    option is global and not per-device -- a per-device value would be a lie.
+
+    Returns the effective settings (for logging), or None when nothing was
+    changed, which includes every invalid value: a typo must leave the library
+    default in place rather than apply a nonsense timeout.
+    """
+    try:
+        timeout = float(seconds)
+    except (TypeError, ValueError, OverflowError):
+        logger.warning('ble_request_timeout: %r is not a number, ignoring it', seconds)
+        return None
+
+    lo, hi = REQUEST_TIMEOUT_RANGE
+    if not (math.isfinite(timeout) and lo <= timeout <= hi):
+        logger.warning('ble_request_timeout: %s is outside %s..%s s, ignoring it',
+                       seconds, lo, hi)
+        return None
+
+    from aiobmsble.basebms import BaseBMS
+    BaseBMS.TIMEOUT = timeout
+    # the derived value is what _await_msg() actually reads; setting TIMEOUT
+    # alone would change nothing, since the class computed this once at import
+    BaseBMS._RETRY_TIMEOUT = timeout / (2 ** BaseBMS.MAX_RETRY - 1)
+    waits = [BaseBMS._RETRY_TIMEOUT * min(2 ** a, BaseBMS._MAX_TIMEOUT_FACTOR)
+             for a in range(BaseBMS.MAX_RETRY)]
+    return dict(timeout=timeout, attempts=BaseBMS.MAX_RETRY, waits=waits, total=sum(waits))
+
+
 class BLEDeviceResolver:
     devices: Dict[Tuple[str, str], BLEDevice] = {}
 
