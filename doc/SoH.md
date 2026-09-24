@@ -149,7 +149,9 @@ remaining charge, else its SoC times its capacity) moved by the charge batmon br
 the capacity including the counter's resolution. The clock alone cannot tell: a host that boots offline with its clock
 restored from the shutdown sees 2 minutes after hours off, while the pack was in use, and without this check a 98 Ah
 pack was published at 49 Ah that way. Without a counter reading, before the counter's resolution is known (it has not
-moved yet since the first start) or without a capacity, a restart ends the segment like a longer one. A file that does
+moved yet since the first start), when the counter is another one than before the restart (the remaining charge before,
+SoC × capacity after, or another capacity setting: the resolution is learnt per counter) or without a capacity, a
+restart ends the segment like a longer one. A file that does
 not validate is discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while

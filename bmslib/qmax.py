@@ -72,7 +72,8 @@ So a restart continues the open segment only when the BMS's own charge counter
 (its remaining charge) moved by what the bridge counts, within RESUME_TOL_FRAC
 of the capacity including the counter's resolution, learnt from the data.
 Without that evidence -- no counter reading at either end, no resolution learnt
-yet, no capacity -- or against it, the restart ends the epoch like a gap.
+yet, no capacity, another counter than before (charge_counter) -- or against
+it, the restart ends the epoch like a gap.
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
@@ -494,6 +495,34 @@ def segment_age_ok(age: float) -> bool:
     return 0.0 <= age <= MAX_SEGMENT_AGE_S
 
 
+def charge_counter(charge, soc, capacity) -> Tuple[Optional[float], Optional[str]]:
+    """The BMS's own charge counter [Ah] and which counter it is: its
+    remaining charge ('charge'), else its SoC times the capacity it reports
+    ('soc*<capacity>', its SoC being that counter over that capacity), else
+    (None, None). The source names the scale: a counter's resolution and its
+    readings only compare with readings of the same source, so the capacity a
+    SoC is scaled with is part of it -- a changed capacity setting is another
+    counter. Here and not in the sampler, so that the code fingerprint covers
+    it: the counter is saved with the state."""
+    if finite(charge):
+        return float(charge), 'charge'
+    if finite(soc) and finite(capacity) and capacity > 0:
+        return soc * capacity / 100.0, 'soc*%r' % float(capacity)
+    return None, None
+
+
+def _counter_src_ok(src) -> bool:
+    if src == 'charge':
+        return True
+    if not isinstance(src, str) or not src.startswith('soc*'):
+        return False
+    try:
+        cap = float(src[4:])
+    except ValueError:
+        return False
+    return math.isfinite(cap) and cap > 0
+
+
 def _same_sign(dq: float, dsoc: Sequence[float]) -> bool:
     """Charge in (dq > 0) must raise every cell's SoC, charge out lower it.
     Otherwise the current sign is wrong (a driver, or invert_current applied
@@ -516,7 +545,8 @@ class QmaxEstimator:
         self._last_t: Optional[float] = None
         self._last_i: Optional[float] = None
         self._last_c: Optional[float] = None  # the BMS's charge counter [Ah] at _last_t, None when unknown
-        self.q_c: Optional[float] = None  # its resolution: the smallest non-zero step seen [Ah]
+        self._c_src: Optional[str] = None  # which counter (charge_counter); q_c belongs to it
+        self.q_c: Optional[float] = None  # its resolution: the smallest non-zero step seen of THAT counter [Ah]
         self._resumed = False  # set by restore(): the next sample is the first after a restart
         self._t_glitch: Optional[float] = None  # the last impossible current reading
         self.q_ah = 0.0
@@ -609,7 +639,7 @@ class QmaxEstimator:
     @locked
     def add(self, t: float, current: float, voltages: Optional[Sequence[float]] = None,
             temp: Optional[float] = None, capacity: Optional[float] = None,
-            bms_charge: Optional[float] = None) -> Optional[Dict[str, Any]]:
+            bms_charge: Optional[float] = None, charge_src: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Feed one sampler iteration.
 
         t: sample timestamp [s]; current [A], BmsSample sign (positive =
@@ -618,7 +648,8 @@ class QmaxEstimator:
         known (pack estimate, BMS probes, or the MOSFET at rest), None when
         unknown; capacity [Ah]: what the BMS reports, None/NaN when unknown,
         never used as a reference (module doc); bms_charge [Ah]: the BMS's own remaining-charge counter, None/NaN when
-        unknown (only used as evidence across a restart, see the module doc).
+        unknown (only used as evidence across a restart, see the module doc), and charge_src which counter it is
+        (charge_counter; None: 'charge').
 
         Returns result() when this call accepted a segment and at least
         PUBLISH_MIN_SEGMENTS are in, else None -- a caller that publishes the
@@ -646,12 +677,13 @@ class QmaxEstimator:
 
         i = -float(current)  # charge current
         c = float(bms_charge) if finite(bms_charge) else None
+        src = (charge_src or 'charge') if c is not None else None
         new = None
         if self._last_t is not None:
             dt = t - self._last_t
             if not 0 <= dt <= MAX_GAP_S:  # (dt < 0 cannot reach here: _clock_back reset _last_t)
                 new = self._gap(t, 'gap')
-            elif self._resumed and not self._resume_ok(t, i, dt, c):
+            elif self._resumed and not self._resume_ok(t, i, dt, c, src):
                 new = self._gap(t, 'restart_unverified')
             else:
                 assert self._last_i is not None
@@ -659,6 +691,11 @@ class QmaxEstimator:
                 if dt <= COVERED_DT_S:
                     self.covered_s += dt
         self._resumed = False
+        if c is not None and src != self._c_src:
+            # Another counter (the BMS reported its remaining charge only now or
+            # no longer, or scales its SoC by another capacity): the smallest
+            # step of the old one says nothing about this one's resolution.
+            self._c_src, self.q_c, self._last_c = src, None, None
         if c is not None and self._last_c is not None:
             step = abs(c - self._last_c)
             if step > 1e-9 * max(1.0, abs(c)) and (self.q_c is None or step < self.q_c):
@@ -712,7 +749,7 @@ class QmaxEstimator:
             b['temp'].append(float(temp))
         return new
 
-    def _resume_ok(self, t: float, i: float, dt: float, c: Optional[float]) -> bool:
+    def _resume_ok(self, t: float, i: float, dt: float, c: Optional[float], src: Optional[str]) -> bool:
         """First sample after a restart, dt after the last one saved: may the
         open segment go on? Only on evidence that the charge the linear bridge
         counts is the charge that moved, from the BMS's own counter (see the
@@ -722,6 +759,8 @@ class QmaxEstimator:
         bridge = 0.5 * (i + self._last_i) * dt / 3600.0
         if c is None or self._last_c is None:
             why = 'the BMS reports no remaining charge to check it against'
+        elif src != self._c_src:
+            why = 'the charge counter is another one than before (%s, was %s)' % (src, self._c_src)
         elif self.q_c is None:
             why = "the resolution of the BMS's charge counter is not known yet"
         elif not cap:
@@ -1025,7 +1064,8 @@ class QmaxEstimator:
         st: Dict[str, Any] = dict(
             version=STATE_VERSION, code=CODE_FINGERPRINT,
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
-            last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, q_charge=self.q_c,
+            last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, charge_src=self._c_src,
+            q_charge=self.q_c,
             t_glitch=self._t_glitch,
             q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
@@ -1079,9 +1119,14 @@ class QmaxEstimator:
         if (last_t is None) != (last_i is None):
             raise ValueError('last_t/last_i %r/%r' % (last_t, last_i))
         last_c = v_opt_fin(st.get('last_charge'), 'last_charge')
+        c_src = st.get('charge_src')
+        if c_src is not None and not _counter_src_ok(c_src):
+            raise ValueError('charge_src %r' % (c_src,))
         q_c = v_opt_fin(st.get('q_charge'), 'q_charge')
         if q_c is not None and not q_c > 0:
             raise ValueError('q_charge %r' % q_c)
+        if c_src is None and (last_c is not None or q_c is not None):
+            raise ValueError('last_charge/q_charge %r/%r of no counter' % (last_c, q_c))
         q_ah = v_fin(st.get('q_ah'), 'q_ah')
         covered = v_fin(st.get('covered_s'), 'covered_s')
         epoch = v_int(st.get('epoch'), 'epoch')
@@ -1148,7 +1193,7 @@ class QmaxEstimator:
         last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
 
         self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
-        self._last_c, self.q_c = last_c, q_c
+        self._last_c, self._c_src, self.q_c = last_c, c_src, q_c
         self._t_glitch = v_opt_fin(st.get('t_glitch'), 't_glitch')
         self._resumed = last_t is not None  # the next sample decides whether the open segment goes on
         self.anchors.extend(anchors[-MAX_ANCHORS:])

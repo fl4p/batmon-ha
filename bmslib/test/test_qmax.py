@@ -140,14 +140,16 @@ def full_cycles(n=2, rest=7200, dq=88.0, **kw):
     return p.end()
 
 
-def run(rows, est=None, cap=100.0, curve=SYNTH, charge=None):
-    """charge: the BMS's counter by t (Pack.charge), or None: not reported."""
+def run(rows, est=None, cap=100.0, curve=SYNTH, charge=None, src=None):
+    """charge: the BMS's counter by t (Pack.charge), or None: not reported;
+    src: which counter it is by t (charge_counter), None: 'charge'."""
     if est is None:
         est = q.QmaxEstimator('t', design_capacity=cap, curve=curve)
         est._log_summary = lambda: None  # keep the counters for the whole run
     pub = []
     for t, i, v, temp in rows:
-        r = est.add(t, i, v, temp=temp, bms_charge=charge.get(t) if charge else None)
+        kw = dict(charge_src=src.get(t)) if src else {}  # only when given: the older add() had no such argument
+        r = est.add(t, i, v, temp=temp, bms_charge=charge.get(t) if charge else None, **kw)
         if r is not None:
             pub.append(r)
     return est, pub
@@ -1082,15 +1084,17 @@ def _fresh(cap=100.0):
     return est
 
 
-def _split_run(rows, cuts, full=True, cap=100.0, charge=None):
+def _split_run(rows, cuts, full=True, cap=100.0, charge=None, src=None, after_restore=None):
     est, pub = _fresh(cap), []
     for a, b in zip([0] + cuts, cuts + [len(rows)]):
-        _, p = run(rows[a:b], est, charge=charge)
+        _, p = run(rows[a:b], est, charge=charge, src=src)
         pub += p
         if b < len(rows):
             st = _via_json(est.get_state(full=full))
             est = _fresh(cap)
             assert est.restore(st)
+            if after_restore:
+                after_restore(est)
     return est, pub
 
 
@@ -1265,6 +1269,82 @@ def test_monotone_in_charge_hidden_by_a_restart():
     # check refuses is the rest plus the 0.1 Ah resolution above 2 Ah (2 % of
     # 100 Ah): 2.5 Ah hidden leaves 1.93, accepted; 3.0 leaves 2.43.
     assert verdicts[:4] == [True] * 4 and not verdicts[4]
+
+
+def test_the_counter_resolution_is_learnt_per_counter():
+    """Third review, finding 6: q_c only ever got smaller, whichever counter
+    it came from. The remaining charge in 1 mAh steps, then (the BMS stops
+    reporting it) SoC x capacity in 1 Ah steps: the 1 mAh resolution is not
+    this counter's, and a changed capacity setting is another counter too."""
+    est = _fresh()
+    for k in range(4):
+        est.add(T0 + 10 * k, -10.0, None, bms_charge=50.0 + 0.001 * k)
+    assert est.q_c == pytest.approx(0.001) and est._c_src == 'charge'
+    c, src = q.charge_counter(math.nan, 51.0, 100.0)
+    assert (c, src) == (51.0, 'soc*100.0')
+    for k in range(4, 8):
+        est.add(T0 + 10 * k, -10.0, None, bms_charge=51.0 + (k - 4), charge_src=src)
+    assert est.q_c == pytest.approx(1.0) and est._c_src == 'soc*100.0'
+    _, src2 = q.charge_counter(math.nan, 51.0, 120.0)
+    est.add(T0 + 90, -10.0, None, bms_charge=61.2, charge_src=src2)
+    assert est.q_c is None and est._c_src == 'soc*120.0'  # nothing learnt yet for this one
+
+
+def _coarse_after(rows, charge, cuts, step=1.0, before_s=3600.0, phase=0.25):
+    """_frozen_clock's counter, from before_s ahead of each restart on read
+    as SoC x capacity with an integer SoC: steps of `step` Ah. The phase puts
+    the last reading before the restart (53.2 Ah) near the top of its step,
+    where the quantisation hides the most."""
+    t_sw = [rows[k][0] - before_s for k in cuts]
+    src, out = {}, {}
+    for t, c in charge.items():
+        if any(t >= ts for ts in t_sw):
+            out[t], src[t] = math.floor((c - phase) / step) * step + phase, 'soc*100.0'
+        else:
+            out[t] = c
+    return out, src
+
+
+def test_a_restart_on_a_coarser_counter_checks_with_its_resolution():
+    """A 1 Ah counter (integer SoC) since an hour before the restart; 2.9 Ah
+    went by unseen. The counter moves by 2 steps, the bridge counts 0.73 Ah:
+    with the counter's own 1 Ah resolution the check sees up to 2.27 Ah
+    unaccounted for and ends the segment."""
+    rows, cuts, charge = _frozen_clock(hidden_ah=2.9, n=1)
+    coarse, src = _coarse_after(rows, charge, cuts)
+    est, _ = _split_run(rows, cuts, charge=coarse, src=src)
+    assert est.q_c == pytest.approx(1.0) and est.counts['restart_unverified'] == 1
+    assert not any(s['dq'] < 0 for s in est.segments)
+
+
+def test_calibration_a_resolution_kept_from_a_finer_counter_publishes_the_hidden_charge():
+    """The same, with q_c kept at the fine counter's 0.1 Ah (the old
+    behaviour): the restart continues, and 2.17 Ah that nothing counted are
+    in the segment -- more than the 2 Ah (2 %) the check stands for."""
+    rows, cuts, charge = _frozen_clock(hidden_ah=2.9, n=1)
+    coarse, src = _coarse_after(rows, charge, cuts)
+
+    def keep_fine(est):
+        est.q_c = 0.1
+    est, _ = _split_run(rows, cuts, charge=coarse, src=src, after_restore=keep_fine)
+    dis = [s for s in est.segments if s['dq'] < 0]
+    assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
+    assert (1 - dis[0]["qmax"] / 98.0) * 100.0 > 100 * q.RESUME_TOL_FRAC  # 95.0 Ah, 3.1 % low
+
+
+def test_a_restart_across_a_change_of_counter_ends_the_segment():
+    """Readings of two counters do not compare: the remaining charge before,
+    SoC x capacity after (or another capacity setting)."""
+    p = Pack().rest()
+    p.run(50.0, 1800).run(50.0, 120, sample=False).run(50.0, 3600 * 88 / 50 - 1920).rest()
+    p.run(-50.0, 3600 * 88 / 50).rest().end()
+    rows = p.rows
+    cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
+    est, _ = _split_run(rows, [cut], charge=p.charge)
+    assert est.counts['restart_unverified'] == 0 and any(s['dq'] < 0 for s in est.segments)
+    src = {t: ('soc*100.0' if t >= rows[cut][0] else 'charge') for t in p.charge}
+    est, _ = _split_run(rows, [cut], charge=p.charge, src=src)
+    assert est.counts['restart_unverified'] == 1 and not any(s['dq'] < 0 for s in est.segments)
 
 
 def test_restoring_publishes_nothing_by_itself():
@@ -1442,6 +1522,12 @@ def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
 
 
 BAD_STATES = [
+    ('q_charge zero', lambda s: s.update(q_charge=0.0)),
+    ('q_charge negative', lambda s: s.update(q_charge=-0.1)),
+    ('q_charge NaN', lambda s: s.update(q_charge=float('nan'))),
+    ('q_charge of no counter', lambda s: s.update(charge_src=None)),
+    ('charge_src unknown', lambda s: s.update(charge_src='voltage')),
+    ('charge_src bad capacity', lambda s: s.update(charge_src='soc*-5.0')),
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
     ('q_ah NaN', lambda s: s.update(q_ah=float('nan'))),
@@ -1464,8 +1550,9 @@ BAD_STATES = [
 
 
 def _mid_rest_state():
-    rows = full_cycles(n=1, dt=7.0).rows
-    est, _ = run(rows[:len(rows) - 700])
+    p = full_cycles(n=1, dt=7.0)
+    est, _ = run(p.rows[:len(p.rows) - 700], charge=p.charge)
+    assert est.q_c  # a counter and its resolution are in the state
     return _via_json(est.get_state())
 
 
@@ -1809,10 +1896,14 @@ def test_an_estimator_exception_disables_it_without_breaking_sampling(monkeypatc
 
 
 def test_sampler_feeds_the_bms_charge_counter_or_soc_times_capacity():
-    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, charge=71.5, capacity=100.0)) == 71.5
-    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, soc=50.0, capacity=200.0)) == 100.0
-    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, soc=50.0)) is None
-    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0)) is None
+    def cc(**kw):
+        s = BmsSample(voltage=53.0, current=1.0, **kw)
+        return q.charge_counter(s.charge, s.soc, s.capacity)
+    assert cc(charge=71.5, capacity=100.0) == (71.5, 'charge')
+    assert cc(soc=50.0, capacity=200.0) == (100.0, 'soc*200.0')
+    assert cc(soc=50.0) == (None, None) and cc() == (None, None)
+    s, bms = _run_sampler(3, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
+    assert s.qmax._c_src == 'charge' and s.qmax._last_c == pytest.approx(80.0 - 10.0 * 3 / 3600, abs=1e-3)
 
 
 class _Counting(_Bms):

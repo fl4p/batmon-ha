@@ -797,29 +797,16 @@ class BmsSampler:
         mos = sample.mos_temperature
         return mos if isinstance(mos, (int, float)) and -40 < mos < 100 else None
 
-    @staticmethod
-    def _bms_charge(sample: BmsSample):
-        """The BMS's own charge counter [Ah]: its remaining charge, else its
-        SoC times the capacity it reports (its SoC is that counter over that
-        capacity). None when neither is known -- the Qmax estimator then does
-        not continue an open segment across a restart."""
-        c = sample.charge
-        if isinstance(c, (int, float)) and math.isfinite(c):
-            return float(c)
-        soc, cap = sample.soc, sample.capacity
-        if isinstance(soc, (int, float)) and isinstance(cap, (int, float)) and math.isfinite(soc) \
-                and math.isfinite(cap) and cap > 0:
-            return soc * cap / 100.0
-        return None
-
     async def _feed_qmax(self, sample: BmsSample, current: float, voltages):
         est = self.qmax
         if est is None:
             return
         try:
             temp = await self._qmax_temperature(sample)
+            from bmslib.qmax import charge_counter
+            counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
             r = est.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
-                        bms_charge=self._bms_charge(sample))
+                        bms_charge=counter, charge_src=counter_src)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
