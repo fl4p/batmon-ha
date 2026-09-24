@@ -75,10 +75,15 @@ async def fetch_loop(fn, period, max_errors, max_backoff=60):
         await fn.bms.disconnect()
 
 
-def store_states(samplers: list[BmsSampler]):
+def store_states(samplers: list[BmsSampler], final=False):
     meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
     from bmslib.store import store_meter_states
     store_meter_states(meter_states)
+    for s in samplers:
+        try:
+            s.store_impedance_state(final=final)
+        except Exception as e:
+            logger.error('%s: error storing cell resistance state: %s', s.bms.name, e)
 
 
 def _runtime_kind():
@@ -447,6 +452,7 @@ async def main():
         except Exception as e:
             logger.warning('GUI state disabled: %s', e)
 
+    from bmslib.store import load_impedance_state
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),
@@ -462,6 +468,7 @@ async def main():
         bt_power_cycle_on_error=user_config.get('bt_power_cycle_on_error', False),
         reconnect_interval_s=float(user_config.get('reconnect_interval_minutes') or 0) * 60 or None,  # <=0 -> off
         impedance_estimator=bool(user_config.get('impedance_estimator', False)),
+        impedance_state=user_config.get('impedance_estimator') and load_impedance_state(bms.name),
         ambient_cache=ambient_cache,
     ) for bms in bms_list]
 
@@ -585,7 +592,7 @@ async def main():
 
     shutdown = True
 
-    store_states(sampler_list)
+    store_states(sampler_list, final=True)
 
     for sink in sinks:
         try:

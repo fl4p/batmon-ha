@@ -47,4 +47,22 @@ because the gates only hold for LiFePO4. The log says so once, as a warning.
 Cell voltages are fetched on every sample while the estimator is on, even if no other sink needs them. A failed fetch
 that only the estimator asked for is logged but does not count towards the reconnect logic.
 
+## Restarts
+
+The estimator's state is saved per BMS in `impedance_<name>.json` in the add-on's data directory: the accepted
+windows and the learnt quantisation steps every 30 s when they changed, and everything, including the window in
+progress, at shutdown. After a restart the saved windows count towards the 5, so there is no new warm-up, and the saved
+estimate is published again with the next accepted window. A restart within a window continues that window.
+
+Not restored:
+
+* windows saved by a different version of the estimator code (an add-on update that changed it): they would mix two
+  definitions of R in one median, so the warm-up starts again; the learnt quantisation steps are kept,
+* a state file that does not validate (logged as a warning): the estimator starts fresh,
+* a switch-off after an internal error: the next start tries again. A switch-off because the pack is not LiFePO4 is
+  kept.
+
+Delete the file to start over, for example after swapping the pack behind a BMS name or to retry after a non-LiFePO4
+switch-off.
+
 Background and the offline analysis: [dev/Impedance.md](dev/Impedance.md).

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import math
 import random
 import re
@@ -158,6 +159,7 @@ class BmsSampler:
                  bt_power_cycle_on_error=False,
                  reconnect_interval_s: Optional[float] = None,
                  impedance_estimator=False,
+                 impedance_state=None,
                  ambient_cache=None,
                  ):
 
@@ -240,6 +242,9 @@ class BmsSampler:
             from bmslib.impedance import CellResistanceEstimator
             self.impedance = CellResistanceEstimator(bms.name)
             logger.info('%s: cell resistance estimator enabled (experimental)', bms.name)
+            if impedance_state:
+                self.impedance.restore(impedance_state)
+        self._impedance_saved = None  # JSON of the last state written, to skip unchanged saves
 
         # pack_temp_estimator (off by default): one RC estimator per real pack,
         # all sharing the ambient cache. Runs without MQTT too (mqtt_single_out
@@ -295,6 +300,20 @@ class BmsSampler:
             debug_data=dd,
             expire_after=self.expire_after_seconds,
         )
+
+    def store_impedance_state(self, final=False):
+        """Save the cell-resistance estimator. Periodic saves (final=False) carry
+        the compact state and only write when it changed; the final one at
+        shutdown carries everything, including the window in progress."""
+        if self.impedance is None:
+            return
+        state = self.impedance.get_state(full=final)
+        js = json.dumps(state, sort_keys=True)
+        if js == self._impedance_saved:
+            return
+        from bmslib.store import store_impedance_state
+        store_impedance_state(self.bms.name, state)
+        self._impedance_saved = js
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
@@ -713,7 +732,7 @@ class BmsSampler:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: cell resistance estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
                          exc_info=True)
-            self.impedance.disable('internal error')
+            self.impedance.disable('internal error', persistent=False)
             return
         if r is not None:
             publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)

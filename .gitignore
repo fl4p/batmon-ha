@@ -8,6 +8,7 @@ options.json
 bms_meter_states.json
 
 /bat_*.json
+/impedance_*.json
 
 /venv
 tools/impedance/influxdb_*.json

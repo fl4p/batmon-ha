@@ -12,7 +12,7 @@ import math
 import os
 import random
 import time
-from collections import Counter
+from collections import Counter, deque
 
 import paho.mqtt.client as paho
 import pytest
@@ -699,3 +699,230 @@ def test_real_daly_capture_survives_the_glitch_and_publishes_a_plausible_value()
 def test_real_daly_capture_with_the_current_sign_flipped_publishes_nothing():
     est, published = _run_real(-1)
     assert published == [] and not est.windows
+
+
+# ------------------------------------------------------------ persistence
+
+def _via_json(state):
+    return json.loads(json.dumps(state))  # what store/load do to it
+
+
+def _split_run(rows, cuts, full=True):
+    """Run rows, but save/restore through JSON into a FRESH estimator at each cut."""
+    est, published = imp.CellResistanceEstimator('p'), []
+    for a, b in zip([0] + cuts, cuts + [len(rows)]):
+        _, pub = run(rows[a:b], est)
+        published += pub
+        if b < len(rows):
+            st = _via_json(est.get_state(full=full))
+            est = imp.CellResistanceEstimator('p')
+            assert est.restore(st)
+    return est, published
+
+
+@pytest.mark.parametrize('dt', [1.0, 0.4])  # 0.4 s: cuts land inside an open 1 s bin
+def test_full_state_continues_exactly_where_it_stopped(dt):
+    rows = trace(n=int(3600 / dt), dt=dt)
+    whole, pub_whole = run(rows)
+    cuts = [len(rows) // 7, len(rows) // 3 + 1, len(rows) // 2 + 3, (4 * len(rows)) // 5 + 1]
+    split, pub_split = _split_run(rows, cuts)
+    assert pub_whole and pub_split == pub_whole
+    assert [w['r'] for w in split.windows] == [w['r'] for w in whole.windows]
+    assert (split.q_i, split.q_u) == (whole.q_i, whole.q_u)
+
+
+def _attrs(est):
+    out = {}
+    for k, v in vars(est).items():
+        if k == '_bin':
+            v = None if v is None else {s: getattr(v, s) for s in type(v).__slots__}
+        elif isinstance(v, deque):
+            v = list(v)
+        out[k] = v
+    return out
+
+
+def test_full_state_restores_every_attribute():
+    """The invariant behind 'full persistence': a restored estimator IS the
+    saved one. Also fails for a field added to the class later but not to
+    get_state()."""
+    rows = trace(n=2001, dt=0.4)  # ends inside an open 1 s bin
+    est, _ = run(rows, imp.CellResistanceEstimator('p'))
+    assert est._bin is not None and est._rows and est.windows and est.counts
+    restored = imp.CellResistanceEstimator('p')
+    assert restored.restore(_via_json(est.get_state(full=True)))
+    assert _attrs(restored) == _attrs(est)
+
+
+def test_full_state_on_the_real_daly_capture_changes_nothing():
+    rows = [(t, i, v, soc) for t, i, v, soc, _ in real_daly_rows()]
+    temps = {t: temp for t, _, _, _, temp in real_daly_rows()}
+
+    def run_t(rows_, est):
+        pub = []
+        for t, i, v, soc in rows_:
+            x = est.add(t, i, v, soc, temps[t])
+            if x is not None:
+                pub.append(x)
+        return pub
+
+    whole = imp.CellResistanceEstimator('d')
+    pub_whole = run_t(rows, whole)
+    est, pub = imp.CellResistanceEstimator('d'), []
+    cuts = [len(rows) // 5, len(rows) // 2, (3 * len(rows)) // 4]
+    for a, b in zip([0] + cuts, cuts + [len(rows)]):
+        pub += run_t(rows[a:b], est)
+        if b < len(rows):
+            st = _via_json(est.get_state(full=True))
+            est = imp.CellResistanceEstimator('d')
+            assert est.restore(st)
+    assert pub_whole and pub == pub_whole
+
+
+def test_a_restart_after_a_gap_keeps_the_windows_and_skips_the_warm_up():
+    est, _ = run(trace())
+    assert est.value is not None
+    later = [(t + 3600, i, v, soc) for t, i, v, soc in trace(n=900, seed=5)]  # an hour later
+
+    restored = imp.CellResistanceEstimator('p')
+    assert restored.restore(_via_json(est.get_state(full=False)))
+    assert restored.value == est.value
+    first_pub_restored = next(k for k, (t, i, v, soc) in enumerate(later)
+                              if restored.add(t, i, v, soc) is not None)
+
+    fresh = imp.CellResistanceEstimator('p')
+    first_pub_fresh = next(k for k, (t, i, v, soc) in enumerate(later) if fresh.add(t, i, v, soc) is not None)
+    # restored: the first accepted window publishes; fresh: it waits for 5
+    assert first_pub_restored < first_pub_fresh
+
+
+def test_restoring_publishes_nothing_by_itself():
+    est, _ = run(trace())
+    restored = imp.CellResistanceEstimator('p')
+    assert restored.restore(_via_json(est.get_state()))
+    t = est._last_t + 3600
+    assert restored.add(t, 10.0, [3300] * 4, 60.0) is None  # no window completes: nothing goes out
+
+
+def test_changed_code_discards_the_windows_but_keeps_the_learnt_steps(caplog):
+    est, _ = run(trace())
+    st = _via_json(est.get_state())
+    st['code'] = 'something else'
+    restored = imp.CellResistanceEstimator('p')
+    with caplog.at_level('INFO'):
+        assert restored.restore(st)
+    assert not restored.windows and restored.value is None and not restored._rows
+    assert restored.q_i == est.q_i and restored.q_u == est.q_u
+    assert 'code changed' in caplog.text
+
+
+def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
+    est, _ = run(trace())
+    st = _via_json(est.get_state())
+    monkeypatch.setattr(imp, 'CODE_FINGERPRINT', None)  # source not readable
+    st['code'] = None
+    restored = imp.CellResistanceEstimator('p')
+    restored.restore(st)
+    assert not restored.windows
+
+
+BAD_STATES = [
+    ('not a dict', lambda s: ['a list']),
+    ('other version', lambda s: s.update(version=99)),
+    ('implausible R', lambda s: s['windows'][0].update(r=50.0)),
+    ('R is NaN', lambda s: s['windows'][0].update(r=float('nan'))),
+    ('t missing', lambda s: s['windows'][0].pop('t')),
+    ('windows out of order', lambda s: s['windows'].reverse()),
+    ('negative step', lambda s: s.update(q_i=-0.1)),
+    ('row garbage', lambda s: s['rows'].append('x')),
+    ('row after last_t', lambda s: s.update(last_t=s['rows'][0][0] - 1)),
+    ('bin missing a field', lambda s: s['bin'].pop('su')),
+]
+
+
+@pytest.mark.parametrize('what,mutate', BAD_STATES, ids=[b[0] for b in BAD_STATES])
+def test_a_state_that_does_not_validate_starts_fresh(caplog, what, mutate):
+    est, _ = run(trace(n=1200))
+    state = _via_json(est.get_state())
+    assert len(state['windows']) >= 2 and state['rows'] and state['bin']
+    state = mutate(state) or state
+    est = imp.CellResistanceEstimator('p')
+    with caplog.at_level('WARNING'):
+        assert est.restore(state) is False
+    assert est.enabled and not est.windows and est.value is None and not est._rows and est._bin is None
+    assert est.q_i is None
+    assert 'starting fresh' in caplog.text
+    # and it still works afterwards
+    _, published = run(trace(), est)
+    assert published
+
+
+def test_calibration_without_the_r_check_an_implausible_window_would_be_restored(monkeypatch):
+    est, _ = run(trace())
+    st = _via_json(est.get_state())
+    for w in st['windows']:
+        w['r'] = 50.0
+    monkeypatch.setattr(imp, 'R_MOHM_HI', 1e9)
+    restored = imp.CellResistanceEstimator('p')
+    assert restored.restore(st) and restored.value == 50.0
+
+
+def test_a_chemistry_disable_survives_a_restart_an_internal_error_does_not():
+    est, _ = run(nmc_pack())
+    assert not est.enabled
+    restored = imp.CellResistanceEstimator('p')
+    restored.restore(_via_json(est.get_state(full=False)))
+    assert not restored.enabled and 'LiFePO4' in restored.disabled_reason
+
+    est2, _ = run(trace(n=600))
+    est2.disable('internal error', persistent=False)
+    restored2 = imp.CellResistanceEstimator('p')
+    restored2.restore(_via_json(est2.get_state(full=False)))
+    assert restored2.enabled
+
+
+def test_restored_windows_still_age_out():
+    est, _ = run(trace())
+    restored = imp.CellResistanceEstimator('p')
+    restored.restore(_via_json(est.get_state(full=False)))
+    later = [(t + 8 * 86400, i, v, soc) for t, i, v, soc in trace(n=400, seed=9)]
+    _, published = run(later, restored)
+    assert all(w['t'] > later[0][0] for w in restored.windows)
+    assert published == [] and restored.value is None
+
+
+def test_store_and_load_round_trip_and_a_corrupt_file(tmp_path, monkeypatch, caplog):
+    import bmslib.store as store
+    monkeypatch.setattr(store, 'root_dir', str(tmp_path) + os.sep)
+    assert store.load_impedance_state('bat 1') is None  # no file yet
+    est, _ = run(trace())
+    store.store_impedance_state('bat 1', est.get_state())
+    assert os.listdir(tmp_path) == ['impedance_bat 1.json']  # no tmp file left behind
+    restored = imp.CellResistanceEstimator('bat 1')
+    assert restored.restore(store.load_impedance_state('bat 1'))
+    assert restored.value == est.value
+
+    (tmp_path / 'impedance_bat 1.json').write_text('{"version": 1, "windo')  # torn by a power cut
+    with caplog.at_level('WARNING'):
+        assert store.load_impedance_state('bat 1') is None
+    assert 'starts fresh' in caplog.text
+
+
+def test_sampler_saves_only_when_the_state_changed_and_restores_on_start(tmp_path, monkeypatch):
+    import bmslib.store as store
+    monkeypatch.setattr(store, 'root_dir', str(tmp_path) + os.sep)
+    writes = []
+    orig = store.store_impedance_state
+    monkeypatch.setattr(store, 'store_impedance_state', lambda n, st: (writes.append(st), orig(n, st)))
+
+    s, _ = _run_sampler(5, impedance_estimator=True)
+    s.store_impedance_state()
+    s.store_impedance_state()  # nothing new: compact state unchanged, no second write
+    assert len(writes) == 1 and 'rows' not in writes[0]
+    s.store_impedance_state(final=True)
+    assert len(writes) == 2 and writes[1]['rows'] is not None and writes[1]['last_t'] is not None
+
+    s2 = BmsSampler(_Bms(), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60,
+                    impedance_estimator=True, impedance_state=store.load_impedance_state('imp_fake'))
+    assert s2.impedance._last_t == s.impedance._last_t
+    assert s2.impedance.q_i == s.impedance.q_i

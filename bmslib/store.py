@@ -40,6 +40,34 @@ def store_meter_states(meter_states):
         os.replace(bms_meter_states_fn + s, bms_meter_states_fn)
 
 
+def impedance_state_file(bms_name):
+    return root_dir + 'impedance_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
+
+
+def load_impedance_state(bms_name):
+    """The saved cell-resistance estimator state, or None (no file, or one that
+    does not parse -- then the estimator starts fresh, with a warning)."""
+    fn = impedance_state_file(bms_name)
+    if not os.path.exists(fn):
+        return None
+    try:
+        with lock, open(fn) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning('%s: cannot read %s (%s), cell resistance estimator starts fresh', bms_name, fn, e)
+        return None
+
+
+def store_impedance_state(bms_name, state):
+    """Atomic (tmp + rename): a crash mid-write leaves the previous state."""
+    fn = impedance_state_file(bms_name)
+    with lock:
+        tmp = f'{fn}.{random_str(6)}.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(state, f)
+        os.replace(tmp, fn)
+
+
 def store_algorithm_state(bms_name, algorithm_name, state=None):
     fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
     with lock:

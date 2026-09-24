@@ -72,6 +72,7 @@ and the replay of real Daly data published 0.85 mOhm that way. The lag-0 sign
 check and the cross-cell lag agreement exist for that case; the replay then
 publishes nothing with the sign flipped. It remains a heuristic, not a proof.
 """
+import hashlib
 import math
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeGuard
@@ -150,9 +151,31 @@ PUBLISH_MIN_WINDOWS = 5  # publish nothing before this many windows were accepte
 MAX_WINDOW_AGE_S = 7 * 86400.0
 SUMMARY_PERIOD_S = 3600.0  # info-level summary of what the gates did
 
+# --- persistence (get_state / restore) ---
+STATE_VERSION = 1
+
+
+def _code_fingerprint() -> Optional[str]:
+    """Hash of this module's source. Accepted windows are only restored into
+    the code that computed them: after an upgrade that changed any gate or the
+    fit, old windows would mix two definitions of R in one median."""
+    try:
+        with open(__file__, 'rb') as f:
+            return hashlib.sha1(f.read()).hexdigest()[:16]
+    except OSError:
+        return None  # unknown code: never matches, so nothing is restored as if it did
+
+
+CODE_FINGERPRINT = _code_fingerprint()
+
 
 def _finite(x) -> TypeGuard[float]:
     return isinstance(x, (int, float)) and math.isfinite(x)
+
+
+def _fmt_t(t: float) -> str:
+    import time
+    return time.strftime('%Y-%m-%d %H:%M', time.localtime(t))
 
 
 def median(xs: Sequence[float]) -> float:
@@ -557,6 +580,7 @@ class CellResistanceEstimator:
         self.n_dropped = 0  # samples with a cell outside the LFP band, since the last summary
         self._t_summary: Optional[float] = None
         self._announced = False
+        self._disable_persistent = False  # only a chemistry verdict survives a restart
 
     @property
     def value(self) -> Optional[float]:
@@ -567,14 +591,151 @@ class CellResistanceEstimator:
             return None
         return median([w['r'] for w in self.windows])
 
-    def disable(self, reason: str):
+    def disable(self, reason: str, persistent: bool = True):
+        """persistent=False for an internal error: that says nothing about the
+        pack, and a restart (maybe onto fixed code) should try again."""
         if self.enabled:
             logger.warning('%s: cell resistance estimator disabled: %s', self.name, reason)
         self.enabled = False
         self.disabled_reason = reason
+        self._disable_persistent = persistent
         self._rows.clear()
         self._bin = None
         self.windows.clear()
+
+    # ------------------------------------------------------------ persistence
+
+    def get_state(self, full: bool = True) -> Dict[str, Any]:
+        """JSON-serialisable state. full=False leaves out what changes on every
+        sample (the open window, the summary counters), so a periodic save only
+        rewrites the file when a window was accepted or a step was learnt;
+        full=True (at shutdown) is everything, so a restart within one window
+        continues exactly where it stopped."""
+        st: Dict[str, Any] = dict(
+            version=STATE_VERSION, code=CODE_FINGERPRINT,
+            disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
+            q_i=self.q_i, q_u=list(self.q_u),
+            windows=[dict(w) for w in self.windows],
+        )
+        if full:
+            b = self._bin
+            st.update(
+                last_t=self._last_t, next_end=self._next_end,
+                rows=[[r[0], r[1], r[2], list(r[3]), r[4], r[5]] for r in self._rows],
+                bin=None if b is None else {k: (list(v) if isinstance(v, list) else v)
+                                            for k in _Bin.__slots__ for v in (getattr(b, k),)},
+                prev_i=self._prev_i, prev_u=None if self._prev_u is None else list(self._prev_u),
+                oob_since=self._oob_since, oob_n=self._oob_n,
+                counts=dict(self.counts), cell_reasons=dict(self.cell_reasons), n_dropped=self.n_dropped,
+                t_summary=self._t_summary, announced=self._announced,
+            )
+        return st
+
+    def restore(self, st) -> bool:
+        """Load a get_state() dict. Anything that does not validate starts the
+        estimator fresh (warning) rather than half-restored: a state that cannot
+        be checked is never trusted as good. Nothing is published here -- the
+        restored estimate goes out with the next accepted window."""
+        try:
+            self._restore(st)
+        except Exception as e:
+            logger.warning('%s: cell resistance state not restored (%s: %s), starting fresh',
+                           self.name, type(e).__name__, e)
+            self.__init__(self.name)
+            return False
+        return True
+
+    def _restore(self, st):
+        def fin(x, what):
+            if not _finite(x) or isinstance(x, bool):
+                raise ValueError('%s is %r' % (what, x))
+            return float(x)
+
+        def opt_fin(x, what):
+            return None if x is None else fin(x, what)
+
+        def step(x, what):
+            if x is not None and fin(x, what) <= 0:
+                raise ValueError('%s is %r' % (what, x))
+            return x
+
+        if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
+            raise ValueError('state version %r, expected %d'
+                             % (st.get('version') if isinstance(st, dict) else type(st).__name__, STATE_VERSION))
+        q_i = step(st.get('q_i'), 'q_i')
+        q_u = st.get('q_u') or []
+        if not isinstance(q_u, list):
+            raise ValueError('q_u is %r' % type(q_u).__name__)
+        q_u = [step(q, 'q_u') for q in q_u]
+
+        self.__init__(self.name)
+        self.q_i, self.q_u = q_i, q_u  # a property of the BMS, not of this code
+        if CODE_FINGERPRINT is None or st.get('code') != CODE_FINGERPRINT:
+            logger.info('%s: cell resistance estimator code changed since the state was saved: accepted '
+                        'windows discarded, learnt quantisation kept', self.name)
+            return
+
+        reason = st.get('disabled_reason')
+        if reason is not None:
+            self.enabled, self.disabled_reason, self._disable_persistent = False, str(reason), True
+            logger.info('%s: cell resistance estimator stays disabled (saved state): %s', self.name, reason)
+            return
+
+        windows = []
+        for w in st.get('windows') or []:
+            if not isinstance(w, dict):
+                raise ValueError('window is %r' % type(w).__name__)
+            fin(w.get('t'), 'window t')
+            if not R_MOHM_LO < fin(w.get('r'), 'window r') < R_MOHM_HI:
+                raise ValueError('window r %r outside %.1f..%.1f mOhm' % (w['r'], R_MOHM_LO, R_MOHM_HI))
+            windows.append(dict(w))
+        if any(a['t'] > b['t'] for a, b in zip(windows, windows[1:])):
+            raise ValueError('windows not in time order')
+        self.windows.extend(windows[-ROLLING_WINDOWS:])
+
+        if 'last_t' in st:  # full state
+            self._last_t = opt_fin(st.get('last_t'), 'last_t')
+            self._next_end = opt_fin(st.get('next_end'), 'next_end')
+            rows = []
+            for r in st.get('rows') or []:
+                if not isinstance(r, list) or len(r) != 6 or not isinstance(r[3], list):
+                    raise ValueError('row %r' % (r,))
+                rows.append((fin(r[0], 'row t'), fin(r[1], 'row i'), float(r[2]),
+                             tuple(float(v) for v in r[3]), opt_fin(r[4], 'row temp'), opt_fin(r[5], 'row ptemp')))
+            if any(a[0] > b[0] for a, b in zip(rows, rows[1:])) or \
+                    (rows and (self._last_t is None or rows[-1][0] > self._last_t)):
+                raise ValueError('rows not in time order')
+            self._rows.extend(rows)
+            b = st.get('bin')
+            if b is not None:
+                if not isinstance(b, dict) or set(b) != set(_Bin.__slots__):
+                    raise ValueError('bin %r' % (b,))
+                nb = _Bin(int(b['idx']), len(b['su']))
+                for k in _Bin.__slots__:
+                    setattr(nb, k, b[k])
+                if not isinstance(nb.n, int) or nb.n < 1 or len(nb.su) != len(nb.nu):
+                    raise ValueError('bin %r' % (b,))
+                fin(nb.st, 'bin st'), fin(nb.si, 'bin si')
+                nb.su = [fin(v, 'bin su') for v in nb.su]
+                nb.nu = [int(k) for k in nb.nu]
+                self._bin = nb
+            self._prev_i = opt_fin(st.get('prev_i'), 'prev_i')
+            pu = st.get('prev_u')
+            self._prev_u = None if pu is None else tuple(float(v) for v in pu)
+            self._oob_since = opt_fin(st.get('oob_since'), 'oob_since')
+            self._oob_n = int(st.get('oob_n') or 0)
+            self.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
+            self.cell_reasons.update({str(k): int(v) for k, v in (st.get('cell_reasons') or {}).items()})
+            self.n_dropped = int(st.get('n_dropped') or 0)
+            self._t_summary = opt_fin(st.get('t_summary'), 't_summary')
+        self._announced = bool(st.get('announced')) or len(self.windows) >= PUBLISH_MIN_WINDOWS
+
+        v = self.value
+        logger.info('%s: cell resistance state restored: %d windows%s, estimate %s (published with the next '
+                    'accepted window)', self.name, len(self.windows),
+                    (', newest from %s' % _fmt_t(self.windows[-1]['t'])) if self.windows else '',
+                    ('%.3f mOhm' % v) if v is not None else
+                    'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS))
 
     def _restart(self):
         self._rows.clear()
