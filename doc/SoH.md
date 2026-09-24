@@ -168,7 +168,9 @@ counter). A file that does not validate is discarded (the log says why).
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the
 open rest and every rest and segment timed after that sample are dropped (logged), rather than published as new or left
-blocking later segments until real time catches up. What lies before it is kept. A pack that the chemistry check switched off stays off after a restart.
+blocking later segments until real time catches up. What lies before it is kept. A sample at most 5 s older than
+the one before it is only skipped (a reordered frame, a clock that jitters or is stepped back by a second or two); that
+costs at most those seconds of current, where the drop used to cost one or two segments. A pack that the chemistry check switched off stays off after a restart.
 
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
 `bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV table, every

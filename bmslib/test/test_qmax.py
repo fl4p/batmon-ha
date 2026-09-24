@@ -1098,6 +1098,68 @@ def test_a_clock_step_back_invalidates_the_open_segment():
     assert [s['dq'] > 0 for s in est.segments] == [True]  # only the charge after it
 
 
+def _one_behind(rows, frac, back=0.001):
+    """The sample at frac of the run timed `back` s before its predecessor
+    (a reordered frame); the next one on time again."""
+    out = list(rows)
+    k = int(len(rows) * frac)
+    t, i, v, temp = out[k]
+    out[k] = (rows[k - 1][0] - back, i, v, temp)
+    return out
+
+
+@pytest.mark.parametrize('frac', [0.55, 0.62, 0.9])
+def test_a_reordered_sample_drops_nothing(frac):
+    """Third review, finding 5: one sample 1 ms older than its predecessor
+    dropped the open segment or rest (5 of 6 segments accepted). It is
+    skipped like a duplicate now."""
+    rows = full_cycles(n=3).rows
+    clean, pub_clean = run(rows)
+    est, pub = run(_one_behind(rows, frac))
+    assert est.counts['clock_back'] == 0 and est.counts['reordered'] == 1
+    assert est.counts['segment'] == clean.counts['segment'] == 6 and len(pub) == len(pub_clean)
+    assert seg_q(est) == pytest.approx(seg_q(clean), rel=1e-3)
+
+
+@pytest.mark.parametrize('back', [0.001, 1.0, 4.9])
+def test_a_small_step_back_drops_nothing_and_costs_its_seconds(back):
+    """The clock stepped back for good by up to REORDER_TOL_S (at 10 s
+    cadence the next sample is then back - 10 s behind the last): the
+    samples up to the old time are skipped, and back x I goes uncounted."""
+    rows = full_cycles(n=3).rows
+    clean, _ = run(rows)
+    for frac in (0.4, 0.55, 0.62, 0.7, 0.8):
+        k = int(len(rows) * frac)
+        est, _ = run(rows[:k] + [(t - 10.0 - back, i, v, temp) for t, i, v, temp in rows[k:]])
+        assert est.counts['clock_back'] == 0 and est.counts['segment'] == 6
+        assert seg_q(est) == pytest.approx(seg_q(clean), rel=3e-3)
+
+
+def test_calibration_without_the_tolerance_a_reordered_sample_costs_a_segment(monkeypatch):
+    """What the tolerance buys (a liveness cost, not a wrong value): without
+    it the review's 5 of 6."""
+    monkeypatch.setattr(q, 'REORDER_TOL_S', 0.0)
+    rows = full_cycles(n=3).rows
+    est, _ = run(_one_behind(rows, 0.55))
+    assert est.counts['clock_back'] == 1 and est.counts['segment'] == 5
+
+
+def test_monotone_in_a_step_back_during_a_run():
+    """From no step to steps far beyond the tolerance: every published value
+    stays right, and once a step costs a segment, a larger one never gets it
+    back."""
+    rows = full_cycles(n=3).rows
+
+    def segments(back):
+        k = int(len(rows) * 0.8)  # in the rest before the last charge
+        est, pub = run(rows[:k] + [(t - back, i, v, temp) for t, i, v, temp in rows[k:]])
+        assert all(r['qmax'] == pytest.approx(97.5, abs=0.3) for r in pub)
+        return est.counts['segment']
+    counts = [segments(b) for b in (0.0, 10.0, 14.9, 15.1, 60.0, 1800.0, 86400.0)]
+    assert counts[:3] == [6] * 3 and counts[3] < 6
+    assert all(a >= b for a, b in zip(counts, counts[1:])), counts
+
+
 # ================================================================ monotonicity
 
 def _accepts(rows, **kw):

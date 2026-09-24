@@ -58,7 +58,8 @@ second rejection within GLITCH_ISOLATION_S of the last, the epoch ends like a
 long gap: a burst of garbled frames says that the readings around them may be
 garbled too. A
 clock step back (a sample
-older than the last one) does more: every anchor and segment timed after the
+more than REORDER_TOL_S older than the last one; one less old is skipped like
+a duplicate) does more: every anchor and segment timed after the
 new sample is dropped, with the open rest, because its age can no longer be
 measured -- a Pi without a hardware clock boots behind real time, and a state
 saved while the clock ran ahead holds times that lie in the future. The
@@ -274,6 +275,17 @@ GLITCH_ISOLATION_S = MAX_GAP_S
 # sample interval), and a run of frames that all read the same wrong value.
 GLITCH_AGREE_A = 1.0
 GLITCH_AGREE_REL = 0.25
+# A sample at most this much older than the last one is skipped like a
+# duplicate, and nothing is dropped: a reordered frame, a clock that jitters or
+# is stepped back by a fraction of a second. Each such step used to drop the
+# open rest and segment (1-2 segments lost per step, third review). What it
+# costs: a permanent step back of s <= 5 s leaves s seconds of current
+# uncounted (s x I, 0.07 Ah at 50 A), well inside the 2 % a restart may cost;
+# and a clock that ran fast before the step had counted them already. 5 s: five
+# sample periods at the 1 s default. A step back beyond it is a clock step
+# (_clock_back); the tolerance must stay small, or a sample stepped back by
+# days would be skipped for days.
+REORDER_TOL_S = 5.0
 # Intervals longer than this count as bridged, not measured, for the coverage
 # gate: the add-on samples every sample_period (default 1 s); 60 s is the
 # resolution of the minute data the prototype and the replay ran on.
@@ -702,6 +714,9 @@ class QmaxEstimator:
         if self._last_t is not None and t == self._last_t:
             return None  # the BMS re-served the same measurement
         if self._last_t is not None and t < self._last_t:
+            if self._last_t - t <= REORDER_TOL_S:
+                self.counts['reordered'] += 1
+                return None  # out of order or jitter: skipped, nothing dropped (REORDER_TOL_S)
             self._clock_back(t)  # before anything else: the sample then starts a new record
         if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
             # Not a current, and not a sample: never integrated, never binned.
