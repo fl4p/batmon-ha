@@ -164,10 +164,12 @@ def test_comments_docstrings_and_moved_lines_keep_the_fingerprint_logic_does_not
     cls = 'class QmaxEstimator:\n' if mod == 'qmax' else 'class CellResistanceEstimator:\n'
     doc = '"""Streaming per-BMS estimator. Feed add() once per sampler iteration."""'
     meth = '    def _restore(self, st):\n'
-    assert text.count(cls) == 1 and text.count(doc) == 1 and text.count(meth) == 1
+    fdoc = '"""Feed one sampler iteration.'  # a method's docstring: its code object's first constant
+    assert text.count(cls) == 1 and text.count(doc) == 1 and text.count(meth) == 1 and text.count(fdoc) == 1
     cosmetic = (text.replace(anchor, anchor + '# a comment\n\n\n# and another\n')
                 .replace(cls, '# a comment above the class\n' + cls)
                 .replace(doc, '"""Streaming estimator, per BMS. Feed add()\n    once per sampler iteration."""')
+                .replace(fdoc, '"""Feed one sampler iteration (reworded).')
                 .replace(meth, meth + '        # a comment inside a method\n'))
     assert fp(cosmetic) == base
     for old, new in ((' >= MIN_REST_S:', ' > MIN_REST_S:'), ('MIN_R2 = 0.80', 'MIN_R2 = 0.81'),
@@ -239,6 +241,33 @@ def test_code_and_constants_count_and_the_logger_does_not():
     assert ec.code_fingerprint(_ns(f=_fn('def f(x=3):\n    return x + 1\n'), K=1.5)) != base  # defaults
     assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.5,
                                    log=logging.getLogger('t'))) == base
+
+
+def test_a_function_docstring_is_not_code():
+    """A function's docstring is its code object's first constant (on 3.14
+    flagged as such); it is masked, or rewording one would discard months of
+    saved segments. The class docstring is a separate thing (__doc__)."""
+    a = _fn('def f(x):\n    """One thing."""\n    return x + 1\n')
+    b = _fn('def f(x):\n    """Another thing,\n    over two lines."""\n    return x + 1\n')
+    c = _fn('def f(x):\n    """One thing."""\n    return x + 2\n')
+    fa, fb, fc = (ec.code_fingerprint(_ns(f=g)) for g in (a, b, c))
+    assert fa == fb and fa is not None and fc != fa
+    # a string constant that is not the docstring still counts
+    d = _fn('def f(x):\n    y = "one"\n    return x + 1\n')
+    e = _fn('def f(x):\n    y = "two"\n    return x + 1\n')
+    assert ec.code_fingerprint(_ns(f=d)) != ec.code_fingerprint(_ns(f=e))
+
+
+def test_the_python_version_is_part_of_the_fingerprint(monkeypatch):
+    """The same bytecode is not the same program on another interpreter. A
+    namespace of constants only has no bytecode that would differ, so the
+    version term alone separates them."""
+    import types as t
+    base = ec.code_fingerprint(_ns(K=1.5, f=_fn('def f(x):\n    return x + 1\n')))
+    consts = ec.code_fingerprint(_ns(K=1.5))
+    monkeypatch.setattr(ec, 'sys', t.SimpleNamespace(version_info=(3, 99, 0, 'final', 0)))
+    assert ec.code_fingerprint(_ns(K=1.5)) not in (consts, None)
+    assert ec.code_fingerprint(_ns(K=1.5, f=_fn('def f(x):\n    return x + 1\n'))) not in (base, None)
 
 
 def test_a_locked_method_is_fingerprinted_by_its_body():
