@@ -209,7 +209,8 @@ MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, 
 
 # ---------------------------------------------------------------- output
 # Published Qmax = median of the last SUMMARY_K accepted segments, once there
-# are PUBLISH_MIN_SEGMENTS, none older than MAX_SEGMENT_AGE_S. From the replay
+# are PUBLISH_MIN_SEGMENTS, none older than MAX_SEGMENT_AGE_S counted from the
+# sample that is being processed (not from the newest segment). From the replay
 # of two years of the van pack's Daly data (doc/SoH.md): with the prototype's
 # looser gates the pack got a segment every ~4 weeks (16 in 412 days of data),
 # and single segments scattered from 117 to 381 Ah (IQR 204-326) for a ~290 Ah
@@ -570,7 +571,7 @@ class QmaxEstimator:
 
         idx = math.floor(t / REST_BIN_S)
         if self._bin is not None and self._bin['idx'] != idx:
-            new = self._close_bin() or new
+            new = self._close_bin(t) or new
         b = self._bin
         if b is None:
             b = self._bin = dict(idx=idx, n=0, si=0.0, sa=0.0, t0=t, t1=t, v=[], temp=[], q=0.0, cov=0.0)
@@ -590,12 +591,14 @@ class QmaxEstimator:
         return new
 
     def _gap(self, t, why) -> Optional[Dict[str, Any]]:
-        """The current record broke: close what was measured before it (a rest
-        long enough still makes its anchor), then start a new epoch."""
+        """The current record broke at t: close what was measured before it (a
+        rest long enough still makes its anchor, ending at its last sample
+        before the gap), then start a new epoch. t is the sample after the
+        gap, and it is what the age of anything published is measured from."""
         new = None
         if self._bin is not None:
-            new = self._close_bin()
-        new = self._end_rest() or new
+            new = self._close_bin(t)
+        new = self._end_rest(t) or new
         self.epoch += 1
         self.counts[why] += 1
         if why != 'current_implausible':
@@ -603,7 +606,7 @@ class QmaxEstimator:
                          self.name, why, t - (self._last_t or t))
         return new
 
-    def _close_bin(self) -> Optional[Dict[str, Any]]:
+    def _close_bin(self, now: float) -> Optional[Dict[str, Any]]:
         b = self._bin
         self._bin = None
         if b is None:
@@ -626,7 +629,7 @@ class QmaxEstimator:
             return None
         # a load minute
         self._load_ewma = mean_i if self._load_ewma is None else self._load_ewma + (mean_i - self._load_ewma) / 30.0
-        return self._end_rest()
+        return self._end_rest(now)
 
     def _reset_rest(self):
         self._rest_bins = []
@@ -634,7 +637,7 @@ class QmaxEstimator:
         self._rest_dir = None
         self._rest_si, self._rest_n = 0.0, 0
 
-    def _end_rest(self) -> Optional[Dict[str, Any]]:
+    def _end_rest(self, now: float) -> Optional[Dict[str, Any]]:
         if self._rest_t0 is None:
             return None
         assert self._rest_t1 is not None
@@ -643,7 +646,7 @@ class QmaxEstimator:
         if dur >= MIN_REST_S:
             anchor = self._make_anchor(dur)
             if anchor is not None:
-                new = self._pair(anchor)
+                new = self._pair(anchor, now)
         elif dur >= 600:
             self.counts['rest_short'] += 1
         self._reset_rest()
@@ -697,7 +700,7 @@ class QmaxEstimator:
                     ', '.join('%.1f' % s if s is not None else str(w) for s, w in zip(soc, why)))
         return a
 
-    def _pair(self, b) -> Optional[Dict[str, Any]]:
+    def _pair(self, b, now: float) -> Optional[Dict[str, Any]]:
         """Keep a new anchor if every cell has a SoC, and pair it with the
         newest earlier one that passes every gate.
 
@@ -714,12 +717,12 @@ class QmaxEstimator:
         self.anchors.append(b)
         self.counts['anchor'] += 1
         try:
-            return self._pair_new(b)
+            return self._pair_new(b, now)
         finally:
             while self.anchors[0]['t'] < b['t'] - MAX_SEGMENT_S:
                 self.anchors.popleft()  # too old to pair with anything to come
 
-    def _pair_new(self, b) -> Optional[Dict[str, Any]]:
+    def _pair_new(self, b, now: float) -> Optional[Dict[str, Any]]:
         cands = list(self.anchors)[:-1]
         reason = 'no_prior_anchor'
         for a in reversed(cands):
@@ -735,7 +738,7 @@ class QmaxEstimator:
             seg, reason = self._evaluate(a, b)
             self.pair_reasons[reason or 'accepted'] += 1
             if seg is not None:
-                return self._accept(seg)
+                return self._accept(seg, now)
         if reason in ('gap', 'span', 'overlap', 'no_prior_anchor'):
             self.pair_reasons[reason] += 1
         self.counts['anchor_unpaired'] += 1
@@ -777,11 +780,24 @@ class QmaxEstimator:
                     spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap,
                     i_off=i_off, drift=drift), None
 
-    def _accept(self, seg) -> Optional[Dict[str, Any]]:
-        self.segments.append(seg)
-        self._last_seg_t = seg['t']
-        while self.segments[0]['t'] < seg['t'] - MAX_SEGMENT_AGE_S:
+    def _accept(self, seg, now: float) -> Optional[Dict[str, Any]]:
+        """Keep a segment and return what to publish. Ages count from now, the
+        sample being processed -- not from the segment's end: a rest that was
+        still open when batmon stopped ends at the first sample after the
+        restart, and its segment may be older than the whole summary window."""
+        self._last_seg_t = seg['t']  # its anchors are used, stale or not
+        horizon = now - MAX_SEGMENT_AGE_S
+        if seg['t'] < horizon:
+            self.counts['segment_stale'] += 1
+            logger.info('%s: Qmax segment %s -> %s not used: it ended more than %.0f days ago', self.name,
+                        fmt_t(seg['t0']), fmt_t(seg['t']), MAX_SEGMENT_AGE_S / 86400)
+            seg = None
+        else:
+            self.segments.append(seg)
+        while self.segments and self.segments[0]['t'] < horizon:
             self.segments.popleft()
+        if seg is None:
+            return None
         self.counts['segment'] += 1
         logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
                     'spread %.1f %%, coverage %.3f, offset drift <= %.1f %% (%.2f A)', self.name, fmt_t(seg['t0']),

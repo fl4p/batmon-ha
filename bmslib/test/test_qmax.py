@@ -959,6 +959,39 @@ def test_a_stale_summary_is_not_published_after_a_long_outage():
     assert pub == [] and len(restored.segments) == 2
 
 
+def _pending_rest_state():
+    """Full state saved inside the last rest (>= 90 min in, not yet closed)
+    of four accepted segments: the rest is still open when batmon stops."""
+    rows = full_cycles(n=2).rows[:-30]  # without end(): the last rest is pending
+    est, _ = run(rows)
+    assert len(est.segments) == 3 and est._rest_t0 is not None and est._rest_t1 - est._rest_t0 >= q.MIN_REST_S
+    return est, _via_json(est.get_state(full=True))
+
+
+def test_a_pending_rest_does_not_publish_a_stale_value_after_a_long_outage():
+    """The review's case, which the compact-state test above cannot reach:
+    the first sample 400 days later closes the pending rest, whose anchor
+    completes a fourth segment -- from 400 days ago. It used to be published,
+    because its age was measured from itself."""
+    est, st = _pending_rest_state()
+    last = est._last_t
+    restored = _fresh()  # keeps the counters: 400 days later the daily summary would clear them
+    assert restored.restore(st)
+    assert restored.add(last + 400 * 86400, 0.0, [3400] * 4, temp=25.0) is None
+    assert restored.anchors[-1]['t'] == last  # the rest ended at its last sample before the gap
+    assert restored.counts['segment_stale'] == 1 and not restored.segments and restored.value is None
+
+
+def test_calibration_without_the_age_limit_a_pending_rest_publishes_a_400_day_old_value(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_SEGMENT_AGE_S', math.inf)
+    est, st = _pending_rest_state()
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(st)
+    now = est._last_t + 400 * 86400
+    res = restored.add(now, 0.0, [3400] * 4, temp=25.0)
+    assert res is not None and now - res['newest_t'] >= 400 * 86400  # published as new
+
+
 def test_calibration_without_the_age_limit_the_old_capacity_is_published(monkeypatch):
     monkeypatch.setattr(q, 'MAX_SEGMENT_AGE_S', math.inf)
     est, _ = run(full_cycles().rows)
