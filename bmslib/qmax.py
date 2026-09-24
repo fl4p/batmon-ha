@@ -71,21 +71,32 @@ yet, no capacity -- or against it, the restart ends the epoch like a gap.
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
-every cell, rests >= 90 min, dQ and dSoC of the same sign, a bounded current
-offset drift (below), and a plausible ratio to a known capacity.
+every cell, rests >= 90 min, dQ and dSoC of the same sign, a budget for the
+drift of a current offset of an assumed size (below), and a plausible ratio to
+a known capacity.
 
 Current offset: a current sensor offset integrates into dQ for the whole
 segment, and the gates above do not see it -- three 5-day segments with a
-0.3 A offset published 57.6 Ah for a 98 Ah cell, well inside 0.4-1.6x. So the
-worst case is bounded explicitly: the offset is taken as the largest of
+0.3 A offset published 57.6 Ah for a 98 Ah cell, well inside 0.4-1.6x. So an
+offset of an ASSUMED size is budgeted: the offset is taken as the largest of
 I_OFFSET_MIN_A and the mean current the BMS reported during the two rests
-(which should read ~0 A), and offset x span may be at most DRIFT_MAX_FRAC of
-|dQ|. The rest reading is not subtracted as a correction: a standby load that
-the BMS measures correctly reads the same as an offset, and subtracting a real
-load would be the error. It only ever widens the bound. It cannot narrow it
-below I_OFFSET_MIN_A: an offset that shows only under load (a deadband that
-reads 0 A at rest, a zero point that moves with current) is invisible at
-rest, which is exactly the review's scenario. Without a capacity (neither the `capacity:` option nor one reported
+(which should read ~0 A), and that offset x span may be at most DRIFT_MAX_FRAC
+of |dQ|. The rest reading is not subtracted as a correction: a standby load
+that the BMS measures correctly reads the same as an offset, and subtracting a
+real load would be the error. It only ever widens the assumption. It cannot
+narrow it below I_OFFSET_MIN_A: an offset that shows only under load (a
+deadband that reads 0 A at rest, a zero point that moves with current) is
+invisible at rest, which is exactly the review's scenario.
+
+This is a budget, not a bound on the error. I_OFFSET_MIN_A is a tuning
+constant; an offset larger than it that shows only under load passes the gate
+unseen, and so does a gain error (which goes 1:1 into Qmax, see
+PLAUSIBLE_REL). The second review's case: a 3 A offset under load over a 6 h
+discharge, rests reading 0 A, published 21 % low while the segment's drift at
+the assumed 0.3 A was 3.4 %. What is published says so: offset_assumed_a and
+offset_drift_pct, the drift at that assumed offset.
+
+Without a capacity (neither the `capacity:` option nor one reported
 by the BMS) nothing is accepted: the plausibility check is then unevaluable,
 and it is the only one that catches a wrong current scale (a shunt setting
 off by 3x) or a glitch below the input bound.
@@ -217,12 +228,15 @@ MIN_COVERAGE = 0.95
 # paired up to 20 days. Not what limits drift any more: at I_OFFSET_MIN_A the
 # drift gate below rejects 10 days for any |dQ| under 1440 Ah.
 MAX_SEGMENT_S = 10 * 86400.0
-# Current offset bound. 0.3 A: the coarsest current floor (smallest non-zero
-# |I| reading) of the BMSes the method was developed on -- Daly 0.3 A, ANT 0.1
-# A, JK 0.01 A (bat-impedance WHITEPAPER 3.2). Below its floor a BMS reads 0 A
-# while current flows, so at rest it cannot show its own offset. 5 % of |dQ|:
-# half of the ~10 % a single segment is meant to stay within; at 0.3 A that is
-# a span of at most 14.7 h for 88 Ah and 33 h for 200 Ah.
+# Current offset ASSUMED by the drift budget: a tuning constant, not a bound
+# (module doc). 0.3 A: the coarsest current floor (smallest non-zero |I|
+# reading) of the three BMSes the method was developed on -- Daly 0.3 A, ANT
+# 0.1 A, JK 0.01 A (bat-impedance WHITEPAPER 3.2). Below its floor a BMS reads
+# 0 A while current flows, so at rest it cannot show its own offset; nothing
+# says another BMS's floor, or an offset that only shows under load, is not
+# larger. 5 % of |dQ|: half of the ~10 % a single segment is meant to stay
+# within; at 0.3 A that is a span of at most 14.7 h for 88 Ah and 33 h for
+# 200 Ah.
 I_OFFSET_MIN_A = 0.3
 DRIFT_MAX_FRAC = 0.05
 
@@ -419,10 +433,11 @@ def fit_relaxation(ts: Sequence[float], vs: Sequence[float], v_end: float) -> Tu
 
 # ================================================================ estimator
 
-def offset_bound(a, b) -> float:
-    """Worst-case current offset [A] over a segment between anchors a and b:
-    I_OFFSET_MIN_A, or what the BMS read during either rest if that is more
-    (see the module doc: never a correction, never below the floor)."""
+def assumed_offset(a, b) -> float:
+    """Current offset [A] the drift budget assumes over a segment between
+    anchors a and b: I_OFFSET_MIN_A, or what the BMS read during either rest if
+    that is more (see the module doc: never a correction, never below the
+    floor, and not a bound on the offset there really is)."""
     return max(I_OFFSET_MIN_A, abs(a['i_rest']), abs(b['i_rest']))
 
 
@@ -523,7 +538,7 @@ class QmaxEstimator:
                     segments=len(self.segments), newest=fmt_t(new['t']), newest_t=new['t'],
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
-                    drift_bound_pct=round(100.0 * new['drift'], 1),
+                    offset_assumed_a=round(new['i_off'], 2), offset_drift_pct=round(100.0 * new['drift'], 1),
                     plausibility_checked=new['cap'] is not None)
 
     def wants_voltages(self, t: float, current: float) -> bool:
@@ -882,8 +897,8 @@ class QmaxEstimator:
             return None, 'dsoc'
         if not _same_sign(dq, dsoc):
             return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
-        i_off = offset_bound(a, b)
-        drift = i_off * span / 3600.0 / abs(dq)  # worst-case offset charge, as a fraction of dQ
+        i_off = assumed_offset(a, b)
+        drift = i_off * span / 3600.0 / abs(dq)  # the assumed offset's charge, as a fraction of dQ
         if not drift <= DRIFT_MAX_FRAC:
             return None, 'drift'
         qc = [100.0 * dq / d for d in dsoc]
@@ -922,7 +937,8 @@ class QmaxEstimator:
             return None
         self.counts['segment'] += 1
         logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
-                    'spread %.1f %%, coverage %.3f, offset drift <= %.1f %% (%.2f A)', self.name, fmt_t(seg['t0']),
+                    'spread %.1f %%, coverage %.3f, offset drift %.1f %% at an assumed %.2f A', self.name,
+                    fmt_t(seg['t0']),
                     fmt_t(seg['t']), seg['dq'], ', '.join('%+.1f' % d for d in seg['dsoc']),
                     ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
                     100 * seg['drift'], seg['i_off'])

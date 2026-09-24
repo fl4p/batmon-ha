@@ -750,6 +750,41 @@ def test_monotone_in_offset_duration():
     _monotone([_accepts(_long_segment(d)) for d in (0.1, 0.25, 0.5, 1, 2, 3, 5, 7, 9)])
 
 
+def test_the_published_offset_figures_say_what_they_assume():
+    """They were published as drift_bound_pct, a 'bound' that holds only for
+    offsets up to the assumed one. Now: the assumed offset and its drift."""
+    est, pub = run(full_cycles().rows)
+    r = pub[-1]
+    assert 'drift_bound_pct' not in r
+    assert r['offset_assumed_a'] == q.I_OFFSET_MIN_A and r['offset_drift_pct'] == pytest.approx(1.3, abs=0.1)
+    c = _Client()
+    publish_qmax(c, 'dev_offset', r)  # a topic of its own: mqtt_single_out skips a repeated value per topic
+    attrs = json.loads(c.published['dev_offset/qmax_est/attributes'])
+    assert attrs['offset_assumed_a'] == 0.3 and attrs['offset_drift_pct'] == r['offset_drift_pct']
+    assert 'drift_bound_pct' not in attrs
+
+
+def _load_only_offset(off=3.0):
+    """The second review's case: the BMS reads `off` A low under load and 0 A
+    at rest (a zero point that moves with the current), 6 h discharges."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(88 / 6, 6 * 3600, i_seen=88 / 6 - off).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    return p.end().rows
+
+
+def test_a_load_only_offset_above_the_assumed_one_is_not_bounded():
+    """A known limit, pinned so the docs' numbers stay measured: the drift
+    figure is the assumed offset's, and the real error is six times it."""
+    est, _ = run(_load_only_offset())
+    dis = [s for s in est.segments if s['dq'] < 0]
+    assert dis and all(s['i_off'] == q.I_OFFSET_MIN_A for s in dis)  # the rests read 0 A: nothing seen
+    for s in dis:
+        err = abs(s['qmax'] / 98.0 - 1)
+        assert s['drift'] == pytest.approx(0.034, abs=0.002) and err == pytest.approx(0.209, abs=0.005)
+
+
 def _offset_at_rest(off=-0.7):
     """A zero-point offset the BMS shows everywhere, rests included: it reads
     0.7 A of phantom charge (below the 1 A rest threshold). Slow 10 A
@@ -775,7 +810,7 @@ DRIFT_BUDGET = 0.055  # 5 % of dQ, as a Qmax error: 1/(1-0.05) - 1
 
 
 def test_calibration_with_only_the_floor_the_offset_seen_at_rest_is_published(monkeypatch):
-    monkeypatch.setattr(q, 'offset_bound', lambda a, b: q.I_OFFSET_MIN_A)
+    monkeypatch.setattr(q, 'assumed_offset', lambda a, b: q.I_OFFSET_MIN_A)
     est, pub = run(_offset_at_rest())
     assert pub, 'scenario is harmless'
     assert pub[-1]['qmax'] / 98.0 - 1 < -0.08  # the slow discharges, 11 % low, carry the median

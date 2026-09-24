@@ -18,7 +18,8 @@ Qmax against the device's `capacity:` option (Ah, nameplate), or, if that is not
 Without either nothing is published: the capacity is also what the result is checked against (see below), and a check
 that cannot be made does not count as passed. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
-capacity used and where it came from.
+current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
+not an error bound, see below), the capacity used and where it came from.
 
 ### How it relates to TI Impedance Track
 
@@ -47,20 +48,24 @@ error is several % of SoC, so a rest there is unusable rather than guessed.
 
 A **segment** between two rests is accepted when every cell has a SoC at both ends, every cell's SoC moved by at least
 60 %, the charge and the SoC moved the same way, no gap in the current record was longer than 5 minutes, at least 95 %
-of the time was covered by samples at most 60 s apart, a current-sensor offset cannot have moved the counted charge
-by more than 5 % (below), it is no longer than 10 days, and every cell's Qmax is within 0.4–1.6× of the capacity.
-Segments do not overlap.
+of the time was covered by samples at most 60 s apart, a current-sensor offset of the assumed size would have moved
+the counted charge by at most 5 % (below), it is no longer than 10 days, and every cell's Qmax is within 0.4–1.6× of
+the capacity. Segments do not overlap.
 
 **Current offset.** A current sensor that reads 0.3 A off adds 0.3 A × the segment's duration to the counted charge,
 and none of the other gates see it: three 5-day segments with that offset gave 57.6 Ah for a 98 Ah cell, well inside
-0.4–1.6×. So the worst case is bounded: offset × duration must stay within 5 % of the counted charge. The offset is
-taken as 0.3 A, or as the mean current the BMS read during either rest if that is more. 0.3 A is the coarsest current
-floor of the BMSes this was developed on (Daly; ANT 0.1 A, JK 0.01 A): below it a BMS reads 0 A while current flows,
-so a rest cannot reveal an offset that small. The rest reading is never subtracted, because a standby load the BMS
-measures correctly looks the same as an offset. At 0.3 A a segment may span at most about 15 hours for 88 Ah of
-charge, 33 hours for 200 Ah; a standby load read during the rests shortens that. The 10-day limit is only the pairing
-horizon now. On the real Daly capture in the tests the one segment the other gates would let through spans 48 hours
-with 0.72 A read during the rests: bound 18 %, rejected.
+0.4–1.6×. So an offset of an assumed size is budgeted: that offset × duration must stay within 5 % of the counted
+charge. The offset is assumed to be 0.3 A, or the mean current the BMS read during either rest if that is more. 0.3 A
+is a tuning constant, the coarsest current floor of the three BMSes this was developed on (Daly; ANT 0.1 A, JK
+0.01 A): below it a BMS reads 0 A while current flows, so a rest cannot reveal an offset that small. The rest reading
+is never subtracted, because a standby load the BMS measures correctly looks the same as an offset. At 0.3 A a segment
+may span at most about 15 hours for 88 Ah of charge, 33 hours for 200 Ah; a standby load read during the rests shortens
+that. The 10-day limit is only the pairing horizon now. On the real Daly capture in the tests the one segment the other
+gates would let through spans 48 hours with 0.72 A read during the rests: drift 18 %, rejected.
+
+This is a budget, not a bound on the error. An offset larger than the assumed one that shows only under load (a zero
+point that moves with the current) passes unseen, and so does a gain error (below). A 3 A offset under load during a
+6-hour discharge, with the rests reading 0 A, gave a Qmax 21 % low while the drift at the assumed 0.3 A was 3.4 %.
 
 The plausibility window catches gross errors (a shunt setting off by 3×), not accuracy: its lower end stays at 0.4 so
 that a pack that has genuinely lost half its capacity is reported, not rejected.
@@ -74,8 +79,8 @@ between accepted segments, and the entities expire a year after the last one.
 ## Why no value
 
 The gates above are the "tightened universal gates" of the offline prototype, aimed at an error of a single segment
-near ±10 %. Only the current-offset part of that is an explicit bound (5 %, above); the rest is the prototype's
-tuning, not a proven limit. But the built-in curve, built from rests of 90 minutes and more on one pack, is steep
+near ±10 %. Only the current-offset part of that has an explicit budget (5 %, above), and only for an offset of the
+assumed size; the rest is the prototype's tuning, not a proven limit. But the built-in curve, built from rests of 90 minutes and more on one pack, is steep
 only near empty, 0–11 % SoC. At its top it rises by less than 1 mV per % SoC. The steep "top knee" that the
 prototype's older 30-minute curve had (3440 mV at 100 %) came from its highest readings, most likely a cell still
 polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So on this curve no rest near

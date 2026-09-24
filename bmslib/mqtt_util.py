@@ -186,8 +186,10 @@ def publish_cell_resistance(client, device_topic, value_mohm: float):
 # itself: a year after the newest segment, the age limit of the median.
 QMAX_EXPIRE_S = 365 * 86400
 
-QMAX_ATTRIBUTES = ('segments', 'newest', 'limiting_cell', 'cell_spread_pct', 'min_dsoc', 'drift_bound_pct',
-                   'capacity', 'capacity_source', 'plausibility_checked')
+# offset_drift_pct is the drift of the ASSUMED offset offset_assumed_a (a tuning
+# constant or the rest reading), not a bound on the error (bmslib/qmax.py).
+QMAX_ATTRIBUTES = ('segments', 'newest', 'limiting_cell', 'cell_spread_pct', 'min_dsoc', 'offset_assumed_a',
+                   'offset_drift_pct', 'capacity', 'capacity_source', 'plausibility_checked')
 
 
 def publish_qmax(client, device_topic, res: dict):
