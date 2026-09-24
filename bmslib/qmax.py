@@ -78,12 +78,16 @@ and it is the only one that catches a wrong current scale (a shunt setting
 off by 3x) or a glitch below the input bound.
 
 STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
-smoothed slope reaches 5 mV/% only between 0 and 11 % SoC. A relaxed LiFePO4
-cell at the top of a charge settles to ~3.33 V, where the curve is flat
-(< 1 mV/%). With these gates no segment can be accepted on this curve; see
-doc/SoH.md for the replay numbers and what relaxing a gate would cost. The
-estimator still logs every anchor and every candidate pair it rejects, with
-the reason.
+smoothed slope reaches 5 mV/% only between 0 and 11 % SoC; its top is flat
+(< 1 mV/%). So with these gates no segment can be accepted on THIS curve; see
+doc/SoH.md for the replay numbers and what relaxing a gate would cost. That is
+a property of this curve and the data it was built from, not a shown property
+of relaxed LiFePO4: the data holds no relaxed minute above 99.61 % BMS SoC or
+3333 mV, the curve's top end is extrapolated from there, and TI treats relaxed
+LFP above ~92-93 % SoC as usable for Qmax updates (SLYT402 pp. 13-14; it gives
+no slope). Whether these packs have a >= 5 mV/% relaxed top region is open.
+The estimator still logs every anchor and every candidate pair it rejects,
+with the reason.
 
 Chemistry: LiFePO4 only, the same persistent-out-of-band rule as the cell
 resistance estimator (bmslib/estimator_common.py).
@@ -113,8 +117,14 @@ logger = get_logger()
 # (WHITEPAPER 6.3), so its scale error goes 1:1 into Qmax.
 # Why 90 min and not the 30-min curve the prototype shipped: the curve must
 # have been built with the same notion of "relaxed" as the anchors it is used
-# on. The 30-min curve's steep top (3440 mV at DOD 0) is a still-polarised
-# cell, and it is what biased Qmax to 210 Ah. At 90 min that top knee is gone.
+# on. The 30-min curve's steep top (3440 mV at DOD 0) comes from its highest
+# readings (up to 3439.5 mV at 99.94 % SoC), most likely a cell still
+# polarised from charging, and that curve is what biased Qmax to 210 Ah. At 90
+# min that top is gone -- in THIS data: its relaxed minutes reach 99.61 % BMS
+# SoC and 3333 mV at most, and DOD 0..0.4 is clipped extrapolation from there
+# (rebuild in the Codex review 2026-09-24, within 0.005 mV of this table). No
+# relaxed rest above that was observed, so a steep relaxed top closer to 100 %
+# is neither shown nor excluded.
 # Hysteresis: the pooled curve is used. In the only zone that is ever inverted
 # (DOD >= 90) 95 % of the rests came after a charge, so the pooled curve there
 # IS the post-charge branch; the post-discharge branch has ~200 points there,

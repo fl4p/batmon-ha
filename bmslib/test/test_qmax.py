@@ -10,10 +10,11 @@ harm it cannot show ("documented redundancy": the sign gate, the chemistry
 band and the span limit behind the plausibility window and the drift bound,
 the rest threshold behind the drift bound's rest reading).
 
-The built-in OCV curve (a relaxed LFP curve) is steep only between 0 and 11 %
-SoC, so no segment can pass the gates on it (test_builtin_curve_*). The tests
-that exercise acceptance therefore run on SYNTH, a synthetic curve with a
-steep top knee, through the same code.
+The built-in OCV curve (built from relaxed LFP rests, whose data stops at
+99.61 % SoC) is steep only between 0 and 11 % SoC, so no segment can pass the
+gates on it (test_builtin_curve_*). The tests that exercise acceptance
+therefore run on SYNTH, a synthetic curve with a steep top knee, through the
+same code.
 """
 import asyncio
 import csv
@@ -43,8 +44,8 @@ CAPS = (100.0, 98.0, 102.0, 101.0)  # Ah per cell; the pack's Qmax is the limiti
 
 def synth_raw():
     """LFP-like OCV(DOD): steep top knee (12 mV/%), plateau, steep bottom knee
-    (20 mV/%). A RELAXED LFP cell has no such top knee; this curve exists to
-    exercise the machinery."""
+    (20 mV/%). The built-in curve has no such relaxed top knee (its data does
+    not reach one); this curve exists to exercise the machinery."""
     out = []
     for d in range(101):
         if d <= 12:
@@ -171,11 +172,11 @@ def test_odd_extension_keeps_a_straight_line_to_the_ends():
 
 def test_builtin_curve_is_steep_only_near_empty():
     """The structural fact behind 'no segment on the built-in curve': at 5
-    mV/% only SoC 0-11 is invertible; a relaxed full cell is off the curve or
-    on the plateau."""
+    mV/% only SoC 0-11 is invertible; above that a rest is off the curve or on
+    its flat top."""
     c = q.DEFAULT_CURVE
     assert [d for d, s in enumerate(c.slope) if abs(s) >= q.MIN_SLOPE_MV_PER_PCT] == list(range(89, 101))
-    assert c.soc(3340.0) == (None, 'off_curve')  # a relaxed full cell
+    assert c.soc(3340.0) == (None, 'off_curve')  # above the curve's top: never clamped
     assert c.soc(3324.0) == (None, 'plateau')
     assert c.soc(3293.4) == (None, 'plateau')
     assert c.soc(3070.0) == (None, 'off_curve')  # below the bottom: never clamped

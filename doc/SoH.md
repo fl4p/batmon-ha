@@ -75,11 +75,19 @@ between accepted segments, and the entities expire a year after the last one.
 
 The gates above are the "tightened universal gates" of the offline prototype, aimed at an error of a single segment
 near ±10 %. Only the current-offset part of that is an explicit bound (5 %, above); the rest is the prototype's
-tuning, not a proven limit. But on a curve built from rests of 90 minutes and more, the curve is steep only near
-empty, 0–11 % SoC. A LiFePO4 cell that rests after a full charge settles to ~3.33 V, where the relaxed curve rises by
-less than 1 mV per % SoC. The steep "top knee" that the prototype's older 30-minute curve had (3440 mV at 100 %) was a
-cell still polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So no rest near
+tuning, not a proven limit. But the built-in curve, built from rests of 90 minutes and more on one pack, is steep
+only near empty, 0–11 % SoC. At its top it rises by less than 1 mV per % SoC. The steep "top knee" that the
+prototype's older 30-minute curve had (3440 mV at 100 %) came from its highest readings, most likely a cell still
+polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So on this curve no rest near
 full is usable, and no segment can reach 60 % of SoC.
+
+What that shows and what it does not: **this curve, built from this data, has no region of ≥ 5 mV/% at the top, so
+the shipped gates accept no segment.** It does not show that relaxed LiFePO4 has no usable top region. The data behind
+the curve has no relaxed minute above 99.61 % of the BMS's SoC or above 3333 mV; the curve's top end is extrapolated
+from there, and its SoC axis is the BMS's own. TI's gauges use relaxed LiFePO4 readings above about 92–93 % SoC for
+Qmax updates ([SLYT402](https://www.ti.com/lit/pdf/slyt402), pp. 13–14, chemistry IDs 404 and 409), though TI gives
+no slope for that region. Whether these packs have a steep enough relaxed region there is open; rests taken closer to
+full would answer it.
 
 Replay of the maintainer's van pack (280 Ah, Daly BMS, two cells logged, 2023-11 to 2025-11, 412 days with data)
 through the add-on's code:
