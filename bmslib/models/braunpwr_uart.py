@@ -1,17 +1,21 @@
 """BraunPWR / KS48100-HO20_V1 rack BMS over its wired UART (#403).
 
-UNTESTED ON HARDWARE. Built from two sources only, and no raw reply frame has
-been captured yet:
-  - the working ESPHome config of the #403 reporter (bialy39), who pulled the
-    BMS's Quectel FC41D WiFi/BLE module (its BLE link kept dropping) and polls
-    the BMS from an ESP32 through the ``uartex`` component instead;
+Wiring: the BMS's internal 4-pin TTL UART header (GND/TX/RX/VIN) that its
+Quectel FC41D WiFi/BLE module plugs into. The #403 reporter (bialy39) pulled
+the module, whose BLE link kept dropping, and polls the BMS from an ESP32 on
+that header; a 3.3 V USB-TTL adapter there does the same job.
+
+Sources:
+  - the reporter's working ESPHome config (``uartex`` component);
   - the manufacturer's protocol PDF "X 1363_Protocol_V1_0_1" (Chinese), which is
     YD/T 1363.3-2014: table 23 (42H field order), table 24 (status words),
-    table 19 (current sign).
-Where the two meet they agree (SOI 0x3E, 42H echo in the response's CID1 slot,
-field offsets up to the alarm words). Wiring is unconfirmed: the reporter's
-ESP32 sits either on the header the FC41D module plugged into or behind an
-RS485 transceiver; we don't know which.
+    table 19 (current sign);
+  - real request/reply pairs from his pack (bmslib/test/test_braunpwr_uart.py
+    REAL_FRAMES). They decode with no warning and their fields cross-check:
+    cells sum to the pack voltage, remaining/full Ah equals SOC, and the
+    charging bit comes with a positive raw current.
+The decoder is verified against those frames; the driver itself has not yet
+run against the hardware.
 
 Wire format: the ASCII-hex YD/T 1363 framing already implemented in
 ``bmslib.models.pace`` (builder, parser, LENGTH/CHKSUM), with a different SOI:

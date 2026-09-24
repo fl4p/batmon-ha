@@ -205,11 +205,10 @@ Supported types (baud rate in parentheses):
 * `braunpwr_uart` (9600) — BraunPWR packs with the KS48100 rack BMS: YD/T 1363
   ASCII protocol (`>22 01 4A 42 …\r`, command 42H). `braunpwr_uart:<addr>` for
   the pack address (default 1). It follows the DIP switch, but how is
-  unverified; if nothing answers, try 1 to 16. Built from a user's
-  working ESPHome config (an ESP32 fitted in place of the BMS's FC41D WiFi/BLE
-  module) and the manufacturer's protocol PDF. Wiring is unconfirmed: the
-  FC41D module's header or the BMS's RS485 port
-  ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
+  unverified; if nothing answers, try 1 to 16. Connect a 3.3 V USB-TTL
+  adapter to the BMS's internal 4-pin UART header in place of its FC41D
+  WiFi/BLE module (GND, TX, RX; leave VIN open). Decoder checked against real
+  reply frames ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
 * `renogy_uart` (9600) — Renogy smart lithium (RBT100LFP12, RBT200LFP12S, ...)
   Modbus RTU; `renogy_uart:<id>` for the slave id (default `0x30`; the
   RBT100LFP12SH-G1 uses `0xF7`).
