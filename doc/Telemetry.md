@@ -45,6 +45,15 @@ If that endpoint is unreachable at startup, batmon falls back to plain HTTP on p
 logs a warning; the startup line `Anonymous telemetry is ON (https://...)` shows which one is
 in use. Add-on versions before 2.19 always used the plain endpoint (#379).
 
+## Versions before 1.98d send nothing that is kept
+
+Version 1.98d (June 2026) changed how voltage and current are encoded, from decimal
+volts/amps to integer millivolts/milliamps. The telemetry server can only store one
+of the two per week, and since 2026-06-22 that is the integer form. An add-on older
+than 1.98d therefore gets its uploads refused and contributes no telemetry; updating
+fixes it. Uploads between 2026-06-08 and 2026-06-21 were largely lost the same way,
+while the fleet was part-updated.
+
 ## Purpose
 
 Research only. I do not sell this data and have no commercial intent with it. I might
