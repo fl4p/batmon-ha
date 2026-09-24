@@ -119,7 +119,12 @@ or a pack that rests for hours near empty and near full. Neither is implemented 
 The state is saved per BMS in `qmax_<name>.json` in the add-on's data directory: the usable rests, the accepted
 segments and the running charge count every 30 s, and also the rest in progress at shutdown. A restart within 5
 minutes continues the open segment; a longer one ends it, keeping the rests. A file that does not validate is discarded
-(the log says why). A pack that the chemistry check switched off stays off after a restart.
+(the log says why).
+
+If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
+the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the
+open rest and every rest and segment timed after that sample are dropped (logged), rather than published as new or left
+blocking later segments until real time catches up. What lies before it is kept. A pack that the chemistry check switched off stays off after a restart.
 
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
 `bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV curve, every

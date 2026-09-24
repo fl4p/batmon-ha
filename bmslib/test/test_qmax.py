@@ -1030,6 +1030,93 @@ def test_calibration_without_the_age_limit_the_old_capacity_is_published(monkeyp
     assert pub and pub[-1]['qmax'] > 0.95 * 98.0  # the pack is at 78 Ah now
 
 
+@pytest.mark.parametrize('back', [1800.0, 30 * 86400.0])
+def test_a_clock_step_back_publishes_nothing_old_as_new(back):
+    """The second review's case: a Pi without a hardware clock boots behind
+    real time. The first sample, 30 min or 30 days behind the saved last_t,
+    closed the pending rest; its segment ended after that sample, a negative
+    age counted as fresh, and 97.5 Ah went out as new."""
+    est, st = _pending_rest_state()
+    restored = _fresh()
+    assert restored.restore(st)
+    now = est._last_t - back
+    assert restored.add(now, 0.0, [3400] * 4, temp=25.0) is None
+    assert restored.counts['clock_back'] == 1 and restored._rest_t0 is None  # the pending rest made no anchor
+    assert all(a['t'] <= now for a in restored.anchors) and all(s['t'] <= now for s in restored.segments)
+    assert restored._last_seg_t <= now
+    # and it goes on: new cycles on the stepped-back clock are measured and published
+    _, pub = run(full_cycles(t0=now + 60).rows, restored)
+    assert pub and pub[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
+    assert all(0 <= pub[-1]['newest_t'] - s['t'] for s in restored.segments)
+
+
+def test_calibration_without_the_age_check_and_the_drop_a_step_back_publishes_an_old_value(monkeypatch):
+    """Both halves reverted to the code the review attacked: the step back
+    handled as a gap (which closes the pending rest) and a negative age taken
+    as fresh. With only the first reverted, the age check alone stops it."""
+    est, st = _pending_rest_state()
+    now = est._last_t - 30 * 86400.0
+    out = []
+    monkeypatch.setattr(q.QmaxEstimator, '_clock_back', lambda self, t: out.append(self._gap(t, 'clock_back')))
+    restored = _fresh()
+    assert restored.restore(st)
+    restored.add(now, 0.0, [3400] * 4, temp=25.0)
+    assert out == [None] and restored.counts['segment_age_unknown'] == 1  # the age check held
+    monkeypatch.setattr(q, 'segment_age_ok', lambda age: age <= q.MAX_SEGMENT_AGE_S)
+    out.clear()
+    restored = _fresh()
+    assert restored.restore(st)
+    restored.add(now, 0.0, [3400] * 4, temp=25.0)
+    res = out[0]
+    assert res is not None, 'scenario is harmless'
+    assert res['newest_t'] - now == pytest.approx(30 * 86400.0, abs=1) and res['qmax'] == pytest.approx(97.5, abs=0.2)
+
+
+def _ahead_state(ahead=365 * 86400.0):
+    """Four segments measured while the clock ran a year ahead, saved; then
+    the clock is corrected, and the pack keeps cycling."""
+    est, _ = run(full_cycles(t0=T0 + ahead).rows)
+    later = full_cycles(n=3, t0=est._last_t - ahead + 600).rows
+    return _via_json(est.get_state(full=True)), later
+
+
+def test_a_state_saved_with_the_clock_ahead_neither_stalls_nor_lingers():
+    """It used to stall: every new pair started before the saved last
+    segment's end and was rejected as an overlap until real time passed it
+    (a year here), and the future segments would then have sat in the median
+    past their real age."""
+    st, later = _ahead_state()
+    restored = _fresh()
+    assert restored.restore(st)
+    _, pub = run(later, restored)
+    assert restored.counts['clock_back'] == 1 and 'overlap' not in restored.pair_reasons
+    assert len(pub) == 4 and pub[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
+    assert all(s['t'] <= later[-1][0] for s in restored.segments)
+    assert restored.restore(_via_json(restored.get_state()))  # and the state it writes validates
+
+
+def test_calibration_without_the_drop_a_state_from_ahead_stalls(monkeypatch):
+    monkeypatch.setattr(q.QmaxEstimator, '_clock_back', lambda self, t: self._gap(t, 'clock_back'))
+    st, later = _ahead_state()
+    restored = _fresh()
+    assert restored.restore(st)
+    _, pub = run(later, restored)
+    assert pub == [] and restored.pair_reasons['overlap'] >= 5
+
+
+def test_monotone_in_clock_step_back():
+    """How far the clock steps back, from 0 (no step) out: once the pending
+    rest's segment is refused, a larger step never gets it accepted."""
+    def published(back):
+        est, st = _pending_rest_state()
+        r = _fresh()
+        assert r.restore(st)
+        t = est._last_t + (60.0 if back == 0 else -back)
+        # two load samples: the second closes the first's minute, which ends the rest
+        return any([r.add(t + dt, 20.0, None) is not None for dt in (0.0, 70.0)])
+    _monotone([published(b) for b in (0, 1, 60, 1800, 86400, 30 * 86400, 400 * 86400)])
+
+
 def test_changed_code_discards_everything(caplog):
     est, _ = run(full_cycles().rows)
     st = _via_json(est.get_state())

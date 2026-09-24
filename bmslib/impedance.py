@@ -138,7 +138,9 @@ IRLS_K = 4.0
 # --- output ---
 ROLLING_WINDOWS = 20  # published value = median over the last N accepted windows
 PUBLISH_MIN_WINDOWS = 5  # publish nothing before this many windows were accepted
-# ... and only windows from the last 7 days count. R changes by ~1.5x per 10 C,
+# ... and only windows from the last 7 days count, measured from the newest
+# window; one timed after it (a clock that stepped back) leaves the median as
+# of unknown age. R changes by ~1.5x per 10 C,
 # so a median that mixes windows from different seasons describes no actual
 # state of the pack (on ANT24 the last 20 windows spanned months). Seven days
 # still lets a pack with a few heavy loads per week collect 5 windows, and
@@ -771,6 +773,13 @@ class CellResistanceEstimator:
                 return None  # the BMS re-served the same measurement: not a new pair
             if t < self._last_t or t - self._last_t > WINDOW_S:
                 self._restart()  # clock stepped back, or a gap longer than a window
+            if t < self._last_t:
+                # timed on a clock that ran ahead: the summary and the
+                # chemistry run would wait for real time to catch up
+                if self._t_summary is not None and self._t_summary > t:
+                    self._t_summary = t
+                if self._oob_since is not None and self._oob_since > t:
+                    self._oob_since = t
         self._last_t = t
 
         vt = None
@@ -812,6 +821,7 @@ class CellResistanceEstimator:
                 self.windows.append(res)
                 while self.windows[0]['t'] < res_t - MAX_WINDOW_AGE_S:
                     self.windows.popleft()
+                self._drop_windows_after(res_t)
                 logger.debug('%s: cell resistance window R=%.3f mOhm (%d/%d cells, dod=%.0f, temp=%s, '
                              'pack_temp=%s)', self.name, res['r'], res['n_accepted'], res['n_cells'], res['dod'],
                              res['temp'], res['pack_temp'])
@@ -834,6 +844,19 @@ class CellResistanceEstimator:
             tp = float(pack_temp) if _finite(pack_temp) else None
             self._bin.add(t, i_chg, s, vt, tc, tp)
         return new_value
+
+    def _drop_windows_after(self, t):
+        """Called with the newest window's time, just appended. A kept window
+        timed after it was timed on a clock that ran ahead (the clock stepped
+        back since, or the saved state was written while it ran ahead). Its
+        age is unknown, so it leaves the median instead of counting as recent
+        until real time catches up with it. The windows are otherwise in time
+        order, so the one before the newest is the only one to check."""
+        if len(self.windows) > 1 and self.windows[-2]['t'] > t:
+            n = len(self.windows)
+            self.windows = deque((w for w in self.windows if w['t'] <= t), maxlen=ROLLING_WINDOWS)
+            logger.info('%s: cell resistance: %d window(s) timed after %s dropped (the clock stepped back)',
+                        self.name, n - len(self.windows), _fmt_t(t))
 
     def _log_summary(self):
         n = sum(self.counts.values())

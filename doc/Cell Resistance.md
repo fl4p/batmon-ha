@@ -56,7 +56,9 @@ that only the estimator asked for is logged but does not count towards the recon
 The estimator's state is saved per BMS in `impedance_<name>.json` in the add-on's data directory: the accepted
 windows and the learnt quantisation steps every 30 s when they changed, and everything, including the window in
 progress, at shutdown. After a restart the saved windows count towards the 5, so there is no new warm-up, and the saved
-estimate is published again with the next accepted window. A restart within a window continues that window.
+estimate is published again with the next accepted window. A restart within a window continues that window. Windows
+timed after a newer one (the clock stepped back, or the state was saved while it ran ahead) leave the median: their age
+is unknown.
 
 Not restored:
 

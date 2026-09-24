@@ -874,6 +874,38 @@ def test_a_restart_after_a_gap_keeps_the_windows_and_skips_the_warm_up():
     assert first_pub_restored < first_pub_fresh
 
 
+def _ahead_then_right():
+    """Windows measured while the clock ran a year ahead, on a pack that then
+    read twice today's resistance (another season), saved without last_t (the
+    compact state a crash leaves); then the clock is right again."""
+    ahead = 365 * 86400.0
+    old, _ = run([(t + ahead, i, v, soc) for t, i, v, soc in trace(r=tuple(2 * x for x in CELL_R))])
+    assert len(old.windows) == imp.ROLLING_WINDOWS and old.value == pytest.approx(2 * R_MEDIAN, rel=0.05)
+    later = [(t + 3600, i, v, soc) for t, i, v, soc in trace(n=900, seed=5)]
+    restored = imp.CellResistanceEstimator('p')
+    assert restored.restore(_via_json(old.get_state(full=False)))
+    return restored, later
+
+
+def test_windows_timed_on_a_clock_that_ran_ahead_leave_the_median():
+    """They used to stay: the age limit only popped windows older than the
+    newest, and a window from the future is never older. The first value
+    published after the correction was the old median, as if recent."""
+    est, later = _ahead_then_right()
+    _, pub = run(later, est)
+    assert pub and pub[0] == pytest.approx(R_MEDIAN, rel=0.05)
+    assert all(w['t'] <= later[-1][0] for w in est.windows)
+    assert len(pub) == len(est.windows) - imp.PUBLISH_MIN_WINDOWS + 1  # a fresh warm-up: nothing old counts
+
+
+def test_calibration_without_the_drop_the_old_windows_are_published_as_recent(monkeypatch):
+    monkeypatch.setattr(imp.CellResistanceEstimator, '_drop_windows_after', lambda self, t: None)
+    est, later = _ahead_then_right()
+    _, pub = run(later, est)
+    assert pub, 'scenario is harmless'
+    assert pub[0] == pytest.approx(2 * R_MEDIAN, rel=0.05)
+
+
 def test_restoring_publishes_nothing_by_itself():
     est, _ = run(trace())
     restored = imp.CellResistanceEstimator('p')

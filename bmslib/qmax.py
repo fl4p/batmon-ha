@@ -46,11 +46,14 @@ plausible wrong number without it:
 
 Coulomb counting: the BMS current (BmsSample sign, before invert_current) is
 integrated with the trapezoid rule at whatever cadence it arrives. A gap
-longer than MAX_GAP_S, a clock step back, or a current no pack can carry (a
-decode glitch, above I_MAX_C_RATE x capacity or I_MAX_ABS_A,
-estimator_common) invalidates the open segment (anchors on the far side of it
-cannot be paired), but keeps the anchors. The glitch itself is never
-integrated. The
+longer than MAX_GAP_S, or a current no pack can carry (a decode glitch, above
+I_MAX_C_RATE x capacity or I_MAX_ABS_A, estimator_common) invalidates the open
+segment (anchors on the far side of it cannot be paired), but keeps the
+anchors. The glitch itself is never integrated. A clock step back (a sample
+older than the last one) does more: every anchor and segment timed after the
+new sample is dropped, with the open rest, because its age can no longer be
+measured -- a Pi without a hardware clock boots behind real time, and a state
+saved while the clock ran ahead holds times that lie in the future. The
 add-on samples at a fixed period, so the prototype's event-downsampling bias
 (dense samples under load, sparse while slowly charging, which undercounted
 charge segments) does not arise; outages still do, hence the gap and coverage
@@ -407,6 +410,14 @@ def offset_bound(a, b) -> float:
     return max(I_OFFSET_MIN_A, abs(a['i_rest']), abs(b['i_rest']))
 
 
+def segment_age_ok(age: float) -> bool:
+    """A segment may count towards what is published only if its age, from
+    the sample being processed, is known and within MAX_SEGMENT_AGE_S. A
+    negative age (the segment ends after the current sample: the clock is
+    behind the one that timed it) is unevaluable, not young."""
+    return 0.0 <= age <= MAX_SEGMENT_AGE_S
+
+
 def _same_sign(dq: float, dsoc: Sequence[float]) -> bool:
     """Charge in (dq > 0) must raise every cell's SoC, charge out lower it.
     Otherwise the current sign is wrong (a driver, or invert_current applied
@@ -535,6 +546,8 @@ class QmaxEstimator:
             return None
         if self._last_t is not None and t == self._last_t:
             return None  # the BMS re-served the same measurement
+        if self._last_t is not None and t < self._last_t:
+            self._clock_back(t)  # before anything else: the sample then starts a new record
         if finite(capacity) and capacity > 0:
             self.bms_capacity = float(capacity)
         if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
@@ -552,8 +565,8 @@ class QmaxEstimator:
         new = None
         if self._last_t is not None:
             dt = t - self._last_t
-            if dt < 0 or dt > MAX_GAP_S:
-                new = self._gap(t, 'clock_back' if dt < 0 else 'gap')
+            if not 0 <= dt <= MAX_GAP_S:  # (dt < 0 cannot reach here: _clock_back reset _last_t)
+                new = self._gap(t, 'gap')
             else:
                 assert self._last_i is not None
                 self.q_ah += 0.5 * (i + self._last_i) * dt / 3600.0
@@ -623,6 +636,36 @@ class QmaxEstimator:
             logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
                          self.name, why, t - (self._last_t or t))
         return new
+
+    def _clock_back(self, t: float):
+        """The clock stepped back: t is older than the last sample. Whatever
+        was timed on the other clock and lies after t -- the open rest and
+        bin, anchors, segments -- has no age that can be measured from now on,
+        and would be published as new (a pending rest closed by a first sample
+        30 days behind completed a segment of age -30 days) or block every
+        later pair as an overlap until real time caught up with it. It is
+        dropped; what lies before t is kept, in a new epoch. The open rest is
+        not made into an anchor: it would end after t."""
+        assert self._last_t is not None
+        back = self._last_t - t
+        n_a, n_s = len(self.anchors), len(self.segments)
+        self._bin = None
+        self._reset_rest()
+        self.anchors = deque((a for a in self.anchors if a['t'] <= t), maxlen=MAX_ANCHORS)
+        self.segments = deque((s for s in self.segments if s['t'] <= t), maxlen=SUMMARY_K)
+        if self._last_seg_t is not None and self._last_seg_t > t:
+            self._last_seg_t = t  # no new segment may start before t; nothing after it is known
+        if self._t_summary is not None and self._t_summary > t:
+            self._t_summary = t
+        if self._oob_since is not None and self._oob_since > t:
+            self._oob_since = t
+        self._t_volt = None
+        self._last_t = self._last_i = None
+        self.epoch += 1
+        self.counts['clock_back'] += 1
+        logger.info('%s: Qmax: the clock stepped back by %.0f s (now %s): open segment, open rest, %d anchor(s) and '
+                    '%d segment(s) timed after it dropped', self.name, back, fmt_t(t),
+                    n_a - len(self.anchors), n_s - len(self.segments))
 
     def _close_bin(self, now: float) -> Optional[Dict[str, Any]]:
         b = self._bin
@@ -802,18 +845,21 @@ class QmaxEstimator:
         """Keep a segment and return what to publish. Ages count from now, the
         sample being processed -- not from the segment's end: a rest that was
         still open when batmon stopped ends at the first sample after the
-        restart, and its segment may be older than the whole summary window."""
+        restart, and its segment may be older than the whole summary window.
+        Every segment in the published median must have a known age within
+        the window (segment_age_ok); one that does not leaves it."""
         self._last_seg_t = seg['t']  # its anchors are used, stale or not
-        horizon = now - MAX_SEGMENT_AGE_S
-        if seg['t'] < horizon:
-            self.counts['segment_stale'] += 1
-            logger.info('%s: Qmax segment %s -> %s not used: it ended more than %.0f days ago', self.name,
-                        fmt_t(seg['t0']), fmt_t(seg['t']), MAX_SEGMENT_AGE_S / 86400)
+        age = now - seg['t']
+        if not segment_age_ok(age):
+            self.counts['segment_stale' if age > 0 else 'segment_age_unknown'] += 1
+            logger.info('%s: Qmax segment %s -> %s not used: %s', self.name, fmt_t(seg['t0']), fmt_t(seg['t']),
+                        ('it ended more than %.0f days ago' % (MAX_SEGMENT_AGE_S / 86400)) if age > 0 else
+                        ('it ends %.0f s after the current sample, its age is unknown' % -age))
             seg = None
         else:
             self.segments.append(seg)
-        while self.segments and self.segments[0]['t'] < horizon:
-            self.segments.popleft()
+        if not all(segment_age_ok(now - s['t']) for s in self.segments):
+            self.segments = deque((s for s in self.segments if segment_age_ok(now - s['t'])), maxlen=SUMMARY_K)
         if seg is None:
             return None
         self.counts['segment'] += 1
