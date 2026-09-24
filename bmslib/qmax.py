@@ -86,7 +86,7 @@ A counter at a stop does not count what still flows. At its full end (SoC
 goes into cells that hold more than that (grade-A LFP holds 105-110 % of its
 nameplate), and at its empty end charge can still come out. A counter held
 there reads "moved 0" while the host was off with its clock frozen, and the
-third review published 95.0 / 91.8 / 87.3 Ah for a 98 Ah pack with 3 / 6 / 10
+third review published 95.0 / 91.7 / 87.3 Ah for a 98 Ah pack with 3 / 6 / 10
 Ah hidden that way. So a reading within COUNTER_STOP_PCT of either end, or one
 without a SoC to tell, is no evidence. Not covered: a counter that runs into a
 stop and back out while the host is off (charged to full, then discharged by
@@ -701,10 +701,11 @@ class QmaxEstimator:
         known (pack estimate, BMS probes, or the MOSFET at rest), None when
         unknown; capacity [Ah]: what the BMS reports, None/NaN when unknown,
         never used as a reference (module doc), only as the full end of its
-        counter; bms_charge [Ah]: the BMS's own remaining-charge counter, None/NaN when
-        unknown (only used as evidence across a restart, see the module doc), and charge_src which counter it is
-        (charge_counter; None: 'charge'); bms_soc [%]: the BMS's SoC, None/NaN when
-        unknown (tells whether that counter may be held at a stop).
+        counter; bms_charge [Ah]: the BMS's own remaining-charge counter,
+        None/NaN when unknown (only used as evidence across a restart, see the
+        module doc), and charge_src which counter it is (charge_counter; None:
+        'charge'); bms_soc [%]: the BMS's SoC, None/NaN when unknown (tells
+        whether that counter may be held at a stop).
 
         Returns result() when this call accepted a segment and at least
         PUBLISH_MIN_SEGMENTS are in, else None -- a caller that publishes the
