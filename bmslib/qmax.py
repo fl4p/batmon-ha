@@ -1,0 +1,949 @@
+"""
+Experimental online Qmax / state-of-health estimator for LiFePO4 packs, per
+BMS, in pure Python.
+
+Port of the Qmax part of the offline Impedance-Track prototype in the
+bat-impedance project (`qmax_soh.py`, `cell_degradation.py`, `ocv_table.py`;
+WHITEPAPER sections 2.1, 6 and 8). Between two relaxed rests the state of
+charge of every cell is read off the OCV(SoC) curve, the charge that flowed in
+between is coulomb-counted, and
+
+    Qmax_cell = dQ * 100 / (SoC_cell(t2) - SoC_cell(t1))       [Ah]
+
+(dQ positive for charge). The pack's Qmax is that of the limiting cell (the
+smallest): in a series string the cell that runs empty first ends the
+discharge, whatever the others still hold. SoH = Qmax / design capacity.
+
+How this relates to TI's Impedance Track: it is the Qmax-update half of it
+(SLUA364b), the OCV-anchored one -- two OCV readings taken in relaxation, both
+in a steep part of the OCV curve, with enough passed charge in between. It
+does not do the rest of a TI gauge: no R(DOD, T) grid, no simulation of the
+remaining run time, no SoC correction of the BMS, no learning cycle. And the
+OCV curve is one fixed table, not a per-chemistry-ID database.
+
+Anchors (relaxed rests) -- each rule exists because the prototype produced a
+plausible wrong number without it:
+ * |I| stays below the rest threshold for at least MIN_REST_S (90 min). LFP
+   relaxes slowly; at 30 min the top of the charge was still polarised, and
+   the curve built from those rests biased Qmax to 210 Ah instead of the
+   280-300 Ah four independent methods agree on (WHITEPAPER 8.3).
+ * The OCV is the asymptote of V(t) = A + B exp(-t/tau) fitted to the rest,
+   used only when the fit observed the settling (tau <= half the rest), fits
+   (r^2 >= 0.5), has something to extrapolate (|B| >= 0.5 mV) and stays within
+   50 mV of the last value; otherwise the last value. Per cell.
+ * A cell's SoC is read only where the curve is steep (smoothed slope >= 5 mV
+   per %SoC) and inside the curve's range. On the plateau 1 mV is several % of
+   SoC; there the anchor is unevaluable, never a guess. Slope and inversion
+   both use the curve smoothed with a 3 % Gaussian: the raw isotonic curve is a
+   staircase whose step edges read as steep (the slope_at bug, WHITEPAPER 6.4).
+ * A known temperature inside the range the curve was measured at. Missing
+   temperature makes the anchor unevaluable; it is never defaulted. At rest the
+   MOSFET temperature is close to the cell's (WHITEPAPER 7), so the caller may
+   pass it when there is nothing better.
+ * Voltages are the per-minute median, and the last value is the median of the
+   last END_BINS minutes after removing isolated single-minute spikes: one
+   garbled reading at the end of a rest must not move the anchor.
+
+Coulomb counting: the BMS current (BmsSample sign, before invert_current) is
+integrated with the trapezoid rule at whatever cadence it arrives. A gap
+longer than MAX_GAP_S, or a clock step back, invalidates the open segment
+(anchors on the far side of it cannot be paired), but keeps the anchors. The
+add-on samples at a fixed period, so the prototype's event-downsampling bias
+(dense samples under load, sparse while slowly charging, which undercounted
+charge segments) does not arise; outages still do, hence the gap and coverage
+gates.
+
+Segments are accepted with the tightened universal gates from the prototype's
+TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
+every cell, rests >= 90 min, dQ and dSoC of the same sign, and, when a
+capacity is known, a plausible ratio to it.
+
+STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
+smoothed slope reaches 5 mV/% only between 0 and 11 % SoC. A relaxed LiFePO4
+cell at the top of a charge settles to ~3.33 V, where the curve is flat
+(< 1 mV/%). With these gates no segment can be accepted on this curve; see
+doc/SoH.md for the replay numbers and what relaxing a gate would cost. The
+estimator still logs every anchor and every candidate pair it rejects, with
+the reason.
+
+Chemistry: LiFePO4 only, the same persistent-out-of-band rule as the cell
+resistance estimator (bmslib/estimator_common.py).
+"""
+import math
+from collections import Counter, deque
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, COMMON_FILE, LFP_MV_HI, LFP_MV_LO,
+                                     chemistry_step, finite, fmt_t, median, source_fingerprint, v_fin, v_int,
+                                     v_opt_fin)
+from bmslib.util import get_logger
+
+logger = get_logger()
+
+# ---------------------------------------------------------------- OCV curve
+# Relaxed OCV [mV] of LiFePO4 against DOD = 0, 1, ..., 100 % (SoC = 100 - DOD).
+# Provenance: bat-impedance `ocv_table.py` run unchanged except REST_SETTLE=90
+# (was 30) on the ANT24 minute cache 2023-08-31..2026-05-22 (cell u0 of the van
+# pack, 280 Ah): 14 764 relaxed minutes with |I| < 1.5 A and < 1 A spread for
+# >= 90 min, SoC drift < 1.5 % during the rest; non-increasing isotonic fit,
+# pooled over both current directions. MOSFET temperature at those minutes:
+# 2-98 % range 10-29 degC, median 25. The DOD axis is ANT's voltage-anchored SoC
+# (WHITEPAPER 6.3), so its scale error goes 1:1 into Qmax.
+# Why 90 min and not the 30-min curve the prototype shipped: the curve must
+# have been built with the same notion of "relaxed" as the anchors it is used
+# on. The 30-min curve's steep top (3440 mV at DOD 0) is a still-polarised
+# cell, and it is what biased Qmax to 210 Ah. At 90 min that top knee is gone.
+# Hysteresis: the pooled curve is used. In the only zone that is ever inverted
+# (DOD >= 90) 95 % of the rests came after a charge, so the pooled curve there
+# IS the post-charge branch; the post-discharge branch has ~200 points there,
+# too few for its own isotonic fit, so neither a split nor a midpoint can be
+# built from this data. The plateau hysteresis is +7 mV (post-charge higher);
+# a post-discharge anchor at a >= 5 mV/% knee therefore reads at most ~1.4 %
+# SoC too low, well inside the other error terms (doc/SoH.md).
+OCV_RAW_MV = (
+    3326.29, 3326.27, 3322.74, 3322.54, 3322.54, 3322.54, 3322.54, 3322.54, 3322.54, 3322.54,
+    3322.54, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23,
+    3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23, 3314.23,
+    3311.35, 3306.78, 3302.21, 3298.79, 3294.28, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40,
+    3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40,
+    3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40, 3293.40,
+    3293.40, 3293.40, 3293.40, 3293.40, 3271.37, 3259.88, 3259.88, 3259.88, 3259.88, 3259.88,
+    3259.88, 3259.88, 3259.88, 3257.38, 3246.54, 3246.12, 3245.70, 3245.29, 3244.87, 3244.46,
+    3244.04, 3243.62, 3243.21, 3242.79, 3242.37, 3241.96, 3241.83, 3237.64, 3231.55, 3221.56,
+    3220.78, 3219.99, 3216.81, 3207.50, 3196.20, 3177.02, 3157.85, 3138.67, 3119.49, 3100.31,
+    3081.14,
+)
+# Temperature range of the rests the curve was built from (2-98 %). The curve
+# has no temperature axis: dOCV/dT is +1.3 mV/degC on the plateau and +3.2 at
+# the bottom knee (CALCE cross-check), so an anchor far outside this range
+# would read a different SoC. Outside it the anchor is unevaluable.
+CURVE_TEMP_LO, CURVE_TEMP_HI = 10.0, 30.0
+
+CURVE_SMOOTH_SIGMA = 3.0  # % DOD, the prototype's make_inverse(slope_smooth_sigma=3.0)
+MIN_SLOPE_MV_PER_PCT = 5.0  # both ends on a steep knee (prototype TODO, tightened from 0.8)
+
+# ---------------------------------------------------------------- anchors
+REST_BIN_S = 60.0  # rest detection and the relaxation fit work on minute bins
+MIN_REST_S = 90 * 60.0
+# Rest threshold: min(REST_I_MAX_A, capacity / 100). 1.5 A is the prototype's
+# rest threshold, the one the curve above was built with, on a 280 Ah pack
+# (C/190): an anchor must not be looser than its curve. C/100 for smaller
+# packs: with the per-cell R_dc of ~2 mOhm at 280 Ah (R*Q ~ 0.56 Ohm*Ah, both
+# packs measured, WHITEPAPER 9) C/100 keeps a cell within ~6 mV of its OCV,
+# about 1 % SoC at a 5 mV/% knee. C/20, the figure quoted for TI gauges, would
+# be ~28 mV, 5-6 % SoC at that knee. Without a known capacity: 1.5 A.
+REST_I_MAX_A = 1.5
+REST_C_RATE = 0.01
+# ... and the minute's mean |I| below twice that, so an alternating load that
+# averages to zero is not a rest (the prototype's i_std < 1 A gate).
+REST_ABS_FACTOR = 2.0
+MAX_REST_BINS = 720  # 12 h of minute bins; beyond that the rest is long settled
+END_BINS = 5  # the rest's last value: median of the last 5 minutes (after despiking)
+END_FRESH_S = 15 * 60.0  # ... which must lie within the last 15 min of the rest
+TEMP_WINDOW_S = 30 * 60.0  # anchor temperature: median over the last 30 min of the rest
+FIT_MAX_POINTS = 120  # long rests are merged to <= 120 points for the fit
+FIT_TAU_MIN_S, FIT_TAU_MAX_S = 5.0, 1800.0  # the prototype's curve_fit bounds
+FIT_TAU_GRID = 60
+FIT_MIN_R2 = 0.5
+FIT_MIN_B_MV = 0.5
+FIT_MAX_TAU_FRAC = 0.5
+FIT_MAX_EXTRAP_MV = 50.0
+VOLTAGE_PERIOD_S = 10.0  # voltages are only needed near rest, and only every 10 s
+
+# ---------------------------------------------------------------- coulomb counting
+# A gap longer than this in the current record invalidates the open segment.
+# 5 min covers a BLE reconnect and an add-on restart; the charge in the gap is
+# bridged linearly. What it can cost: 5 min at C/5 is 1.7 % of Qmax. The
+# prototype's 90 min limit was far looser (a single such outage is one of its
+# listed residual errors, WHITEPAPER "why deep cycles don't go to zero").
+MAX_GAP_S = 300.0
+# Intervals longer than this count as bridged, not measured, for the coverage
+# gate: the add-on samples every sample_period (default 1 s); 60 s is the
+# resolution of the minute data the prototype and the replay ran on.
+COVERED_DT_S = 60.0
+MIN_COVERAGE = 0.95
+MAX_SEGMENT_S = 10 * 86400.0  # coulomb drift grows with time; the prototype paired up to 20 days
+
+# ---------------------------------------------------------------- segments
+MIN_DSOC = 60.0  # %, every cell
+# With a known capacity, every cell's Qmax must be within this ratio of it.
+# The prototype's window was 150-450 Ah for 280 Ah (0.54-1.6); the lower end is
+# widened so that a genuinely failing cell (SoH 50 %) is reported, not rejected.
+PLAUSIBLE_REL = (0.4, 1.6)
+MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, MAX_SEGMENT_S is 10 days
+
+# ---------------------------------------------------------------- output
+# Published Qmax = median of the last SUMMARY_K accepted segments, once there
+# are PUBLISH_MIN_SEGMENTS, none older than MAX_SEGMENT_AGE_S. From the replay
+# of two years of the van pack's Daly data (doc/SoH.md): with the prototype's
+# looser gates the pack got a segment every ~4 weeks (16 in 412 days of data),
+# and single segments scattered from 117 to 381 Ah (IQR 204-326) for a ~290 Ah
+# pack. A median of 3 is the smallest that outvotes one such outlier, 5 outvote
+# two. At one segment a month, 5 segments span ~5 months; LFP loses 2-3 % of
+# capacity a year, so a one-year window biases the median by ~1 %, far below
+# the scatter.
+SUMMARY_K = 5
+PUBLISH_MIN_SEGMENTS = 3
+MAX_SEGMENT_AGE_S = 365 * 86400.0
+SUMMARY_PERIOD_S = 86400.0  # info-level summary of what the gates did
+
+STATE_VERSION = 1
+
+
+def _code_fingerprint() -> Optional[str]:
+    """Anchors and segments are only restored into the code that made them:
+    a change to the curve or any gate would mix two definitions of Qmax."""
+    return source_fingerprint(__file__, COMMON_FILE)
+
+
+CODE_FINGERPRINT = _code_fingerprint()
+
+
+# ================================================================ OCV curve
+
+def gaussian_smooth(xs: Sequence[float], sigma: float, truncate: float = 4.0, mode: str = 'odd') -> List[float]:
+    """Gaussian filter (scipy.ndimage.gaussian_filter1d's kernel) in pure Python.
+
+    mode 'nearest' pads with the end values, as the prototype's
+    gaussian_filter1d(mode='nearest') did. mode 'odd' pads by point reflection
+    about the end value (x[-k] = 2 x[0] - x[k]), which leaves a straight line
+    unchanged up to the ends: 'nearest' flattens the steep bottom knee there
+    and lifts the curve's last point by 22 mV (3081 -> 3104 mV at DOD 100)."""
+    n = len(xs)
+    r = int(truncate * sigma + 0.5)
+    w = [math.exp(-0.5 * (k / sigma) ** 2) for k in range(-r, r + 1)]
+    s = sum(w)
+    w = [x / s for x in w]
+
+    def at(j):
+        if 0 <= j < n:
+            return xs[j]
+        if mode == 'nearest':
+            return xs[0] if j < 0 else xs[-1]
+        if j < 0:
+            return 2 * xs[0] - xs[min(n - 1, -j)]
+        return 2 * xs[-1] - xs[max(0, 2 * (n - 1) - j)]
+
+    return [sum(w[k + r] * at(i + k) for k in range(-r, r + 1)) for i in range(n)]
+
+
+def gradient(xs: Sequence[float]) -> List[float]:
+    """numpy.gradient(xs) for unit spacing."""
+    n = len(xs)
+    return [xs[1] - xs[0]] + [(xs[i + 1] - xs[i - 1]) / 2 for i in range(1, n - 1)] + [xs[-1] - xs[-2]]
+
+
+def _interp(x: float, xs: Sequence[float]) -> float:
+    """xs sampled at 0, 1, ..., n-1; linear."""
+    i = min(len(xs) - 2, max(0, int(math.floor(x))))
+    f = x - i
+    return xs[i] * (1 - f) + xs[i + 1] * f
+
+
+class OcvCurve:
+    """OCV(DOD) on a 1 % DOD grid, non-increasing.
+
+    soc() inverts the SMOOTHED curve and gates on the slope of that same
+    curve. The prototype inverted the raw isotonic curve but gated on the
+    smoothed slope; the raw curve is a staircase, so at a step edge (3322.5 ->
+    3314.2 mV between DOD 10 and 11) it maps a 7 mV range onto 1 % SoC while the
+    smoothed slope, the better estimate of the true curve, says ~1 mV/% there:
+    the sensitivity that the gate bounds would not be the one the inversion
+    has."""
+
+    def __init__(self, raw_mv: Sequence[float] = OCV_RAW_MV, sigma: float = CURVE_SMOOTH_SIGMA,
+                 min_slope: Optional[float] = None):
+        raw = [float(v) for v in raw_mv]
+        if len(raw) < 3 or any(b > a for a, b in zip(raw, raw[1:])):
+            raise ValueError('an OCV curve must be non-increasing in DOD')
+        self.raw = raw
+        self.smooth = gaussian_smooth(raw, sigma)  # non-increasing again: a positive kernel keeps the order
+        self.slope = gradient(self.smooth)  # mV per % DOD, <= 0
+        self.min_slope = min_slope  # None: MIN_SLOPE_MV_PER_PCT at call time
+
+    def soc(self, ocv: Optional[float]) -> Tuple[Optional[float], Optional[str]]:
+        """(SoC %, None) or (None, reason): 'missing', 'off_curve' (outside the
+        curve: a clamp would be a guess), 'plateau' (a flat stretch, or the
+        slope there below the gate)."""
+        if not finite(ocv):
+            return None, 'missing'
+        c = self.smooth
+        if ocv > c[0] or ocv < c[-1]:
+            return None, 'off_curve'
+        first = last = None
+        for i in range(len(c) - 1):
+            a, b = c[i], c[i + 1]
+            if a >= ocv >= b:
+                d = i if a == b else i + (a - ocv) / (a - b)
+                if first is None:
+                    first = d
+                last = i + 1 if a == b else d
+            elif first is not None:
+                break
+        if first is None or last is None:
+            return None, 'off_curve'
+        if last - first > 1e-9:
+            return None, 'plateau'  # the voltage sits on a flat stretch: DOD anywhere along it
+        min_slope = MIN_SLOPE_MV_PER_PCT if self.min_slope is None else self.min_slope
+        if abs(_interp(first, self.slope)) < min_slope:
+            return None, 'plateau'
+        return 100.0 - first, None
+
+
+# ================================================================ relaxation fit
+
+def despike(vs: Sequence[float]) -> List[float]:
+    """Running median of 3: removes isolated single-minute spikes (a garbled
+    frame, a 1-sample-per-minute BMS reading one bad value) and keeps steps.
+    The end points take the median of the three nearest values, so a spike in
+    the rest's last minute -- the one the anchor rests on -- goes too."""
+    n = len(vs)
+    if n < 3:
+        return list(vs)
+    return [median(vs[:3])] + [median(vs[k - 1:k + 2]) for k in range(1, n - 1)] + [median(vs[-3:])]
+
+
+def _merge(ts, vs, max_points):
+    n = len(ts)
+    if n <= max_points:
+        return list(ts), list(vs)
+    g = -(-n // max_points)
+    return ([sum(ts[k:k + g]) / len(ts[k:k + g]) for k in range(0, n, g)],
+            [median(vs[k:k + g]) for k in range(0, n, g)])
+
+
+_TAU_GRID = [FIT_TAU_MIN_S * (FIT_TAU_MAX_S / FIT_TAU_MIN_S) ** (k / (FIT_TAU_GRID - 1)) for k in range(FIT_TAU_GRID)]
+
+
+def fit_relaxation(ts: Sequence[float], vs: Sequence[float], v_end: float) -> Tuple[float, str, Dict[str, Any]]:
+    """OCV of one cell from its rest trace (ts seconds since the rest began,
+    vs mV, both in time order). The prototype's fit_asymptote: returns the
+    asymptote A of V = A + B exp(-t/tau) when the fit is trustworthy, else
+    v_end. Least squares in (A, B) is linear for fixed tau, so tau is found on
+    a log grid over the prototype's bounds (5..1800 s), A and B within its
+    bounds (A within 100 mV of the data, |B| <= 200 mV).
+
+    Returns (ocv, 'rc' | 'last', info)."""
+    if len(vs) < 8 or max(vs) - min(vs) < 1.0 or ts[-1] - ts[0] < 30:
+        return v_end, 'last', dict(why='short')
+    t, v = _merge(ts, vs, FIT_MAX_POINTS)
+    n = len(v)
+    mv = sum(v) / n
+    sst = sum((y - mv) ** 2 for y in v)
+    vlo, vhi = min(v) - 100.0, max(v) + 100.0
+    best = None
+    for tau in _TAU_GRID:
+        x = [math.exp(-tt / tau) for tt in t]
+        mx = sum(x) / n
+        sxx = sum((a - mx) ** 2 for a in x)
+        if sxx < 1e-12:
+            continue
+        b = sum((a - mx) * (y - mv) for a, y in zip(x, v)) / sxx
+        a0 = mv - b * mx
+        if not (vlo <= a0 <= vhi and -200.0 <= b <= 200.0):
+            continue
+        sse = sum((y - a0 - b * a) ** 2 for a, y in zip(x, v))
+        if best is None or sse < best[0]:
+            best = (sse, a0, b, tau)
+    if best is None or not sst > 0:
+        return v_end, 'last', dict(why='nofit')
+    sse, a0, b, tau = best
+    r2 = 1.0 - sse / sst
+    info = dict(r2=r2, tau=tau, b=b, a=a0)
+    if r2 < FIT_MIN_R2 or abs(b) < FIT_MIN_B_MV or tau > FIT_MAX_TAU_FRAC * (ts[-1] - ts[0]) \
+            or abs(a0 - v_end) > FIT_MAX_EXTRAP_MV:
+        return v_end, 'last', info
+    return a0, 'rc', info
+
+
+# ================================================================ estimator
+
+def _same_sign(dq: float, dsoc: Sequence[float]) -> bool:
+    """Charge in (dq > 0) must raise every cell's SoC, charge out lower it.
+    Otherwise the current sign is wrong (a driver, or invert_current applied
+    where it must not be) or the anchors are: Qmax would come out negative."""
+    return all(dq * d > 0 for d in dsoc)
+
+
+class QmaxEstimator:
+    """Streaming per-BMS estimator. Feed add() once per sampler iteration."""
+
+    def __init__(self, name: str, design_capacity: Optional[float] = None, curve: Optional[OcvCurve] = None):
+        self.name = name
+        self.design_capacity = float(design_capacity) if finite(design_capacity) and design_capacity > 0 else None
+        self.curve = curve or DEFAULT_CURVE
+        self.enabled = True
+        self.disabled_reason: Optional[str] = None
+        self._disable_persistent = False
+        # coulomb counter (charge-positive Ah) and its bookkeeping
+        self._last_t: Optional[float] = None
+        self._last_i: Optional[float] = None
+        self.q_ah = 0.0
+        self.covered_s = 0.0
+        self.epoch = 0  # bumped by every gap: anchors of different epochs never pair
+        # rest detection
+        self._bin: Optional[Dict[str, Any]] = None
+        self._rest_bins: List[list] = []  # [t_mid, [v per cell or None], temp or None]
+        self._rest_t0: Optional[float] = None
+        self._rest_t1: Optional[float] = None
+        self._rest_q: Optional[float] = None
+        self._rest_cov: Optional[float] = None
+        self._rest_dir: Optional[str] = None
+        self._load_ewma: Optional[float] = None  # mean charge current of recent load minutes, for the direction tag
+        self._t_volt: Optional[float] = None
+        self.bms_capacity: Optional[float] = None
+        # results
+        self.anchors = deque(maxlen=MAX_ANCHORS)
+        self.segments = deque(maxlen=SUMMARY_K)
+        self._last_seg_t: Optional[float] = None  # segments never overlap in time
+        # chemistry guard
+        self._oob_since: Optional[float] = None
+        self._oob_n = 0
+        # diagnostics
+        self.counts = Counter()
+        self.pair_reasons = Counter()
+        self.n_dropped = 0
+        self._t_summary: Optional[float] = None
+        self._announced = False
+
+    # ------------------------------------------------------------ properties
+
+    def capacity(self) -> Tuple[Optional[float], Optional[str]]:
+        """Design capacity for SoH and for the rest threshold: the per-device
+        option, else what the BMS reports, else unknown."""
+        if self.design_capacity is not None:
+            return self.design_capacity, 'option'
+        if self.bms_capacity is not None:
+            return self.bms_capacity, 'bms'
+        return None, None
+
+    def rest_current(self) -> float:
+        cap, _ = self.capacity()
+        return min(REST_I_MAX_A, REST_C_RATE * cap) if cap else REST_I_MAX_A
+
+    @property
+    def value(self) -> Optional[float]:
+        """Median Qmax over the kept segments [Ah], or None with fewer than
+        PUBLISH_MIN_SEGMENTS."""
+        if len(self.segments) < PUBLISH_MIN_SEGMENTS:
+            return None
+        return median([s['qmax'] for s in self.segments])
+
+    def result(self) -> Optional[Dict[str, Any]]:
+        """What would be published now: Qmax, SoH (None without a capacity) and
+        the provenance of the newest segment."""
+        v = self.value
+        if v is None:
+            return None
+        cap, src = self.capacity()
+        new = self.segments[-1]
+        return dict(qmax=v, soh=100.0 * v / cap if cap else None, capacity=cap, capacity_source=src,
+                    segments=len(self.segments), newest=fmt_t(new['t']), newest_t=new['t'],
+                    limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
+                    min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
+                    plausibility_checked=new['cap'] is not None)
+
+    def wants_voltages(self, t: float, current: float) -> bool:
+        """Whether this iteration's cell voltages are worth a fetch: only near
+        rest (where anchors are made) and at most every VOLTAGE_PERIOD_S."""
+        if not self.enabled or not finite(current) or abs(current) > REST_ABS_FACTOR * self.rest_current():
+            return False
+        return self._t_volt is None or not (0 <= t - self._t_volt < VOLTAGE_PERIOD_S)
+
+    def disable(self, reason: str, persistent: bool = True):
+        if self.enabled:
+            logger.warning('%s: Qmax/SoH estimator disabled: %s', self.name, reason)
+        self.enabled = False
+        self.disabled_reason = reason
+        self._disable_persistent = persistent
+        self._bin = None
+        self._reset_rest()
+        self.anchors.clear()
+        self.segments.clear()
+
+    # ------------------------------------------------------------ streaming
+
+    def add(self, t: float, current: float, voltages: Optional[Sequence[float]] = None,
+            temp: Optional[float] = None, capacity: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """Feed one sampler iteration.
+
+        t: sample timestamp [s]; current [A], BmsSample sign (positive =
+        discharging) before invert_current; voltages: cell voltages [mV] or
+        None when not fetched this time; temp [degC]: the best cell temperature
+        known (pack estimate, BMS probes, or the MOSFET at rest), None when
+        unknown; capacity [Ah]: what the BMS reports, None/NaN when unknown.
+
+        Returns result() when this call accepted a segment and at least
+        PUBLISH_MIN_SEGMENTS are in, else None -- a caller that publishes the
+        return value only ever publishes a fresh result."""
+        if not self.enabled or not finite(t) or not finite(current):
+            return None
+        if self._last_t is not None and t == self._last_t:
+            return None  # the BMS re-served the same measurement
+        if finite(capacity) and capacity > 0:
+            self.bms_capacity = float(capacity)
+
+        i = -float(current)  # charge current
+        new = None
+        if self._last_t is not None:
+            dt = t - self._last_t
+            if dt < 0 or dt > MAX_GAP_S:
+                new = self._gap(t, 'clock_back' if dt < 0 else 'gap')
+            else:
+                assert self._last_i is not None
+                self.q_ah += 0.5 * (i + self._last_i) * dt / 3600.0
+                if dt <= COVERED_DT_S:
+                    self.covered_s += dt
+        self._last_t, self._last_i = t, i
+
+        if self._t_summary is None:
+            self._t_summary = t
+        elif t - self._t_summary >= SUMMARY_PERIOD_S:
+            self._log_summary()
+            self._t_summary = t
+
+        vt = None
+        if voltages:
+            vt = [float(v) if finite(v) else None for v in voltages]
+            fin = [v for v in vt if v is not None]
+            if fin:
+                self._t_volt = t
+                self._oob_since, self._oob_n, verdict, med = chemistry_step(
+                    self._oob_since, self._oob_n, t, fin, LFP_MV_LO, LFP_MV_HI, CHEM_PERSIST_S, CHEM_PERSIST_N)
+                if verdict == 'disable':
+                    assert self._oob_since is not None
+                    self.disable('the median cell voltage has been outside %.0f..%.0f mV for %.0f s (%d samples, '
+                                 'now %.0f mV); the OCV curve is only valid for LiFePO4'
+                                 % (LFP_MV_LO, LFP_MV_HI, t - self._oob_since, self._oob_n, med))
+                    return None
+                if verdict == 'drop':
+                    self.n_dropped += 1
+                    vt = None  # the current still counts, the voltages do not
+            else:
+                vt = None
+
+        idx = math.floor(t / REST_BIN_S)
+        if self._bin is not None and self._bin['idx'] != idx:
+            new = self._close_bin() or new
+        b = self._bin
+        if b is None:
+            b = self._bin = dict(idx=idx, n=0, si=0.0, sa=0.0, t0=t, t1=t, v=[], temp=[], q=0.0, cov=0.0)
+        b['n'] += 1
+        b['si'] += i
+        b['sa'] += abs(i)
+        b['t1'] = t
+        b['q'], b['cov'] = self.q_ah, self.covered_s
+        if vt is not None:
+            if len(b['v']) < len(vt):
+                b['v'].extend([] for _ in range(len(vt) - len(b['v'])))
+            for c, v in enumerate(vt):
+                if v is not None:
+                    b['v'][c].append(v)
+        if finite(temp) and -40.0 < temp < 100.0:
+            b['temp'].append(float(temp))
+        return new
+
+    def _gap(self, t, why) -> Optional[Dict[str, Any]]:
+        """The current record broke: close what was measured before it (a rest
+        long enough still makes its anchor), then start a new epoch."""
+        new = None
+        if self._bin is not None:
+            new = self._close_bin()
+        new = self._end_rest() or new
+        self.epoch += 1
+        self.counts[why] += 1
+        logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
+                     self.name, why, t - (self._last_t or t))
+        return new
+
+    def _close_bin(self) -> Optional[Dict[str, Any]]:
+        b = self._bin
+        self._bin = None
+        if b is None:
+            return None
+        n = b['n']
+        mean_i, mean_abs = b['si'] / n, b['sa'] / n
+        i_rest = self.rest_current()
+        if abs(mean_i) <= i_rest and mean_abs <= REST_ABS_FACTOR * i_rest:
+            if self._rest_t0 is None:
+                self._rest_t0 = b['t0']
+                self._rest_dir = None if self._load_ewma is None else ('chg' if self._load_ewma >= 0 else 'dch')
+            self._rest_t1, self._rest_q, self._rest_cov = b['t1'], b['q'], b['cov']
+            self._rest_bins.append([0.5 * (b['t0'] + b['t1']),
+                                    [median(vs) if vs else None for vs in b['v']],
+                                    median(b['temp']) if b['temp'] else None])
+            if len(self._rest_bins) > MAX_REST_BINS:
+                del self._rest_bins[0]
+            return None
+        # a load minute
+        self._load_ewma = mean_i if self._load_ewma is None else self._load_ewma + (mean_i - self._load_ewma) / 30.0
+        return self._end_rest()
+
+    def _reset_rest(self):
+        self._rest_bins = []
+        self._rest_t0 = self._rest_t1 = self._rest_q = self._rest_cov = None
+        self._rest_dir = None
+
+    def _end_rest(self) -> Optional[Dict[str, Any]]:
+        if self._rest_t0 is None:
+            return None
+        assert self._rest_t1 is not None
+        dur = self._rest_t1 - self._rest_t0
+        new = None
+        if dur >= MIN_REST_S:
+            anchor = self._make_anchor(dur)
+            if anchor is not None:
+                new = self._pair(anchor)
+        elif dur >= 600:
+            self.counts['rest_short'] += 1
+        self._reset_rest()
+        return new
+
+    def _make_anchor(self, dur) -> Optional[Dict[str, Any]]:
+        bins = self._rest_bins
+        t1 = self._rest_t1
+        assert t1 is not None and self._rest_t0 is not None
+        temps = [b[2] for b in bins if b[2] is not None and b[0] >= t1 - TEMP_WINDOW_S]
+        if not temps:
+            self.counts['anchor_temp_missing'] += 1
+            logger.info('%s: Qmax: %.1f h rest ending %s not used: no temperature known', self.name, dur / 3600,
+                        fmt_t(t1))
+            return None
+        temp = median(temps)
+        if not CURVE_TEMP_LO <= temp <= CURVE_TEMP_HI:
+            self.counts['anchor_temp_range'] += 1
+            logger.info('%s: Qmax: %.1f h rest ending %s not used: %.1f degC is outside the %.0f..%.0f degC the '
+                        'OCV curve was measured at', self.name, dur / 3600, fmt_t(t1), temp,
+                        CURVE_TEMP_LO, CURVE_TEMP_HI)
+            return None
+        n_cells = max((len(b[1]) for b in bins), default=0)
+        ocv, soc, why, fit = [], [], [], []
+        for c in range(n_cells):
+            pts = [(b[0] - self._rest_t0, b[1][c]) for b in bins if c < len(b[1]) and b[1][c] is not None]
+            if not pts or pts[-1][0] < (t1 - self._rest_t0) - END_FRESH_S:
+                ocv.append(None)
+                soc.append(None)
+                why.append('missing')
+                fit.append(None)
+                continue
+            ts = [p[0] for p in pts]
+            vs = despike([p[1] for p in pts])
+            v_end = median(vs[-END_BINS:])
+            o, method, _ = fit_relaxation(ts, vs, v_end)
+            s, w = self.curve.soc(o)
+            ocv.append(o)
+            soc.append(s)
+            why.append(w)
+            fit.append(method)
+        if not n_cells:
+            self.counts['anchor_no_voltages'] += 1
+            return None
+        cap, _ = self.capacity()
+        a = dict(t=t1, t0=self._rest_t0, q=self._rest_q, cov=self._rest_cov, epoch=self.epoch, temp=temp,
+                 dir=self._rest_dir, ocv=ocv, soc=soc, why=why, fit=fit, cap=cap)
+        logger.info('%s: Qmax anchor: %.1f h rest ending %s, %.1f degC, OCV [%s] mV -> SoC [%s]', self.name,
+                    dur / 3600, fmt_t(t1), temp, ', '.join('%.0f' % o if o is not None else '-' for o in ocv),
+                    ', '.join('%.1f' % s if s is not None else str(w) for s, w in zip(soc, why)))
+        return a
+
+    def _pair(self, b) -> Optional[Dict[str, Any]]:
+        """Keep a new anchor if every cell has a SoC, and pair it with the
+        newest earlier one that passes every gate.
+
+        An anchor with a cell on the plateau (or off the curve, or without a
+        voltage) is counted and dropped: no segment can end on it, because
+        every cell needs a SoC at both ends. Dropping it changes no pairing --
+        the pairing loop would skip it, and its break conditions (epoch, span,
+        overlap) only depend on age -- and keeps the state that is saved
+        every 30 s small."""
+        bad = next((w for w in b['why'] if w is not None), None)
+        if bad is not None:
+            self.counts['anchor_' + bad] += 1
+            return None
+        self.anchors.append(b)
+        self.counts['anchor'] += 1
+        try:
+            return self._pair_new(b)
+        finally:
+            while self.anchors[0]['t'] < b['t'] - MAX_SEGMENT_S:
+                self.anchors.popleft()  # too old to pair with anything to come
+
+    def _pair_new(self, b) -> Optional[Dict[str, Any]]:
+        cands = list(self.anchors)[:-1]
+        reason = 'no_prior_anchor'
+        for a in reversed(cands):
+            if a['epoch'] != b['epoch']:
+                reason = 'gap'
+                break
+            if b['t'] - a['t'] > MAX_SEGMENT_S:
+                reason = 'span'
+                break
+            if self._last_seg_t is not None and a['t'] < self._last_seg_t:
+                reason = 'overlap'
+                break
+            seg, reason = self._evaluate(a, b)
+            self.pair_reasons[reason or 'accepted'] += 1
+            if seg is not None:
+                return self._accept(seg)
+        if reason in ('gap', 'span', 'overlap', 'no_prior_anchor'):
+            self.pair_reasons[reason] += 1
+        self.counts['anchor_unpaired'] += 1
+        return None
+
+    def _evaluate(self, a, b) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        span = b['t'] - a['t']
+        if not span > 0:
+            return None, 'span'
+        cov = (b['cov'] - a['cov']) / span
+        if cov < MIN_COVERAGE:
+            return None, 'coverage'
+        if len(a['soc']) != len(b['soc']):
+            return None, 'cells'
+        for x in (a, b):
+            for s, w in zip(x['soc'], x['why']):
+                if s is None:
+                    return None, 'endpoint_' + str(w)
+        dq = b['q'] - a['q']
+        dsoc = [sb - sa for sa, sb in zip(a['soc'], b['soc'])]
+        if min(abs(d) for d in dsoc) < MIN_DSOC:
+            return None, 'dsoc'
+        if not _same_sign(dq, dsoc):
+            return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
+        qc = [100.0 * dq / d for d in dsoc]
+        cap = b['cap']
+        if cap is not None and not all(PLAUSIBLE_REL[0] * cap <= q <= PLAUSIBLE_REL[1] * cap for q in qc):
+            return None, 'implausible'
+        k = min(range(len(qc)), key=lambda c: qc[c])
+        med = median(qc)
+        return dict(t=b['t'], t0=a['t'], dq=dq, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
+                    spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap), None
+
+    def _accept(self, seg) -> Optional[Dict[str, Any]]:
+        self.segments.append(seg)
+        self._last_seg_t = seg['t']
+        while self.segments[0]['t'] < seg['t'] - MAX_SEGMENT_AGE_S:
+            self.segments.popleft()
+        self.counts['segment'] += 1
+        logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
+                    'spread %.1f %%, coverage %.3f', self.name, fmt_t(seg['t0']), fmt_t(seg['t']), seg['dq'],
+                    ', '.join('%+.1f' % d for d in seg['dsoc']), ', '.join('%.1f' % q for q in seg['q_cells']),
+                    seg['cell'] + 1, 100 * seg['spread'], seg['cov'])
+        res = self.result()
+        if res is not None and not self._announced:
+            self._announced = True
+            logger.info('%s: first Qmax estimate %.1f Ah%s (from %d segments)', self.name, res['qmax'],
+                        (', SoH %.1f %%' % res['soh']) if res['soh'] is not None else ', SoH unknown (no capacity)',
+                        res['segments'])
+        return res
+
+    def _log_summary(self):
+        if self.counts or self.pair_reasons or self.n_dropped:
+            v = self.value
+            logger.info('%s: Qmax/SoH: %s; pairs: %s%s; estimate %s', self.name,
+                        ', '.join('%s=%d' % kv for kv in sorted(self.counts.items())) or 'nothing',
+                        ', '.join('%s=%d' % kv for kv in sorted(self.pair_reasons.items())) or 'none',
+                        ('; %d samples dropped with a cell outside %.0f..%.0f mV'
+                         % (self.n_dropped, LFP_MV_LO, LFP_MV_HI)) if self.n_dropped else '',
+                        ('%.1f Ah' % v) if v is not None else
+                        'none yet (%d/%d segments)' % (len(self.segments), PUBLISH_MIN_SEGMENTS))
+        self.counts.clear()
+        self.pair_reasons.clear()
+        self.n_dropped = 0
+
+    # ------------------------------------------------------------ persistence
+
+    def get_state(self, full: bool = True) -> Dict[str, Any]:
+        """JSON-serialisable state. Unlike the cell resistance estimator, the
+        compact state (full=False, saved every 30 s when it changed) carries
+        the coulomb counter: a crash must not lose the charge of a segment that
+        may be days old. It leaves out the open rest and the diagnostics; a
+        rest in progress then restarts after a crash. full=True (at shutdown)
+        is everything."""
+        st: Dict[str, Any] = dict(
+            version=STATE_VERSION, code=CODE_FINGERPRINT,
+            disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
+            last_t=self._last_t, last_i=self._last_i, q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
+            anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
+            last_seg_t=self._last_seg_t, bms_capacity=self.bms_capacity, load_ewma=self._load_ewma,
+            announced=self._announced,
+        )
+        if full:
+            st.update(
+                bin=None if self._bin is None else dict(self._bin),
+                rest_bins=self._rest_bins, rest_t0=self._rest_t0, rest_t1=self._rest_t1, rest_q=self._rest_q,
+                rest_cov=self._rest_cov, rest_dir=self._rest_dir, t_volt=self._t_volt,
+                oob_since=self._oob_since, oob_n=self._oob_n, counts=dict(self.counts),
+                pair_reasons=dict(self.pair_reasons), n_dropped=self.n_dropped, t_summary=self._t_summary,
+            )
+        return st
+
+    def restore(self, st) -> bool:
+        """Load a get_state() dict. Anything that does not validate starts the
+        estimator fresh (warning): a state that cannot be checked is never
+        trusted. Nothing is published here -- the restored estimate goes out
+        with the next accepted segment."""
+        try:
+            self._restore(st)
+        except Exception as e:
+            logger.warning('%s: Qmax/SoH state not restored (%s: %s), starting fresh', self.name,
+                           type(e).__name__, e)
+            self.__init__(self.name, self.design_capacity, self.curve)
+            return False
+        return True
+
+    def _restore(self, st):
+        if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
+            raise ValueError('state version %r, expected %d'
+                             % (st.get('version') if isinstance(st, dict) else type(st).__name__, STATE_VERSION))
+        self.__init__(self.name, self.design_capacity, self.curve)
+        if CODE_FINGERPRINT is None or st.get('code') != CODE_FINGERPRINT:
+            logger.info('%s: Qmax/SoH estimator code changed since the state was saved: anchors, segments and the '
+                        'open coulomb count discarded', self.name)
+            return
+
+        reason = st.get('disabled_reason')
+        if reason is not None:
+            self.enabled, self.disabled_reason, self._disable_persistent = False, str(reason), True
+            logger.info('%s: Qmax/SoH estimator stays disabled (saved state): %s', self.name, reason)
+            return
+
+        last_t = v_opt_fin(st.get('last_t'), 'last_t')
+        last_i = v_opt_fin(st.get('last_i'), 'last_i')
+        if (last_t is None) != (last_i is None):
+            raise ValueError('last_t/last_i %r/%r' % (last_t, last_i))
+        q_ah = v_fin(st.get('q_ah'), 'q_ah')
+        covered = v_fin(st.get('covered_s'), 'covered_s')
+        epoch = v_int(st.get('epoch'), 'epoch')
+
+        def soc_list(x, what):
+            if not isinstance(x, list):
+                raise ValueError('%s is %r' % (what, x))
+            out = []
+            for s in x:
+                if s is not None and not 0.0 <= v_fin(s, what) <= 100.0:
+                    raise ValueError('%s %r outside 0..100' % (what, s))
+                out.append(s)
+            return out
+
+        anchors = []
+        for a in st.get('anchors') or []:
+            if not isinstance(a, dict):
+                raise ValueError('anchor is %r' % type(a).__name__)
+            for k in ('t', 't0', 'q', 'cov'):
+                v_fin(a.get(k), 'anchor ' + k)
+            if any(f not in (None, 'rc', 'last') for f in a.get('fit') or []):
+                raise ValueError('anchor fit %r' % a.get('fit'))
+            if v_int(a.get('epoch'), 'anchor epoch') > epoch:
+                raise ValueError('anchor epoch %r after the counter %d' % (a['epoch'], epoch))
+            if not CURVE_TEMP_LO <= v_fin(a.get('temp'), 'anchor temp') <= CURVE_TEMP_HI:
+                raise ValueError('anchor temp %r' % a['temp'])
+            socs = soc_list(a.get('soc'), 'anchor soc')
+            why, ocv, fit = a.get('why'), a.get('ocv'), a.get('fit')
+            if not (isinstance(why, list) and isinstance(ocv, list) and isinstance(fit, list)
+                    and len(why) == len(ocv) == len(fit) == len(socs)):
+                raise ValueError('anchor cells %r' % (a,))
+            if any((s is None) == (w is None) for s, w in zip(socs, why)):
+                raise ValueError('anchor soc/why disagree')
+            for o in ocv:
+                v_opt_fin(o, 'anchor ocv')
+            v_opt_fin(a.get('cap'), 'anchor cap')
+            anchors.append(dict(a))
+        if any(x['t'] > y['t'] for x, y in zip(anchors, anchors[1:])) or \
+                any(x['epoch'] > y['epoch'] for x, y in zip(anchors, anchors[1:])) or \
+                (anchors and (last_t is None or anchors[-1]['t'] > last_t)):
+            raise ValueError('anchors not in time order')
+
+        segments = []
+        for s in st.get('segments') or []:
+            if not isinstance(s, dict):
+                raise ValueError('segment is %r' % type(s).__name__)
+            for k in ('t', 't0', 'dq'):
+                v_fin(s.get(k), 'segment ' + k)
+            qc = s.get('q_cells')
+            if not isinstance(qc, list) or not qc or not all(v_fin(q, 'segment q_cells') > 0 for q in qc):
+                raise ValueError('segment q_cells %r' % (qc,))
+            if v_fin(s.get('qmax'), 'segment qmax') != min(qc):
+                raise ValueError('segment qmax %r is not its limiting cell' % s['qmax'])
+            if v_int(s.get('cell'), 'segment cell') >= len(qc) or not isinstance(s.get('dsoc'), list) \
+                    or len(s['dsoc']) != len(qc) or min(abs(v_fin(d, 'segment dsoc')) for d in s['dsoc']) < MIN_DSOC:
+                raise ValueError('segment cells %r' % (s,))
+            v_fin(s.get('spread'), 'segment spread')
+            v_fin(s.get('cov'), 'segment cov')
+            v_opt_fin(s.get('cap'), 'segment cap')
+            segments.append(dict(s))
+        if any(x['t'] > y['t'] for x, y in zip(segments, segments[1:])) or \
+                (segments and (last_t is None or segments[-1]['t'] > last_t)):
+            raise ValueError('segments not in time order')
+        last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
+        cap = v_opt_fin(st.get('bms_capacity'), 'bms_capacity')
+        if cap is not None and cap <= 0:
+            raise ValueError('bms_capacity %r' % cap)
+
+        self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
+        self.anchors.extend(anchors[-MAX_ANCHORS:])
+        self.segments.extend(segments[-SUMMARY_K:])
+        self._last_seg_t, self.bms_capacity = last_seg_t, cap
+        self._load_ewma = v_opt_fin(st.get('load_ewma'), 'load_ewma')
+
+        if 'rest_bins' in st:  # full state
+            b = st.get('bin')
+            if b is not None:
+                if not isinstance(b, dict) or set(b) != {'idx', 'n', 'si', 'sa', 't0', 't1', 'v', 'temp', 'q', 'cov'}:
+                    raise ValueError('bin %r' % (b,))
+                v_int(b['idx'], 'bin idx', lo=-2 ** 62)
+                v_int(b['n'], 'bin n', lo=1)
+                for k in ('si', 'sa', 't0', 't1', 'q', 'cov'):
+                    v_fin(b[k], 'bin ' + k)
+                if not (isinstance(b['v'], list) and all(isinstance(vs, list) for vs in b['v'])
+                        and isinstance(b['temp'], list)):
+                    raise ValueError('bin lists %r' % (b,))
+                for vs in b['v']:
+                    for v in vs:
+                        v_fin(v, 'bin v')
+                for v in b['temp']:
+                    v_fin(v, 'bin temp')
+                if last_t is None or b['t1'] != last_t:
+                    raise ValueError('open bin does not end at last_t')
+                self._bin = dict(b)
+            rb = st.get('rest_bins')
+            if not isinstance(rb, list):
+                raise ValueError('rest_bins %r' % type(rb).__name__)
+            for r in rb:
+                if not (isinstance(r, list) and len(r) == 3 and isinstance(r[1], list)):
+                    raise ValueError('rest bin %r' % (r,))
+                v_fin(r[0], 'rest bin t')
+                v_opt_fin(r[2], 'rest bin temp')
+                for v in r[1]:
+                    v_opt_fin(v, 'rest bin v')
+            if any(x[0] > y[0] for x, y in zip(rb, rb[1:])):
+                raise ValueError('rest bins not in time order')
+            r0, r1 = v_opt_fin(st.get('rest_t0'), 'rest_t0'), v_opt_fin(st.get('rest_t1'), 'rest_t1')
+            rq, rc = v_opt_fin(st.get('rest_q'), 'rest_q'), v_opt_fin(st.get('rest_cov'), 'rest_cov')
+            if (r0 is None) != (not rb) or any((x is None) != (r0 is None) for x in (r1, rq, rc)):
+                raise ValueError('rest %r/%r with %d bins' % (r0, r1, len(rb)))
+            if r0 is not None and (r1 is None or r1 < r0 or last_t is None or r1 > last_t):
+                raise ValueError('rest %r..%r' % (r0, r1))
+            rd = st.get('rest_dir')
+            if rd not in (None, 'chg', 'dch'):
+                raise ValueError('rest_dir %r' % rd)
+            self._rest_bins = [list(r) for r in rb]
+            self._rest_t0, self._rest_t1, self._rest_q, self._rest_cov, self._rest_dir = r0, r1, rq, rc, rd
+            self._t_volt = v_opt_fin(st.get('t_volt'), 't_volt')
+            self._oob_since = v_opt_fin(st.get('oob_since'), 'oob_since')
+            self._oob_n = v_int(st.get('oob_n') or 0, 'oob_n')
+            self.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
+            self.pair_reasons.update({str(k): int(v) for k, v in (st.get('pair_reasons') or {}).items()})
+            self.n_dropped = v_int(st.get('n_dropped') or 0, 'n_dropped')
+            self._t_summary = v_opt_fin(st.get('t_summary'), 't_summary')
+        self._announced = bool(st.get('announced')) or len(self.segments) >= PUBLISH_MIN_SEGMENTS
+
+        v = self.value
+        logger.info('%s: Qmax/SoH state restored: %d anchors, %d segments%s, coulomb count %s, estimate %s '
+                    '(published with the next accepted segment)', self.name, len(self.anchors),
+                    len(self.segments), (', newest from %s' % fmt_t(self.segments[-1]['t'])) if self.segments else '',
+                    ('%+.1f Ah since %s' % (self.q_ah, fmt_t(last_t))) if last_t is not None else 'empty',
+                    ('%.1f Ah' % v) if v is not None else
+                    'none yet (%d/%d segments)' % (len(self.segments), PUBLISH_MIN_SEGMENTS))
+
+
+DEFAULT_CURVE = OcvCurve()

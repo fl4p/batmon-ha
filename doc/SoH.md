@@ -1,0 +1,101 @@
+# Capacity / SoH estimator (experimental)
+
+`soh_estimator: true` makes batmon estimate the present capacity (Qmax) of each LiFePO4 pack, and from it the state
+of health, as two sensors per BMS: `Qmax (est.)` in Ah and `SoH (est.)` in %. It is off by default.
+
+**On the built-in OCV curve it cannot currently produce a value.** Read [Why no value](#why-no-value) before turning
+it on. It still logs every usable rest it finds and why nothing came of it, which is what it is for at this stage.
+
+## How it works
+
+Between two long rests the state of charge of every cell is read off an OCV curve (relaxed cell voltage against SoC),
+and the charge that flowed in between is counted from the BMS current. Then, per cell,
+
+    Qmax = charge counted × 100 / (SoC at the second rest − SoC at the first)
+
+The pack's Qmax is that of the weakest cell: in a series string the cell that is empty first ends the discharge. SoH is
+Qmax against the device's `capacity:` option (Ah, nameplate), or, if that is not set, the capacity the BMS reports.
+Without either only Qmax is published. The `Qmax (est.)` sensor carries attributes: how many segments the value is
+the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
+capacity used and where it came from.
+
+### How it relates to TI Impedance Track
+
+It is the Qmax-update half of TI's Impedance Track gauges ([SLUA364b](https://www.ti.com/lit/an/slua364b/slua364b.pdf)):
+two OCV readings taken in relaxation, both where the OCV curve is steep, with enough charge passed between them. It is
+not a TI gauge. There is no resistance table, no run-time prediction, no correction of the BMS's SoC, and no learning
+cycle, and the OCV curve is one fixed table measured on one pack, not a chemistry database. The cell resistance is a
+separate estimator ([Cell Resistance](Cell%20Resistance.md)). The method and its data analysis are in the
+bat-impedance project (WHITEPAPER §2.1, §6, §8), which this is a port of.
+
+## What counts
+
+A **rest** is at least 90 minutes with the current below min(1.5 A, capacity/100) (1.5 A without a known capacity).
+1.5 A is what the OCV curve was measured with, on a 280 Ah pack. At capacity/100 an LFP cell sits within about 6 mV
+of its OCV. The C/20 usually quoted for TI gauges would leave ~28 mV, 5 % of SoC at the steepest part the gates accept.
+Per cell, the relaxed voltage is extrapolated from the rest with an exponential fit when that fit is trustworthy (it saw
+the settling, fits, and moves the value by at most 50 mV), otherwise it is the last value. Voltages are minute medians
+with isolated spikes removed, so one garbled reading does not move it.
+
+The rest needs a **temperature** between 10 and 30 °C (the range the curve was measured in). An unknown temperature
+makes the rest unusable, it is never assumed. batmon uses the `pack_temp_estimator` value if that runs, else the median
+of the BMS temperature probes, else the MOSFET temperature, which is close to the cells after a long rest.
+
+A cell's SoC is read only where the curve is **steep, at least 5 mV per % SoC**. On the plateau 1 mV of BMS
+error is several % of SoC, so a rest there is unusable rather than guessed.
+
+A **segment** between two rests is accepted when every cell has a SoC at both ends, every cell's SoC moved by at least
+60 %, the charge and the SoC moved the same way, no gap in the current record was longer than 5 minutes, at least 95 %
+of the time was covered by samples at most 60 s apart, it is no longer than 10 days, and, with a known capacity, every
+cell's Qmax is within 0.4–1.6× of it. Segments do not overlap.
+
+The sensors show the median of the last 5 accepted segments of the past year, once there are 3. Nothing is published
+between accepted segments, and the entities expire a year after the last one.
+
+## Why no value
+
+The gates above are the "tightened universal gates" of the offline prototype. They were chosen to keep the error of a
+single segment near ±10 %. But on a curve built from rests of 90 minutes and more, the curve is steep only near
+empty, 0–11 % SoC. A LiFePO4 cell that rests after a full charge settles to ~3.33 V, where the relaxed curve rises by
+less than 1 mV per % SoC. The steep "top knee" that the prototype's older 30-minute curve had (3440 mV at 100 %) was a
+cell still polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So no rest near
+full is usable, and no segment can reach 60 % of SoC.
+
+Replay of the maintainer's van pack (280 Ah, Daly BMS, two cells logged, 2023-11 to 2025-11, 412 days with data)
+through the add-on's code:
+
+| gates | segments | Qmax of the weakest cell: median (IQR) | published |
+|---|---:|---|---|
+| as shipped | 0 | – | nothing |
+| as shipped, short logging gaps filled | 0 | – | nothing |
+| slope ≥ 2 mV/% (instead of 5) | 0 | – | nothing |
+| slope ≥ 0.8 mV/% | 0 | – | nothing |
+| slope ≥ 0.8, gap limit 90 min, no coverage gate, 20 days | 2 | 357 and 233 Ah | nothing |
+| any slope, gap limit 90 min, no coverage gate, 20 days | 5 | 229 (213–233) Ah | 213–231 Ah |
+| slope ≥ 0.8, SoC swing ≥ 30 %, gap limit 90 min, ... | 10 | 276 (221–338) Ah | 220–343 Ah |
+| the prototype's gates (slope ≥ 0.8, swing ≥ 15 %, gap 90 min) | 16 | 225 (204–326) Ah | 195–343 Ah |
+| the prototype's gates, cell 0 only (as the prototype) | 40 | 287 (216–338) Ah | 156–356 Ah |
+
+The last row reproduces the prototype's 294 Ah on the same cell and matches its converged 280–300 Ah. The spread shows
+what relaxing costs: with the prototype's gates the published SoH of this healthy pack wanders between 70 % and 122 %.
+Of the 231 rests of 90 minutes and more, the shipped version could use 23, all near empty; 194 were on the
+plateau, 4 off the curve, 10 without a usable temperature or voltages. With the current sign
+flipped, nothing is accepted: 158 pairs are rejected because the charge and the SoC moved in opposite directions.
+
+What would give values: an anchor at full charge that does not come from the OCV -- charge termination, the charger's
+absorption voltage reached and the current tailed off, the way battery monitors like Victron's synchronise to 100 % --
+or a pack that rests for hours near empty and near full. Neither is implemented yet.
+
+## Restarts
+
+The state is saved per BMS in `qmax_<name>.json` in the add-on's data directory: the usable rests, the accepted
+segments and the running charge count every 30 s, and also the rest in progress at shutdown. A restart within 5
+minutes continues the open segment; a longer one ends it, keeping the rests. State written by a different version of the
+estimator code is discarded, as is a file that does not validate (the log says why). A pack that the chemistry check
+switched off stays off after a restart.
+
+## Cost
+
+Per sample about 4 µs on an Apple M3 Pro and 10 µs on a Raspberry Pi 5 (16 cells, 1 s sampling). Closing a 12-hour rest
+with 16 cells takes 25 ms and 60 ms. A Raspberry Pi 3 has not been measured; expect roughly 5–8× the Pi 5 figures.
+Cell voltages are fetched only near rest and at most every 10 s, unless something else fetches them anyway.

@@ -45,6 +45,11 @@ configuration:
     description: >-
       Multiplikator für die gemeldeten Stromwerte, um Shunt-Skalierungsfehler
       zu korrigieren. Standard 1.0.
+  capacity:
+    name: Nennkapazität (Ah)
+    description: >-
+      Nennkapazität des Akkus in Ah. Nur für den SoH-Schätzer, als Bezug für
+      den SoH; ohne Angabe wird die vom BMS gemeldete Kapazität verwendet.
 
   concurrent_sampling:
     name: Parallele Abtastung
@@ -181,6 +186,15 @@ configuration:
       Zellspannungen, als Sensor "Cell Resistance" in mOhm. Braucht große
       Stromsprünge (8 A und mehr), kleine Akkus bekommen daher eventuell nie
       einen Wert. Schaltet sich bei Akkus ab, die nicht LiFePO4 sind.
+  soh_estimator:
+    name: Kapazität / SoH schätzen (experimentell)
+    description: >-
+      Schätzt die aktuelle Kapazität (Qmax) von LiFePO4-Akkus aus den
+      Zellspannungen nach langen Ruhephasen und der dazwischen gezählten
+      Ladung, als "Qmax (est.)" in Ah und "SoH (est.)" in %. Braucht
+      Ruhephasen von 90 Minuten und mehr nahe leer und nahe voll; bis zu
+      einem Wert können Wochen vergehen, oder es kommt nie einer. Schaltet
+      sich bei Akkus ab, die nicht LiFePO4 sind.
   pack_temp_estimator:
     name: Akkutemperatur schätzen (experimentell)
     description: >-

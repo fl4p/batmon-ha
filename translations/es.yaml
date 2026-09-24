@@ -46,6 +46,11 @@ configuration:
     description: >-
       Multiplicador aplicado a los valores de corriente reportados, para
       corregir errores de escala del shunt. Por defecto 1.0.
+  capacity:
+    name: Capacidad nominal (Ah)
+    description: >-
+      Capacidad nominal de la batería en Ah. Solo la usa el estimador de SoH,
+      como referencia; sin ella se usa la capacidad que reporta el BMS.
 
   concurrent_sampling:
     name: Muestreo concurrente
@@ -192,6 +197,15 @@ configuration:
       mOhm. Necesita saltos de corriente grandes (8 A o más), por lo que una
       batería pequeña puede no obtener nunca un valor. Se desactiva sola en
       baterías que no son LiFePO4.
+  soh_estimator:
+    name: Estimar capacidad / SoH (experimental)
+    description: >-
+      Estima la capacidad actual (Qmax) de baterías LiFePO4 a partir de las
+      tensiones de celda tras reposos largos y la carga contada entre ellos,
+      como "Qmax (est.)" en Ah y "SoH (est.)" en %. Necesita reposos de 90
+      minutos o más cerca de vacía y cerca de llena, así que pueden pasar
+      semanas, o nunca, hasta tener un valor. Se desactiva sola en baterías
+      que no son LiFePO4.
   pack_temp_estimator:
     name: Estimar la temperatura de la batería (experimental)
     description: >-

@@ -229,3 +229,21 @@ It contains the multi-frame BLE decode glitch at 08:33:21 (cell 1 at
 estimator for good, and enough load steps for 6 accepted windows.
 Columns: `t` (unix s), `current` (A), `soc` (%), `temp` (°C), `u1`..`u4` (mV),
 empty = missing.
+
+---
+
+## Qmax/SoH estimator — `daly_2024-05-17_qmax.csv.gz`
+
+A real capture, the maintainer's own van pack (280 Ah LFP, Daly BMS), from the batmon InfluxDB, 2024-05-17 18:00 –
+2024-05-20 08:00 UTC (44 kB gzip'd, 3703 rows). Source: `report/cache/daly_bms_min_2023-11-10_2025-11-22.parquet` of
+the bat-impedance project, the 1-minute means of the Influx data (only two cells, `u0`/`u1`, are in that cache).
+
+The Influx sink drops unchanged fields, so the cell voltages, SoC and temperature are carried forward from their last
+stored value; a missing minute (no stored field changed, or no data) is left out. `t` is the middle of the minute.
+`current` is the BmsSample sign (discharge > 0), i.e. the negated stored current; one minute has no current (empty).
+`temp` is the BMS probe (`temperatures_0`).
+
+It holds four rests of 2–7 h: three on the OCV plateau and one near empty (cells at 3182/3213 mV, SoC ~6/9 %) that the
+estimator can use, and two outages of 6 and 7 minutes. With the shipped gates it gives no segment; with the gap limit at
+10 minutes and the slope gate at 0.8 mV/% it gives one, 2024-05-18 → 05-20, with the cells at ~287 and ~233 Ah.
+Columns: `t` (unix s), `current` (A), `u1`, `u2` (mV), `soc` (%), `temp` (°C).

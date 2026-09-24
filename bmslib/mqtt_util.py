@@ -181,10 +181,28 @@ def publish_cell_resistance(client, device_topic, value_mohm: float):
     mqtt_single_out(client, f"{device_topic}/cell_resistance", round_to_n(value_mohm, 3))
 
 
+# Qmax/SoH (bmslib/qmax.py) is published once per accepted segment -- weeks
+# apart at best -- and never refreshed. The entity expires with the estimate
+# itself: a year after the newest segment, the age limit of the median.
+QMAX_EXPIRE_S = 365 * 86400
+
+QMAX_ATTRIBUTES = ('segments', 'newest', 'limiting_cell', 'cell_spread_pct', 'min_dsoc', 'capacity',
+                   'capacity_source', 'plausibility_checked')
+
+
+def publish_qmax(client, device_topic, res: dict):
+    """res: QmaxEstimator.result(). SoH only when a capacity is known."""
+    mqtt_single_out(client, f"{device_topic}/qmax_est/attributes",
+                    json.dumps({k: res.get(k) for k in QMAX_ATTRIBUTES}))
+    mqtt_single_out(client, f"{device_topic}/qmax_est", round_to_n(res['qmax'], 4))
+    if res.get('soh') is not None:
+        mqtt_single_out(client, f"{device_topic}/soh_est", round_to_n(res['soh'], 4))
+
+
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
                            device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
-                           pack_temp_est=False):
+                           pack_temp_est=False, soh_est=False):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -201,7 +219,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     }
 
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
-                        precision=None, expire_after=None):
+                        precision=None, expire_after=None, json_attributes_topic=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": name or capitalize_words(k.replace('/', ' ')),
@@ -215,6 +233,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "state_topic": f"{device_topic}/{k}",
             "expire_after": expire_after or (max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds),
             "device": device_json,
+            "json_attributes_topic": json_attributes_topic,
         }
         if icon:
             dm['icon'] = 'mdi:' + icon
@@ -260,6 +279,15 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         # experimental, see bmslib/impedance.py: median per-cell resistance [mOhm]
         _hass_discovery('cell_resistance', None, "mΩ", state_class="measurement", icon="resistor",
                         name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S)
+
+    if soh_est:
+        # experimental, see bmslib/qmax.py: capacity of the limiting cell [Ah], and
+        # that against the design capacity (only published when one is known)
+        _hass_discovery('qmax_est', None, "Ah", state_class="measurement", icon="battery-heart-variant",
+                        name="Qmax (est.)", precision=1, expire_after=QMAX_EXPIRE_S,
+                        json_attributes_topic=f"{device_topic}/qmax_est/attributes")
+        _hass_discovery('soh_est', None, "%", state_class="measurement", icon="battery-heart-variant",
+                        name="SoH (est.)", precision=1, expire_after=QMAX_EXPIRE_S)
 
     if pack_temp_est:
         # pack_temp_estimator: RC estimate of the cell temperature from MOS + ambient

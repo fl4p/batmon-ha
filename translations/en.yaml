@@ -44,6 +44,12 @@ configuration:
     description: >-
       Multiplier applied to reported current values, to correct shunt
       scaling errors. Default 1.0.
+  capacity:
+    name: Design capacity (Ah)
+    description: >-
+      Nameplate capacity of the pack in Ah. Only used by the SoH estimator,
+      as the reference for SoH; without it the capacity the BMS reports is
+      used.
 
   concurrent_sampling:
     name: Concurrent sampling
@@ -172,6 +178,14 @@ configuration:
       sampled current and cell voltages, as a "Cell Resistance" sensor in
       mOhm. Needs large current steps (8 A or more), so small packs may never
       get a value. Turns itself off for packs that are not LiFePO4.
+  soh_estimator:
+    name: Capacity / SoH estimator (experimental)
+    description: >-
+      Estimate the present capacity (Qmax) of LiFePO4 packs from cell voltages
+      after long rests and the charge counted between them, as "Qmax (est.)"
+      in Ah and "SoH (est.)" in %. Needs rests of 90 minutes and more near
+      empty and near full, so it may take weeks to never before a value
+      appears. Turns itself off for packs that are not LiFePO4.
   pack_temp_estimator:
     name: Pack temperature estimator (experimental)
     description: >-

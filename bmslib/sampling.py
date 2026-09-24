@@ -19,7 +19,7 @@ from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance
+    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -161,6 +161,9 @@ class BmsSampler:
                  impedance_estimator=False,
                  impedance_state=None,
                  ambient_cache=None,
+                 soh_estimator=False,
+                 soh_state=None,
+                 design_capacity=None,
                  ):
 
         self.bms = bms
@@ -246,6 +249,20 @@ class BmsSampler:
                 self.impedance.restore(impedance_state)
         self._impedance_saved = None  # JSON of the last state written, to skip unchanged saves
 
+        # Experimental Qmax/SoH estimator (soh_estimator, off by default), real
+        # packs only for the same reason. design_capacity: the per-device
+        # `capacity:` option [Ah], else the BMS-reported capacity is used.
+        self.qmax = None
+        if soh_estimator and not bms.is_virtual:
+            from bmslib.qmax import QmaxEstimator
+            self.qmax = QmaxEstimator(bms.name, design_capacity=design_capacity)
+            logger.info('%s: Qmax/SoH estimator enabled (experimental), design capacity %s', bms.name,
+                        ('%.1f Ah' % self.qmax.design_capacity) if self.qmax.design_capacity else
+                        'not set (the BMS-reported capacity is used)')
+            if soh_state:
+                self.qmax.restore(soh_state)
+        self._qmax_saved = None
+
         # pack_temp_estimator (off by default): one RC estimator per real pack,
         # all sharing the ambient cache. Runs without MQTT too (mqtt_single_out
         # ignores a None client), so the impedance windows still get the tag.
@@ -314,6 +331,20 @@ class BmsSampler:
         from bmslib.store import store_impedance_state
         store_impedance_state(self.bms.name, state)
         self._impedance_saved = js
+
+    def store_qmax_state(self, final=False):
+        """Save the Qmax/SoH estimator; same scheme as store_impedance_state.
+        Its compact state carries the coulomb counter, so it changes (and is
+        written) every 30 s while current flows."""
+        if self.qmax is None:
+            return
+        state = self.qmax.get_state(full=final)
+        js = json.dumps(state, sort_keys=True)
+        if js == self._qmax_saved:
+            return
+        from bmslib.store import store_qmax_state
+        store_qmax_state(self.bms.name, state)
+        self._qmax_saved = js
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
@@ -630,6 +661,13 @@ class BmsSampler:
                 voltages = await cached_fetch_voltages(optional=True)
                 self._feed_impedance(sample, current_native, voltages)
 
+            if self.qmax is not None and self.qmax.enabled:
+                # cell voltages are only needed near rest, and at most every
+                # 10 s; use them when they were fetched anyway
+                if not voltages and self.qmax.wants_voltages(sample.timestamp, current_native):
+                    voltages = await cached_fetch_voltages(optional=True)
+                await self._feed_qmax(sample, current_native, voltages)
+
             # z_score = self.power_stats.z_score(sample.power)
             # if abs(z_score) > 12:
             #    logger.info('%s Power z_score %.1f (avg=%.0f std=%.2f last=%.0f)', bms.name, z_score, self.power_stats.avg.value, self.power_stats.stddev, sample.power)
@@ -695,6 +733,7 @@ class BmsSampler:
                     set_soc=getattr(bms, 'supports_set_soc', lambda: False)(),
                     cell_resistance=self.impedance is not None and self.impedance.enabled,
                     pack_temp_est=self._pack_temp_publisher is not None,
+                    soh_est=self.qmax is not None and self.qmax.enabled,
                 )
 
                 # publish sample again after discovery
@@ -736,6 +775,37 @@ class BmsSampler:
             return
         if r is not None:
             publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)
+
+    async def _qmax_temperature(self, sample: BmsSample):
+        """Best cell temperature known, None if none -- never a default. The
+        pack-temperature estimate if it runs, else the median BMS probe, else
+        the MOSFET, which is close to the cells at rest (the only time the
+        estimator uses it)."""
+        if self._pack_temp is not None and math.isfinite(self._pack_temp):
+            return self._pack_temp
+        # sample.temperatures is only filled when a sink or a group wanted it
+        temps = sample.temperatures or await self._fetch_temperatures_cached()
+        temps = sorted(t for t in (temps or []) if isinstance(t, (int, float)) and -40 < t < 100)
+        if temps:
+            return temps[len(temps) // 2]
+        mos = sample.mos_temperature
+        return mos if isinstance(mos, (int, float)) and -40 < mos < 100 else None
+
+    async def _feed_qmax(self, sample: BmsSample, current: float, voltages):
+        est = self.qmax
+        if est is None:
+            return
+        try:
+            temp = await self._qmax_temperature(sample)
+            r = est.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity)
+        except Exception as e:
+            # an estimator bug must neither kill sampling nor keep publishing
+            logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
+                         exc_info=True)
+            est.disable('internal error', persistent=False)
+            return
+        if r is not None:
+            publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix

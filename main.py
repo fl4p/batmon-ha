@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import random
 import sys
@@ -84,6 +85,10 @@ def store_states(samplers: list[BmsSampler], final=False):
             s.store_impedance_state(final=final)
         except Exception as e:
             logger.error('%s: error storing cell resistance state: %s', s.bms.name, e)
+        try:
+            s.store_qmax_state(final=final)
+        except Exception as e:
+            logger.error('%s: error storing Qmax/SoH state: %s', s.bms.name, e)
 
 
 def _runtime_kind():
@@ -452,7 +457,23 @@ async def main():
         except Exception as e:
             logger.warning('GUI state disabled: %s', e)
 
-    from bmslib.store import load_impedance_state
+    from bmslib.store import load_impedance_state, load_qmax_state
+
+    def design_capacity(name):
+        """The per-device `capacity:` option [Ah], None when unset or unusable."""
+        c = dev_args[name].get('capacity')
+        if c in (None, ''):
+            return None
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            c = math.nan
+        if not (math.isfinite(c) and c > 0):
+            logger.warning('%s: ignoring capacity=%r, expected the design capacity in Ah', name,
+                           dev_args[name].get('capacity'))
+            return None
+        return c
+
     sampler_list = [BmsSampler(
         bms, mqtt_client=mqtt_client,
         dt_max_seconds=max(60. * 10, sample_period * 2),
@@ -470,6 +491,9 @@ async def main():
         impedance_estimator=bool(user_config.get('impedance_estimator', False)),
         impedance_state=user_config.get('impedance_estimator') and load_impedance_state(bms.name),
         ambient_cache=ambient_cache,
+        soh_estimator=bool(user_config.get('soh_estimator', False)),
+        soh_state=user_config.get('soh_estimator') and load_qmax_state(bms.name),
+        design_capacity=design_capacity(bms.name),
     ) for bms in bms_list]
 
     # move groups to the end

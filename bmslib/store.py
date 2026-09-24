@@ -81,6 +81,19 @@ def store_impedance_state(bms_name, state):
     _store_estimator_state('impedance_', bms_name, state)
 
 
+def qmax_state_file(bms_name):
+    return _estimator_state_file('qmax_', bms_name)
+
+
+def load_qmax_state(bms_name):
+    """The saved Qmax/SoH estimator state, or None."""
+    return _load_estimator_state('qmax_', bms_name, 'Qmax/SoH estimator')
+
+
+def store_qmax_state(bms_name, state):
+    _store_estimator_state('qmax_', bms_name, state)
+
+
 def store_algorithm_state(bms_name, algorithm_name, state=None):
     fn = root_dir + 'bat_state_' + re.sub(r'[^\w_. -]', '_', bms_name) + '.json'
     with lock:

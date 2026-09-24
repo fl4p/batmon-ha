@@ -1,0 +1,1123 @@
+"""Experimental Qmax / SoH estimator (bmslib/qmax.py).
+
+Pure Python, like the module. Every known-bad case comes in a pair: the test
+that the guard rejects it, and a calibration test that breaks exactly that
+guard and shows the same data then DOES produce a (wrong) estimate. Without the
+second half a known-bad test could pass because the scenario is harmless, not
+because the guard works.
+
+The built-in OCV curve (a relaxed LFP curve) is steep only between 0 and 11 %
+SoC, so no segment can pass the gates on it (test_builtin_curve_*). The tests
+that exercise acceptance therefore run on SYNTH, a synthetic curve with a
+steep top knee, through the same code.
+"""
+import asyncio
+import csv
+import gzip
+import json
+import math
+import os
+import random
+import time
+from collections import deque
+
+import paho.mqtt.client as paho
+import pytest
+
+import bmslib.qmax as q
+from bmslib.bms import BmsSample
+from bmslib.mqtt_util import publish_hass_discovery, publish_qmax
+from bmslib.sampling import BmsSampler
+
+T0 = 1.7e9
+CAPS = (100.0, 98.0, 102.0, 101.0)  # Ah per cell; the pack's Qmax is the limiting cell, 98
+
+
+# ================================================================ simulator
+
+def synth_raw():
+    """LFP-like OCV(DOD): steep top knee (12 mV/%), plateau, steep bottom knee
+    (20 mV/%). A RELAXED LFP cell has no such top knee; this curve exists to
+    exercise the machinery."""
+    out = []
+    for d in range(101):
+        if d <= 12:
+            v = 3460.0 - 12.0 * d
+        elif d <= 85:
+            v = 3316.0 - (d - 12) * 36.0 / 73.0
+        else:
+            v = 3280.0 - (d - 85) * 20.0
+        out.append(v)
+    return out
+
+
+SYNTH = q.OcvCurve(synth_raw())
+
+
+class Pack:
+    """Series pack of cells with their own capacity, top-balanced at soc0.
+    Terminal voltage = OCV(SoC) + temperature term + hysteresis (+h/2 after a
+    charge, -h/2 after a discharge, 7 mV as measured on the plateau) - R0*I -
+    two RC polarisations (60 s and 20 min) + sensor offset + noise, rounded to
+    1 mV. Rows are sampler iterations (t, current in BmsSample sign, cell mV,
+    temp)."""
+
+    def __init__(self, caps=CAPS, soc0=97.0, curve=SYNTH, temp=25.0, dt=10.0, t0=T0, r0=1.0, r1=0.5, tau1=60.0,
+                 r2=1.0, tau2=1200.0, hyst=7.0, tc=0.0, offset=0.0, noise_u=0.5, noise_i=0.1, seed=1, sign=1.0,
+                 ocv_fn=None):
+        self.caps, self.curve, self.temp, self.dt, self.t = list(caps), curve, temp, dt, t0
+        self.soc = [float(soc0)] * len(caps)
+        self.e1 = [0.0] * len(caps)
+        self.e2 = [0.0] * len(caps)
+        self.r0, self.r1, self.tau1, self.r2, self.tau2 = r0, r1, tau1, r2, tau2
+        self.hyst, self.tc, self.offset = hyst, tc, offset
+        self.noise_u, self.noise_i, self.sign = noise_u, noise_i, sign
+        self.ocv_fn = ocv_fn
+        self.h = 1.0
+        self.rng = random.Random(seed)
+        self.rows = []
+
+    def ocv(self, soc):
+        if self.ocv_fn is not None:
+            return self.ocv_fn(soc)
+        return q._interp(min(100.0, max(0.0, 100.0 - soc)), self.curve.smooth)
+
+    def run(self, i_dis, seconds, sample=True, i_seen=None):
+        """i_dis: true discharge current [A] for `seconds`. sample=False: the
+        time passes unobserved (an outage). i_seen: what the BMS reports, if
+        not the truth."""
+        a1, a2 = 1 - math.exp(-self.dt / self.tau1), 1 - math.exp(-self.dt / self.tau2)
+        for _ in range(int(round(seconds / self.dt))):
+            self.t += self.dt
+            for c, cap in enumerate(self.caps):
+                self.soc[c] -= i_dis * self.dt / 36.0 / cap
+                self.e1[c] += (self.r1 * i_dis - self.e1[c]) * a1
+                self.e2[c] += (self.r2 * i_dis - self.e2[c]) * a2
+            if i_dis > 0.5:
+                self.h = -1.0
+            elif i_dis < -0.5:
+                self.h = 1.0
+            if sample:
+                tt = self.temp
+                v = [round(self.ocv(s) + self.tc * ((tt if tt is not None else 25.0) - 25.0) + self.h * self.hyst / 2
+                           - self.r0 * i_dis - e1 - e2 + self.offset + self.rng.gauss(0, self.noise_u))
+                     for s, e1, e2 in zip(self.soc, self.e1, self.e2)]
+                i = i_dis if i_seen is None else i_seen
+                self.rows.append((self.t, self.sign * (i + self.rng.gauss(0, self.noise_i)), v, tt))
+        return self
+
+    def rest(self, seconds=7200):
+        return self.run(0.0, seconds)
+
+    def cycle(self, dq=88.0, i=50.0, rest=7200):
+        """Discharge dq, rest, charge it back, rest."""
+        self.run(i, 3600 * dq / i).rest(rest)
+        self.run(-i, 3600 * dq / i).rest(rest)
+        return self
+
+    def end(self):
+        """A load after the last rest, so that rest is closed as an anchor."""
+        return self.run(20.0, 300)
+
+
+def full_cycles(n=2, rest=7200, dq=88.0, **kw):
+    p = Pack(**kw).rest(rest)
+    for _ in range(n):
+        p.cycle(dq=dq, rest=rest)
+    return p.end()
+
+
+def run(rows, est=None, cap=100.0, curve=SYNTH):
+    if est is None:
+        est = q.QmaxEstimator('t', design_capacity=cap, curve=curve)
+        est._log_summary = lambda: None  # keep the counters for the whole run
+    pub = []
+    for t, i, v, temp in rows:
+        r = est.add(t, i, v, temp=temp)
+        if r is not None:
+            pub.append(r)
+    return est, pub
+
+
+def seg_q(est):
+    return [s['qmax'] for s in est.segments]
+
+
+# ================================================================ curve
+
+def test_pure_python_smoothing_matches_scipy():
+    """gaussian_filter1d(ant24 90-min curve, 3.0, mode='nearest'), computed
+    with scipy 1.x when the curve was made (the prototype's make_inverse)."""
+    sm = q.gaussian_smooth(q.OCV_RAW_MV, 3.0, mode='nearest')
+    ref = {0: 3325.153, 10: 3318.948, 30: 3307.921, 50: 3293.395, 64: 3275.923, 90: 3219.053, 95: 3169.692,
+           100: 3103.644}
+    for d, v in ref.items():
+        assert sm[d] == pytest.approx(v, abs=0.01)
+    assert q.gradient([0, 1, 4, 9]) == [1, 2, 4, 5]  # numpy.gradient
+
+
+def test_odd_extension_keeps_a_straight_line_to_the_ends():
+    line = [3400.0 - 3.0 * d for d in range(101)]
+    assert q.gaussian_smooth(line, 3.0) == pytest.approx(line, abs=1e-9)
+    near = q.gaussian_smooth(line, 3.0, mode='nearest')
+    assert near[100] - line[100] > 3  # what 'nearest' does to a steep end
+
+
+def test_builtin_curve_is_steep_only_near_empty():
+    """The structural fact behind 'no segment on the built-in curve': at 5
+    mV/% only SoC 0-11 is invertible; a relaxed full cell is off the curve or
+    on the plateau."""
+    c = q.DEFAULT_CURVE
+    assert [d for d, s in enumerate(c.slope) if abs(s) >= q.MIN_SLOPE_MV_PER_PCT] == list(range(89, 101))
+    assert c.soc(3340.0) == (None, 'off_curve')  # a relaxed full cell
+    assert c.soc(3324.0) == (None, 'plateau')
+    assert c.soc(3293.4) == (None, 'plateau')
+    assert c.soc(3070.0) == (None, 'off_curve')  # below the bottom: never clamped
+    s, why = c.soc(3150.0)
+    assert why is None and 3.0 < s < 5.0
+    assert c.soc(None) == (None, 'missing') and c.soc(math.nan) == (None, 'missing')
+
+
+def test_a_flat_stretch_is_unevaluable_whatever_the_gate(monkeypatch):
+    flat = q.OcvCurve([3400.0] * 20 + [3300.0] * 61 + [3200.0] * 20)
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.0)
+    assert flat.soc(3300.0) == (None, 'plateau')  # anywhere between DOD 20 and 80: no guess
+
+
+def test_curve_must_be_monotone():
+    with pytest.raises(ValueError):
+        q.OcvCurve([3300.0, 3310.0, 3200.0])
+
+
+# ================================================================ recovery
+
+def test_full_cycles_recover_the_limiting_cell():
+    est, pub = run(full_cycles().rows)
+    assert len(est.segments) == 4 and len(pub) == 2
+    assert pub[-1]['qmax'] == pytest.approx(min(CAPS), rel=0.01)
+    assert pub[-1]['soh'] == pytest.approx(pub[-1]['qmax'])  # 100 Ah design capacity
+    assert pub[-1]['limiting_cell'] == 2 and pub[-1]['capacity_source'] == 'option'
+    for s in est.segments:
+        assert s['q_cells'] == pytest.approx(list(CAPS), rel=0.01)
+        assert s['cov'] == pytest.approx(1.0)
+    assert all(f == 'rc' for a in list(est.anchors)[1:] for f in a['fit'])  # the relaxation was extrapolated
+
+
+def test_nothing_is_published_before_the_minimum_and_only_on_a_new_segment():
+    est = _fresh()
+    n_seg = 0
+    for t, i, v, temp in full_cycles(n=3).rows:
+        before = len(est.segments)
+        r = est.add(t, i, v, temp=temp)
+        new_seg = est.counts['segment'] > n_seg
+        n_seg = est.counts['segment']
+        if r is not None:
+            assert new_seg, 'published without a newly accepted segment (stale-as-new)'
+            assert len(est.segments) >= q.PUBLISH_MIN_SEGMENTS
+        elif new_seg:
+            assert before + 1 < q.PUBLISH_MIN_SEGMENTS
+    assert n_seg == 6
+
+
+def test_without_a_capacity_qmax_is_published_and_soh_is_not():
+    est, pub = run(full_cycles().rows, cap=None)
+    assert pub and pub[-1]['soh'] is None and pub[-1]['capacity'] is None
+    assert pub[-1]['plausibility_checked'] is False
+    assert pub[-1]['qmax'] == pytest.approx(min(CAPS), rel=0.01)
+
+
+def test_the_bms_reported_capacity_is_used_when_no_option_is_set():
+    est = q.QmaxEstimator('t', curve=SYNTH)
+    pub = [r for t, i, v, temp in full_cycles().rows if (r := est.add(t, i, v, temp=temp, capacity=120.0))]
+    assert pub[-1]['capacity'] == 120.0 and pub[-1]['capacity_source'] == 'bms'
+    assert pub[-1]['soh'] == pytest.approx(100 * pub[-1]['qmax'] / 120.0)
+
+
+def test_segments_do_not_overlap():
+    """top, bottom, deeper bottom: the second bottom must not pair with the
+    first top again (two segments sharing a start are one measurement)."""
+    p = Pack().rest()
+    p.run(50.0, 3600 * 86 / 50).rest()
+    p.run(50.0, 3600 * 3 / 50).rest().end()
+    est, _ = run(p.rows)
+    assert len(est.segments) == 1
+    assert est.pair_reasons['overlap'] == 1
+
+
+# ================================================================ builtin curve
+
+def _builtin_cycle(offset=0.0):
+    """A deep cycle of an LFP pack whose true OCV is the built-in curve."""
+    p = Pack(curve=q.DEFAULT_CURVE, soc0=99.0, offset=offset, hyst=0.0).rest()
+    for _ in range(2):
+        p.cycle(dq=93.0)
+    return p.end()
+
+
+def test_builtin_curve_accepts_no_segment_on_a_perfect_deep_cycle():
+    est, pub = run(_builtin_cycle().rows, curve=None)
+    assert pub == [] and not est.segments
+    assert est.counts['anchor_plateau'] + est.counts['anchor_off_curve'] == 3  # every top rest
+    assert est.counts['anchor'] == 2 and all(max(a['soc']) < 11 for a in est.anchors)  # the bottom ones
+    assert est.pair_reasons['dsoc'] == 1  # bottom to bottom, the only pair left
+
+
+def test_calibration_builtin_curve_without_the_slope_gate_publishes_and_an_offset_moves_it(monkeypatch):
+    """Known-bad: plateau endpoints. With the gate gone the same cycles give
+    segments -- and a 5 mV cell-voltage offset, a fraction of the 30-100 mV
+    seen between two BMSes on one pack (WHITEPAPER 9.1), moves the result by
+    far more than it moves a knee-to-knee segment."""
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.0)
+    est0, pub0 = run(_builtin_cycle().rows, curve=None)
+    assert est0.segments
+    est5, _ = run(_builtin_cycle(offset=-5.0).rows, curve=None)
+    q0, q5 = seg_q(est0)[0], seg_q(est5)[0]
+    assert abs(q5 / q0 - 1) > 0.05
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 5.0)
+    k0, _ = run(full_cycles().rows)
+    k5, _ = run(full_cycles(offset=-5.0).rows)
+    assert abs(seg_q(k5)[0] / seg_q(k0)[0] - 1) < 0.01
+
+
+# ================================================================ known-bad: plateau endpoint (synthetic)
+
+def _plateau_start():
+    """Rests at SoC 72 (on the plateau) and at the bottom knee, dSoC ~64 %."""
+    p = Pack(soc0=72.0).rest()
+    for _ in range(3):
+        p.run(50.0, 3600 * 64 / 50).rest()
+        p.run(-50.0, 3600 * 64 / 50).rest()
+    return p.end()
+
+
+def test_plateau_endpoint_is_rejected():
+    est, pub = run(_plateau_start().rows)
+    assert pub == [] and not est.segments
+    assert est.counts['anchor_plateau'] == 4 and est.counts['anchor'] == 3
+
+
+def test_calibration_without_the_slope_gate_a_plateau_endpoint_publishes(monkeypatch):
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.0)
+    est, pub = run(_plateau_start().rows)
+    assert pub, 'scenario is harmless: the known-bad test proves nothing'
+
+
+# ================================================================ known-bad: short rest
+
+def _short_rests(rest_min, r2=3.0):
+    """Heavy slow polarisation (3 mOhm, 20 min) that a short rest has not shed."""
+    return full_cycles(n=2, rest=rest_min * 60, r2=r2).rows
+
+
+def test_short_rests_make_no_anchor():
+    est, pub = run(_short_rests(60))
+    assert pub == [] and est.counts['anchor'] == 0 and est.counts['rest_short'] >= 4
+
+
+def test_calibration_with_30_min_rests_accepted_the_result_is_biased(monkeypatch):
+    good, _ = run(_short_rests(120))
+    assert seg_q(good)[0] == pytest.approx(98.0, rel=0.01)
+    monkeypatch.setattr(q, 'MIN_REST_S', 15 * 60.0)
+    est, pub = run(_short_rests(20))
+    assert est.segments, 'scenario is harmless'
+    assert abs(seg_q(est)[0] / 98.0 - 1) > 0.03
+
+
+# ================================================================ known-bad: current gap
+
+def _slow_discharge_with_outage(p, gap_s=1800, true_i=60.0, sample=False):
+    """40 Ah at 5 A, an outage of gap_s while the pack really delivers
+    true_i (5 A reported on both sides), 5 A for the rest of 88 Ah. The
+    segment spans ~14 h, so one 30-min hole still leaves 96 % coverage: the
+    gap limit, not the coverage gate, is what stops it."""
+    p.run(5.0, 8 * 3600)
+    p.run(true_i, gap_s, sample=sample)
+    return p.run(5.0, 3600 * (48 - true_i * gap_s / 3600) / 5)
+
+
+def _gap_cycle(gap_s=1800):
+    p = Pack().rest()
+    for _ in range(3):
+        _slow_discharge_with_outage(p, gap_s).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    return p.end().rows
+
+
+def test_a_gap_in_the_current_record_invalidates_the_segment():
+    est, pub = run(_gap_cycle())
+    assert est.counts['gap'] == 3 and est.pair_reasons['gap'] >= 3
+    # it keeps the anchors: the charge segments on the other side of each gap pass
+    assert est.counts['segment'] == 3 and all(s['dq'] > 0 for s in est.segments)
+    assert pub[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
+
+
+def test_calibration_without_the_gap_limit_the_bridged_charge_is_wrong(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_GAP_S', math.inf)
+    est, pub = run(_gap_cycle())
+    dis = [s for s in est.segments if s['dq'] < 0]
+    assert dis, 'scenario is harmless'
+    assert dis[0]['cov'] >= q.MIN_COVERAGE  # the coverage gate would not have caught it
+    assert dis[0]['qmax'] < 0.8 * 98.0  # 27.5 of 88 Ah were never counted
+
+
+def _holey_cycle():
+    """Every 7 minutes a 3-minute hole (each below the gap limit) in which the
+    load is 100 A; either side the BMS reports 50 A."""
+    p = Pack().rest()
+    for _ in range(2):
+        for _ in range(10):  # 10 x (3.3 + 5.0) Ah = 83 Ah
+            p.run(50.0, 240)
+            p.run(100.0, 180, sample=False)
+        p.rest()
+        p.run(-50.0, 3600 * 83.33 / 50).rest()
+    return p.end().rows
+
+
+def test_coverage_gate_catches_many_short_bridged_gaps():
+    est, _ = run(_holey_cycle())
+    assert est.counts['gap'] == 0 and est.pair_reasons['coverage'] >= 2
+    assert all(s['dq'] > 0 for s in est.segments)
+
+
+def test_calibration_without_the_coverage_gate_the_holes_bias_it(monkeypatch):
+    monkeypatch.setattr(q, 'MIN_COVERAGE', 0.0)
+    est, _ = run(_holey_cycle())
+    dis = [s for s in est.segments if s['dq'] < 0]
+    assert dis, 'scenario is harmless'
+    assert dis[0]['qmax'] < 0.85 * 98.0
+
+
+# ================================================================ known-bad: small dSoC
+
+def _shallow(depth=6.0):
+    """Top knee to top knee: both ends steep, dSoC ~6 %, after a charge and a
+    discharge (hysteresis +-3.5 mV)."""
+    p = Pack().rest()
+    for _ in range(4):
+        p.run(50.0, 3600 * depth / 50).rest()
+        p.run(-50.0, 3600 * depth / 50).rest()
+    return p.end().rows
+
+
+def test_small_dsoc_is_rejected():
+    est, pub = run(_shallow())
+    assert pub == [] and not est.segments and est.pair_reasons['dsoc'] >= 4
+
+
+def test_calibration_with_a_small_dsoc_accepted_hysteresis_dominates(monkeypatch):
+    monkeypatch.setattr(q, 'MIN_DSOC', 2.0)
+    est, pub = run(_shallow())
+    assert est.segments, 'scenario is harmless'
+    assert abs(median_q(est) / 98.0 - 1) > 0.05  # 7 mV of hysteresis on 6 % dSoC
+
+
+def median_q(est):
+    return q.median(seg_q(est))
+
+
+# ================================================================ known-bad: temperature
+
+def test_missing_temperature_makes_no_anchor():
+    est, pub = run(full_cycles(temp=None).rows)
+    assert pub == [] and est.counts['anchor'] == 0 and est.counts['anchor_temp_missing'] == 5
+
+
+def _warm_top_cold_bottom():
+    """Charged in the warm, discharged overnight in a 0 degC garage; dOCV/dT
+    +3.2 mV/degC (the bottom-knee value, CALCE cross-check)."""
+    p = Pack(tc=3.2).rest()
+    for _ in range(2):
+        p.temp = 0.0
+        p.run(50.0, 3600 * 88 / 50).rest()
+        p.temp = 25.0
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    return p.end().rows
+
+
+def test_calibration_a_default_temperature_publishes_a_wrong_value():
+    """The BMS reports no temperature. Defaulting it to 25 degC publishes a
+    value 4-5 % low; knowing it rejects the cold anchors."""
+    rows = _warm_top_cold_bottom()
+    est, pub = run([(r[0], r[1], r[2], 25.0) for r in rows])
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] / 98.0 - 1 < -0.03
+    est_known, pub_known = run(rows)
+    assert pub_known == [] and est_known.counts['anchor_temp_range'] == 2
+
+
+# ================================================================ known-bad: current sign
+
+def test_wrong_current_sign_publishes_nothing():
+    est, pub = run(full_cycles(sign=-1.0).rows, cap=None)  # no capacity: the sign gate alone
+    assert pub == [] and not est.segments and est.pair_reasons['sign'] >= 4
+    assert 'accepted' not in est.pair_reasons
+
+
+def test_calibration_without_the_sign_check_a_negative_qmax_is_published(monkeypatch):
+    monkeypatch.setattr(q, '_same_sign', lambda dq, dsoc: True)
+    est, pub = run(full_cycles(sign=-1.0).rows, cap=None)
+    assert pub and pub[-1]['qmax'] < 0
+
+
+# ================================================================ known-bad: chemistry
+
+def nmc_ocv(soc):
+    """A rough NMC curve: 3.0 V empty, 3.45 V at 10 %, 4.15 V full."""
+    pts = [(0, 3000), (2, 3120), (5, 3300), (8, 3400), (10, 3450), (20, 3560), (50, 3700), (80, 3950), (100, 4150)]
+    for (a, va), (b, vb) in zip(pts, pts[1:]):
+        if soc <= b:
+            return va + (vb - va) * (max(soc, a) - a) / (b - a)
+    return pts[-1][1]
+
+
+def _nmc_day():
+    """An NMC pack: full at 4.1 V for hours, then cycles between 8 % and 2 %
+    SoC, whose voltages (3.40 / 3.12 V) sit on the knees of the LFP curve."""
+    p = Pack(ocv_fn=nmc_ocv, soc0=98.0, hyst=0.0).rest(3 * 3600)
+    p.run(50.0, 3600 * 90 / 50).rest()
+    for _ in range(3):
+        p.run(50.0, 3600 * 6 / 50).rest()
+        p.run(-50.0, 3600 * 6 / 50).rest()
+    return p.end()
+
+
+def test_a_non_lfp_pack_disables_the_estimator(caplog):
+    with caplog.at_level('INFO'):
+        est, pub = run(_nmc_day().rows)
+    assert pub == [] and not est.enabled and 'LiFePO4' in est.disabled_reason
+    assert len([r for r in caplog.records if 'disabled' in r.getMessage()]) == 1
+
+
+def test_calibration_without_the_band_an_nmc_pack_gets_an_absurd_qmax(monkeypatch):
+    monkeypatch.setattr(q, 'LFP_MV_HI', math.inf)
+    est, pub = run(_nmc_day().rows, cap=None)
+    assert est.segments, 'scenario is harmless'
+    assert seg_q(est)[0] < 0.2 * 98.0  # 6 % of the pack read as ~90 % of an LFP curve
+
+
+def test_a_single_out_of_band_glitch_does_not_disable():
+    rows = full_cycles().rows
+    k = 500
+    rows[k] = rows[k][:2] + ([3732, 3119, -1, 3300],) + rows[k][3:]
+    est, pub = run(rows)
+    assert est.enabled and est.n_dropped == 1 and pub
+
+
+# ================================================================ known-bad: glitch at an anchor
+
+def _glitched(dt=60.0, glitch=-60):
+    """1 sample a minute; the last sample of every bottom rest reads cell 2 (the
+    limiting one) 60 mV low (a garbled frame inside the LFP band)."""
+    p = Pack(dt=dt).rest()
+    ends = []
+    for _ in range(2):
+        p.run(50.0, 3600 * 88 / 50).rest()
+        ends.append(len(p.rows) - 1)
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    rows = p.end().rows
+    for k in ends:
+        t, i, v, temp = rows[k]
+        rows[k] = (t, i, [v[0], v[1] + glitch] + v[2:], temp)
+    return rows
+
+
+def test_a_single_glitch_at_the_end_of_a_rest_does_not_move_the_anchor():
+    clean, _ = run(_glitched(glitch=0))
+    est, pub = run(_glitched())
+    assert seg_q(est) == pytest.approx(seg_q(clean), rel=2e-3) and len(pub) == 2
+
+
+def test_calibration_without_despiking_and_the_end_median_the_glitch_moves_it(monkeypatch):
+    monkeypatch.setattr(q, 'despike', lambda vs: list(vs))
+    monkeypatch.setattr(q, 'END_BINS', 1)
+    clean, _ = run(_glitched(glitch=0))
+    est, _ = run(_glitched())
+    assert abs(seg_q(est)[0] / seg_q(clean)[0] - 1) > 0.03
+
+
+# ================================================================ known-bad: load during the "rest"
+
+def _loaded_bottom(i_bottom):
+    """The bottom 'rest' has a load left on (C/10). Cell resistance as for a
+    real 100 Ah LFP cell (R_dc * Q ~ 0.56 Ohm*Ah, WHITEPAPER 9)."""
+    p = Pack(r0=2.0, r2=3.5).rest()
+    for _ in range(2):
+        p.run(50.0, 3600 * (88 - 2 * i_bottom) / 50).run(i_bottom, 7200)
+        p.run(-50.0, 3600 * (88 - 2 * i_bottom) / 50).rest()
+    return p.end().rows
+
+
+def test_a_loaded_rest_is_no_anchor():
+    est, pub = run(_loaded_bottom(10.0))
+    assert pub == [] and est.counts['segment'] == 0
+
+
+def test_calibration_with_the_rest_threshold_at_c10_the_loaded_anchor_biases_qmax(monkeypatch):
+    good, _ = run(_loaded_bottom(0.0))
+    monkeypatch.setattr(q, 'REST_I_MAX_A', 20.0)
+    monkeypatch.setattr(q, 'REST_C_RATE', 0.2)
+    est, _ = run(_loaded_bottom(10.0))
+    assert est.segments, 'scenario is harmless'
+    assert seg_q(est)[0] / seg_q(good)[0] - 1 < -0.025  # 55 mV of IR drop read as SoC
+
+
+# ================================================================ known-bad: temperature range
+
+def test_calibration_without_the_temperature_range_the_cold_anchors_bias_qmax(monkeypatch):
+    monkeypatch.setattr(q, 'CURVE_TEMP_LO', -40.0)
+    est, _ = run(_warm_top_cold_bottom())
+    assert est.segments, 'scenario is harmless'
+    assert seg_q(est)[0] / 98.0 - 1 < -0.03
+
+
+# ================================================================ known-bad: long segment, current offset
+
+def _long_segment(days):
+    """Top rest; `days` of small loads (+-3 A, no rest) with a 0.3 A offset
+    in the reported current (sensor offset: 0.3 A is Daly's floor); discharge;
+    bottom rest."""
+    p = Pack(dt=60.0).rest()
+    for k in range(int(days * 24)):
+        sgn = 1 if k % 2 else -1
+        p.run(3.0 * sgn, 3600, i_seen=3.0 * sgn - 0.3)
+    p.run(50.0, 3600 * 88 / 50).rest().end()
+    return p.rows
+
+
+def test_a_segment_longer_than_the_limit_is_rejected():
+    est, pub = run(_long_segment(11))
+    assert not est.segments and est.pair_reasons['span'] == 1
+
+
+def test_calibration_without_the_span_limit_the_offset_drift_is_published(monkeypatch):
+    """No capacity known, so the plausibility window (which would also catch
+    this one) does not apply: only the span limit stands in the way."""
+    monkeypatch.setattr(q, 'MAX_SEGMENT_S', math.inf)
+    est, _ = run(_long_segment(11), cap=None)
+    assert est.segments, 'scenario is harmless'
+    assert seg_q(est)[0] < 0.2 * 98.0  # 11 days x 0.3 A = 79 of the 88 Ah cancelled by phantom charge
+
+
+# ================================================================ known-bad: implausible ratio
+
+def test_an_implausible_qmax_is_rejected():
+    """A current reported at 30 % of the truth (a wrong shunt setting):
+    30 Ah for a 100 Ah pack."""
+    rows = [(t, 0.3 * i, v, temp) for t, i, v, temp in full_cycles().rows]
+    est, pub = run(rows)
+    assert pub == [] and est.pair_reasons['implausible'] >= 4 and 'accepted' not in est.pair_reasons
+
+
+def test_calibration_without_the_plausibility_window_it_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'PLAUSIBLE_REL', (0.0, math.inf))
+    rows = [(t, 0.3 * i, v, temp) for t, i, v, temp in full_cycles().rows]
+    est, pub = run(rows)
+    assert pub and pub[-1]['qmax'] < 35.0
+
+
+def test_a_clock_step_back_invalidates_the_open_segment():
+    rows = full_cycles(n=1).rows
+    k = len(rows) // 3  # during the first discharge
+    stepped = rows[:k] + [(t - 3600, i, v, temp) for t, i, v, temp in rows[k:]]
+    est, _ = run(stepped)
+    assert est.counts['clock_back'] == 1
+    assert est.anchors[0]['epoch'] == 0 and est.anchors[1]['epoch'] == 1
+    assert [s['dq'] > 0 for s in est.segments] == [True]  # only the charge after it
+
+
+# ================================================================ monotonicity
+
+def _accepts(rows, **kw):
+    est, _ = run(rows, **kw)
+    return bool(est.segments)
+
+
+def _monotone(verdicts):
+    """Quality worsens along the list: once rejected, never accepted again."""
+    assert verdicts[0], 'must accept the good end'
+    first = verdicts.index(False)
+    assert not any(verdicts[first:]), verdicts
+
+
+def test_monotone_in_rest_length():
+    _monotone([_accepts(full_cycles(n=1, rest=m * 60).rows) for m in (240, 120, 95, 91, 89, 80, 45, 20)])
+
+
+def test_monotone_in_gap_length():
+    def gap_rows(g):
+        p = Pack().rest()
+        p.run(50.0, 1800)
+        p.run(50.0, g, sample=False)
+        p.run(50.0, 3600 * 88 / 50 - 1800 - g).rest().end()
+        return p.rows
+    _monotone([_accepts(gap_rows(g)) for g in (10, 120, 290, 310, 900, 3600, 86400)])
+
+
+def test_monotone_in_rest_current():
+    """capacity 100 Ah: the rest threshold is min(1.5 A, C/100) = 1 A."""
+    def rows(i_rest):
+        p = Pack().run(i_rest, 7200)
+        p.run(50.0, 3600 * 88 / 50).run(i_rest, 7200).end()
+        return p.rows
+    _monotone([_accepts(rows(i)) for i in (0.0, 0.5, 0.9, 1.1, 1.5, 3.0, 10.0)])
+
+
+def test_monotone_in_depth():
+    def rows(dq):
+        return Pack().rest().run(50.0, 3600 * dq / 50).rest().end().rows
+    _monotone([_accepts(rows(dq)) for dq in (90, 88, 86, 80, 70, 60, 40, 20)])
+
+
+def test_monotone_in_bridged_gaps():
+    def rows(n_holes):
+        p = Pack().rest()
+        per = 3600 * 88 / 50 / 30
+        for k in range(30):
+            p.run(50.0, per - (120 if k < n_holes else 0))
+            if k < n_holes:
+                p.run(50.0, 120, sample=False)
+        return p.rest().end().rows
+    _monotone([_accepts(rows(n)) for n in (0, 5, 10, 20, 30)])
+
+
+# ================================================================ restarts
+
+def _via_json(state):
+    return json.loads(json.dumps(state))
+
+
+def _fresh(cap=100.0):
+    est = q.QmaxEstimator('p', design_capacity=cap, curve=SYNTH)
+    est._log_summary = lambda: None
+    return est
+
+
+def _split_run(rows, cuts, full=True, cap=100.0):
+    est, pub = _fresh(cap), []
+    for a, b in zip([0] + cuts, cuts + [len(rows)]):
+        _, p = run(rows[a:b], est)
+        pub += p
+        if b < len(rows):
+            st = _via_json(est.get_state(full=full))
+            est = _fresh(cap)
+            assert est.restore(st)
+    return est, pub
+
+
+def test_full_state_continues_exactly_where_it_stopped():
+    rows = full_cycles(n=2, dt=7.0).rows
+    whole, pub_whole = run(rows)
+    n = len(rows)
+    cuts = [n // 9, n // 5 + 1, n // 3 + 2, n // 2 + 3, (4 * n) // 5 + 1]  # inside rests, loads and open bins
+    split, pub_split = _split_run(rows, cuts)
+    assert pub_whole and pub_split == pub_whole
+    assert [s['q_cells'] for s in split.segments] == [s['q_cells'] for s in whole.segments]
+    assert split.q_ah == whole.q_ah and split.covered_s == whole.covered_s
+
+
+def _attrs(est):
+    out = {}
+    for k, v in vars(est).items():
+        if k == '_log_summary':
+            continue  # the test stub
+        if isinstance(v, deque):
+            v = list(v)
+        out[k] = v
+    return out
+
+
+def test_full_state_restores_every_attribute():
+    """A restored estimator IS the saved one. Also fails for a field added to
+    the class later but not to get_state()."""
+    rows = full_cycles(n=1, dt=7.0).rows
+    est, _ = run(rows[:len(rows) - 700])  # ends inside the last rest, in an open bin
+    assert est._bin is not None and est._rest_bins and est.anchors and est.segments and est.counts
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(_via_json(est.get_state(full=True)))
+    assert _attrs(restored) == _attrs(est)
+
+
+def test_restart_within_the_gap_limit_continues_the_segment():
+    """Shut down mid-discharge, back 2 minutes later: the charge is bridged."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(50.0, 1800).run(50.0, 120, sample=False).run(50.0, 3600 * 88 / 50 - 1920).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    rows = p.end().rows
+    cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
+    est, pub = _split_run(rows, [cut], full=True)
+    assert est.counts['segment'] == 6 and pub
+    assert pub[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
+    est_c, pub_c = _split_run(rows, [cut], full=False)  # crash: the compact state carries the count
+    assert [s['qmax'] for s in est_c.segments] == pytest.approx([s['qmax'] for s in est.segments], rel=1e-3)
+
+
+def _downtime(down_s=1800):
+    """Top rest; a slow discharge during which batmon is down for down_s
+    while the pack delivers 60 A; restart; on to the bottom; rest."""
+    p = Pack().rest()
+    return _slow_discharge_with_outage(p, down_s).rest().end().rows
+
+
+def test_restart_beyond_the_gap_limit_invalidates_the_segment_but_keeps_the_anchor():
+    rows = _downtime()
+    cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
+    est, pub = _split_run(rows, [cut])
+    assert not est.segments and est.counts['gap'] == 1
+    assert est.anchors[0]['epoch'] == 0 and est.anchors[-1]['epoch'] == 1  # kept, not paired
+
+
+def test_calibration_without_the_gap_limit_a_restart_loses_the_charge(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_GAP_S', math.inf)
+    rows = _downtime()
+    cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
+    est, _ = _split_run(rows, [cut])
+    assert est.segments, 'scenario is harmless'
+    assert est.segments[0]['qmax'] < 0.8 * 98.0  # 27.5 of the 30 Ah during the downtime are missing
+
+
+def test_restoring_publishes_nothing_by_itself():
+    est, pub = run(full_cycles().rows)
+    assert pub
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(_via_json(est.get_state()))
+    assert restored.value == est.value
+    rows = Pack(t0=est._last_t + 60).rest(3 * 3600).rows  # hours of rest, no new segment
+    assert run(rows, restored)[1] == []
+
+
+def test_a_stale_summary_is_not_published_after_a_long_outage():
+    """Four segments, then the add-on is off for 400 days while the pack loses
+    20 %. The first new segment must not be published with the old median."""
+    est, _ = run(full_cycles().rows)
+    st = _via_json(est.get_state(full=False))
+    later = full_cycles(n=1, dq=70.0, caps=[c * 0.8 for c in CAPS], t0=est._last_t + 400 * 86400).rows
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(st)
+    _, pub = run(later, restored)
+    assert pub == [] and len(restored.segments) == 2
+
+
+def test_calibration_without_the_age_limit_the_old_capacity_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_SEGMENT_AGE_S', math.inf)
+    est, _ = run(full_cycles().rows)
+    st = _via_json(est.get_state(full=False))
+    later = full_cycles(n=1, dq=70.0, caps=[c * 0.8 for c in CAPS], t0=est._last_t + 400 * 86400).rows
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(st)
+    _, pub = run(later, restored)
+    assert pub and pub[-1]['qmax'] > 0.95 * 98.0  # the pack is at 78 Ah now
+
+
+def test_changed_code_discards_everything(caplog):
+    est, _ = run(full_cycles().rows)
+    st = _via_json(est.get_state())
+    st['code'] = 'something else'
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    with caplog.at_level('INFO'):
+        assert restored.restore(st)
+    assert not restored.segments and not restored.anchors and restored._last_t is None
+    assert 'code changed' in caplog.text
+
+
+def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
+    est, _ = run(full_cycles().rows)
+    st = _via_json(est.get_state())
+    monkeypatch.setattr(q, 'CODE_FINGERPRINT', None)
+    st['code'] = None
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    restored.restore(st)
+    assert not restored.segments
+
+
+BAD_STATES = [
+    ('not a dict', lambda s: ['a list']),
+    ('other version', lambda s: s.update(version=99)),
+    ('q_ah NaN', lambda s: s.update(q_ah=float('nan'))),
+    ('last_i without last_t', lambda s: s.update(last_t=None)),
+    ('epoch negative', lambda s: s.update(epoch=-1)),
+    ('anchor soc out of range', lambda s: s['anchors'][1]['soc'].__setitem__(0, 140.0)),
+    ('anchor soc without reason', lambda s: s['anchors'][1]['why'].__setitem__(0, 'plateau')),
+    ('anchor temp out of range', lambda s: s['anchors'][1].update(temp=-5.0)),
+    ('anchor from a later epoch', lambda s: s['anchors'][1].update(epoch=99)),
+    ('anchors out of order', lambda s: s['anchors'].reverse()),
+    ('segment qmax not its minimum', lambda s: s['segments'][0].update(qmax=500.0)),
+    ('segment negative cell', lambda s: s['segments'][0]['q_cells'].__setitem__(0, -3.0)),
+    ('segment dsoc too small', lambda s: s['segments'][0]['dsoc'].__setitem__(0, 10.0)),
+    ('segment after last_t', lambda s: s['segments'][-1].update(t=s['last_t'] + 1)),
+    ('bin garbage', lambda s: s.update(bin='x')),
+    ('bin not at last_t', lambda s: s['bin'].update(t1=s['bin']['t1'] - 5)),
+    ('rest bins without rest_t0', lambda s: s.update(rest_t0=None)),
+    ('rest bin garbage', lambda s: s['rest_bins'].append('x')),
+]
+
+
+def _mid_rest_state():
+    rows = full_cycles(n=1, dt=7.0).rows
+    est, _ = run(rows[:len(rows) - 700])
+    return _via_json(est.get_state())
+
+
+@pytest.mark.parametrize('what,mutate', BAD_STATES, ids=[b[0] for b in BAD_STATES])
+def test_a_state_that_does_not_validate_starts_fresh(caplog, what, mutate):
+    state = _mid_rest_state()
+    assert state['anchors'] and state['segments'] and state['bin'] and state['rest_bins']
+    state = mutate(state) or state
+    est = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    with caplog.at_level('WARNING'):
+        assert est.restore(state) is False
+    assert est.enabled and not est.anchors and not est.segments and est._last_t is None and est.q_ah == 0
+    assert 'starting fresh' in caplog.text
+    _, pub = run(full_cycles().rows, est)  # and it works afterwards
+    assert pub
+
+
+def test_calibration_without_the_qmax_check_a_forged_segment_would_be_restored():
+    """The segment check is what catches 'qmax not its minimum': the same
+    state with a consistent forged value restores fine."""
+    state = _mid_rest_state()
+    state['segments'][0]['q_cells'] = [500.0] * len(state['segments'][0]['q_cells'])
+    state['segments'][0]['qmax'] = 500.0
+    est = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert est.restore(state) and est.segments[0]['qmax'] == 500.0
+
+
+def test_a_chemistry_disable_survives_a_restart_an_internal_error_does_not():
+    est, _ = run(_nmc_day().rows)
+    assert not est.enabled
+    r = q.QmaxEstimator('t', curve=SYNTH)
+    r.restore(_via_json(est.get_state(full=False)))
+    assert not r.enabled and 'LiFePO4' in r.disabled_reason
+
+    est2, _ = run(full_cycles(n=1).rows)
+    est2.disable('internal error', persistent=False)
+    r2 = q.QmaxEstimator('t', curve=SYNTH)
+    r2.restore(_via_json(est2.get_state(full=False)))
+    assert r2.enabled
+
+
+def test_store_and_load_round_trip_and_a_corrupt_file(tmp_path, monkeypatch, caplog):
+    import bmslib.store as store
+    monkeypatch.setattr(store, 'root_dir', str(tmp_path) + os.sep)
+    assert store.load_qmax_state('bat 1') is None
+    est, _ = run(full_cycles().rows)
+    store.store_qmax_state('bat 1', est.get_state())
+    assert os.listdir(tmp_path) == ['qmax_bat 1.json']
+    restored = q.QmaxEstimator('bat 1', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(store.load_qmax_state('bat 1'))
+    assert restored.value == est.value
+    (tmp_path / 'qmax_bat 1.json').write_text('{"version": 1, "anch')
+    with caplog.at_level('WARNING'):
+        assert store.load_qmax_state('bat 1') is None
+    assert 'starts fresh' in caplog.text
+
+
+def test_duplicate_timestamps_do_not_count_twice():
+    rows = full_cycles(n=1).rows
+    once, _ = run(rows)
+    twice, _ = run([r for r in rows for _ in range(2)])
+    assert once.q_ah == twice.q_ah and seg_q(once) == seg_q(twice)
+
+
+# ================================================================ real data
+
+REAL_DALY = os.path.join(os.path.dirname(__file__), 'data', 'daly_2024-05-17_qmax.csv.gz')
+
+
+def real_rows():
+    """Minute rows of the van pack (Daly, 280 Ah, 2 of its cells), 2024-05-17
+    18:00 - 05-20 08:00 UTC, see data/SOURCES.md."""
+    def f(x):
+        return float(x) if x else math.nan
+
+    with gzip.open(REAL_DALY, 'rt') as fh:
+        return [(float(r['t']), f(r['current']), [f(r['u1']), f(r['u2'])], f(r['temp'])) for r in csv.DictReader(fh)]
+
+
+def _run_real(rows=None):
+    est = q.QmaxEstimator('daly', design_capacity=280.0)
+    est._log_summary = lambda: None  # keep the counters
+    return run(rows or real_rows(), est)
+
+
+def test_real_daly_three_nights_give_anchors_but_no_segment():
+    """Four rests of 2-7 h: three on the plateau, the last near empty and
+    evaluable for both cells. No segment: an outage of 7 min, and without it,
+    the plateau."""
+    est, pub = _run_real()
+    assert pub == [] and not est.segments and est.enabled
+    assert est.counts['anchor_plateau'] == 3 and est.counts['anchor'] == 1
+    assert max(est.anchors[-1]['soc']) < 11 and est.anchors[-1]['epoch'] == 2  # two outages before it
+    assert est.counts['gap'] == 2
+
+
+def test_calibration_real_daly_with_the_gap_and_slope_gates_relaxed_a_segment_passes(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_GAP_S', 600.0)
+    est, _ = _run_real()
+    assert not est.segments and est.counts['gap'] == 0 and est.counts['anchor_plateau'] == 3  # the gap was not all
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.8)
+    est, _ = _run_real()
+    assert len(est.segments) == 1
+    s = est.segments[0]
+    assert 200 < s['qmax'] < 260 and 270 < s['q_cells'][0] < 310  # cell 1: the prototype's 280-300 Ah
+
+
+def test_real_daly_with_the_current_sign_flipped_has_only_sign_rejections(monkeypatch):
+    monkeypatch.setattr(q, 'MAX_GAP_S', 600.0)
+    monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.8)
+    est, _ = _run_real([(t, -i, v, temp) for t, i, v, temp in real_rows()])
+    assert not est.segments and est.pair_reasons['sign'] >= 1
+
+
+# ================================================================ MQTT
+
+class _Client:
+    def __init__(self):
+        self.published = {}
+
+    def publish(self, topic, payload, retain=False):
+        self.published[topic] = payload
+
+        class R:
+            rc = paho.MQTT_ERR_SUCCESS
+
+        return R()
+
+
+def test_discovery_declares_qmax_and_soh_only_when_enabled():
+    sample = BmsSample(voltage=53.2, current=1.0)
+    c = _Client()
+    publish_hass_discovery(c, "test/q", 20, sample, 16, [])
+    assert not [t for t in c.published if 'qmax_est' in t or 'soh_est' in t]
+    c = _Client()
+    publish_hass_discovery(c, "test/q", 20, sample, 16, [], soh_est=True)
+    d = json.loads(c.published["homeassistant/sensor/test_q/_qmax_est/config"])
+    assert d['state_topic'] == 'test/q/qmax_est' and d['unit_of_measurement'] == 'Ah'
+    assert d['json_attributes_topic'] == 'test/q/qmax_est/attributes'
+    assert d['expire_after'] >= 30 * 86400  # published per accepted segment, weeks apart
+    s = json.loads(c.published["homeassistant/sensor/test_q/_soh_est/config"])
+    assert s['state_topic'] == 'test/q/soh_est' and s['unit_of_measurement'] == '%'
+    assert "homeassistant/sensor/test_q/_soc_soh/config" not in c.published  # not the BMS's own SoH
+
+
+def test_publish_qmax_leaves_out_an_unknown_soh():
+    est, pub = run(full_cycles().rows, cap=None)
+    c = _Client()
+    publish_qmax(c, 'dev', pub[-1])
+    assert float(c.published['dev/qmax_est']) == pytest.approx(pub[-1]['qmax'], rel=1e-3)
+    assert 'dev/soh_est' not in c.published
+    assert json.loads(c.published['dev/qmax_est/attributes'])['plausibility_checked'] is False
+
+
+# ================================================================ sampler wiring
+
+class _Bms:
+    name = 'q_fake'
+    address = 'serial'
+    is_virtual = False
+    is_connected = True
+    connect_time = 0
+    verbose_log = False
+
+    def __init__(self, current=10.0, temps=None, mos=math.nan, capacity=math.nan):
+        self.n_voltage_fetches = 0
+        self.k = 0
+        self.t0 = time.time()
+        self.current, self.temps, self.mos, self.capacity = current, temps, mos, capacity
+
+    def __str__(self):
+        return 'FakeBms(q)'
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def fetch(self):
+        self.k += 1
+        return BmsSample(voltage=53.0, current=self.current, soc=60.0, timestamp=self.t0 + self.k,
+                         mos_temperature=self.mos, capacity=self.capacity)
+
+    async def fetch_voltages(self):
+        self.n_voltage_fetches += 1
+        return [3300] * 4
+
+    async def fetch_temperatures(self):
+        if self.temps is None:
+            raise NotImplementedError()
+        return self.temps
+
+    def debug_data(self):
+        return None
+
+
+def _run_sampler(n, bms=None, **kw):
+    bms = bms or _Bms()
+    s = BmsSampler(bms, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, publish_period=3600, **kw)
+    s.num_samples = 1
+    s._last_power = bms.current * 53.0
+    for _ in range(n):
+        asyncio.run(s())
+    return s, bms
+
+
+def test_sampler_feeds_the_native_sign_and_fetches_voltages_only_near_rest():
+    s, bms = _run_sampler(5, soh_estimator=True, invert_current=True)
+    assert s.qmax is not None and s.impedance is None
+    assert bms.n_voltage_fetches == 1  # the first, publishing cycle; 10 A is no rest
+    assert s.qmax._last_i == -10.0  # discharging 10 A = charge current -10 A, whatever invert_current says
+    assert s.qmax.q_ah == pytest.approx(-10.0 * 4 / 3600)
+
+    s, bms = _run_sampler(25, bms=_Bms(current=0.2), soh_estimator=True)
+    # near rest: voltages at most every VOLTAGE_PERIOD_S (samples are 1 s apart)
+    assert bms.n_voltage_fetches == pytest.approx(1 + 25 / q.VOLTAGE_PERIOD_S, abs=1)
+
+
+def test_sampler_temperature_falls_back_to_the_mosfet_and_never_defaults():
+    for bms, want in ((_Bms(temps=[18.0, 22.0, 20.0]), 20.0), (_Bms(mos=23.0), 23.0), (_Bms(), None)):
+        s, _ = _run_sampler(2, bms=bms, soh_estimator=True)
+        temps = s.qmax._bin['temp']
+        assert temps == ([want] * 2 if want is not None else [])
+
+
+def test_sampler_passes_the_bms_capacity_and_the_design_option_wins():
+    s, _ = _run_sampler(2, bms=_Bms(capacity=230.0), soh_estimator=True)
+    assert s.qmax.capacity() == (230.0, 'bms')
+    s, _ = _run_sampler(2, bms=_Bms(capacity=230.0), soh_estimator=True, design_capacity=280.0)
+    assert s.qmax.capacity() == (280.0, 'option')
+
+
+def test_sampler_skips_virtual_bms_and_is_off_by_default():
+    class _Group(_Bms):
+        is_virtual = True
+
+    s = BmsSampler(_Group(), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, soh_estimator=True)
+    assert s.qmax is None
+    s, _ = _run_sampler(1)
+    assert s.qmax is None
+
+
+def test_sampler_saves_only_when_the_state_changed_and_restores_on_start(tmp_path, monkeypatch):
+    import bmslib.store as store
+    monkeypatch.setattr(store, 'root_dir', str(tmp_path) + os.sep)
+    writes = []
+    orig = store.store_qmax_state
+    monkeypatch.setattr(store, 'store_qmax_state', lambda n, st: (writes.append(st), orig(n, st)))
+    s, _ = _run_sampler(3, soh_estimator=True)
+    s.store_qmax_state()
+    s.store_qmax_state()
+    assert len(writes) == 1 and 'rest_bins' not in writes[0] and writes[0]['last_t'] is not None
+    s.store_qmax_state(final=True)
+    assert len(writes) == 2 and 'rest_bins' in writes[1]
+    s2 = BmsSampler(_Bms(), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, soh_estimator=True,
+                    soh_state=store.load_qmax_state('q_fake'))
+    assert s2.qmax._last_t == s.qmax._last_t and s2.qmax.q_ah == s.qmax.q_ah
+
+
+def test_an_estimator_exception_disables_it_without_breaking_sampling(monkeypatch):
+    s, bms = _run_sampler(1, soh_estimator=True)
+    monkeypatch.setattr(s.qmax, 'add', lambda *a, **k: 1 / 0)
+    asyncio.run(s())
+    assert not s.qmax.enabled and s.qmax._disable_persistent is False
+    assert asyncio.run(s()) is not None  # the next sample still comes through
