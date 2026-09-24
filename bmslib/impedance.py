@@ -76,13 +76,14 @@ check and the cross-cell lag agreement exist for that case; the replay then
 publishes nothing with the sign flipped. It remains a heuristic, not a proof.
 """
 import math
+import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bmslib import estimator_common
 from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite as _finite,
-                                     fmt_t as _fmt_t, median)
+                                     fmt_t as _fmt_t, locked, median)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -522,6 +523,7 @@ class CellResistanceEstimator:
 
     def __init__(self, name: str):
         self.name = name
+        self._lock = getattr(self, '_lock', None) or threading.RLock()  # kept when restore() re-inits
         self.enabled = True
         self.disabled_reason: Optional[str] = None
         self._rows = deque()  # closed bins
@@ -554,6 +556,7 @@ class CellResistanceEstimator:
             return None
         return median([w['r'] for w in self.windows])
 
+    @locked
     def disable(self, reason: str, persistent: bool = True):
         """persistent=False for an internal error: that says nothing about the
         pack, and a restart (maybe onto fixed code) should try again."""
@@ -568,6 +571,7 @@ class CellResistanceEstimator:
 
     # ------------------------------------------------------------ persistence
 
+    @locked
     def get_state(self, full: bool = True) -> Dict[str, Any]:
         """JSON-serialisable state. full=False leaves out what changes on every
         sample (the open window, the summary counters), so a periodic save only
@@ -594,6 +598,7 @@ class CellResistanceEstimator:
             )
         return st
 
+    @locked
     def restore(self, st) -> bool:
         """Load a get_state() dict. Anything that does not validate starts the
         estimator fresh (warning) rather than half-restored: a state that cannot
@@ -742,6 +747,7 @@ class CellResistanceEstimator:
         self._prev_i = i
         self._prev_u = vt
 
+    @locked
     def add(self, t: float, current: float, voltages: Optional[List[float]],
             soc: Optional[float] = None, temp: Optional[float] = None,
             pack_temp: Optional[float] = None, capacity: Optional[float] = None) -> Optional[float]:

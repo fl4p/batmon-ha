@@ -118,6 +118,18 @@ def test_code_and_constants_count_and_other_objects_do_not():
     assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.5, log=object())) == base
 
 
+def test_a_locked_method_is_fingerprinted_by_its_body():
+    """@locked replaces a method with a generic wrapper; the body lives in
+    __wrapped__ and must count, or every change to add() would go unseen."""
+    def cls(body):
+        ns = {'__name__': 'fake_mod', 'locked': ec.locked}
+        exec(compile('class E:\n    @locked\n    def add(self, x):\n        return x + %d\n' % body, 'fake.py', 'exec'),
+             ns)
+        return _ns(E=ns['E'])
+    assert ec.code_fingerprint(cls(1)) == ec.code_fingerprint(cls(1))
+    assert ec.code_fingerprint(cls(1)) != ec.code_fingerprint(cls(2))
+
+
 def test_what_cannot_be_fingerprinted_is_unknown_never_a_match():
     f = _fn('def f(x):\n    return x\n')
     f.__defaults__ = (object(),)  # not marshallable

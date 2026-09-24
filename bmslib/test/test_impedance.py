@@ -790,6 +790,8 @@ def test_full_state_continues_exactly_where_it_stopped(dt):
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
+        if k == '_lock':
+            continue  # not state
         if k == '_bin':
             v = None if v is None else {s: getattr(v, s) for s in type(v).__slots__}
         elif isinstance(v, deque):
@@ -808,6 +810,24 @@ def test_full_state_restores_every_attribute():
     restored = imp.CellResistanceEstimator('p')
     assert restored.restore(_via_json(est.get_state(full=True)))
     assert _attrs(restored) == _attrs(est)
+
+
+def test_a_snapshot_during_add_is_consistent():
+    """Snapshot from another thread while add() is half done -- after it
+    advanced the time, before the sample reached its bin. A restart from that
+    snapshot drops the sample as a duplicate; with the lock the snapshot
+    waits for add() and the split run equals the whole one."""
+    from bmslib.test.test_qmax import snapshot_inside
+    rows = trace(n=600)
+    whole, _ = run(rows)
+    est, _ = run(rows[:400])
+    t_new = rows[400][0]
+    snap, early = snapshot_inside(est, lambda: est.add(*rows[400]), lambda: est._last_t == t_new, full=True)
+    assert not early
+    restored = imp.CellResistanceEstimator('test')
+    assert restored.restore(snap)
+    run(rows[400:], restored)  # the restarted add-on sees the sample again
+    assert _attrs(restored) == _attrs(whole)
 
 
 def test_full_state_on_the_real_daly_capture_changes_nothing():

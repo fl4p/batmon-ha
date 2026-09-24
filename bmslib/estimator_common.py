@@ -5,6 +5,7 @@ code for persisted state, and the validators `restore()` uses.
 
 Kept free of numpy on purpose: the add-on has none.
 """
+import functools
 import hashlib
 import marshal
 import math
@@ -58,6 +59,19 @@ def current_ceiling(capacity: Optional[float], c_rate: float = I_MAX_C_RATE,
     if finite(capacity) and capacity > 0:
         return min(abs_max, c_rate * capacity)
     return abs_max
+
+
+def locked(method):
+    """Run the method under self._lock (a threading.RLock). The estimators'
+    state is saved from the background thread (main.py, every 30 s) while the
+    event loop feeds samples; without the lock a snapshot could land between
+    two updates of one add() -- the charge counted but the time not advanced
+    -- and a restore from it would count that interval twice."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def median(xs: Sequence[float]) -> float:
@@ -119,6 +133,8 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
             return  # imported: fingerprinted with its own module
         h.update(name.encode() + b'\0')
         h.update(marshal.dumps((_norm_code(obj.__code__), _canon(obj.__defaults__), _canon(obj.__kwdefaults__))))
+        if hasattr(obj, '__wrapped__'):  # a decorated method (locked): its body is the wrapped function
+            _feed(h, name + '.__wrapped__', obj.__wrapped__, modname, depth)
     elif isinstance(obj, type):
         if obj.__module__ != modname or depth > 3:
             return

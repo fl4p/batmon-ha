@@ -88,14 +88,16 @@ the reason.
 Chemistry: LiFePO4 only, the same persistent-out-of-band rule as the cell
 resistance estimator (bmslib/estimator_common.py).
 """
+import copy
 import math
+import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bmslib import estimator_common
 from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
-                                     LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, median, v_fin,
-                                     v_int, v_opt_fin)
+                                     LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, locked, median,
+                                     v_fin, v_int, v_opt_fin)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -404,6 +406,7 @@ class QmaxEstimator:
 
     def __init__(self, name: str, design_capacity: Optional[float] = None, curve: Optional[OcvCurve] = None):
         self.name = name
+        self._lock = getattr(self, '_lock', None) or threading.RLock()  # kept when restore() re-inits
         self.design_capacity = float(design_capacity) if finite(design_capacity) and design_capacity > 0 else None
         self.curve = curve or DEFAULT_CURVE
         self.enabled = True
@@ -487,6 +490,7 @@ class QmaxEstimator:
             return False
         return self._t_volt is None or not (0 <= t - self._t_volt < VOLTAGE_PERIOD_S)
 
+    @locked
     def disable(self, reason: str, persistent: bool = True):
         if self.enabled:
             logger.warning('%s: Qmax/SoH estimator disabled: %s', self.name, reason)
@@ -500,6 +504,7 @@ class QmaxEstimator:
 
     # ------------------------------------------------------------ streaming
 
+    @locked
     def add(self, t: float, current: float, voltages: Optional[Sequence[float]] = None,
             temp: Optional[float] = None, capacity: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """Feed one sampler iteration.
@@ -828,6 +833,7 @@ class QmaxEstimator:
 
     # ------------------------------------------------------------ persistence
 
+    @locked
     def get_state(self, full: bool = True) -> Dict[str, Any]:
         """JSON-serialisable state. Unlike the cell resistance estimator, the
         compact state (full=False, saved every 30 s when it changed) carries
@@ -845,8 +851,8 @@ class QmaxEstimator:
         )
         if full:
             st.update(
-                bin=None if self._bin is None else dict(self._bin),
-                rest_bins=self._rest_bins, rest_t0=self._rest_t0, rest_t1=self._rest_t1, rest_q=self._rest_q,
+                bin=copy.deepcopy(self._bin),  # add() appends to its lists; the caller serialises later
+                rest_bins=copy.deepcopy(self._rest_bins), rest_t0=self._rest_t0, rest_t1=self._rest_t1, rest_q=self._rest_q,
                 rest_cov=self._rest_cov, rest_dir=self._rest_dir, rest_si=self._rest_si, rest_n=self._rest_n,
                 t_volt=self._t_volt,
                 oob_since=self._oob_since, oob_n=self._oob_n, counts=dict(self.counts),
@@ -854,6 +860,7 @@ class QmaxEstimator:
             )
         return st
 
+    @locked
     def restore(self, st) -> bool:
         """Load a get_state() dict. Anything that does not validate starts the
         estimator fresh (warning): a state that cannot be checked is never

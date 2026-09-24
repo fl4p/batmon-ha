@@ -18,6 +18,8 @@ import json
 import math
 import os
 import random
+import sys
+import threading
 import time
 from collections import deque
 
@@ -879,8 +881,8 @@ def test_full_state_continues_exactly_where_it_stopped():
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
-        if k == '_log_summary':
-            continue  # the test stub
+        if k in ('_log_summary', '_lock'):
+            continue  # the test stub; a lock is not state
         if isinstance(v, deque):
             v = list(v)
         out[k] = v
@@ -1104,6 +1106,54 @@ def test_store_and_load_round_trip_and_a_corrupt_file(tmp_path, monkeypatch, cap
     with caplog.at_level('WARNING'):
         assert store.load_qmax_state('bat 1') is None
     assert 'starts fresh' in caplog.text
+
+
+def snapshot_inside(est, call, changed, full):
+    """Run call() and, at the first line of the estimator's code after which
+    changed() is true, take est.get_state(full) from ANOTHER thread, as
+    main.py's background save does. The main thread waits up to 0.3 s for
+    that snapshot before it goes on: without a lock the snapshot sees the
+    half-done update, with one it has to wait for call() to finish.
+    Returns (snapshot, whether it was taken before call() finished)."""
+    snaps, early = [], []
+
+    def tracer(frame, event, arg):
+        if event == 'line' and not early and frame.f_code.co_filename == est_file(est) and changed():
+            th = threading.Thread(target=lambda: snaps.append(_via_json(est.get_state(full=full))))
+            th.start()
+            th.join(0.3)
+            early.append((th, bool(snaps)))
+        return tracer
+
+    sys.settrace(tracer)
+    try:
+        call()
+    finally:
+        sys.settrace(None)
+    assert early, 'the trace never saw the change'
+    th, was_early = early[0]
+    th.join(5)
+    return snaps[0], was_early
+
+
+def est_file(est):
+    return sys.modules[type(est).__module__].__file__
+
+
+def test_a_snapshot_during_add_is_consistent():
+    """The review's interleaving: add() had counted the charge of an interval
+    but not yet advanced the time when the background thread saved; the
+    restored state then counted that interval again (-0.50 Ah for -0.25)."""
+    est = q.QmaxEstimator('race', design_capacity=100.0, curve=SYNTH)
+    est.add(T0, 10.0, [3300], temp=25)
+    q0 = est.q_ah
+    snap, early = snapshot_inside(est, lambda: est.add(T0 + 60, 20.0, [3300], temp=25),
+                                  lambda: est.q_ah != q0, full=False)
+    assert not early  # it had to wait for add()
+    r = q.QmaxEstimator('race', design_capacity=100.0, curve=SYNTH)
+    assert r.restore(snap)
+    r.add(T0 + 60, 20.0, [3300], temp=25)  # the sample goes through again after the restart
+    assert r.q_ah == est.q_ah == pytest.approx(-0.25) and r._last_t == est._last_t
 
 
 def test_duplicate_timestamps_do_not_count_twice():
