@@ -368,8 +368,13 @@ def test_an_object_that_cannot_describe_itself_leaves_the_fingerprint_unknown():
         def fingerprint_data(self):
             return (self.k,)
 
+    import bisect
+    import math
     base = ec.code_fingerprint(_ns(K=1.5))
     assert ec.code_fingerprint(_ns(K=1.5, log=logging.getLogger('x'), Opt=Optional)) == base
+    # an imported C function is imported code, as an imported Python function is (the review's util_import)
+    assert ec.code_fingerprint(_ns(K=1.5, _flo=math.floor, _bis=bisect.bisect_left)) == base
     assert ec.code_fingerprint(_ns(K=1.5, cfg=object())) is None
+    assert ec.code_fingerprint(_ns(K=1.5, add=[].append)) is None  # bound to state
     a, b = ec.code_fingerprint(_ns(K=1.5, cfg=Configured(1))), ec.code_fingerprint(_ns(K=1.5, cfg=Configured(2)))
     assert None not in (a, b) and len({a, b, base}) == 3

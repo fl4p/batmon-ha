@@ -184,6 +184,9 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
                 _feed(h, name + '.' + k, vars(obj)[k], modname, depth + 1)
     elif isinstance(obj, types.ModuleType):
         return  # an imported module: fingerprinted when its namespace is passed too
+    elif isinstance(obj, types.BuiltinFunctionType) and (obj.__self__ is None
+                                                          or isinstance(obj.__self__, types.ModuleType)):
+        return  # an imported C function (math.floor, bisect.bisect_left): the interpreter's code, whose version counts
     elif _is_const(obj):
         _put(h, 'const', name, _canon(obj))
     elif isinstance(obj, (list, dict, set, bytearray)):
