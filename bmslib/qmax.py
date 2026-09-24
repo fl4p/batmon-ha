@@ -77,7 +77,7 @@ a known capacity.
 
 Current offset: a current sensor offset integrates into dQ for the whole
 segment, and the gates above do not see it -- three 5-day segments with a
-0.3 A offset published 57.6 Ah for a 98 Ah cell, well inside 0.4-1.6x. So an
+0.3 A offset published 57.6 Ah for a 98 Ah cell, well inside 0.4-1.2x. So an
 offset of an ASSUMED size is budgeted: the offset is taken as the largest of
 I_OFFSET_MIN_A and the mean current the BMS reported during the two rests
 (which should read ~0 A), and that offset x span may be at most DRIFT_MAX_FRAC
@@ -246,10 +246,18 @@ MIN_DSOC = 60.0  # %, every cell
 # evaluated, and an unevaluable check never counts as passed. (A switch only so
 # that a test can show what goes out without it.)
 REQUIRE_CAPACITY = True
-# Every cell's Qmax must be within this ratio of the capacity.
-# The prototype's window was 150-450 Ah for 280 Ah (0.54-1.6); the lower end is
-# widened so that a genuinely failing cell (SoH 50 %) is reported, not rejected.
-PLAUSIBLE_REL = (0.4, 1.6)
+# Every cell's Qmax must be within this ratio of the capacity. A current gain
+# error goes 1:1 into Qmax (gain 0.6 / 0.9 / 1.1 published 58.5 / 87.8 / 107.3
+# Ah for a 98 Ah pack), and this window is the only thing that sees it, so it
+# is as tight as real packs allow. Upper end 1.2: new LFP cells deliver about
+# 100-110 % of nameplate, and the van pack converged at 280-300 Ah for 280 Ah
+# by three independent methods (bat-impedance WHITEPAPER 8.3, <= 1.07x); the
+# prototype's 1.6 let a 1.5x gain through as 146 Ah. The capacity must then be
+# the nameplate: a BMS set to less than the pack holds gets no value. Lower end
+# 0.4, widened from the prototype's 0.54 (150-450 Ah for 280 Ah) so that a
+# genuinely failing cell (SoH 50 %) is reported, not rejected; the price is
+# that a gain down to 0.4 passes.
+PLAUSIBLE_REL = (0.4, 1.2)
 MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, MAX_SEGMENT_S is 10 days
 
 # ---------------------------------------------------------------- output

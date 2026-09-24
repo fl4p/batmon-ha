@@ -494,7 +494,7 @@ BIG = 10.0  # the shallow cycles run on a 1000 Ah pack
 def _shallow(depth=6.0):
     """Top knee to top knee: both ends steep, dSoC ~6 %, after a charge and a
     discharge (hysteresis +-3.5 mV). On a 1000 Ah pack, so that the 60 Ah
-    swing is well inside the offset-drift bound (0.3 A x 3.2 h = 1.6 %): on a
+    swing is well inside the offset-drift budget (0.3 A x 3.2 h = 1.6 %): on a
     100 Ah pack that bound alone would reject a 6 Ah segment."""
     p = Pack(caps=[c * BIG for c in CAPS]).rest()
     for _ in range(4):
@@ -731,7 +731,7 @@ def _offset_segments(days, n=3):
 
 def test_an_offset_over_days_publishes_nothing():
     """Three 5-day segments with the 0.3 A offset published 57.6 Ah for the
-    98 Ah cell, inside the 0.4-1.6x window; seven days gave 41.7 Ah."""
+    98 Ah cell, inside the 0.4-1.2x window; seven days gave 41.7 Ah."""
     est, pub = run(_offset_segments(5))
     assert pub == [] and not est.segments and est.pair_reasons['drift'] == 3
     for days in (1, 3, 7):
@@ -743,7 +743,7 @@ def test_calibration_without_the_drift_bound_the_offset_is_published(monkeypatch
     monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, pub = run(_offset_segments(5))
     assert pub, 'scenario is harmless'
-    assert pub[-1]['qmax'] < 0.6 * 98.0 and pub[-1]['plausibility_checked']  # 57.6 Ah, inside 0.4-1.6x
+    assert pub[-1]['qmax'] < 0.6 * 98.0 and pub[-1]['plausibility_checked']  # 57.6 Ah, inside 0.4-1.2x
 
 
 def test_monotone_in_offset_duration():
@@ -843,6 +843,42 @@ def test_calibration_without_the_plausibility_window_it_is_published(monkeypatch
     monkeypatch.setattr(q, 'PLAUSIBLE_REL', (0.0, math.inf))
     est, pub = run(_wrong_shunt())
     assert pub and pub[-1]['qmax'] < 35.0
+
+
+def _gain(g):
+    """The BMS's current reading scaled by g (a shunt or calibration error)."""
+    return [(t, g * i, v, temp) for t, i, v, temp in full_cycles().rows]
+
+
+@pytest.mark.parametrize('g', [0.6, 0.9, 1.1])
+def test_a_gain_error_inside_the_window_goes_one_to_one_into_qmax(g):
+    """A known limit, pinned: nothing inside the plausibility window can see a
+    current scale error, and the second review measured it going 1:1 into
+    the published value. doc/SoH.md says so."""
+    est, pub = run(_gain(g))
+    assert pub and pub[-1]['plausibility_checked']
+    assert pub[-1]['qmax'] == pytest.approx(g * 97.5, rel=0.01)
+
+
+def test_a_gain_error_beyond_the_window_is_rejected():
+    """1.3x: 126.8 Ah for a 98 Ah pack went out under the prototype's 1.6x."""
+    for g in (1.3, 1.5):
+        est, pub = run(_gain(g))
+        assert pub == [] and not est.segments and est.pair_reasons['implausible'] >= 4
+
+
+def test_calibration_with_the_prototypes_upper_limit_a_30_percent_gain_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'PLAUSIBLE_REL', (0.4, 1.6))
+    est, pub = run(_gain(1.3))
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] == pytest.approx(126.8, abs=0.5) and pub[-1]['plausibility_checked']
+
+
+def test_monotone_in_gain():
+    """Away from 1 in either direction: once rejected, never accepted again.
+    Upward the strongest cell (102 Ah) meets 1.2 x 100 Ah first."""
+    _monotone([_accepts(_gain(g)) for g in (1.0, 1.1, 1.17, 1.19, 1.25, 1.6, 3.0, 10.0)])
+    _monotone([_accepts(_gain(g)) for g in (1.0, 0.8, 0.6, 0.42, 0.40, 0.3, 0.1)])
 
 
 def test_a_clock_step_back_invalidates_the_open_segment():

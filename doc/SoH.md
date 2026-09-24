@@ -49,12 +49,12 @@ error is several % of SoC, so a rest there is unusable rather than guessed.
 A **segment** between two rests is accepted when every cell has a SoC at both ends, every cell's SoC moved by at least
 60 %, the charge and the SoC moved the same way, no gap in the current record was longer than 5 minutes, at least 95 %
 of the time was covered by samples at most 60 s apart, a current-sensor offset of the assumed size would have moved
-the counted charge by at most 5 % (below), it is no longer than 10 days, and every cell's Qmax is within 0.4–1.6× of
+the counted charge by at most 5 % (below), it is no longer than 10 days, and every cell's Qmax is within 0.4–1.2× of
 the capacity. Segments do not overlap.
 
 **Current offset.** A current sensor that reads 0.3 A off adds 0.3 A × the segment's duration to the counted charge,
 and none of the other gates see it: three 5-day segments with that offset gave 57.6 Ah for a 98 Ah cell, well inside
-0.4–1.6×. So an offset of an assumed size is budgeted: that offset × duration must stay within 5 % of the counted
+0.4–1.2×. So an offset of an assumed size is budgeted: that offset × duration must stay within 5 % of the counted
 charge. The offset is assumed to be 0.3 A, or the mean current the BMS read during either rest if that is more. 0.3 A
 is a tuning constant, the coarsest current floor of the three BMSes this was developed on (Daly; ANT 0.1 A, JK
 0.01 A): below it a BMS reads 0 A while current flows, so a rest cannot reveal an offset that small. The rest reading
@@ -67,8 +67,13 @@ This is a budget, not a bound on the error. An offset larger than the assumed on
 point that moves with the current) passes unseen, and so does a gain error (below). A 3 A offset under load during a
 6-hour discharge, with the rests reading 0 A, gave a Qmax 21 % low while the drift at the assumed 0.3 A was 3.4 %.
 
-The plausibility window catches gross errors (a shunt setting off by 3×), not accuracy: its lower end stays at 0.4 so
-that a pack that has genuinely lost half its capacity is reported, not rejected.
+**Current scale.** A current reading that is off by a factor (a shunt setting, a gain error) goes 1:1 into Qmax: a BMS
+reading 10 % high publishes a Qmax 10 % high. Nothing inside the plausibility window can tell. Measured on a 98 Ah pack:
+gain 0.45, 0.6, 0.9 and 1.1 published 43.9, 58.5, 87.8 and 107.3 Ah. The window catches gross errors only. Its upper
+end is 1.2× (it was 1.6×, which let a gain of 1.3 and 1.5 through as 126.8 and 146.3 Ah) because new LFP cells deliver
+about 100–110 % of nameplate. Set `capacity:` to the nameplate: a BMS set to less than the pack holds gets no value
+then. The lower end stays at 0.4 so that a pack that has genuinely lost half its capacity is reported, not rejected. A
+gain down to 0.4 passes.
 
 A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
 (2³¹ mA) seen from a JK BMS: it is not counted, and it ends the open segment like a gap in the record.
@@ -79,7 +84,10 @@ between accepted segments, and the entities expire a year after the last one.
 ## Why no value
 
 The gates above are the "tightened universal gates" of the offline prototype, aimed at an error of a single segment
-near ±10 %. Only the current-offset part of that has an explicit budget (5 %, above), and only for an offset of the
+near ±10 %. That aim leaves out the BMS's own measurement errors: its current scale (above) and its cell-voltage
+calibration. In the prototype's data the same pack, read by four different BMSes over 4.5 years, gave Qmax values
+4–43 % of nameplate apart (about 10 % on deep cycles), mostly from differences in their cell-voltage readings, and more
+segments do not average that away (bat-impedance WHITEPAPER, error budget and §9.1). Only the current-offset part of that has an explicit budget (5 %, above), and only for an offset of the
 assumed size; the rest is the prototype's tuning, not a proven limit. But the built-in curve, built from rests of 90 minutes and more on one pack, is steep
 only near empty, 0–11 % SoC. At its top it rises by less than 1 mV per % SoC. The steep "top knee" that the
 prototype's older 30-minute curve had (3440 mV at 100 %) came from its highest readings, most likely a cell still
