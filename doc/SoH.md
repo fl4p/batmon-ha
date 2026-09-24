@@ -117,9 +117,14 @@ or a pack that rests for hours near empty and near full. Neither is implemented 
 ## Restarts
 
 The state is saved per BMS in `qmax_<name>.json` in the add-on's data directory: the usable rests, the accepted
-segments and the running charge count every 30 s, and also the rest in progress at shutdown. A restart within 5
-minutes continues the open segment; a longer one ends it, keeping the rests. A file that does not validate is discarded
-(the log says why).
+segments and the running charge count every 30 s, and also the rest in progress at shutdown. A longer restart than 5
+minutes ends the open segment, keeping the rests. A shorter one continues it only if the BMS's own charge counter (its
+remaining charge, else its SoC times its capacity) moved by the charge batmon bridges across the restart, within 2 % of
+the capacity including the counter's resolution. The clock alone cannot tell: a host that boots offline with its clock
+restored from the shutdown sees 2 minutes after hours off, while the pack was in use, and without this check a 98 Ah
+pack was published at 49 Ah that way. Without a counter reading, before the counter's resolution is known (it has not
+moved yet since the first start) or without a capacity, a restart ends the segment like a longer one. A file that does
+not validate is discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the

@@ -67,11 +67,13 @@ class Pack:
     charge, -h/2 after a discharge, 7 mV as measured on the plateau) - R0*I -
     two RC polarisations (60 s and 20 min) + sensor offset + noise, rounded to
     1 mV. Rows are sampler iterations (t, current in BmsSample sign, cell mV,
-    temp)."""
+    temp). `charge` maps a row's t to the BMS's remaining-charge counter [Ah]:
+    the current the BMS measures, integrated also while nobody samples it,
+    in steps of q_res."""
 
     def __init__(self, caps=CAPS, soc0=97.0, curve=SYNTH, temp=25.0, dt=10.0, t0=T0, r0=1.0, r1=0.5, tau1=60.0,
                  r2=1.0, tau2=1200.0, hyst=7.0, tc=0.0, offset=0.0, noise_u=0.5, noise_i=0.1, seed=1, sign=1.0,
-                 ocv_fn=None):
+                 ocv_fn=None, q_res=0.1):
         self.caps, self.curve, self.temp, self.dt, self.t = list(caps), curve, temp, dt, t0
         self.soc = [float(soc0)] * len(caps)
         self.e1 = [0.0] * len(caps)
@@ -83,6 +85,8 @@ class Pack:
         self.h = 1.0
         self.rng = random.Random(seed)
         self.rows = []
+        self.bms_ah, self.q_res = soc0 * sum(caps) / len(caps) / 100.0, q_res
+        self.charge = {}
 
     def ocv(self, soc):
         if self.ocv_fn is not None:
@@ -100,6 +104,7 @@ class Pack:
                 self.soc[c] -= i_dis * self.dt / 36.0 / cap
                 self.e1[c] += (self.r1 * i_dis - self.e1[c]) * a1
                 self.e2[c] += (self.r2 * i_dis - self.e2[c]) * a2
+            self.bms_ah -= (i_dis if i_seen is None else i_seen) * self.dt / 3600.0
             if i_dis > 0.5:
                 self.h = -1.0
             elif i_dis < -0.5:
@@ -111,6 +116,7 @@ class Pack:
                      for s, e1, e2 in zip(self.soc, self.e1, self.e2)]
                 i = i_dis if i_seen is None else i_seen
                 self.rows.append((self.t, self.sign * (i + self.rng.gauss(0, self.noise_i)), v, tt))
+                self.charge[self.t] = round(self.bms_ah / self.q_res) * self.q_res
         return self
 
     def rest(self, seconds=7200):
@@ -134,13 +140,14 @@ def full_cycles(n=2, rest=7200, dq=88.0, **kw):
     return p.end()
 
 
-def run(rows, est=None, cap=100.0, curve=SYNTH):
+def run(rows, est=None, cap=100.0, curve=SYNTH, charge=None):
+    """charge: the BMS's counter by t (Pack.charge), or None: not reported."""
     if est is None:
         est = q.QmaxEstimator('t', design_capacity=cap, curve=curve)
         est._log_summary = lambda: None  # keep the counters for the whole run
     pub = []
     for t, i, v, temp in rows:
-        r = est.add(t, i, v, temp=temp)
+        r = est.add(t, i, v, temp=temp, bms_charge=charge.get(t) if charge else None)
         if r is not None:
             pub.append(r)
     return est, pub
@@ -880,10 +887,10 @@ def _fresh(cap=100.0):
     return est
 
 
-def _split_run(rows, cuts, full=True, cap=100.0):
+def _split_run(rows, cuts, full=True, cap=100.0, charge=None):
     est, pub = _fresh(cap), []
     for a, b in zip([0] + cuts, cuts + [len(rows)]):
-        _, p = run(rows[a:b], est)
+        _, p = run(rows[a:b], est, charge=charge)
         pub += p
         if b < len(rows):
             st = _via_json(est.get_state(full=full))
@@ -893,11 +900,17 @@ def _split_run(rows, cuts, full=True, cap=100.0):
 
 
 def test_full_state_continues_exactly_where_it_stopped():
-    rows = full_cycles(n=2, dt=7.0).rows
-    whole, pub_whole = run(rows)
+    """With the BMS's charge counter confirming each restart. The first cut
+    is inside the first discharge: before the counter has moved once, its
+    resolution is unknown and a restart ends the segment
+    (test_a_restart_before_the_counter_has_moved_ends_the_segment)."""
+    p = full_cycles(n=2, dt=7.0)
+    rows = p.rows
+    whole, pub_whole = run(rows, charge=p.charge)
     n = len(rows)
-    cuts = [n // 9, n // 5 + 1, n // 3 + 2, n // 2 + 3, (4 * n) // 5 + 1]  # inside rests, loads and open bins
-    split, pub_split = _split_run(rows, cuts)
+    cuts = [n // 7, n // 5 + 1, n // 3 + 2, n // 2 + 3, (4 * n) // 5 + 1]  # inside rests, loads and open bins
+    split, pub_split = _split_run(rows, cuts, charge=p.charge)
+    assert split.counts['restart_unverified'] == 0
     assert pub_whole and pub_split == pub_whole
     assert [s['q_cells'] for s in split.segments] == [s['q_cells'] for s in whole.segments]
     assert split.q_ah == whole.q_ah and split.covered_s == whole.covered_s
@@ -906,8 +919,8 @@ def test_full_state_continues_exactly_where_it_stopped():
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
-        if k in ('_log_summary', '_lock'):
-            continue  # the test stub; a lock is not state
+        if k in ('_log_summary', '_lock', '_resumed'):
+            continue  # the test stub; a lock is not state; a restored estimator knows it was restarted
         if isinstance(v, deque):
             v = list(v)
         out[k] = v
@@ -923,6 +936,7 @@ def test_full_state_restores_every_attribute():
     restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
     assert restored.restore(_via_json(est.get_state(full=True)))
     assert _attrs(restored) == _attrs(est)
+    assert restored._resumed and not est._resumed
 
 
 def test_restart_within_the_gap_limit_continues_the_segment():
@@ -933,10 +947,10 @@ def test_restart_within_the_gap_limit_continues_the_segment():
         p.run(-50.0, 3600 * 88 / 50).rest()
     rows = p.end().rows
     cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
-    est, pub = _split_run(rows, [cut], full=True)
-    assert est.counts['segment'] == 6 and pub
+    est, pub = _split_run(rows, [cut], full=True, charge=p.charge)
+    assert est.counts['segment'] == 6 and pub and est.counts['restart_unverified'] == 0
     assert pub[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
-    est_c, pub_c = _split_run(rows, [cut], full=False)  # crash: the compact state carries the count
+    est_c, pub_c = _split_run(rows, [cut], full=False, charge=p.charge)  # crash: the compact state carries it
     assert [s['qmax'] for s in est_c.segments] == pytest.approx([s['qmax'] for s in est.segments], rel=1e-3)
 
 
@@ -956,12 +970,106 @@ def test_restart_beyond_the_gap_limit_invalidates_the_segment_but_keeps_the_anch
 
 
 def test_calibration_without_the_gap_limit_a_restart_loses_the_charge(monkeypatch):
+    """Partly redundant, and said so: without the gap limit the BMS's charge
+    counter, which counted the 38 A of the downtime, still ends the segment at
+    the restart. With that check trusting the clock too, the charge is lost."""
     monkeypatch.setattr(q, 'MAX_GAP_S', math.inf)
-    rows = _downtime()
+    p = Pack().rest()
+    rows = _slow_discharge_with_outage(p, 1800).rest().end().rows
     cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
-    est, _ = _split_run(rows, [cut])
+    est, _ = _split_run(rows, [cut], charge=p.charge)
+    assert not est.segments and est.counts['restart_unverified'] == 1
+    monkeypatch.setattr(q.QmaxEstimator, '_resume_ok', lambda self, *a: True)
+    est, _ = _split_run(rows, [cut], charge=p.charge)
     assert est.segments, 'scenario is harmless'
     assert est.segments[0]['qmax'] < 0.85 * 98.0  # 15 of the 19 Ah during the downtime are missing
+
+
+def _frozen_clock(hidden_ah=44.0, n=3, frozen_s=120.0):
+    """Per cycle: a 22 A discharge of 88 Ah; after 2 h batmon shuts down
+    cleanly (full state saved) and the host is off while the pack delivers
+    hidden_ah; it boots offline with its clock restored from the shutdown, so
+    the first sample looks frozen_s after the last. Then on to the bottom,
+    rest, and a clean charge back. Returns (rows, cuts, BMS counter by t) on
+    the host's clock."""
+    p = Pack().rest()
+    cuts, i = [], 22.0
+    for _ in range(n):
+        p.run(i, 2 * 3600)
+        cuts.append(len(p.rows))
+        p.run(i, 3600 * hidden_ah / i, sample=False)
+        p.run(i, 3600 * (88 - 44 - hidden_ah) / i).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    p.end()
+    rows, charge, shift, k = [], {}, 0.0, 0
+    for j, (t, cur, v, temp) in enumerate(p.rows):
+        if k < len(cuts) and j == cuts[k]:
+            shift += max(0.0, 3600 * hidden_ah / i + p.dt - frozen_s)
+            k += 1
+        rows.append((t - shift, cur, v, temp))
+        charge[t - shift] = p.charge[t]
+    return rows, cuts, charge
+
+
+def test_a_restart_the_wall_clock_did_not_see_ends_the_segment():
+    """The second review's case: the clock says 2 minutes, the pack was in
+    use for 2 hours. Every gate passed and 49 Ah went out for a 98 Ah pack.
+    The BMS's own counter saw the 44 Ah; the restart ends the segment."""
+    rows, cuts, charge = _frozen_clock()
+    est, pub = _split_run(rows, cuts, charge=charge)
+    assert est.counts['restart_unverified'] == 3 and est.counts['gap'] == 0
+    assert all(s['dq'] > 0 for s in est.segments)  # only the clean charges
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_trusting_the_clock_across_a_restart_publishes_half_the_pack(monkeypatch):
+    monkeypatch.setattr(q.QmaxEstimator, '_resume_ok', lambda self, *a: True)
+    rows, cuts, charge = _frozen_clock()
+    est, pub = _split_run(rows, cuts, charge=charge)
+    assert pub, 'scenario is harmless'
+    assert pub[0]['qmax'] < 0.55 * 98.0 and pub[0]['plausibility_checked']  # 49 Ah, inside 0.4x
+
+
+def test_a_restart_without_a_charge_counter_reading_ends_the_segment():
+    """No remaining charge from the BMS (nor SoC and capacity): nothing
+    confirms the clock, and unconfirmed is not confirmed. The same run with
+    the counter continues (test_restart_within_the_gap_limit_continues_the_segment)."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(50.0, 1800).run(50.0, 120, sample=False).run(50.0, 3600 * 88 / 50 - 1920).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    rows = p.end().rows
+    cuts = [k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60]
+    est, _ = _split_run(rows, cuts)
+    assert est.counts['restart_unverified'] == 3 and all(s['dq'] > 0 for s in est.segments)
+
+
+def test_a_restart_before_the_counter_has_moved_ends_the_segment():
+    """Its resolution is learnt from its steps; before the first one, 'no
+    change' might hide anything up to an unknown step. The resolution is
+    saved, so this costs a segment only on a fresh install."""
+    p = full_cycles(n=1)
+    n_rest = next(k for k, r in enumerate(p.rows) if r[1] > 30)  # the first load sample
+    est, _ = _split_run(p.rows, [n_rest // 2], charge=p.charge)
+    assert est.counts['restart_unverified'] == 1
+    est, _ = _split_run(p.rows, [n_rest + 20], charge=p.charge)  # once it has moved, a restart continues
+    assert est.counts['restart_unverified'] == 0 and est.q_c == pytest.approx(0.1)
+
+
+def test_monotone_in_charge_hidden_by_a_restart():
+    """The segment across a restart is accepted while the charge moved in
+    the unseen time stays within RESUME_TOL_FRAC (less the counter's
+    resolution), and never again beyond."""
+    def accepted(hidden):
+        rows, cuts, charge = _frozen_clock(hidden_ah=hidden, n=1)
+        est, _ = _split_run(rows, cuts, charge=charge)
+        return any(s['dq'] < 0 for s in est.segments)
+    verdicts = [accepted(h) for h in (0.0, 0.5, 1.5, 2.5, 3.0, 5.0, 20.0, 44.0)]
+    _monotone(verdicts)
+    # The bridge counts 22 A x the 2 minutes the clock shows (0.73 Ah); what the
+    # check refuses is the rest plus the 0.1 Ah resolution above 2 Ah (2 % of
+    # 100 Ah): 2.5 Ah hidden leaves 1.93, accepted; 3.0 leaves 2.43.
+    assert verdicts[:4] == [True] * 4 and not verdicts[4]
 
 
 def test_restoring_publishes_nothing_by_itself():
@@ -1484,3 +1592,44 @@ def test_an_estimator_exception_disables_it_without_breaking_sampling(monkeypatc
     asyncio.run(s())
     assert not s.qmax.enabled and s.qmax._disable_persistent is False
     assert asyncio.run(s()) is not None  # the next sample still comes through
+
+
+def test_sampler_feeds_the_bms_charge_counter_or_soc_times_capacity():
+    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, charge=71.5, capacity=100.0)) == 71.5
+    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, soc=50.0, capacity=200.0)) == 100.0
+    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0, soc=50.0)) is None
+    assert BmsSampler._bms_charge(BmsSample(voltage=53.0, current=1.0)) is None
+
+
+class _Counting(_Bms):
+    """A BMS whose remaining charge counts its current, in 1 mAh steps; `jump`
+    Ah went by unseen (the host was off)."""
+
+    def __init__(self, t0=None, k0=0, jump=0.0, **kw):
+        super().__init__(**kw)
+        if t0 is not None:
+            self.t0, self.k = t0, k0
+        self.jump = jump
+
+    async def fetch(self):
+        s = await super().fetch()
+        s.charge = round(80.0 - self.current * self.k / 3600 - self.jump, 3)
+        return s
+
+
+def test_a_restart_through_the_sampler_continues_only_on_the_bms_counter():
+    """The precondition in the real call path: the sampler passes the counter,
+    and a restart restored from soh_state is checked against it."""
+    s, bms = _run_sampler(5, bms=_Counting(capacity=100.0), soh_estimator=True)
+    est = s.qmax
+    assert est._last_c == pytest.approx(80.0 - 10.0 * 5 / 3600, abs=1e-3) and est.q_c is not None
+    st = json.loads(json.dumps(est.get_state(full=True)))
+    for jump, verdict in ((0.0, 0), (30.0, 1)):
+        again = _Counting(t0=bms.t0, k0=bms.k + 60, jump=jump, capacity=100.0)  # back a minute later
+        s2 = BmsSampler(again, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, soh_estimator=True,
+                        soh_state=st)
+        s2.num_samples = 1
+        s2._last_power = again.current * 53.0
+        asyncio.run(s2())
+        assert s2.qmax.counts['restart_unverified'] == verdict, jump
+        assert s2.qmax.epoch == est.epoch + verdict
