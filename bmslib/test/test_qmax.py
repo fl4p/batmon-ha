@@ -1700,10 +1700,16 @@ def test_sampler_feeds_the_native_sign_and_fetches_voltages_only_near_rest():
 
 
 def test_sampler_temperature_falls_back_to_the_mosfet_and_never_defaults():
+    """What the sampler passes to add(). (It used to read the estimator's open
+    minute bin, which holds one sample instead of two whenever the two fall
+    either side of a minute boundary: a 1-in-60 flake.)"""
     for bms, want in ((_Bms(temps=[18.0, 22.0, 20.0]), 20.0), (_Bms(mos=23.0), 23.0), (_Bms(), None)):
-        s, _ = _run_sampler(2, bms=bms, soh_estimator=True)
-        temps = s.qmax._bin['temp']
-        assert temps == ([want] * 2 if want is not None else [])
+        s, _ = _run_sampler(0, bms=bms, soh_estimator=True)
+        seen, orig = [], s.qmax.add
+        s.qmax.add = lambda *a, **k: (seen.append(k.get('temp')), orig(*a, **k))[1]
+        for _ in range(2):
+            asyncio.run(s())
+        assert seen == [want, want]
 
 
 def test_sampler_passes_the_bms_capacity_and_the_design_option_wins():
