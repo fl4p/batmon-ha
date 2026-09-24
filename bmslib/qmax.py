@@ -51,9 +51,12 @@ it cannot be paired), but keeps the anchors; a shorter one is bridged
 linearly. A current no pack can carry (a decode glitch, above I_MAX_C_RATE x
 capacity or I_MAX_ABS_A, estimator_common) is never integrated and is no
 sample: an isolated one leaves a hole that the next good sample bridges under
-the same rule, as if it had not come. A second within GLITCH_ISOLATION_S of the
-last ends the epoch like a long gap: a burst of garbled frames says that the
-readings around them, which the bound cannot catch, may be garbled too. A
+the same rule, as if it had not come -- but only if that sample and the one
+before the hole agree (GLITCH_AGREE_*): a garbled frame next to a caught one
+reads like a current, and the bound cannot catch it. Otherwise, and at a
+second rejection within GLITCH_ISOLATION_S of the last, the epoch ends like a
+long gap: a burst of garbled frames says that the readings around them may be
+garbled too. A
 clock step back (a sample
 older than the last one) does more: every anchor and segment timed after the
 new sample is dropped, with the open rest, because its age can no longer be
@@ -261,6 +264,16 @@ COUNTER_STOP_PCT = 1.0
 # is what the real 2^31 mA JK glitch looks like; ending the epoch on it threw
 # away segments identical to the clean run once the hole was bridged.
 GLITCH_ISOLATION_S = MAX_GAP_S
+# ... and only when the good samples either side of it agree, within
+# max(GLITCH_AGREE_A, GLITCH_AGREE_REL x the larger of the two): garbled frames
+# come in runs, and one next to a caught glitch reads like a current. Without
+# this, 1 / 2 / 4 frames of 450 A beside one caught glitch per discharge were
+# counted, 99.4 / 100.6 / 103.0 Ah for 97.5 (third review). A real load step
+# right at a glitch costs the open segment, never a value. What still passes:
+# a garbled neighbour within the tolerance (at most 25 % of the load for one
+# sample interval), and a run of frames that all read the same wrong value.
+GLITCH_AGREE_A = 1.0
+GLITCH_AGREE_REL = 0.25
 # Intervals longer than this count as bridged, not measured, for the coverage
 # gate: the add-on samples every sample_period (default 1 s); 60 s is the
 # resolution of the minute data the prototype and the replay ran on.
@@ -575,6 +588,7 @@ class QmaxEstimator:
         self._last_cfull: Optional[float] = None  # the capacity the BMS reported at _last_t [Ah], None when unknown
         self._resumed = False  # set by restore(): the next sample is the first after a restart
         self._t_glitch: Optional[float] = None  # the last impossible current reading
+        self._glitch_open = False  # one since the last good sample: the next must agree with that one
         self.q_ah = 0.0
         self.covered_s = 0.0
         self.epoch = 0  # bumped by every gap: anchors of different epochs never pair
@@ -699,6 +713,7 @@ class QmaxEstimator:
             self.counts['current_implausible'] += 1
             burst = self._t_glitch is not None and 0 <= t - self._t_glitch <= GLITCH_ISOLATION_S
             self._t_glitch = t
+            self._glitch_open = not burst and self._last_t is not None
             logger.debug('%s: Qmax: current %.6g A at %s is not a measurement%s', self.name, current, fmt_t(t),
                          ', the second within %.0f s: open segment invalidated' % GLITCH_ISOLATION_S if burst else
                          ', left out and bridged')
@@ -716,12 +731,14 @@ class QmaxEstimator:
                 new = self._gap(t, 'gap')
             elif self._resumed and not self._resume_ok(t, i, dt, c, src, soc, cfull):
                 new = self._gap(t, 'restart_unverified')
+            elif self._glitch_open and not self._neighbours_agree(i):
+                new = self._gap(t, 'current_implausible_neighbours')
             else:
                 assert self._last_i is not None
                 self.q_ah += 0.5 * (i + self._last_i) * dt / 3600.0
                 if dt <= COVERED_DT_S:
                     self.covered_s += dt
-        self._resumed = False
+        self._resumed = self._glitch_open = False
         if c is not None and src != self._c_src:
             # Another counter (the BMS reported its remaining charge only now or
             # no longer, or scales its SoC by another capacity): the smallest
@@ -782,6 +799,18 @@ class QmaxEstimator:
         if finite(temp) and -40.0 < temp < 100.0:
             b['temp'].append(float(temp))
         return new
+
+    def _neighbours_agree(self, i: float) -> bool:
+        """The good samples either side of an isolated impossible reading: i
+        now, _last_i before it (charge currents). Do they agree well enough
+        to bridge the hole between them (GLITCH_AGREE_*)?"""
+        assert self._last_i is not None
+        tol = max(GLITCH_AGREE_A, GLITCH_AGREE_REL * max(abs(i), abs(self._last_i)))
+        if abs(i - self._last_i) <= tol:
+            return True
+        logger.debug('%s: Qmax: %.1f A before an impossible current reading and %.1f A after it disagree: open '
+                     'segment invalidated', self.name, -self._last_i, -i)
+        return False
 
     def _counter_stop(self, c: float, soc: Optional[float], cfull: Optional[float], when: str) -> Optional[str]:
         """Why the counter reading c may be held at a stop, or None. A reading
@@ -846,7 +875,7 @@ class QmaxEstimator:
             new = self._close_bin(t)
         new = self._end_rest(t) or new
         self.epoch += 1
-        self._resumed = False
+        self._resumed = self._glitch_open = False
         self.counts[why] += 1
         if why != 'current_implausible_burst':
             logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
@@ -877,6 +906,7 @@ class QmaxEstimator:
             self._oob_since = t
         if self._t_glitch is not None and self._t_glitch > t:
             self._t_glitch = None
+        self._glitch_open = False
         self._t_volt = None
         self._last_t = self._last_i = self._last_c = self._last_soc = self._last_cfull = None
         self._resumed = False
@@ -1125,7 +1155,7 @@ class QmaxEstimator:
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
             last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, charge_src=self._c_src,
             q_charge=self.q_c, charge_q=self._c_q, last_soc=self._last_soc, last_charge_full=self._last_cfull,
-            t_glitch=self._t_glitch,
+            t_glitch=self._t_glitch, glitch_open=self._glitch_open,
             q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
             last_seg_t=self._last_seg_t, load_ewma=self._load_ewma,
@@ -1264,6 +1294,10 @@ class QmaxEstimator:
         self._last_c, self._c_src, self.q_c, self._c_q = last_c, c_src, q_c, c_q
         self._last_soc, self._last_cfull = last_soc, last_cfull
         self._t_glitch = v_opt_fin(st.get('t_glitch'), 't_glitch')
+        go = st.get('glitch_open', False)
+        if not isinstance(go, bool) or (go and (self._t_glitch is None or last_t is None)):
+            raise ValueError('glitch_open %r' % (go,))
+        self._glitch_open = go
         self._resumed = last_t is not None  # the next sample decides whether the open segment goes on
         self.anchors.extend(anchors[-MAX_ANCHORS:])
         self.segments.extend(segments[-SUMMARY_K:])

@@ -355,7 +355,13 @@ def test_a_burst_of_impossible_currents_ends_the_segment():
 
 
 def test_calibration_bridging_every_glitch_publishes_the_garbled_frames_between_them(monkeypatch):
+    """Partly redundant, and said so: in this burst every caught frame has a
+    garbled neighbour, so with only the isolation rule off the neighbour rule
+    still ends the segment. With both off the garbage is counted."""
     monkeypatch.setattr(q, 'GLITCH_ISOLATION_S', -1.0)  # every rejection counts as isolated
+    est, _ = run(_glitch_burst(full_cycles(n=3).rows))
+    assert all(s['dq'] > 0 for s in est.segments) and est.counts['current_implausible_neighbours'] >= 3
+    monkeypatch.setattr(q, 'GLITCH_AGREE_REL', math.inf)
     est, pub = run(_glitch_burst(full_cycles(n=3).rows))
     dis = [s for s in est.segments if s['dq'] < 0]
     assert dis, 'scenario is harmless'
@@ -371,6 +377,65 @@ def test_monotone_in_glitches_per_burst():
     verdicts = [accepted(n) for n in (0, 1, 2, 3, 5, 10)]
     _monotone(verdicts)
     assert verdicts[:3] == [True, True, False]
+
+
+def _glitch_with_neighbours(rows, k, before=False, value=450.0):
+    """The third review's case: one caught glitch (+3553.5 A) in the middle
+    of every discharge, and k garbled frames next to it (after it, or before
+    it) that read `value` A -- below 5C for 100 Ah, so no bound catches them."""
+    out = list(rows)
+    j, n = 0, len(rows)
+    while j < n:
+        if rows[j][1] > 30:
+            e = j
+            while e < n and rows[e][1] > 30:
+                e += 1
+            m = (j + e) // 2
+            t, _, v, temp = out[m]
+            out[m] = (t, 3553.5, v, temp)
+            for b in range(1, k + 1):
+                t, _, v, temp = out[m - b if before else m + b]
+                out[m - b if before else m + b] = (t, value, v, temp)
+            j = e
+        j += 1
+    return out
+
+
+@pytest.mark.parametrize('before', [False, True])
+@pytest.mark.parametrize('k', [1, 2, 4])
+def test_a_glitch_next_to_garbled_frames_ends_the_segment(k, before):
+    """ea00b57 bridged an isolated glitch and so counted the garbled frames
+    beside it: 1 / 2 / 4 frames of 450 A gave 99.4 / 100.6 / 103.0 Ah for
+    97.5 (98ac224 published nothing). The samples either side of the hole
+    disagree (450 A and 50 A): the epoch ends."""
+    rows = full_cycles(n=3).rows
+    est, pub = run(_glitch_with_neighbours(rows, k, before))
+    assert est.counts['current_implausible_neighbours'] == 3 and est.counts['current_implausible_burst'] == 0
+    assert all(s['dq'] > 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_without_the_neighbour_rule_the_garbled_frames_are_counted(monkeypatch):
+    monkeypatch.setattr(q, 'GLITCH_AGREE_REL', math.inf)
+    rows = full_cycles(n=3).rows
+    for k, want in ((1, 99.4), (2, 100.6), (4, 103.0)):
+        est, _ = run(_glitch_with_neighbours(rows, k))
+        dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+        assert dis, 'scenario is harmless'
+        assert all(x == pytest.approx(want, abs=0.15) for x in dis), (k, dis)
+
+
+def test_monotone_in_how_far_a_glitch_neighbour_is_off():
+    """A 50 A discharge; the sample after the caught glitch reads 50 + d A.
+    Up to 16.7 A (25 % of the larger, 66.7 A) the hole is bridged; beyond,
+    never again -- up to
+    the far tail, where the neighbour is itself above the bound (a burst)."""
+    def accepted(d):
+        rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
+        return _accepts(_glitch_with_neighbours(rows, 1, value=50.0 + d))
+    verdicts = [accepted(d) for d in (0.0, 5.0, 16.0, 17.0, 50.0, 400.0, 3000.0)]
+    _monotone(verdicts)
+    assert verdicts[:3] == [True] * 3 and not verdicts[3]
 
 
 def test_calibration_without_the_current_bound_the_glitches_are_published(monkeypatch):
@@ -1723,6 +1788,8 @@ BAD_STATES = [
     ('q_charge of no counter', lambda s: s.update(charge_src=None)),
     ('charge_src unknown', lambda s: s.update(charge_src='voltage')),
     ('charge_src bad capacity', lambda s: s.update(charge_src='soc*-5.0')),
+    ('glitch_open without a glitch', lambda s: s.update(glitch_open=True, t_glitch=None)),
+    ('glitch_open not a bool', lambda s: s.update(glitch_open='yes')),
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
     ('q_ah NaN', lambda s: s.update(q_ah=float('nan'))),

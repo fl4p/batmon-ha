@@ -88,8 +88,10 @@ gain down to 0.4 passes.
 
 A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
 (2³¹ mA) seen from a JK BMS. It is not counted: an isolated one is left out and bridged like a sample that never came
-(the 5-minute rule above). A second within 5 minutes ends the open segment, because a burst of garbled frames can
-hide garbled readings below the bound, and those would be counted.
+(the 5-minute rule above), if the readings either side of it agree (within 25 % of the larger, or 1 A). Otherwise, and
+at a second one within 5 minutes, the open segment ends: garbled frames come in runs, and those below the bound read like
+a current. One caught glitch with one to four 450 A frames beside it was counted as 99.4–103.0 Ah for a 97.5 Ah pack
+before this. A real load step right at a glitch costs the segment, not a value.
 
 The sensors show the median of the last 5 accepted segments of the past year, once there are 3. Nothing is published
 between accepted segments, and the entities expire a year after the last one.
