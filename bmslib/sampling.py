@@ -806,7 +806,7 @@ class BmsSampler:
             from bmslib.qmax import charge_counter
             counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
             r = est.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
-                        bms_charge=counter, charge_src=counter_src)
+                        bms_charge=counter, charge_src=counter_src, bms_soc=sample.soc)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),

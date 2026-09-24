@@ -146,13 +146,22 @@ The state is saved per BMS in `qmax_<name>.json` in the add-on's data directory:
 segments and the running charge count every 30 s, and also the rest in progress at shutdown. A longer restart than 5
 minutes ends the open segment, keeping the rests. A shorter one continues it only if the BMS's own charge counter (its
 remaining charge, else its SoC times its capacity) moved by the charge batmon bridges across the restart, within 2 % of
-the capacity including the counter's resolution. The clock alone cannot tell: a host that boots offline with its clock
-restored from the shutdown sees 2 minutes after hours off, while the pack was in use, and without this check a 98 Ah
-pack was published at 49 Ah that way. Without a counter reading, before the counter's resolution is known (it has not
-moved yet since the first start), when the counter is another one than before the restart (the remaining charge before,
-SoC × capacity after, or another capacity setting: the resolution is learnt per counter) or without a capacity, a
-restart ends the segment like a longer one. A file that does
-not validate is discarded (the log says why).
+the capacity including the counter's resolution and the charge counted since the counter last moved (a reading served
+from a cache lags by that much). The clock alone cannot tell: a host that boots offline with its clock restored from the
+shutdown sees 2 minutes after hours off, while the pack was in use, and without this check a 98 Ah pack was published at
+49 Ah that way. Without a counter reading, before the counter's resolution is known (it has not moved yet since the first
+start), when the counter is another one than before the restart (the remaining charge before, SoC × capacity after, or
+another capacity setting: the resolution is learnt per counter) or without a capacity, a restart ends the segment like a
+longer one.
+
+It also ends it when the counter may be held at one of its ends on either side of the restart: the BMS reads SoC 99 % or
+more, or 1 % or less, reports no SoC at all, or the counter reads its capacity setting or 0. A BMS's counter stops at
+100 % while cells that hold 105–110 % of their nameplate keep taking charge, so it reads "moved 0" while the charger
+ran: with 3, 6 and 10 Ah going in unseen that way, 95.0, 91.7 and 87.3 Ah were published for a 98 Ah pack. The price is
+that a restart at the top of a charge (or near empty) ends the segment. Not covered, because they read like a pack at
+rest: a counter that runs into its end and back out while the host is off, and one that stops counting less than about
+2 % of the capacity before the shutdown and still reads the same afterwards (the 49 Ah case above, with a frozen BMS
+counter). A file that does not validate is discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the
