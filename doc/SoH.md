@@ -47,8 +47,23 @@ error is several % of SoC, so a rest there is unusable rather than guessed.
 
 A **segment** between two rests is accepted when every cell has a SoC at both ends, every cell's SoC moved by at least
 60 %, the charge and the SoC moved the same way, no gap in the current record was longer than 5 minutes, at least 95 %
-of the time was covered by samples at most 60 s apart, it is no longer than 10 days, and every
-cell's Qmax is within 0.4–1.6× of the capacity. Segments do not overlap.
+of the time was covered by samples at most 60 s apart, a current-sensor offset cannot have moved the counted charge
+by more than 5 % (below), it is no longer than 10 days, and every cell's Qmax is within 0.4–1.6× of the capacity.
+Segments do not overlap.
+
+**Current offset.** A current sensor that reads 0.3 A off adds 0.3 A × the segment's duration to the counted charge,
+and none of the other gates see it: three 5-day segments with that offset gave 57.6 Ah for a 98 Ah cell, well inside
+0.4–1.6×. So the worst case is bounded: offset × duration must stay within 5 % of the counted charge. The offset is
+taken as 0.3 A, or as the mean current the BMS read during either rest if that is more. 0.3 A is the coarsest current
+floor of the BMSes this was developed on (Daly; ANT 0.1 A, JK 0.01 A): below it a BMS reads 0 A while current flows,
+so a rest cannot reveal an offset that small. The rest reading is never subtracted, because a standby load the BMS
+measures correctly looks the same as an offset. At 0.3 A a segment may span at most about 15 hours for 88 Ah of
+charge, 33 hours for 200 Ah; a standby load read during the rests shortens that. The 10-day limit is only the pairing
+horizon now. On the real Daly capture in the tests the one segment the other gates would let through spans 48 hours
+with 0.72 A read during the rests: bound 18 %, rejected.
+
+The plausibility window catches gross errors (a shunt setting off by 3×), not accuracy: its lower end stays at 0.4 so
+that a pack that has genuinely lost half its capacity is reported, not rejected.
 
 A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
 (2³¹ mA) seen from a JK BMS: it is not counted, and it ends the open segment like a gap in the record.
@@ -58,8 +73,9 @@ between accepted segments, and the entities expire a year after the last one.
 
 ## Why no value
 
-The gates above are the "tightened universal gates" of the offline prototype. They were chosen to keep the error of a
-single segment near ±10 %. But on a curve built from rests of 90 minutes and more, the curve is steep only near
+The gates above are the "tightened universal gates" of the offline prototype, aimed at an error of a single segment
+near ±10 %. Only the current-offset part of that is an explicit bound (5 %, above); the rest is the prototype's
+tuning, not a proven limit. But on a curve built from rests of 90 minutes and more, the curve is steep only near
 empty, 0–11 % SoC. A LiFePO4 cell that rests after a full charge settles to ~3.33 V, where the relaxed curve rises by
 less than 1 mV per % SoC. The steep "top knee" that the prototype's older 30-minute curve had (3440 mV at 100 %) was a
 cell still polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So no rest near

@@ -58,8 +58,21 @@ gates.
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
-every cell, rests >= 90 min, dQ and dSoC of the same sign, and a plausible ratio to a known
-capacity. Without a capacity (neither the `capacity:` option nor one reported
+every cell, rests >= 90 min, dQ and dSoC of the same sign, a bounded current
+offset drift (below), and a plausible ratio to a known capacity.
+
+Current offset: a current sensor offset integrates into dQ for the whole
+segment, and the gates above do not see it -- three 5-day segments with a
+0.3 A offset published 57.6 Ah for a 98 Ah cell, well inside 0.4-1.6x. So the
+worst case is bounded explicitly: the offset is taken as the largest of
+I_OFFSET_MIN_A and the mean current the BMS reported during the two rests
+(which should read ~0 A), and offset x span may be at most DRIFT_MAX_FRAC of
+|dQ|. The rest reading is not subtracted as a correction: a standby load that
+the BMS measures correctly reads the same as an offset, and subtracting a real
+load would be the error. It only ever widens the bound. It cannot narrow it
+below I_OFFSET_MIN_A: an offset that shows only under load (a deadband that
+reads 0 A at rest, a zero point that moves with current) is invisible at
+rest, which is exactly the review's scenario. Without a capacity (neither the `capacity:` option nor one reported
 by the BMS) nothing is accepted: the plausibility check is then unevaluable,
 and it is the only one that catches a wrong current scale (a shunt setting
 off by 3x) or a glitch below the input bound.
@@ -169,7 +182,18 @@ MAX_GAP_S = 300.0
 # resolution of the minute data the prototype and the replay ran on.
 COVERED_DT_S = 60.0
 MIN_COVERAGE = 0.95
-MAX_SEGMENT_S = 10 * 86400.0  # coulomb drift grows with time; the prototype paired up to 20 days
+# Pairing horizon (and what keeps the saved anchor list short); the prototype
+# paired up to 20 days. Not what limits drift any more: at I_OFFSET_MIN_A the
+# drift gate below rejects 10 days for any |dQ| under 1440 Ah.
+MAX_SEGMENT_S = 10 * 86400.0
+# Current offset bound. 0.3 A: the coarsest current floor (smallest non-zero
+# |I| reading) of the BMSes the method was developed on -- Daly 0.3 A, ANT 0.1
+# A, JK 0.01 A (bat-impedance WHITEPAPER 3.2). Below its floor a BMS reads 0 A
+# while current flows, so at rest it cannot show its own offset. 5 % of |dQ|:
+# half of the ~10 % a single segment is meant to stay within; at 0.3 A that is
+# a span of at most 14.7 h for 88 Ah and 33 h for 200 Ah.
+I_OFFSET_MIN_A = 0.3
+DRIFT_MAX_FRAC = 0.05
 
 # ---------------------------------------------------------------- segments
 MIN_DSOC = 60.0  # %, every cell
@@ -360,6 +384,13 @@ def fit_relaxation(ts: Sequence[float], vs: Sequence[float], v_end: float) -> Tu
 
 # ================================================================ estimator
 
+def offset_bound(a, b) -> float:
+    """Worst-case current offset [A] over a segment between anchors a and b:
+    I_OFFSET_MIN_A, or what the BMS read during either rest if that is more
+    (see the module doc: never a correction, never below the floor)."""
+    return max(I_OFFSET_MIN_A, abs(a['i_rest']), abs(b['i_rest']))
+
+
 def _same_sign(dq: float, dsoc: Sequence[float]) -> bool:
     """Charge in (dq > 0) must raise every cell's SoC, charge out lower it.
     Otherwise the current sign is wrong (a driver, or invert_current applied
@@ -391,6 +422,8 @@ class QmaxEstimator:
         self._rest_q: Optional[float] = None
         self._rest_cov: Optional[float] = None
         self._rest_dir: Optional[str] = None
+        self._rest_si = 0.0  # sum and count of the charge current samples in the rest, for its mean
+        self._rest_n = 0
         self._load_ewma: Optional[float] = None  # mean charge current of recent load minutes, for the direction tag
         self._t_volt: Optional[float] = None
         self.bms_capacity: Optional[float] = None
@@ -443,6 +476,7 @@ class QmaxEstimator:
                     segments=len(self.segments), newest=fmt_t(new['t']), newest_t=new['t'],
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
+                    drift_bound_pct=round(100.0 * new['drift'], 1),
                     plausibility_checked=new['cap'] is not None)
 
     def wants_voltages(self, t: float, current: float) -> bool:
@@ -582,6 +616,8 @@ class QmaxEstimator:
                 self._rest_t0 = b['t0']
                 self._rest_dir = None if self._load_ewma is None else ('chg' if self._load_ewma >= 0 else 'dch')
             self._rest_t1, self._rest_q, self._rest_cov = b['t1'], b['q'], b['cov']
+            self._rest_si += b['si']
+            self._rest_n += n
             self._rest_bins.append([0.5 * (b['t0'] + b['t1']),
                                     [median(vs) if vs else None for vs in b['v']],
                                     median(b['temp']) if b['temp'] else None])
@@ -596,6 +632,7 @@ class QmaxEstimator:
         self._rest_bins = []
         self._rest_t0 = self._rest_t1 = self._rest_q = self._rest_cov = None
         self._rest_dir = None
+        self._rest_si, self._rest_n = 0.0, 0
 
     def _end_rest(self) -> Optional[Dict[str, Any]]:
         if self._rest_t0 is None:
@@ -653,7 +690,8 @@ class QmaxEstimator:
             return None
         cap, _ = self.capacity()
         a = dict(t=t1, t0=self._rest_t0, q=self._rest_q, cov=self._rest_cov, epoch=self.epoch, temp=temp,
-                 dir=self._rest_dir, ocv=ocv, soc=soc, why=why, fit=fit, cap=cap)
+                 dir=self._rest_dir, i_rest=self._rest_si / self._rest_n, ocv=ocv, soc=soc, why=why, fit=fit,
+                 cap=cap)
         logger.info('%s: Qmax anchor: %.1f h rest ending %s, %.1f degC, OCV [%s] mV -> SoC [%s]', self.name,
                     dur / 3600, fmt_t(t1), temp, ', '.join('%.0f' % o if o is not None else '-' for o in ocv),
                     ', '.join('%.1f' % s if s is not None else str(w) for s, w in zip(soc, why)))
@@ -722,6 +760,10 @@ class QmaxEstimator:
             return None, 'dsoc'
         if not _same_sign(dq, dsoc):
             return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
+        i_off = offset_bound(a, b)
+        drift = i_off * span / 3600.0 / abs(dq)  # worst-case offset charge, as a fraction of dQ
+        if not drift <= DRIFT_MAX_FRAC:
+            return None, 'drift'
         qc = [100.0 * dq / d for d in dsoc]
         cap = b['cap']
         if cap is None:
@@ -732,7 +774,8 @@ class QmaxEstimator:
         k = min(range(len(qc)), key=lambda c: qc[c])
         med = median(qc)
         return dict(t=b['t'], t0=a['t'], dq=dq, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
-                    spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap), None
+                    spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap,
+                    i_off=i_off, drift=drift), None
 
     def _accept(self, seg) -> Optional[Dict[str, Any]]:
         self.segments.append(seg)
@@ -741,9 +784,10 @@ class QmaxEstimator:
             self.segments.popleft()
         self.counts['segment'] += 1
         logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
-                    'spread %.1f %%, coverage %.3f', self.name, fmt_t(seg['t0']), fmt_t(seg['t']), seg['dq'],
-                    ', '.join('%+.1f' % d for d in seg['dsoc']), ', '.join('%.1f' % q for q in seg['q_cells']),
-                    seg['cell'] + 1, 100 * seg['spread'], seg['cov'])
+                    'spread %.1f %%, coverage %.3f, offset drift <= %.1f %% (%.2f A)', self.name, fmt_t(seg['t0']),
+                    fmt_t(seg['t']), seg['dq'], ', '.join('%+.1f' % d for d in seg['dsoc']),
+                    ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
+                    100 * seg['drift'], seg['i_off'])
         res = self.result()
         if res is not None and not self._announced:
             self._announced = True
@@ -787,7 +831,8 @@ class QmaxEstimator:
             st.update(
                 bin=None if self._bin is None else dict(self._bin),
                 rest_bins=self._rest_bins, rest_t0=self._rest_t0, rest_t1=self._rest_t1, rest_q=self._rest_q,
-                rest_cov=self._rest_cov, rest_dir=self._rest_dir, t_volt=self._t_volt,
+                rest_cov=self._rest_cov, rest_dir=self._rest_dir, rest_si=self._rest_si, rest_n=self._rest_n,
+                t_volt=self._t_volt,
                 oob_since=self._oob_since, oob_n=self._oob_n, counts=dict(self.counts),
                 pair_reasons=dict(self.pair_reasons), n_dropped=self.n_dropped, t_summary=self._t_summary,
             )
@@ -845,7 +890,7 @@ class QmaxEstimator:
         for a in st.get('anchors') or []:
             if not isinstance(a, dict):
                 raise ValueError('anchor is %r' % type(a).__name__)
-            for k in ('t', 't0', 'q', 'cov'):
+            for k in ('t', 't0', 'q', 'cov', 'i_rest'):
                 v_fin(a.get(k), 'anchor ' + k)
             if any(f not in (None, 'rc', 'last') for f in a.get('fit') or []):
                 raise ValueError('anchor fit %r' % a.get('fit'))
@@ -873,7 +918,7 @@ class QmaxEstimator:
         for s in st.get('segments') or []:
             if not isinstance(s, dict):
                 raise ValueError('segment is %r' % type(s).__name__)
-            for k in ('t', 't0', 'dq'):
+            for k in ('t', 't0', 'dq', 'i_off', 'drift'):
                 v_fin(s.get(k), 'segment ' + k)
             qc = s.get('q_cells')
             if not isinstance(qc, list) or not qc or not all(v_fin(q, 'segment q_cells') > 0 for q in qc):
@@ -942,8 +987,12 @@ class QmaxEstimator:
             rd = st.get('rest_dir')
             if rd not in (None, 'chg', 'dch'):
                 raise ValueError('rest_dir %r' % rd)
+            rsi, rn = v_fin(st.get('rest_si'), 'rest_si'), v_int(st.get('rest_n'), 'rest_n')
+            if (rn == 0) != (r0 is None):
+                raise ValueError('rest of %d samples from %r' % (rn, r0))
             self._rest_bins = [list(r) for r in rb]
             self._rest_t0, self._rest_t1, self._rest_q, self._rest_cov, self._rest_dir = r0, r1, rq, rc, rd
+            self._rest_si, self._rest_n = rsi, rn
             self._t_volt = v_opt_fin(st.get('t_volt'), 't_volt')
             self._oob_since = v_opt_fin(st.get('oob_since'), 'oob_since')
             self._oob_n = v_int(st.get('oob_n') or 0, 'oob_n')

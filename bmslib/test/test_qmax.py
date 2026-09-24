@@ -394,14 +394,16 @@ def test_calibration_with_30_min_rests_accepted_the_result_is_biased(monkeypatch
 
 # ================================================================ known-bad: current gap
 
-def _slow_discharge_with_outage(p, gap_s=1800, true_i=60.0, sample=False):
-    """40 Ah at 5 A, an outage of gap_s while the pack really delivers
-    true_i (5 A reported on both sides), 5 A for the rest of 88 Ah. The
-    segment spans ~14 h, so one 30-min hole still leaves 96 % coverage: the
-    gap limit, not the coverage gate, is what stops it."""
-    p.run(5.0, 8 * 3600)
+def _slow_discharge_with_outage(p, gap_s=1800, true_i=38.0, sample=False):
+    """32 Ah at 8 A, an outage of gap_s while the pack really delivers true_i
+    (8 A reported on both sides), 8 A for the rest of 88 Ah. With the bottom
+    rest the segment spans ~11 h: long enough that one 30-min hole still leaves
+    95.5 % coverage, short enough for the offset-drift bound (0.3 A x 11 h is
+    4.6 % of the 73 Ah counted). So the gap limit, and neither of those, is
+    what stops it."""
+    p.run(8.0, 4 * 3600)
     p.run(true_i, gap_s, sample=sample)
-    return p.run(5.0, 3600 * (48 - true_i * gap_s / 3600) / 5)
+    return p.run(8.0, 3600 * (56 - true_i * gap_s / 3600) / 8)
 
 
 def _gap_cycle(gap_s=1800):
@@ -426,7 +428,8 @@ def test_calibration_without_the_gap_limit_the_bridged_charge_is_wrong(monkeypat
     dis = [s for s in est.segments if s['dq'] < 0]
     assert dis, 'scenario is harmless'
     assert dis[0]['cov'] >= q.MIN_COVERAGE  # the coverage gate would not have caught it
-    assert dis[0]['qmax'] < 0.8 * 98.0  # 27.5 of 88 Ah were never counted
+    assert dis[0]['drift'] <= q.DRIFT_MAX_FRAC  # nor the drift bound
+    assert dis[0]['qmax'] < 0.85 * 98.0  # 15 of 88 Ah were never counted
 
 
 def _holey_cycle():
@@ -458,26 +461,31 @@ def test_calibration_without_the_coverage_gate_the_holes_bias_it(monkeypatch):
 
 # ================================================================ known-bad: small dSoC
 
+BIG = 10.0  # the shallow cycles run on a 1000 Ah pack
+
+
 def _shallow(depth=6.0):
     """Top knee to top knee: both ends steep, dSoC ~6 %, after a charge and a
-    discharge (hysteresis +-3.5 mV)."""
-    p = Pack().rest()
+    discharge (hysteresis +-3.5 mV). On a 1000 Ah pack, so that the 60 Ah
+    swing is well inside the offset-drift bound (0.3 A x 3.2 h = 1.6 %): on a
+    100 Ah pack that bound alone would reject a 6 Ah segment."""
+    p = Pack(caps=[c * BIG for c in CAPS]).rest()
     for _ in range(4):
-        p.run(50.0, 3600 * depth / 50).rest()
-        p.run(-50.0, 3600 * depth / 50).rest()
+        p.run(50.0, 3600 * depth * BIG / 50).rest()
+        p.run(-50.0, 3600 * depth * BIG / 50).rest()
     return p.end().rows
 
 
 def test_small_dsoc_is_rejected():
-    est, pub = run(_shallow())
+    est, pub = run(_shallow(), cap=100.0 * BIG)
     assert pub == [] and not est.segments and est.pair_reasons['dsoc'] >= 4
 
 
 def test_calibration_with_a_small_dsoc_accepted_hysteresis_dominates(monkeypatch):
     monkeypatch.setattr(q, 'MIN_DSOC', 2.0)
-    est, pub = run(_shallow())
-    assert est.segments, 'scenario is harmless'
-    assert abs(median_q(est) / 98.0 - 1) > 0.05  # 7 mV of hysteresis on 6 % dSoC
+    est, pub = run(_shallow(), cap=100.0 * BIG)
+    assert pub, 'scenario is harmless'
+    assert abs(pub[-1]['qmax'] / (98.0 * BIG) - 1) > 0.05  # 7 mV of hysteresis on 6 % dSoC
 
 
 def median_q(est):
@@ -564,17 +572,18 @@ def test_a_non_lfp_pack_disables_the_estimator(caplog):
 def test_calibration_without_the_band_the_plausibility_window_still_rejects(monkeypatch):
     """Documented redundancy, not a demonstration of harm. Without the band the
     NMC anchors pair, and 6 % of the pack read as ~90 % of an LFP curve gives
-    ~7 Ah per cell -- which the plausibility window rejects, and a capacity is
-    now required. An NMC pack cannot do better on an LFP curve: only its bottom
+    ~7 Ah per cell -- which the plausibility window rejects (so does the
+    offset-drift bound, for so small a dQ), and a capacity is now required. An NMC pack cannot do better on an LFP curve: only its bottom
     ~10 % rests inside the curve's voltage range, so a swing there can never
     look like >= 40 % of its capacity. The band stays because it switches the
     estimator off (no voltage fetches) and says why."""
     monkeypatch.setattr(q, 'LFP_MV_HI', math.inf)
     est, pub = run(_nmc_day().rows)
     assert pub == [] and not est.segments and est.enabled
-    assert est.pair_reasons['implausible'] >= 6 and 'accepted' not in est.pair_reasons
+    assert est.pair_reasons['drift'] + est.pair_reasons['implausible'] >= 6 and 'accepted' not in est.pair_reasons
     monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)
-    est, _ = run(_nmc_day().rows, cap=None)  # both guards off: what they stop together
+    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)  # 6 Ah is also within reach of the offset bound
+    est, _ = run(_nmc_day().rows, cap=None)  # the guards off: what they stop together
     assert seg_q(est)[0] < 0.2 * 98.0
 
 
@@ -636,9 +645,17 @@ def test_a_loaded_rest_is_no_anchor():
 
 
 def test_calibration_with_the_rest_threshold_at_c10_the_loaded_anchor_biases_qmax(monkeypatch):
+    """Partly redundant now, and said so: with the rest threshold at C/10 the
+    offset-drift bound still rejects the pair, because it takes the 10 A the
+    BMS reads during that 'rest' as a possible offset (10 A x 2 h is 23 % of
+    88 Ah). It would for any loaded rest above ~C/100 on a segment of a few
+    hours. With both relaxed, the IR drop is read as SoC."""
     good, _ = run(_loaded_bottom(0.0))
     monkeypatch.setattr(q, 'REST_I_MAX_A', 20.0)
     monkeypatch.setattr(q, 'REST_C_RATE', 0.2)
+    est, _ = run(_loaded_bottom(10.0))
+    assert not est.segments and est.pair_reasons['drift'] >= 1
+    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, _ = run(_loaded_bottom(10.0))
     assert est.segments, 'scenario is harmless'
     assert seg_q(est)[0] / seg_q(good)[0] - 1 < -0.025  # 55 mV of IR drop read as SoC
@@ -667,17 +684,81 @@ def _long_segment(days):
     return p.rows
 
 
+def _offset_segments(days, n=3):
+    """The review's scenario: n independent _long_segment(days), each its own
+    epoch (10 minutes apart)."""
+    base = _long_segment(days)
+    rows, off = [], 0.0
+    for _ in range(n):
+        rows += [(t + off, i, v, temp) for t, i, v, temp in base]
+        off = rows[-1][0] + 600 - base[0][0]
+    return rows
+
+
+def test_an_offset_over_days_publishes_nothing():
+    """Three 5-day segments with the 0.3 A offset published 57.6 Ah for the
+    98 Ah cell, inside the 0.4-1.6x window; seven days gave 41.7 Ah."""
+    est, pub = run(_offset_segments(5))
+    assert pub == [] and not est.segments and est.pair_reasons['drift'] == 3
+    for days in (1, 3, 7):
+        est, pub = run(_long_segment(days))
+        assert not est.segments and est.pair_reasons['drift'] == 1
+
+
+def test_calibration_without_the_drift_bound_the_offset_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
+    est, pub = run(_offset_segments(5))
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] < 0.6 * 98.0 and pub[-1]['plausibility_checked']  # 57.6 Ah, inside 0.4-1.6x
+
+
+def test_monotone_in_offset_duration():
+    _monotone([_accepts(_long_segment(d)) for d in (0.1, 0.25, 0.5, 1, 2, 3, 5, 7, 9)])
+
+
+def _offset_at_rest(off=-0.7):
+    """A zero-point offset the BMS shows everywhere, rests included: it reads
+    0.7 A of phantom charge (below the 1 A rest threshold). Slow 10 A
+    discharges (~11 h with the rest: 0.3 A x 11 h passes the floor, 0.7 A x 11 h
+    is 9 % of dQ), fast 50 A charges (~4 h: 3 %). Four discharges, three
+    charges: the discharges are the majority of the last five segments."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(10.0, 3600 * 88 / 10).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    p.run(10.0, 3600 * 88 / 10).rest()
+    return [(t, i + off, v, temp) for t, i, v, temp in p.end().rows]
+
+
+def test_an_offset_seen_at_rest_widens_the_bound():
+    est, pub = run(_offset_at_rest())
+    assert all(abs(a['i_rest'] - 0.7) < 0.05 for a in est.anchors)
+    assert est.pair_reasons['drift'] >= 2 and all(s['dq'] > 0 for s in est.segments)
+    assert pub and abs(pub[-1]['qmax'] / 98.0 - 1) < DRIFT_BUDGET  # the charges that pass are within budget
+
+
+DRIFT_BUDGET = 0.055  # 5 % of dQ, as a Qmax error: 1/(1-0.05) - 1
+
+
+def test_calibration_with_only_the_floor_the_offset_seen_at_rest_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'offset_bound', lambda a, b: q.I_OFFSET_MIN_A)
+    est, pub = run(_offset_at_rest())
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] / 98.0 - 1 < -0.08  # the slow discharges, 11 % low, carry the median
+
+
 def test_a_segment_longer_than_the_limit_is_rejected():
     est, pub = run(_long_segment(11))
     assert not est.segments and est.pair_reasons['span'] == 1
 
 
-def test_calibration_without_the_span_limit_the_plausibility_window_still_rejects(monkeypatch):
-    """Documented redundancy: 11 days x 0.3 A cancel 79 of the 88 Ah, ~10 Ah,
-    which the plausibility window rejects with the capacity kept."""
+def test_calibration_without_the_span_limit_the_drift_bound_still_rejects(monkeypatch):
+    """Documented redundancy: the span limit is the pairing horizon now, not
+    the drift guard. 11 days x 0.3 A cancel 79 of the 88 Ah; the offset-drift
+    bound rejects that (and the plausibility window would too)."""
     monkeypatch.setattr(q, 'MAX_SEGMENT_S', math.inf)
     est, _ = run(_long_segment(11))
-    assert not est.segments and est.pair_reasons['implausible'] == 1
+    assert not est.segments and est.pair_reasons['drift'] == 1
 
 
 # ================================================================ known-bad: implausible ratio
@@ -834,7 +915,7 @@ def test_restart_within_the_gap_limit_continues_the_segment():
 
 def _downtime(down_s=1800):
     """Top rest; a slow discharge during which batmon is down for down_s
-    while the pack delivers 60 A; restart; on to the bottom; rest."""
+    while the pack delivers 38 A; restart; on to the bottom; rest."""
     p = Pack().rest()
     return _slow_discharge_with_outage(p, down_s).rest().end().rows
 
@@ -853,7 +934,7 @@ def test_calibration_without_the_gap_limit_a_restart_loses_the_charge(monkeypatc
     cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
     est, _ = _split_run(rows, [cut])
     assert est.segments, 'scenario is harmless'
-    assert est.segments[0]['qmax'] < 0.8 * 98.0  # 27.5 of the 30 Ah during the downtime are missing
+    assert est.segments[0]['qmax'] < 0.85 * 98.0  # 15 of the 19 Ah during the downtime are missing
 
 
 def test_restoring_publishes_nothing_by_itself():
@@ -1031,11 +1112,16 @@ def test_real_daly_three_nights_give_anchors_but_no_segment():
     assert est.counts['gap'] == 2
 
 
-def test_calibration_real_daly_with_the_gap_and_slope_gates_relaxed_a_segment_passes(monkeypatch):
+def test_calibration_real_daly_with_the_gap_slope_and_drift_gates_relaxed_a_segment_passes(monkeypatch):
     monkeypatch.setattr(q, 'MAX_GAP_S', 600.0)
     est, _ = _run_real()
     assert not est.segments and est.counts['gap'] == 0 and est.counts['anchor_plateau'] == 3  # the gap was not all
     monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.8)
+    est, _ = _run_real()
+    # 48 h, -190.5 Ah, and the Daly read 0.72 A during the rests (a standby
+    # load or an offset, it cannot tell): offset x span is 18 % of dQ
+    assert not est.segments and est.pair_reasons['drift'] == 1
+    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, _ = _run_real()
     assert len(est.segments) == 1
     s = est.segments[0]
@@ -1045,6 +1131,7 @@ def test_calibration_real_daly_with_the_gap_and_slope_gates_relaxed_a_segment_pa
 def test_real_daly_with_the_current_sign_flipped_has_only_sign_rejections(monkeypatch):
     monkeypatch.setattr(q, 'MAX_GAP_S', 600.0)
     monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.8)
+    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, _ = _run_real([(t, -i, v, temp) for t, i, v, temp in real_rows()])
     assert not est.segments and est.pair_reasons['sign'] >= 1
 
