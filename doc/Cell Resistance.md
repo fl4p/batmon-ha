@@ -60,8 +60,11 @@ estimate is published again with the next accepted window. A restart within a wi
 
 Not restored:
 
-* windows saved by a different version of the estimator code (an add-on update that changed it): they would mix two
-  definitions of R in one median, so the warm-up starts again; the learnt quantisation steps are kept,
+* windows saved by different estimator code (an add-on update that changed it): they would mix two definitions of R in
+  one median, so the warm-up starts again; the learnt quantisation steps are kept. What counts as a change: the
+  bytecode of any function or method in `bmslib/impedance.py` or `bmslib/estimator_common.py`, a default argument, a
+  module-level constant (every gate), or the Python version. Comments, docstrings, blank lines and where code sits in
+  the file do not,
 * a state file that does not validate (logged as a warning): the estimator starts fresh,
 * a switch-off after an internal error: the next start tries again. A switch-off because the pack is not LiFePO4 is
   kept.

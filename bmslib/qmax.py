@@ -351,7 +351,10 @@ def _merge(ts, vs, max_points):
             [median(vs[k:k + g]) for k in range(0, n, g)])
 
 
-_TAU_GRID = [FIT_TAU_MIN_S * (FIT_TAU_MAX_S / FIT_TAU_MIN_S) ** (k / (FIT_TAU_GRID - 1)) for k in range(FIT_TAU_GRID)]
+# A tuple, not a list: module-level lists are state to the code fingerprint and
+# left out of it (estimator_common._is_const), and this grid is configuration.
+_TAU_GRID = tuple(FIT_TAU_MIN_S * (FIT_TAU_MAX_S / FIT_TAU_MIN_S) ** (k / (FIT_TAU_GRID - 1))
+                  for k in range(FIT_TAU_GRID))
 
 
 def fit_relaxation(ts: Sequence[float], vs: Sequence[float], v_end: float) -> Tuple[float, str, Dict[str, Any]]:

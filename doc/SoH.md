@@ -118,9 +118,13 @@ or a pack that rests for hours near empty and near full. Neither is implemented 
 
 The state is saved per BMS in `qmax_<name>.json` in the add-on's data directory: the usable rests, the accepted
 segments and the running charge count every 30 s, and also the rest in progress at shutdown. A restart within 5
-minutes continues the open segment; a longer one ends it, keeping the rests. State written by a different version of the
-estimator code is discarded, as is a file that does not validate (the log says why). A pack that the chemistry check
-switched off stays off after a restart.
+minutes continues the open segment; a longer one ends it, keeping the rests. A file that does not validate is discarded
+(the log says why). A pack that the chemistry check switched off stays off after a restart.
+
+Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
+`bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV curve, every
+gate), or the Python version. Comments, docstrings, blank lines and where code sits in the file do not count, so an
+update that only touches those keeps months of segments.
 
 ## Cost
 

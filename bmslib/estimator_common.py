@@ -7,8 +7,8 @@ Kept free of numpy on purpose: the add-on has none.
 """
 import functools
 import hashlib
-import marshal
 import math
+import sys
 import time
 import types
 from typing import Optional, Sequence, Tuple, TypeGuard
@@ -83,42 +83,74 @@ def median(xs: Sequence[float]) -> float:
     return s[m] if n % 2 else 0.5 * (s[m - 1] + s[m])
 
 
-_CONST_TYPES = (bool, int, float, complex, str, bytes, type(None))
+_SCALAR_TYPES = (bool, int, float, complex, str, bytes, type(None))
 
 
 def _is_const(x) -> bool:
-    """Plain data: numbers, strings, and tuples/lists/sets/dicts of them."""
-    if isinstance(x, _CONST_TYPES):
+    """Immutable plain data: numbers, strings, bytes, None, and tuples and
+    frozensets of them. A list, dict or set at module level is taken as state,
+    not as a constant: it can change while the module runs (a cache such as
+    impedance._LAG_ORDER_CACHE), so its value at the moment of the call says
+    nothing about the code. Configuration therefore lives in tuples."""
+    if isinstance(x, _SCALAR_TYPES):
         return True
-    if isinstance(x, dict):
-        return all(_is_const(k) and _is_const(v) for k, v in x.items())
-    return isinstance(x, (tuple, list, frozenset, set)) and all(_is_const(v) for v in x)
+    return isinstance(x, (tuple, frozenset)) and all(_is_const(v) for v in x)
 
 
-def _canon(x):
-    """x with every set replaced by a sorted tuple. Python 3.10 (which the
-    Dockerfile still accepts) marshals a set of strings in hash order, which
-    changes with PYTHONHASHSEED, so the same code would fingerprint
-    differently in every process; 3.12 and later sort."""
+# Python 3.14 marks a code object whose co_consts[0] is the docstring. Masked
+# out with the docstring itself (below).
+_CO_HAS_DOCSTRING = 0x4000000
+
+# Class attributes that are not code: the class docstring, and the line the
+# class starts on (__firstlineno__, 3.13+). __static_attributes__ (3.13+) is
+# derived from the methods' code, which is hashed itself.
+_CLASS_SKIP = frozenset(('__doc__', '__firstlineno__', '__static_attributes__', '__module__', '__qualname__',
+                         '__dict__', '__weakref__'))
+
+
+def _canon(x, doc=None):
+    """A canonical, hashable description of x built only from tuples, strings,
+    bytes and numbers, whose repr() is the same in every process of a given
+    Python version.
+
+    Not marshal: its bytes depend on more than the value -- whether a string
+    happens to be interned (type byte 0xda vs 0xfa on 3.10, which changed with
+    what else was imported: enabling impedance_estimator changed the Qmax
+    fingerprint) and, for sets on 3.10, the hash seed.
+
+    For a code object: the bytecode, constants, names, argument layout and
+    flags; NOT its line numbers or positions (co_firstlineno, the line table),
+    its file name, or its docstring (doc, replaced by a marker), so that a
+    comment, a docstring or a moved block keeps saved state.
+
+    Raises TypeError for anything else: what cannot be described is never
+    fingerprinted as if it were known."""
     if isinstance(x, types.CodeType):
-        return _norm_code(x)
-    if isinstance(x, (set, frozenset)):
-        return ('<set>',) + tuple(sorted((_canon(v) for v in x), key=repr))
+        consts = list(x.co_consts)
+        if doc is not None and consts and consts[0] == doc:
+            consts[0] = '<docstring>'
+        return ('<code>', x.co_name, x.co_argcount, x.co_posonlyargcount, x.co_kwonlyargcount,
+                x.co_flags & ~_CO_HAS_DOCSTRING, x.co_code, getattr(x, 'co_exceptiontable', b''),
+                tuple(_canon(c) for c in consts), x.co_names, x.co_varnames, x.co_freevars, x.co_cellvars)
+    if isinstance(x, bool) or x is None or x is Ellipsis:
+        return repr(x)
+    if isinstance(x, _SCALAR_TYPES):
+        return (type(x).__name__, repr(x))  # float repr is exact; the tag keeps 1, 1.0 and '1' apart
     if isinstance(x, tuple):
-        return tuple(_canon(v) for v in x)
-    if isinstance(x, list):
-        return [_canon(v) for v in x]
+        return ('<tuple>',) + tuple(_canon(v) for v in x)
+    if isinstance(x, (frozenset, set)):
+        return ('<set>',) + tuple(sorted((_canon(v) for v in x), key=repr))
+    if isinstance(x, list):  # function defaults only; module-level lists are state (_is_const)
+        return ('<list>',) + tuple(_canon(v) for v in x)
     if isinstance(x, dict):
-        return {k: _canon(v) for k, v in x.items()}
-    return x
+        return ('<dict>',) + tuple(sorted(((_canon(k), _canon(v)) for k, v in x.items()), key=repr))
+    if isinstance(x, slice):  # a constant in 3.14 bytecode (x[:3])
+        return ('<slice>', _canon(x.start), _canon(x.stop), _canon(x.step))
+    raise TypeError('cannot fingerprint %s' % type(x).__name__)
 
 
-def _norm_code(co: types.CodeType) -> types.CodeType:
-    """The code object as it runs, minus what is not code: the file it was
-    loaded from (an install path), and set constants in hash order (_canon).
-    Nested code objects (closures, comprehensions) too. Only ever hashed,
-    never executed."""
-    return co.replace(co_filename='', co_consts=tuple(_canon(c) for c in co.co_consts))
+def _put(h, *parts):
+    h.update(repr(parts).encode() + b'\0')
 
 
 def _feed(h, name: str, obj, modname: str, depth: int = 0):
@@ -131,27 +163,35 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
     elif isinstance(obj, types.FunctionType):
         if obj.__module__ != modname:
             return  # imported: fingerprinted with its own module
-        h.update(name.encode() + b'\0')
-        h.update(marshal.dumps((_norm_code(obj.__code__), _canon(obj.__defaults__), _canon(obj.__kwdefaults__))))
+        _put(h, 'def', name, _canon(obj.__code__, obj.__doc__), _canon(obj.__defaults__),
+             _canon(obj.__kwdefaults__))
         if hasattr(obj, '__wrapped__'):  # a decorated method (locked): its body is the wrapped function
             _feed(h, name + '.__wrapped__', obj.__wrapped__, modname, depth)
     elif isinstance(obj, type):
         if obj.__module__ != modname or depth > 3:
             return
-        h.update(b'class ' + name.encode() + b'\0')
+        _put(h, 'class', name)
         for k in sorted(vars(obj)):
-            _feed(h, name + '.' + k, vars(obj)[k], modname, depth + 1)
+            if k not in _CLASS_SKIP:
+                _feed(h, name + '.' + k, vars(obj)[k], modname, depth + 1)
     elif _is_const(obj):
-        h.update(name.encode() + b'=' + marshal.dumps(_canon(obj)))
+        _put(h, 'const', name, _canon(obj))
 
 
 def code_fingerprint(*namespaces) -> Optional[str]:
-    """Fingerprint of the code that is RUNNING: the marshalled code objects of
-    every function and class defined in the given module namespaces (a
-    module's __dict__, or globals() from inside it), with their defaults, and
-    every module-level constant (plain data: numbers, strings, containers of
-    them, as they are when the call is made). Persisted results are only
-    restored into the code that computed them.
+    """Fingerprint of the code that is RUNNING: the code objects of every
+    function and class defined in the given module namespaces (a module's
+    __dict__, or globals() from inside it), with their defaults, and every
+    module-level constant (immutable plain data: numbers, strings, tuples of
+    them). Persisted results are only restored into the code that computed
+    them.
+
+    What changes it: the bytecode of any function or method, their constants
+    and defaults, a module-level constant, a name, and the Python version (the
+    same bytecode is not the same program on another interpreter). What does
+    not: comments, docstrings, blank lines, where a block sits in the file (line
+    numbers), the install path, the hash seed, what else was imported, and
+    module-level lists, dicts and sets (state, see _is_const).
 
     Why not a hash of the .py file: Python may execute a timestamp-valid .pyc
     compiled from different source, and the file hash then vouches for code
@@ -162,13 +202,13 @@ def code_fingerprint(*namespaces) -> Optional[str]:
 
     Call it at the END of the module, once everything is defined. None when
     anything cannot be fingerprinted: unknown code never matches, so nothing
-    is restored as if it did. The marshal format depends on the Python
-    version, so an interpreter upgrade also discards saved state."""
+    is restored as if it did."""
     h = hashlib.sha1()
     try:
+        _put(h, 'python', tuple(sys.version_info[:2]))
         for ns in namespaces:
             modname = ns['__name__']
-            h.update(b'module ' + modname.encode() + b'\0')
+            _put(h, 'module', modname)
             for name in sorted(ns):
                 if not name.startswith('__') and name != 'CODE_FINGERPRINT':
                     _feed(h, name, ns[name], modname)
