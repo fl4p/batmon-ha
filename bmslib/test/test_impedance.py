@@ -517,6 +517,41 @@ def test_clock_jumps_restart_the_windows():
     assert not est._rows and est._bin.n == 1 and len(est.windows) == n
 
 
+def _after_a_year_ahead(mv, reset=True, what='_t_summary'):
+    """A few samples while the clock ran a year ahead, then the clock is right
+    again: two days (summary) or 20 minutes (chemistry) of samples. reset=False
+    puts the field back where the clock ahead had left it, as the code did
+    before a step back reset it."""
+    est = imp.CellResistanceEstimator('s')
+    calls = []
+    est._log_summary = lambda: calls.append(1)
+    ahead = 365 * 86400.0
+    for k in range(6):
+        est.add(T0 + ahead + 10 * k, 10.0, [mv] * 4, 60.0)
+    kept = getattr(est, what)
+    assert kept is not None and kept >= T0 + ahead
+    n, dt = (2 * 24 * 12 + 1, 300.0) if what == '_t_summary' else (120, 10.0)
+    for k in range(n):
+        est.add(T0 + dt * k, 10.0, [mv] * 4, 60.0)
+        if not reset and k == 0:
+            setattr(est, what, kept)
+    return est, calls
+
+
+def test_a_clock_step_back_does_not_hold_off_the_summary_or_the_chemistry_guard():
+    _, calls = _after_a_year_ahead(3300.0)
+    assert len(calls) >= 47  # hourly, over two days
+    est, _ = _after_a_year_ahead(4100.0, what='_oob_since')
+    assert not est.enabled and 'LiFePO4' in est.disabled_reason
+
+
+def test_calibration_without_the_resets_both_wait_for_the_old_clock():
+    _, calls = _after_a_year_ahead(3300.0, reset=False)
+    assert calls == []
+    est, _ = _after_a_year_ahead(4100.0, reset=False, what='_oob_since')
+    assert est.enabled
+
+
 def test_sub_second_samples_are_binned():
     """0.2 s cadence: 750 samples per window, fitted as <= 150 one-second bins."""
     est = imp.CellResistanceEstimator('fast')

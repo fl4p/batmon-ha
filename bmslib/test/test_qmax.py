@@ -438,6 +438,56 @@ def test_monotone_in_how_far_a_glitch_neighbour_is_off():
     assert verdicts[:3] == [True] * 3 and not verdicts[3]
 
 
+def _spaced_glitches(rows, spacing_s=120.0, n_garbled=4, value=450.0):
+    """In the middle of every discharge (10 s cadence): a caught glitch, n
+    garbled frames of `value` A from 30 s after it, and a second caught
+    glitch spacing_s after the first. The samples beside each glitch are
+    clean, so the neighbour rule bridges each one; only the isolation window
+    sees that there were two."""
+    out = list(rows)
+    j, n, step = 0, len(rows), int(round(spacing_s / 10.0))
+    while j < n:
+        if rows[j][1] > 30:
+            e = j
+            while e < n and rows[e][1] > 30:
+                e += 1
+            m = (j + e) // 2 - step // 2
+            for b in [0, step] + list(range(3, 3 + n_garbled)):
+                t, _, v, temp = out[m + b]
+                out[m + b] = (t, 3553.5 if b in (0, step) else value, v, temp)
+            j = e
+        j += 1
+    return out
+
+
+def test_two_glitches_minutes_apart_end_the_segment():
+    """The isolation window, on its own: two caught glitches 120 s apart with
+    garbled frames between them but not beside them. The burst test spaces
+    its frames 10 s apart, so a window cut to 60 s passed it."""
+    est, pub = run(_spaced_glitches(full_cycles(n=3).rows))
+    assert est.counts['current_implausible_burst'] == 3 and est.counts['current_implausible_neighbours'] == 0
+    assert all(s['dq'] > 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_with_a_60_s_isolation_window_the_garbage_between_is_counted(monkeypatch):
+    monkeypatch.setattr(q, 'GLITCH_ISOLATION_S', 60.0)
+    est, _ = run(_spaced_glitches(full_cycles(n=3).rows))
+    dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+    assert dis, 'scenario is harmless'
+    assert all(x / 97.5 - 1 > 0.04 for x in dis)  # 4 x 400 A x 10 s = 4.4 Ah of garbage: 102.4 Ah
+
+
+def test_monotone_in_glitch_spacing():
+    """Closer glitches are worse: bridged beyond 300 s, and never again below."""
+    def accepted(spacing):
+        rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
+        return _accepts(_spaced_glitches(rows, spacing_s=spacing))
+    verdicts = [accepted(x) for x in (900.0, 600.0, 310.0, 290.0, 120.0, 60.0, 20.0)]
+    _monotone(verdicts)
+    assert verdicts[:3] == [True] * 3 and not verdicts[3]
+
+
 def test_calibration_without_the_current_bound_the_glitches_are_published(monkeypatch):
     monkeypatch.setattr(q, 'I_MAX_ABS_A', math.inf)
     monkeypatch.setattr(q, 'I_MAX_C_RATE', math.inf)
@@ -1065,6 +1115,22 @@ def test_a_gain_error_inside_the_window_goes_one_to_one_into_qmax(g):
     est, pub = run(_gain(g))
     assert pub and pub[-1]['plausibility_checked']
     assert pub[-1]['qmax'] == pytest.approx(g * 97.5, rel=0.01)
+
+
+def test_a_gain_that_puts_the_strongest_cell_just_beyond_1_2x_is_rejected():
+    """The window's upper end exactly: at a 1.19x gain the 102 Ah cell reads
+    121.4 Ah, beyond 1.2 x 100 Ah (1.3x, the other test, would also fail a
+    1.25x window)."""
+    assert _accepts(_gain(1.17))  # 119.3 Ah: inside
+    est, pub = run(_gain(1.19))
+    assert pub == [] and not est.segments and est.pair_reasons['implausible'] >= 4
+
+
+def test_calibration_with_the_window_at_1_25_a_19_percent_gain_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'PLAUSIBLE_REL', (0.4, 1.25))
+    est, pub = run(_gain(1.19))
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] == pytest.approx(1.19 * 97.5, rel=0.01)  # 116 Ah for 98
 
 
 def test_a_gain_error_beyond_the_window_is_rejected():
@@ -1820,6 +1886,56 @@ def test_monotone_in_clock_step_back():
         # two load samples: the second closes the first's minute, which ends the rest
         return any([r.add(t + dt, 20.0, None) is not None for dt in (0.0, 70.0)])
     _monotone([published(b) for b in (0, 1, 60, 1800, 86400, 30 * 86400, 400 * 86400)])
+
+
+def _nmc_after_a_year_ahead(reset=True):
+    """A non-LFP pack (4.1 V cells) seen for a minute while the clock ran a
+    year ahead, then the clock is right again and it stays there: 20 min of
+    samples. reset=False puts the chemistry run's start back where the clock
+    had it, as the code did before the step back reset it."""
+    est = _fresh()
+    ahead = 365 * 86400.0
+    for k in range(6):
+        est.add(T0 + ahead + 10 * k, 0.0, [4100] * 4, temp=25.0)
+    assert est._oob_since == T0 + ahead and est.enabled
+    for k in range(120):
+        est.add(T0 + 10 * k, 0.0, [4100] * 4, temp=25.0)
+        if not reset and k == 0:
+            est._oob_since = T0 + ahead
+    return est
+
+
+def test_a_clock_step_back_does_not_hold_off_the_chemistry_guard():
+    """The run of out-of-band samples had started on the clock that ran
+    ahead: without moving its start back, t - start stays negative and the
+    guard waits a year."""
+    est = _nmc_after_a_year_ahead()
+    assert not est.enabled and 'LiFePO4' in est.disabled_reason
+
+
+def test_calibration_without_the_reset_the_chemistry_guard_waits_for_the_old_clock():
+    est = _nmc_after_a_year_ahead(reset=False)
+    assert est.enabled and est._oob_n > q.CHEM_PERSIST_N  # 20 minutes of NMC, still running
+
+
+def _summaries_after_a_year_ahead(reset=True):
+    est = q.QmaxEstimator('s', design_capacity=100.0, curve=SYNTH)
+    calls = []
+    est._log_summary = lambda: calls.append(1)
+    est.add(T0 + 365 * 86400.0, 0.0, None)
+    for k in range(2 * 24 * 12 + 1):  # two days, every 5 minutes
+        est.add(T0 + 300 * k, 0.0, None)
+        if not reset and k == 0:
+            est._t_summary = T0 + 365 * 86400.0
+    return calls
+
+
+def test_a_clock_step_back_does_not_hold_off_the_daily_summary():
+    assert len(_summaries_after_a_year_ahead()) == 2
+
+
+def test_calibration_without_the_reset_the_summary_waits_for_the_old_clock():
+    assert _summaries_after_a_year_ahead(reset=False) == []
 
 
 def test_changed_code_discards_everything(caplog):
