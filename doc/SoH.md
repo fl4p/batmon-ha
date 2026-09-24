@@ -67,6 +67,13 @@ This is a budget, not a bound on the error. An offset larger than the assumed on
 point that moves with the current) passes unseen, and so does a gain error (below). A 3 A offset under load during a
 6-hour discharge, with the rests reading 0 A, gave a Qmax 21 % low while the drift at the assumed 0.3 A was 3.4 %.
 
+What the assumption costs: a segment of one day needs at least 144 Ah of charge, so a 100 Ah pack can never pass a
+segment longer than about 17 hours, and the rest at its far end counts into that. 88 Ah out of a 100 Ah pack between
+two 2-hour rests must average about 7 A or more (7 A passed, 6.5 A did not). Slow or small packs get no value. The
+floor is not learnt per BMS from its data: the smallest current a BMS reports is its resolution (0.01 A on a JK), not
+the size of an offset that only shows under load, and with a floor learnt that way the 0.3 A case above published
+57.6 Ah for 98.
+
 **Current scale.** A current reading that is off by a factor (a shunt setting, a gain error) goes 1:1 into Qmax: a BMS
 reading 10 % high publishes a Qmax 10 % high. Nothing inside the plausibility window can tell. Measured on a 98 Ah pack:
 gain 0.45, 0.6, 0.9 and 1.1 published 43.9, 58.5, 87.8 and 107.3 Ah. The window catches gross errors only. Its upper

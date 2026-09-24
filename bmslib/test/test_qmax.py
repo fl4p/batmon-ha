@@ -785,6 +785,34 @@ def test_a_load_only_offset_above_the_assumed_one_is_not_bounded():
         assert s['drift'] == pytest.approx(0.034, abs=0.002) and err == pytest.approx(0.209, abs=0.005)
 
 
+def test_liveness_cost_of_the_offset_floor():
+    """The price of the 0.3 A assumption, pinned so the docs' numbers stay
+    measured (second review, finding 5): 88 Ah out of a 100 Ah pack with 2 h
+    rests must average about 7 A or more (the span, rest included, may be at
+    most 14.7 h); a one-day segment needs 144 Ah; a 100 Ah pack can never pass
+    one longer than 16.7 h."""
+    def accepted(i):
+        return _accepts(Pack().rest().run(i, 3600 * 88 / i).rest().end().rows)
+    assert [accepted(i) for i in (10.0, 7.5, 7.0, 6.5, 6.0, 5.0)] == [True, True, True, False, False, False]
+    assert q.I_OFFSET_MIN_A * 24 / q.DRIFT_MAX_FRAC == pytest.approx(144.0)
+    assert q.DRIFT_MAX_FRAC * 100.0 / q.I_OFFSET_MIN_A == pytest.approx(16.7, abs=0.05)
+
+
+def test_calibration_a_floor_learnt_from_the_readings_publishes_the_load_only_offset(monkeypatch):
+    """Why the floor is not learnt per BMS, as impedance.py learns its
+    quantisation: the smallest non-zero |I| a BMS reports is its resolution
+    (JK 0.01 A), not the size of an offset that only shows under load. On the
+    same input as test_an_offset_over_days_publishes_nothing, with a current
+    read at fine resolution, a learnt floor lets the 0.3 A offset through."""
+    rows = _offset_segments(5)
+    floor = min(abs(i) for _, i, _, _ in rows if i != 0)
+    assert floor < 0.01  # the simulated BMS resolves the current finely
+    monkeypatch.setattr(q, 'assumed_offset', lambda a, b: max(floor, abs(a['i_rest']), abs(b['i_rest'])))
+    est, pub = run(rows)
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] < 0.6 * 98.0  # 57.6 Ah
+
+
 def _offset_at_rest(off=-0.7):
     """A zero-point offset the BMS shows everywhere, rests included: it reads
     0.7 A of phantom charge (below the 1 A rest threshold). Slow 10 A

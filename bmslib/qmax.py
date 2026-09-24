@@ -237,6 +237,13 @@ MAX_SEGMENT_S = 10 * 86400.0
 # larger. 5 % of |dQ|: half of the ~10 % a single segment is meant to stay
 # within; at 0.3 A that is a span of at most 14.7 h for 88 Ah and 33 h for
 # 200 Ah.
+# What it costs (second review): a one-day segment needs |dQ| >= 144 Ah, a
+# 100 Ah pack can never pass a segment longer than 16.7 h, and 88 Ah out of it
+# between 2 h rests must average about 7 A. Not learnt per BMS from its data
+# (as impedance.py learns quantisation): the smallest non-zero |I| is the
+# current's resolution, not the size of an offset that only shows under load;
+# learnt that way, the 0.3 A load-only offset of test_an_offset_over_days_*
+# publishes 57.6 Ah for 98 on a finely resolved current (the calibration test).
 I_OFFSET_MIN_A = 0.3
 DRIFT_MAX_FRAC = 0.05
 
