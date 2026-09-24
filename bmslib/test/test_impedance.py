@@ -4,7 +4,9 @@ Pure Python, like the module. Every known-bad case comes in a pair: the test
 that the guard rejects it, and a calibration test that breaks exactly that
 guard (the way the offline prototype had it) and shows the same data then DOES
 produce an estimate. Without the second half a known-bad test could pass
-because the scenario is harmless, not because the guard works.
+because the scenario is harmless, not because the guard works. The one
+exception says so: without the input bound on the current, glitches cost
+windows, they do not produce a wrong R (the fit gates reject them).
 """
 import asyncio
 import json

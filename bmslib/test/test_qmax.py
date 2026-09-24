@@ -2,9 +2,13 @@
 
 Pure Python, like the module. Every known-bad case comes in a pair: the test
 that the guard rejects it, and a calibration test that breaks exactly that
-guard and shows the same data then DOES produce a (wrong) estimate. Without the
-second half a known-bad test could pass because the scenario is harmless, not
-because the guard works.
+guard on the SAME input and asserts that what then comes out is measurably
+wrong. Without the second half a known-bad test could pass because the
+scenario is harmless, not because the guard works. Where another guard also
+stops the scenario, the calibration says so and asserts it instead of claiming
+harm it cannot show ("documented redundancy": the sign gate, the chemistry
+band and the span limit behind the plausibility window and the drift bound,
+the rest threshold behind the drift bound's rest reading).
 
 The built-in OCV curve (a relaxed LFP curve) is steep only between 0 and 11 %
 SoC, so no segment can pass the gates on it (test_builtin_curve_*). The tests
@@ -367,31 +371,44 @@ def test_plateau_endpoint_is_rejected():
     assert est.counts['anchor_plateau'] == 4 and est.counts['anchor'] == 3
 
 
-def test_calibration_without_the_slope_gate_a_plateau_endpoint_publishes(monkeypatch):
+def test_calibration_without_the_slope_gate_a_plateau_endpoint_publishes_a_wrong_value(monkeypatch):
+    """At 0.5 mV/% the 7 mV hysteresis alone is ~14 % of SoC."""
     monkeypatch.setattr(q, 'MIN_SLOPE_MV_PER_PCT', 0.0)
     est, pub = run(_plateau_start().rows)
     assert pub, 'scenario is harmless: the known-bad test proves nothing'
+    assert pub[-1]['qmax'] / 98.0 - 1 < -0.08  # 88.3 Ah
 
 
 # ================================================================ known-bad: short rest
 
 def _short_rests(rest_min, r2=3.0):
-    """Heavy slow polarisation (3 mOhm, 20 min) that a short rest has not shed."""
-    return full_cycles(n=2, rest=rest_min * 60, r2=r2).rows
+    """Heavy slow polarisation (3 mOhm, 20 min) that a short rest has not shed.
+    Cycles between SoC 92 and 10 %: from a full 97 % the polarised top rest
+    lands above the curve and is unevaluable anyway."""
+    return full_cycles(n=3, rest=rest_min * 60, r2=r2, soc0=92.0, dq=82.0).rows
 
 
 def test_short_rests_make_no_anchor():
-    est, pub = run(_short_rests(60))
-    assert pub == [] and est.counts['anchor'] == 0 and est.counts['rest_short'] >= 4
+    est, pub = run(_short_rests(20))
+    assert pub == [] and est.counts['anchor'] == 0 and est.counts['rest_short'] >= 6
 
 
-def test_calibration_with_30_min_rests_accepted_the_result_is_biased(monkeypatch):
+def test_calibration_with_20_min_rests_accepted_a_biased_value_is_published(monkeypatch):
+    """The same input with only the duration gate lowered. Also what the
+    synthetic pack does NOT show, said here rather than hidden: at 60 min the
+    relaxation fit already extrapolates its single 20-min polarisation, so
+    60-min rests are harmless here (within 1 %). The 90 min come from real LFP
+    data, where 30-min rests at the top of a charge were still polarised and
+    biased Qmax to 210 Ah for ~290 (WHITEPAPER 8.3); this pack model has no
+    such slow tail."""
     good, _ = run(_short_rests(120))
     assert seg_q(good)[0] == pytest.approx(98.0, rel=0.01)
     monkeypatch.setattr(q, 'MIN_REST_S', 15 * 60.0)
     est, pub = run(_short_rests(20))
-    assert est.segments, 'scenario is harmless'
-    assert abs(seg_q(est)[0] / 98.0 - 1) > 0.03
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] / 98.0 - 1 < -0.08  # 88.5 Ah
+    _, pub60 = run(_short_rests(60))
+    assert pub60[-1]['qmax'] == pytest.approx(98.0, rel=0.01)
 
 
 # ================================================================ known-bad: current gap
@@ -499,6 +516,12 @@ def median_q(est):
 def test_missing_temperature_makes_no_anchor():
     est, pub = run(full_cycles(temp=None).rows)
     assert pub == [] and est.counts['anchor'] == 0 and est.counts['anchor_temp_missing'] == 5
+    est, pub = run(_no_temperature(_warm_top_cold_bottom()))  # the calibration's input
+    assert pub == [] and est.counts['anchor'] == 0 and est.counts['anchor_temp_missing'] == 5
+
+
+def _no_temperature(rows):
+    return [(t, i, v, None) for t, i, v, _ in rows]
 
 
 def _warm_top_cold_bottom():
@@ -514,10 +537,11 @@ def _warm_top_cold_bottom():
 
 
 def test_calibration_a_default_temperature_publishes_a_wrong_value():
-    """The BMS reports no temperature. Defaulting it to 25 degC publishes a
-    value 4-5 % low; knowing it rejects the cold anchors."""
+    """The BMS reports no temperature (the same input as the guard test).
+    Defaulting it to 25 degC publishes a value 4-5 % low; knowing it rejects
+    the cold anchors."""
     rows = _warm_top_cold_bottom()
-    est, pub = run([(r[0], r[1], r[2], 25.0) for r in rows])
+    est, pub = run([(t, i, v, 25.0 if temp is None else temp) for t, i, v, temp in _no_temperature(rows)])
     assert pub, 'scenario is harmless'
     assert pub[-1]['qmax'] / 98.0 - 1 < -0.03
     est_known, pub_known = run(rows)
