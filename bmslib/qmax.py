@@ -73,8 +73,9 @@ import math
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, COMMON_FILE, LFP_MV_HI, LFP_MV_LO,
-                                     chemistry_step, finite, fmt_t, median, source_fingerprint, v_fin, v_int,
+from bmslib import estimator_common
+from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, LFP_MV_HI, LFP_MV_LO,
+                                     chemistry_step, finite, fmt_t, median, v_fin, v_int,
                                      v_opt_fin)
 from bmslib.util import get_logger
 
@@ -188,15 +189,6 @@ MAX_SEGMENT_AGE_S = 365 * 86400.0
 SUMMARY_PERIOD_S = 86400.0  # info-level summary of what the gates did
 
 STATE_VERSION = 1
-
-
-def _code_fingerprint() -> Optional[str]:
-    """Anchors and segments are only restored into the code that made them:
-    a change to the curve or any gate would mix two definitions of Qmax."""
-    return source_fingerprint(__file__, COMMON_FILE)
-
-
-CODE_FINGERPRINT = _code_fingerprint()
 
 
 # ================================================================ OCV curve
@@ -947,3 +939,8 @@ class QmaxEstimator:
 
 
 DEFAULT_CURVE = OcvCurve()
+
+# Anchors and segments are only restored into the code that made them: a change
+# to the curve or any gate would mix two definitions of Qmax. Computed last, over
+# the code that actually runs (estimator_common.code_fingerprint).
+CODE_FINGERPRINT = estimator_common.code_fingerprint(globals(), vars(estimator_common))

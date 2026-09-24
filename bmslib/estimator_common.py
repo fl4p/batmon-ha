@@ -1,13 +1,15 @@
 """
 Helpers shared by the experimental estimators (`impedance.py`, `qmax.py`):
-robust statistics, the LiFePO4 chemistry guard, a source fingerprint for
-persisted state, and the validators `restore()` uses.
+robust statistics, the LiFePO4 chemistry guard, a fingerprint of the running
+code for persisted state, and the validators `restore()` uses.
 
 Kept free of numpy on purpose: the add-on has none.
 """
 import hashlib
+import marshal
 import math
 import time
+import types
 from typing import Optional, Sequence, Tuple, TypeGuard
 
 # Chemistry guard: only LFP-looking packs. A sample with any cell outside this
@@ -43,21 +45,96 @@ def median(xs: Sequence[float]) -> float:
     return s[m] if n % 2 else 0.5 * (s[m - 1] + s[m])
 
 
-def source_fingerprint(*files) -> Optional[str]:
-    """Hash of the given source files. Persisted results are only restored into
-    the code that computed them. None when a file cannot be read: unknown code
-    never matches, so nothing is restored as if it did."""
+_CONST_TYPES = (bool, int, float, complex, str, bytes, type(None))
+
+
+def _is_const(x) -> bool:
+    """Plain data: numbers, strings, and tuples/lists/sets/dicts of them."""
+    if isinstance(x, _CONST_TYPES):
+        return True
+    if isinstance(x, dict):
+        return all(_is_const(k) and _is_const(v) for k, v in x.items())
+    return isinstance(x, (tuple, list, frozenset, set)) and all(_is_const(v) for v in x)
+
+
+def _canon(x):
+    """x with every set replaced by a sorted tuple. Python 3.10 (which the
+    Dockerfile still accepts) marshals a set of strings in hash order, which
+    changes with PYTHONHASHSEED, so the same code would fingerprint
+    differently in every process; 3.12 and later sort."""
+    if isinstance(x, types.CodeType):
+        return _norm_code(x)
+    if isinstance(x, (set, frozenset)):
+        return ('<set>',) + tuple(sorted((_canon(v) for v in x), key=repr))
+    if isinstance(x, tuple):
+        return tuple(_canon(v) for v in x)
+    if isinstance(x, list):
+        return [_canon(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _canon(v) for k, v in x.items()}
+    return x
+
+
+def _norm_code(co: types.CodeType) -> types.CodeType:
+    """The code object as it runs, minus what is not code: the file it was
+    loaded from (an install path), and set constants in hash order (_canon).
+    Nested code objects (closures, comprehensions) too. Only ever hashed,
+    never executed."""
+    return co.replace(co_filename='', co_consts=tuple(_canon(c) for c in co.co_consts))
+
+
+def _feed(h, name: str, obj, modname: str, depth: int = 0):
+    if isinstance(obj, (staticmethod, classmethod)):
+        obj = obj.__func__
+    if isinstance(obj, property):
+        for k, f in (('get', obj.fget), ('set', obj.fset), ('del', obj.fdel)):
+            if f is not None:
+                _feed(h, name + '.' + k, f, modname, depth)
+    elif isinstance(obj, types.FunctionType):
+        if obj.__module__ != modname:
+            return  # imported: fingerprinted with its own module
+        h.update(name.encode() + b'\0')
+        h.update(marshal.dumps((_norm_code(obj.__code__), _canon(obj.__defaults__), _canon(obj.__kwdefaults__))))
+    elif isinstance(obj, type):
+        if obj.__module__ != modname or depth > 3:
+            return
+        h.update(b'class ' + name.encode() + b'\0')
+        for k in sorted(vars(obj)):
+            _feed(h, name + '.' + k, vars(obj)[k], modname, depth + 1)
+    elif _is_const(obj):
+        h.update(name.encode() + b'=' + marshal.dumps(_canon(obj)))
+
+
+def code_fingerprint(*namespaces) -> Optional[str]:
+    """Fingerprint of the code that is RUNNING: the marshalled code objects of
+    every function and class defined in the given module namespaces (a
+    module's __dict__, or globals() from inside it), with their defaults, and
+    every module-level constant (plain data: numbers, strings, containers of
+    them, as they are when the call is made). Persisted results are only
+    restored into the code that computed them.
+
+    Why not a hash of the .py file: Python may execute a timestamp-valid .pyc
+    compiled from different source, and the file hash then vouches for code
+    that is not running. Imported names count with the module that defines
+    them, which must be passed too. Objects that are not plain data (the
+    logger, an OcvCurve instance) are left out; they are built by fingerprinted
+    code from fingerprinted constants.
+
+    Call it at the END of the module, once everything is defined. None when
+    anything cannot be fingerprinted: unknown code never matches, so nothing
+    is restored as if it did. The marshal format depends on the Python
+    version, so an interpreter upgrade also discards saved state."""
     h = hashlib.sha1()
     try:
-        for fn in files:
-            with open(fn, 'rb') as f:
-                h.update(f.read())
-    except OSError:
+        for ns in namespaces:
+            modname = ns['__name__']
+            h.update(b'module ' + modname.encode() + b'\0')
+            for name in sorted(ns):
+                if not name.startswith('__') and name != 'CODE_FINGERPRINT':
+                    _feed(h, name, ns[name], modname)
+    except Exception:
         return None
     return h.hexdigest()[:16]
-
-
-COMMON_FILE = __file__
 
 
 def chemistry_step(oob_since: Optional[float], oob_n: int, t: float, finite_mv: Sequence[float],

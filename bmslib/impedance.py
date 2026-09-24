@@ -76,9 +76,9 @@ import math
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, COMMON_FILE, LFP_MV_HI, LFP_MV_LO,
-                                     chemistry_step, finite as _finite, fmt_t as _fmt_t, median,
-                                     source_fingerprint)
+from bmslib import estimator_common
+from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, LFP_MV_HI, LFP_MV_LO,
+                                     chemistry_step, finite as _finite, fmt_t as _fmt_t, median)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -143,17 +143,6 @@ SUMMARY_PERIOD_S = 3600.0  # info-level summary of what the gates did
 
 # --- persistence (get_state / restore) ---
 STATE_VERSION = 1
-
-
-def _code_fingerprint() -> Optional[str]:
-    """Hash of this module's source and the shared helpers it uses. Accepted
-    windows are only restored into the code that computed them: after an
-    upgrade that changed any gate or the fit, old windows would mix two
-    definitions of R in one median."""
-    return source_fingerprint(__file__, COMMON_FILE)
-
-
-CODE_FINGERPRINT = _code_fingerprint()
 
 
 def noise_std(xs: Sequence[float]) -> Optional[float]:
@@ -846,3 +835,10 @@ class CellResistanceEstimator:
         self.counts.clear()
         self.cell_reasons.clear()
         self.n_dropped = 0
+
+
+# Accepted windows are only restored into the code that computed them: after an
+# upgrade that changed any gate or the fit, old windows would mix two
+# definitions of R in one median. Computed last, over the code that actually
+# runs, this module's and the shared helpers' (estimator_common.code_fingerprint).
+CODE_FINGERPRINT = estimator_common.code_fingerprint(globals(), vars(estimator_common))
