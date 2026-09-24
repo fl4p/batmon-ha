@@ -648,6 +648,18 @@ def test_sampler_fetches_voltages_every_sample_only_when_enabled():
     assert all(r[3] == (3300.0,) * 16 for r in rows)
 
 
+def test_sampler_passes_the_capacity_that_bounds_the_current():
+    """The input bound is only as good as the capacity it gets in the real call
+    path: the `capacity:` option, else what the BMS reports."""
+    seen = []
+    for kw, want in (({}, None), ({'design_capacity': 280.0}, 280.0)):
+        s, _ = _run_sampler(1, impedance_estimator=True, **kw)
+        orig = s.impedance.add
+        s.impedance.add = lambda *a, **k: (seen.append(k.get('capacity')), orig(*a, **k))[1]
+        asyncio.run(s())
+        assert seen[-1] == want or (want is None and math.isnan(seen[-1]))  # the fake BMS reports none
+
+
 def test_sampler_skips_virtual_bms():
     class _Group(_Bms):
         is_virtual = True
@@ -699,6 +711,50 @@ def test_real_daly_capture_survives_the_glitch_and_publishes_a_plausible_value()
 def test_real_daly_capture_with_the_current_sign_flipped_publishes_nothing():
     est, published = _run_real(-1)
     assert published == [] and not est.windows
+
+
+# ------------------------------------------------------------ decode glitch in the current
+
+def test_an_impossible_current_is_no_pair():
+    est = imp.CellResistanceEstimator('g')
+    est.add(T0, 10.0, [3300] * 4, 60.0)
+    est.add(T0 + 1, 2147483.136, [3300] * 4, 60.0)  # ~2^31 mA, seen in real JK telemetry
+    est.add(T0 + 2, 12.0, [3301] * 4, 60.0)
+    rows = list(est._rows) + [est._bin.row()]
+    assert est.n_i_rejected == 1 and [r[1] for r in rows] == [-10.0, -12.0]
+    assert est.q_i == pytest.approx(2.0)  # learnt from the real neighbours only
+    # the bound follows a known capacity: 655.35 A is a current for no 100 Ah pack
+    est = imp.CellResistanceEstimator('g')
+    est.add(T0, 655.35, [3300] * 4, 60.0, capacity=100.0)
+    est.add(T0 + 1, 655.35, [3300] * 4, 60.0)
+    assert est.n_i_rejected == 1
+
+
+def _glitch_every(rows, every):
+    """Daly: a current word read as 0 decodes to (0 - 30000) / 10 = -3000 A."""
+    return [(t, (-3000.0 if k % every == 7 else i), v, soc) for k, (t, i, v, soc) in enumerate(rows)]
+
+
+def test_glitches_are_dropped_and_the_estimate_is_unchanged():
+    clean, pub_clean = run(trace(n=3600))
+    for every in (600, 150, 30):
+        est, pub = run(_glitch_every(trace(n=3600), every))
+        assert est.n_i_rejected == len(range(7, 3600, every))
+        assert len(pub) == len(pub_clean) and est.value == pytest.approx(clean.value, rel=1e-3)
+
+
+def test_calibration_without_the_current_bound_the_glitches_cost_the_estimate(monkeypatch):
+    """Honest about the harm: the fit gates already reject a window with a
+    glitch in it, so without the bound the estimator does not publish a wrong
+    value, it loses windows -- 42 published become 31 at one glitch per 10
+    minutes and none at one per 2.5 minutes."""
+    monkeypatch.setattr(imp, 'I_MAX_ABS_A', math.inf)
+    monkeypatch.setattr(imp, 'I_MAX_C_RATE', math.inf)
+    _, pub_clean = run(trace(n=3600))
+    est, pub = run(_glitch_every(trace(n=3600), 600))
+    assert len(pub) < 0.8 * len(pub_clean) and est.value == pytest.approx(R_MEDIAN, rel=0.05)
+    est, pub = run(_glitch_every(trace(n=3600), 150))
+    assert pub == [] and est.value is None
 
 
 # ------------------------------------------------------------ persistence

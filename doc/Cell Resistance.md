@@ -40,6 +40,10 @@ These gates were tuned on large packs. A small pack that never draws 8 A steps w
 purpose: no value is better than a wrong one. The log says once per hour how many windows were evaluated and why they
 were rejected.
 
+A sample with a current no pack can carry is left out too: more than 5× the capacity (the device's `capacity:` option,
+else what the BMS reports), never more than 1000 A. That is a decode glitch, like the 2 147 483 A (2³¹ mA) seen from a
+JK BMS.
+
 A sample with any cell outside 2.5–3.7 V is left out (a garbled BLE frame, a runner cell at the top of a charge). The
 estimator switches itself off for a BMS only when the median cell voltage stays outside that band for 10 minutes,
 because the gates only hold for LiFePO4. The log says so once, as a warning.

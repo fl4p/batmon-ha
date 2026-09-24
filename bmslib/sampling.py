@@ -237,6 +237,10 @@ class BmsSampler:
 
         # self.power_stats = EWM(span=120, std_regularisation=0.1)
 
+        # The per-device `capacity:` option [Ah] or None; the estimators fall
+        # back to the capacity the BMS reports.
+        self._design_capacity = design_capacity
+
         # Experimental cell-resistance estimator (impedance_estimator, off by
         # default). Only for real packs: a group's current and cell list are
         # aggregates of its members, which are estimated on their own.
@@ -258,7 +262,7 @@ class BmsSampler:
             self.qmax = QmaxEstimator(bms.name, design_capacity=design_capacity)
             logger.info('%s: Qmax/SoH estimator enabled (experimental), design capacity %s', bms.name,
                         ('%.1f Ah' % self.qmax.design_capacity) if self.qmax.design_capacity else
-                        'not set (the BMS-reported capacity is used)')
+                        'not set (the BMS-reported capacity is used; without one nothing is published)')
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None
@@ -766,7 +770,7 @@ class BmsSampler:
         temp = sorted(temps)[len(temps) // 2] if temps else None  # BMS probes; None if none, never a default
         try:
             r = self.impedance.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp,
-                                   pack_temp=self._pack_temp)
+                                   pack_temp=self._pack_temp, capacity=self._design_capacity or sample.capacity)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: cell resistance estimator failed, disabled: %s', self.bms.name, summarize_exc(e),

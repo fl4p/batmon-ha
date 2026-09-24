@@ -47,6 +47,9 @@ prototype produced a plausible wrong number without it:
    MAX_MEDIAN_DT_S is unevaluable.
  * Missing inputs are never replaced by plausible values: no SoC means no DOD
    tag and a failed drift gate; no temperature means temp None.
+ * A current no pack can carry (a decode glitch such as 2^31 mA; above
+   I_MAX_C_RATE x capacity or I_MAX_ABS_A, estimator_common) makes the sample
+   no pair: it never reaches a bin, a window or the learnt quantisation.
 
 Each accepted window is tagged with DOD, the median BMS temperature probe
 (`temp`) and, when pack_temp_estimator runs, the median RC pack-temperature
@@ -77,8 +80,9 @@ from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bmslib import estimator_common
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, LFP_MV_HI, LFP_MV_LO,
-                                     chemistry_step, finite as _finite, fmt_t as _fmt_t, median)
+from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
+                                     LFP_MV_LO, chemistry_step, current_ceiling, finite as _finite,
+                                     fmt_t as _fmt_t, median)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -536,6 +540,7 @@ class CellResistanceEstimator:
         self.counts = Counter()  # window outcomes since the last summary
         self.cell_reasons = Counter()
         self.n_dropped = 0  # samples with a cell outside the LFP band, since the last summary
+        self.n_i_rejected = 0  # samples with an impossible current, since the last summary
         self._t_summary: Optional[float] = None
         self._announced = False
         self._disable_persistent = False  # only a chemistry verdict survives a restart
@@ -585,7 +590,7 @@ class CellResistanceEstimator:
                 prev_i=self._prev_i, prev_u=None if self._prev_u is None else list(self._prev_u),
                 oob_since=self._oob_since, oob_n=self._oob_n,
                 counts=dict(self.counts), cell_reasons=dict(self.cell_reasons), n_dropped=self.n_dropped,
-                t_summary=self._t_summary, announced=self._announced,
+                n_i_rejected=self.n_i_rejected, t_summary=self._t_summary, announced=self._announced,
             )
         return st
 
@@ -685,6 +690,7 @@ class CellResistanceEstimator:
             self.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
             self.cell_reasons.update({str(k): int(v) for k, v in (st.get('cell_reasons') or {}).items()})
             self.n_dropped = int(st.get('n_dropped') or 0)
+            self.n_i_rejected = int(st.get('n_i_rejected') or 0)
             self._t_summary = opt_fin(st.get('t_summary'), 't_summary')
         self._announced = bool(st.get('announced')) or len(self.windows) >= PUBLISH_MIN_WINDOWS
 
@@ -738,14 +744,15 @@ class CellResistanceEstimator:
 
     def add(self, t: float, current: float, voltages: Optional[List[float]],
             soc: Optional[float] = None, temp: Optional[float] = None,
-            pack_temp: Optional[float] = None) -> Optional[float]:
+            pack_temp: Optional[float] = None, capacity: Optional[float] = None) -> Optional[float]:
         """Feed one sampler iteration.
 
         t: sample timestamp [s]; current: [A], BmsSample sign (positive =
         discharging) before invert_current; voltages: cell voltages [mV] from
         the same iteration, or None if they could not be fetched; soc [%],
         temp (BMS probes) and pack_temp (RC estimate) [degC] may be None/NaN
-        when unknown.
+        when unknown; capacity [Ah] (the option, else the BMS's) only bounds
+        the plausible current, None/NaN when unknown.
 
         Returns the new rolling value when this call accepted a window and at
         least PUBLISH_MIN_WINDOWS are in, else None -- so a caller that
@@ -768,6 +775,9 @@ class CellResistanceEstimator:
                     return None
                 vt = None  # dropped: not a pair, but time still moves on
         i_chg = -float(current) if _finite(current) else math.nan
+        if i_chg == i_chg and abs(i_chg) > current_ceiling(capacity, I_MAX_C_RATE, I_MAX_ABS_A):
+            self.n_i_rejected += 1  # a decode glitch, not a current: no pair
+            i_chg = math.nan
         use = vt is not None and i_chg == i_chg and any(v == v for v in vt)
         if use:
             self._learn_quantisation(i_chg, vt)
@@ -821,20 +831,23 @@ class CellResistanceEstimator:
 
     def _log_summary(self):
         n = sum(self.counts.values())
-        if n or self.n_dropped:
+        if n or self.n_dropped or self.n_i_rejected:
             rej = ', '.join('%s=%d' % kv for kv in sorted(self.counts.items()) if kv[0] != 'accepted')
             cells = ', '.join('%s=%d' % kv for kv in self.cell_reasons.most_common(3))
             v = self.value
-            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s)%s, estimate %s',
+            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s)%s%s, estimate %s',
                         self.name, n, self.counts['accepted'], rej or 'none rejected',
                         ('; cells: ' + cells) if cells else '',
                         ('; %d samples dropped with a cell outside %.0f..%.0f mV'
                          % (self.n_dropped, LFP_MV_LO, LFP_MV_HI)) if self.n_dropped else '',
+                        ('; %d samples dropped with an impossible current' % self.n_i_rejected)
+                        if self.n_i_rejected else '',
                         ('%.3f mOhm' % v) if v is not None else
                         'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS))
         self.counts.clear()
         self.cell_reasons.clear()
         self.n_dropped = 0
+        self.n_i_rejected = 0
 
 
 # Accepted windows are only restored into the code that computed them: after an

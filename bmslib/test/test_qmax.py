@@ -219,11 +219,80 @@ def test_nothing_is_published_before_the_minimum_and_only_on_a_new_segment():
     assert n_seg == 6
 
 
-def test_without_a_capacity_qmax_is_published_and_soh_is_not():
-    est, pub = run(full_cycles().rows, cap=None)
-    assert pub and pub[-1]['soh'] is None and pub[-1]['capacity'] is None
-    assert pub[-1]['plausibility_checked'] is False
-    assert pub[-1]['qmax'] == pytest.approx(min(CAPS), rel=0.01)
+def _wrong_shunt():
+    """The current reported at 30 % of the truth (a wrong shunt setting)."""
+    return [(t, 0.3 * i, v, temp) for t, i, v, temp in full_cycles().rows]
+
+
+def test_without_a_capacity_nothing_is_published():
+    """No `capacity:` option and none from the BMS: the plausibility window is
+    unevaluable, and unevaluable is not a pass. The sign and slope gates
+    cannot see a wrong current scale."""
+    for rows in (full_cycles().rows, _wrong_shunt()):
+        est, pub = run(rows, cap=None)
+        assert pub == [] and not est.segments
+        assert est.pair_reasons['no_capacity'] >= 4 and 'accepted' not in est.pair_reasons
+
+
+def test_calibration_without_the_capacity_requirement_a_wrong_scale_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)
+    est, pub = run(_wrong_shunt(), cap=None)
+    assert pub and pub[-1]['qmax'] < 0.35 * 98.0  # 29 Ah for a 98 Ah cell
+    assert pub[-1]['soh'] is None and pub[-1]['plausibility_checked'] is False
+
+
+# ================================================================ known-bad: decode glitch in the current
+
+def test_an_impossible_current_is_never_integrated_and_breaks_the_epoch():
+    """The reviewer's case: 2 147 483.136 A (about 2^31 mA, seen in real JK
+    telemetry) between two 15 s samples, no capacity known. It used to add
+    8 948 Ah to the count with the epoch intact."""
+    for cap in (None, 100.0):
+        est = q.QmaxEstimator('g', design_capacity=cap, curve=SYNTH)
+        est.add(T0, 0.0, [3300], temp=25)
+        est.add(T0 + 15, 2147483.136, [3300], temp=25)
+        est.add(T0 + 30, 0.0, [3300], temp=25)
+        assert est.q_ah == 0.0 and est.epoch == 1 and est.counts['current_implausible'] == 1
+    # the bound follows a known capacity: 655.35 A (0xFFFF x 10 mA) is no current for 100 Ah
+    est = q.QmaxEstimator('g', design_capacity=100.0, curve=SYNTH)
+    for k, i in enumerate((10.0, 655.35, 10.0)):
+        est.add(T0 + 10 * k, i, None)
+    assert est.epoch == 1 and est.q_ah == pytest.approx(-20.0 / 360)
+
+
+def _glitched_current(rows, every=2):
+    """Daly's current word is (raw - 30000) / 10 A: a frame read as 0xFFFF
+    gives +3553.5 A, one read as 0 gives -3000 A. One such sample in the middle
+    of every load, in the direction that adds to it (+10 % of 88 Ah each)."""
+    out = list(rows)
+    k, n = 0, len(rows)
+    while k < n:
+        i = rows[k][1]
+        if abs(i) > 30:
+            j = k
+            while j < n and abs(rows[j][1]) > 30:
+                j += 1
+            m = (k + j) // 2
+            t, _, v, temp = out[m]
+            out[m] = (t, 3553.5 if i > 0 else -3000.0, v, temp)
+            k = j
+        k += 1
+    return out
+
+
+def test_a_glitch_in_every_load_publishes_nothing_wrong():
+    est, pub = run(_glitched_current(full_cycles(n=3).rows))
+    assert est.counts['current_implausible'] == 6
+    assert pub == [] and not est.segments  # every segment spans a glitch
+
+
+def test_calibration_without_the_current_bound_the_glitches_are_published(monkeypatch):
+    monkeypatch.setattr(q, 'I_MAX_ABS_A', math.inf)
+    monkeypatch.setattr(q, 'I_MAX_C_RATE', math.inf)
+    est, pub = run(_glitched_current(full_cycles(n=3).rows))
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] / 98.0 - 1 > 0.08  # plausible (1.08x of 100 Ah), and wrong
+    assert pub[-1]['plausibility_checked']
 
 
 def test_the_bms_reported_capacity_is_used_when_no_option_is_set():
@@ -448,15 +517,19 @@ def test_calibration_a_default_temperature_publishes_a_wrong_value():
 # ================================================================ known-bad: current sign
 
 def test_wrong_current_sign_publishes_nothing():
-    est, pub = run(full_cycles(sign=-1.0).rows, cap=None)  # no capacity: the sign gate alone
+    est, pub = run(full_cycles(sign=-1.0).rows)
     assert pub == [] and not est.segments and est.pair_reasons['sign'] >= 4
     assert 'accepted' not in est.pair_reasons
 
 
-def test_calibration_without_the_sign_check_a_negative_qmax_is_published(monkeypatch):
+def test_calibration_without_the_sign_check_the_plausibility_window_still_rejects(monkeypatch):
+    """Documented redundancy, not a demonstration of harm: a flipped sign makes
+    every cell's Qmax negative, below 0.4 x capacity, and a capacity is now
+    required. The sign gate stays for its log reason ('sign', not
+    'implausible'), which names the cause."""
     monkeypatch.setattr(q, '_same_sign', lambda dq, dsoc: True)
-    est, pub = run(full_cycles(sign=-1.0).rows, cap=None)
-    assert pub and pub[-1]['qmax'] < 0
+    est, pub = run(full_cycles(sign=-1.0).rows)
+    assert pub == [] and est.pair_reasons['implausible'] >= 4 and 'sign' not in est.pair_reasons
 
 
 # ================================================================ known-bad: chemistry
@@ -488,11 +561,21 @@ def test_a_non_lfp_pack_disables_the_estimator(caplog):
     assert len([r for r in caplog.records if 'disabled' in r.getMessage()]) == 1
 
 
-def test_calibration_without_the_band_an_nmc_pack_gets_an_absurd_qmax(monkeypatch):
+def test_calibration_without_the_band_the_plausibility_window_still_rejects(monkeypatch):
+    """Documented redundancy, not a demonstration of harm. Without the band the
+    NMC anchors pair, and 6 % of the pack read as ~90 % of an LFP curve gives
+    ~7 Ah per cell -- which the plausibility window rejects, and a capacity is
+    now required. An NMC pack cannot do better on an LFP curve: only its bottom
+    ~10 % rests inside the curve's voltage range, so a swing there can never
+    look like >= 40 % of its capacity. The band stays because it switches the
+    estimator off (no voltage fetches) and says why."""
     monkeypatch.setattr(q, 'LFP_MV_HI', math.inf)
-    est, pub = run(_nmc_day().rows, cap=None)
-    assert est.segments, 'scenario is harmless'
-    assert seg_q(est)[0] < 0.2 * 98.0  # 6 % of the pack read as ~90 % of an LFP curve
+    est, pub = run(_nmc_day().rows)
+    assert pub == [] and not est.segments and est.enabled
+    assert est.pair_reasons['implausible'] >= 6 and 'accepted' not in est.pair_reasons
+    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)
+    est, _ = run(_nmc_day().rows, cap=None)  # both guards off: what they stop together
+    assert seg_q(est)[0] < 0.2 * 98.0
 
 
 def test_a_single_out_of_band_glitch_does_not_disable():
@@ -589,13 +672,12 @@ def test_a_segment_longer_than_the_limit_is_rejected():
     assert not est.segments and est.pair_reasons['span'] == 1
 
 
-def test_calibration_without_the_span_limit_the_offset_drift_is_published(monkeypatch):
-    """No capacity known, so the plausibility window (which would also catch
-    this one) does not apply: only the span limit stands in the way."""
+def test_calibration_without_the_span_limit_the_plausibility_window_still_rejects(monkeypatch):
+    """Documented redundancy: 11 days x 0.3 A cancel 79 of the 88 Ah, ~10 Ah,
+    which the plausibility window rejects with the capacity kept."""
     monkeypatch.setattr(q, 'MAX_SEGMENT_S', math.inf)
-    est, _ = run(_long_segment(11), cap=None)
-    assert est.segments, 'scenario is harmless'
-    assert seg_q(est)[0] < 0.2 * 98.0  # 11 days x 0.3 A = 79 of the 88 Ah cancelled by phantom charge
+    est, _ = run(_long_segment(11))
+    assert not est.segments and est.pair_reasons['implausible'] == 1
 
 
 # ================================================================ known-bad: implausible ratio
@@ -603,15 +685,13 @@ def test_calibration_without_the_span_limit_the_offset_drift_is_published(monkey
 def test_an_implausible_qmax_is_rejected():
     """A current reported at 30 % of the truth (a wrong shunt setting):
     30 Ah for a 100 Ah pack."""
-    rows = [(t, 0.3 * i, v, temp) for t, i, v, temp in full_cycles().rows]
-    est, pub = run(rows)
+    est, pub = run(_wrong_shunt())
     assert pub == [] and est.pair_reasons['implausible'] >= 4 and 'accepted' not in est.pair_reasons
 
 
 def test_calibration_without_the_plausibility_window_it_is_published(monkeypatch):
     monkeypatch.setattr(q, 'PLAUSIBLE_REL', (0.0, math.inf))
-    rows = [(t, 0.3 * i, v, temp) for t, i, v, temp in full_cycles().rows]
-    est, pub = run(rows)
+    est, pub = run(_wrong_shunt())
     assert pub and pub[-1]['qmax'] < 35.0
 
 
@@ -1000,7 +1080,8 @@ def test_discovery_declares_qmax_and_soh_only_when_enabled():
     assert "homeassistant/sensor/test_q/_soc_soh/config" not in c.published  # not the BMS's own SoH
 
 
-def test_publish_qmax_leaves_out_an_unknown_soh():
+def test_publish_qmax_leaves_out_an_unknown_soh(monkeypatch):
+    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)  # the only way to get a result without a capacity
     est, pub = run(full_cycles().rows, cap=None)
     c = _Client()
     publish_qmax(c, 'dev', pub[-1])

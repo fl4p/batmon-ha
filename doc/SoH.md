@@ -15,7 +15,8 @@ and the charge that flowed in between is counted from the BMS current. Then, per
 
 The pack's Qmax is that of the weakest cell: in a series string the cell that is empty first ends the discharge. SoH is
 Qmax against the device's `capacity:` option (Ah, nameplate), or, if that is not set, the capacity the BMS reports.
-Without either only Qmax is published. The `Qmax (est.)` sensor carries attributes: how many segments the value is
+Without either nothing is published: the capacity is also what the result is checked against (see below), and a check
+that cannot be made does not count as passed. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 capacity used and where it came from.
 
@@ -46,8 +47,11 @@ error is several % of SoC, so a rest there is unusable rather than guessed.
 
 A **segment** between two rests is accepted when every cell has a SoC at both ends, every cell's SoC moved by at least
 60 %, the charge and the SoC moved the same way, no gap in the current record was longer than 5 minutes, at least 95 %
-of the time was covered by samples at most 60 s apart, it is no longer than 10 days, and, with a known capacity, every
-cell's Qmax is within 0.4–1.6× of it. Segments do not overlap.
+of the time was covered by samples at most 60 s apart, it is no longer than 10 days, and every
+cell's Qmax is within 0.4–1.6× of the capacity. Segments do not overlap.
+
+A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
+(2³¹ mA) seen from a JK BMS: it is not counted, and it ends the open segment like a gap in the record.
 
 The sensors show the median of the last 5 accepted segments of the past year, once there are 3. Nothing is published
 between accepted segments, and the entities expire a year after the last one.

@@ -27,6 +27,20 @@ LFP_MV_LO, LFP_MV_HI = 2500.0, 3700.0
 CHEM_PERSIST_S = 600.0
 CHEM_PERSIST_N = 30
 
+# Input plausibility of the pack current: a reading above this is a decode
+# glitch, not a current. Seen in real JK telemetry: 2 147 483.136 A (about
+# 2^31 mA), which a trapezoid between 15 s samples turns into 8 948 Ah. Bound:
+# I_MAX_C_RATE times the capacity when one is known, never above I_MAX_ABS_A.
+# LFP energy cells like those in these packs are specified for about 1C
+# continuous; 5C leaves margin for a small pack behind a big inverter. 1000 A
+# is above the rating of the BMSes the add-on reads (a few hundred amps). A
+# real current above the bound costs a segment or a resistance pair, never a
+# wrong number, so the bound errs high. What it cannot catch: a glitch below
+# it, worth at most 5C x one sample interval (0.14 % of C at the default 1 s,
+# 2 % at 15 s).
+I_MAX_C_RATE = 5.0
+I_MAX_ABS_A = 1000.0
+
 
 def finite(x) -> TypeGuard[float]:
     return isinstance(x, (int, float)) and math.isfinite(x)
@@ -34,6 +48,16 @@ def finite(x) -> TypeGuard[float]:
 
 def fmt_t(t: float) -> str:
     return time.strftime('%Y-%m-%d %H:%M', time.localtime(t))
+
+
+def current_ceiling(capacity: Optional[float], c_rate: float = I_MAX_C_RATE,
+                    abs_max: float = I_MAX_ABS_A) -> float:
+    """Largest |current| [A] taken as a measurement: min(abs_max, c_rate *
+    capacity), abs_max without a usable capacity. The caller passes its own
+    module's constants (as for chemistry_step)."""
+    if finite(capacity) and capacity > 0:
+        return min(abs_max, c_rate * capacity)
+    return abs_max
 
 
 def median(xs: Sequence[float]) -> float:

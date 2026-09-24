@@ -46,8 +46,11 @@ plausible wrong number without it:
 
 Coulomb counting: the BMS current (BmsSample sign, before invert_current) is
 integrated with the trapezoid rule at whatever cadence it arrives. A gap
-longer than MAX_GAP_S, or a clock step back, invalidates the open segment
-(anchors on the far side of it cannot be paired), but keeps the anchors. The
+longer than MAX_GAP_S, a clock step back, or a current no pack can carry (a
+decode glitch, above I_MAX_C_RATE x capacity or I_MAX_ABS_A,
+estimator_common) invalidates the open segment (anchors on the far side of it
+cannot be paired), but keeps the anchors. The glitch itself is never
+integrated. The
 add-on samples at a fixed period, so the prototype's event-downsampling bias
 (dense samples under load, sparse while slowly charging, which undercounted
 charge segments) does not arise; outages still do, hence the gap and coverage
@@ -55,8 +58,11 @@ gates.
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
-every cell, rests >= 90 min, dQ and dSoC of the same sign, and, when a
-capacity is known, a plausible ratio to it.
+every cell, rests >= 90 min, dQ and dSoC of the same sign, and a plausible ratio to a known
+capacity. Without a capacity (neither the `capacity:` option nor one reported
+by the BMS) nothing is accepted: the plausibility check is then unevaluable,
+and it is the only one that catches a wrong current scale (a shunt setting
+off by 3x) or a glitch below the input bound.
 
 STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
 smoothed slope reaches 5 mV/% only between 0 and 11 % SoC. A relaxed LiFePO4
@@ -74,9 +80,9 @@ from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bmslib import estimator_common
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, LFP_MV_HI, LFP_MV_LO,
-                                     chemistry_step, finite, fmt_t, median, v_fin, v_int,
-                                     v_opt_fin)
+from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
+                                     LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, median, v_fin,
+                                     v_int, v_opt_fin)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -167,7 +173,11 @@ MAX_SEGMENT_S = 10 * 86400.0  # coulomb drift grows with time; the prototype pai
 
 # ---------------------------------------------------------------- segments
 MIN_DSOC = 60.0  # %, every cell
-# With a known capacity, every cell's Qmax must be within this ratio of it.
+# A capacity is required: without one the plausibility window below cannot be
+# evaluated, and an unevaluable check never counts as passed. (A switch only so
+# that a test can show what goes out without it.)
+REQUIRE_CAPACITY = True
+# Every cell's Qmax must be within this ratio of the capacity.
 # The prototype's window was 150-450 Ah for 280 Ah (0.54-1.6); the lower end is
 # widened so that a genuinely failing cell (SoH 50 %) is reported, not rejected.
 PLAUSIBLE_REL = (0.4, 1.6)
@@ -474,6 +484,16 @@ class QmaxEstimator:
             return None  # the BMS re-served the same measurement
         if finite(capacity) and capacity > 0:
             self.bms_capacity = float(capacity)
+        if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
+            # Not a current. Never integrated; and the charge around it is
+            # unknown (the true current at that instant was not measured), so
+            # it ends the epoch like a gap. _last_t/_last_i stay at the last
+            # good sample: the next one integrates from there, inside the new
+            # epoch and before any of its anchors, so that charge can only
+            # enter a segment that starts after it.
+            logger.debug('%s: Qmax: current %.6g A at %s is not a measurement, open segment invalidated',
+                         self.name, current, fmt_t(t))
+            return self._gap(t, 'current_implausible')
 
         i = -float(current)  # charge current
         new = None
@@ -544,8 +564,9 @@ class QmaxEstimator:
         new = self._end_rest() or new
         self.epoch += 1
         self.counts[why] += 1
-        logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
-                     self.name, why, t - (self._last_t or t))
+        if why != 'current_implausible':
+            logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
+                         self.name, why, t - (self._last_t or t))
         return new
 
     def _close_bin(self) -> Optional[Dict[str, Any]]:
@@ -703,7 +724,10 @@ class QmaxEstimator:
             return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
         qc = [100.0 * dq / d for d in dsoc]
         cap = b['cap']
-        if cap is not None and not all(PLAUSIBLE_REL[0] * cap <= q <= PLAUSIBLE_REL[1] * cap for q in qc):
+        if cap is None:
+            if REQUIRE_CAPACITY:
+                return None, 'no_capacity'  # the plausibility check is unevaluable
+        elif not all(PLAUSIBLE_REL[0] * cap <= q <= PLAUSIBLE_REL[1] * cap for q in qc):
             return None, 'implausible'
         k = min(range(len(qc)), key=lambda c: qc[c])
         med = median(qc)
