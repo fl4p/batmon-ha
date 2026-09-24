@@ -230,13 +230,15 @@ def _fn(src, name='f'):
     return ns[name]
 
 
-def test_code_and_constants_count_and_other_objects_do_not():
+def test_code_and_constants_count_and_the_logger_does_not():
+    import logging
     base = ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.5))
     assert base is not None
     assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 2\n'), K=1.5)) != base
     assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.6)) != base
     assert ec.code_fingerprint(_ns(f=_fn('def f(x=3):\n    return x + 1\n'), K=1.5)) != base  # defaults
-    assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.5, log=object())) == base
+    assert ec.code_fingerprint(_ns(f=_fn('def f(x):\n    return x + 1\n'), K=1.5,
+                                   log=logging.getLogger('t'))) == base
 
 
 def test_a_locked_method_is_fingerprinted_by_its_body():
@@ -264,3 +266,81 @@ def test_the_estimators_fingerprint_their_code_and_the_shared_helpers():
     assert q.CODE_FINGERPRINT and imp.CODE_FINGERPRINT and q.CODE_FINGERPRINT != imp.CODE_FINGERPRINT
     assert q.CODE_FINGERPRINT == ec.code_fingerprint(vars(q), vars(ec))
     assert ec.code_fingerprint(vars(q)) != q.CODE_FINGERPRINT  # the shared helpers are in it
+
+
+# ---------------------------------------------------------------- configured objects (third review)
+
+def _curve_fp(monkeypatch, curve):
+    import bmslib.qmax as q
+    monkeypatch.setattr(q, 'DEFAULT_CURVE', curve)
+    return ec.code_fingerprint(vars(q), vars(ec))
+
+
+CURVE_MUTATIONS = [
+    ('arguments', lambda q: q.OcvCurve(sigma=1.0, min_slope=1.0)),
+    ('slope gate', lambda q: q.OcvCurve(min_slope=1.0)),
+    ('smoothing sigma', lambda q: q.OcvCurve(sigma=2.0)),
+    ('data', lambda q: q.OcvCurve([v + 20.0 for v in q.OCV_RAW_MV])),
+    ('one value', lambda q: q.OcvCurve((3326.29, 3326.28) + q.OCV_RAW_MV[2:])),
+]
+
+
+@pytest.mark.parametrize('what,make', CURVE_MUTATIONS, ids=[m[0] for m in CURVE_MUTATIONS])
+def test_the_curve_the_module_runs_with_is_fingerprinted(monkeypatch, what, make):
+    """qmax.DEFAULT_CURVE = OcvCurve(): its arguments are not code and were
+    left out (third review), so OcvCurve(sigma=1.0, min_slope=1.0) or a
+    shifted table kept the fingerprint and old anchors restored under another
+    curve. The same curve built again keeps it."""
+    import bmslib.qmax as q
+    assert _curve_fp(monkeypatch, q.OcvCurve()) == q.CODE_FINGERPRINT
+    assert _curve_fp(monkeypatch, make(q)) not in (q.CODE_FINGERPRINT, None)
+
+
+def test_calibration_a_curve_that_describes_nothing_keeps_the_fingerprint(monkeypatch):
+    """Known-bad for the object rule: without what the curve says about
+    itself, a curve with another smoothing and slope gate fingerprints as the
+    shipped one -- the review's measurement at cab71f4."""
+    import bmslib.qmax as q
+    monkeypatch.setattr(q.OcvCurve, 'fingerprint_data', lambda self: ())
+    base = _curve_fp(monkeypatch, q.OcvCurve())
+    assert _curve_fp(monkeypatch, q.OcvCurve(sigma=1.0, min_slope=1.0)) == base
+    assert _curve_fp(monkeypatch, q.OcvCurve([v + 20.0 for v in q.OCV_RAW_MV])) == base
+
+
+@pytest.mark.parametrize('new', ['DEFAULT_CURVE = OcvCurve(sigma=1.0, min_slope=1.0)',
+                                 'DEFAULT_CURVE = OcvCurve([v + 20.0 for v in OCV_RAW_MV])'])
+def test_an_edited_default_curve_changes_the_fingerprint_of_the_real_module(tmp_path, new):
+    """The same, as an edit of qmax.py in a fresh process (the review's
+    mutation)."""
+    pkg = _copy_bmslib(tmp_path)
+    src = pkg / 'qmax.py'
+    text = src.read_text()
+    old = 'DEFAULT_CURVE = OcvCurve()'
+    assert text.count(old) == 1
+    probe = 'import bmslib.qmax as m; print(m.CODE_FINGERPRINT)'
+    base, = _py(tmp_path, probe, '-B')
+    src.write_text(text.replace(old, new))
+    edited, = _py(tmp_path, probe, '-B')
+    assert base != 'None' and edited not in (base, 'None')
+
+
+def test_an_object_that_cannot_describe_itself_leaves_the_fingerprint_unknown():
+    """Any module-level object might configure behaviour. The logger and type
+    annotations are known to configure nothing; anything else without a
+    fingerprint_data() makes the fingerprint None, so state is never restored
+    into code that cannot be vouched for."""
+    import logging
+    from typing import Optional
+
+    class Configured:
+        def __init__(self, k):
+            self.k = k
+
+        def fingerprint_data(self):
+            return (self.k,)
+
+    base = ec.code_fingerprint(_ns(K=1.5))
+    assert ec.code_fingerprint(_ns(K=1.5, log=logging.getLogger('x'), Opt=Optional)) == base
+    assert ec.code_fingerprint(_ns(K=1.5, cfg=object())) is None
+    a, b = ec.code_fingerprint(_ns(K=1.5, cfg=Configured(1))), ec.code_fingerprint(_ns(K=1.5, cfg=Configured(2)))
+    assert None not in (a, b) and len({a, b, base}) == 3

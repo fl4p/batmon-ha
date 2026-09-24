@@ -354,9 +354,20 @@ class OcvCurve:
         if len(raw) < 3 or any(b > a for a, b in zip(raw, raw[1:])):
             raise ValueError('an OCV curve must be non-increasing in DOD')
         self.raw = raw
+        self.sigma = float(sigma)
         self.smooth = gaussian_smooth(raw, sigma)  # non-increasing again: a positive kernel keeps the order
         self.slope = gradient(self.smooth)  # mV per % DOD, <= 0
         self.min_slope = min_slope  # None: MIN_SLOPE_MV_PER_PCT at call time
+
+    def fingerprint_data(self):
+        """What makes this curve this curve, for the code fingerprint
+        (estimator_common): the data and parameters it was built with, and
+        the smoothed curve and slope that soc() inverts and gates on. The
+        tables are rounded to 1 nV, so that a last-bit difference of exp() in
+        another libm does not count as another curve; anything that moves
+        them measurably does."""
+        return (tuple(self.raw), self.sigma, self.min_slope,
+                tuple(round(v, 6) for v in self.smooth), tuple(round(v, 6) for v in self.slope))
 
     def soc(self, ocv: Optional[float]) -> Tuple[Optional[float], Optional[str]]:
         """(SoC %, None) or (None, reason): 'missing', 'off_curve' (outside the

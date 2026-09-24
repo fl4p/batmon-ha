@@ -7,6 +7,7 @@ Kept free of numpy on purpose: the add-on has none.
 """
 import functools
 import hashlib
+import logging
 import math
 import sys
 import time
@@ -92,9 +93,14 @@ def _is_const(x) -> bool:
     not as a constant: it can change while the module runs (a cache such as
     impedance._LAG_ORDER_CACHE), so its value at the moment of the call says
     nothing about the code. Configuration therefore lives in tuples."""
-    if isinstance(x, _SCALAR_TYPES):
+    if isinstance(x, _SCALAR_TYPES) or _is_builtin_type(x):
         return True
     return isinstance(x, (tuple, frozenset)) and all(_is_const(v) for v in x)
+
+
+def _is_builtin_type(x) -> bool:
+    """int, float, type(None), ...: as data (_SCALAR_TYPES) they are names."""
+    return isinstance(x, type) and x.__module__ == 'builtins'
 
 
 # Python 3.14 marks a code object whose co_consts[0] is the docstring. Masked
@@ -134,6 +140,8 @@ def _canon(x, doc=None):
                 tuple(_canon(c) for c in consts), x.co_names, x.co_varnames, x.co_freevars, x.co_cellvars)
     if isinstance(x, bool) or x is None or x is Ellipsis:
         return repr(x)
+    if _is_builtin_type(x):
+        return ('<type>', x.__qualname__)
     if isinstance(x, _SCALAR_TYPES):
         return (type(x).__name__, repr(x))  # float repr is exact; the tag keeps 1, 1.0 and '1' apart
     if isinstance(x, tuple):
@@ -174,8 +182,26 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
         for k in sorted(vars(obj)):
             if k not in _CLASS_SKIP:
                 _feed(h, name + '.' + k, vars(obj)[k], modname, depth + 1)
+    elif isinstance(obj, types.ModuleType):
+        return  # an imported module: fingerprinted when its namespace is passed too
     elif _is_const(obj):
         _put(h, 'const', name, _canon(obj))
+    elif isinstance(obj, (list, dict, set, bytearray)):
+        return  # state, not configuration (_is_const)
+    elif callable(getattr(obj, 'fingerprint_data', None)) and not isinstance(obj, type):
+        # A configured object, e.g. qmax.DEFAULT_CURVE = OcvCurve(...): its
+        # class's code is fingerprinted as a class, but the arguments it was
+        # built with are not code. It says what configures it.
+        _put(h, 'object', name, type(obj).__qualname__, _canon(obj.fingerprint_data()))
+    elif isinstance(obj, (logging.Logger, types.MemberDescriptorType, types.GetSetDescriptorType)) \
+            or type(obj).__module__ in ('typing', 'typing_extensions'):
+        # the logger, a class's __slots__ entries (the tuple itself counts),
+        # type annotations (Optional, Dict, ...): configure nothing
+        return
+    else:
+        # Anything else might configure behaviour, and what is not described
+        # cannot be vouched for: the fingerprint becomes None (never a match).
+        raise TypeError('cannot fingerprint module-level %s (%s)' % (name, type(obj).__name__))
 
 
 def code_fingerprint(*namespaces) -> Optional[str]:
@@ -187,18 +213,23 @@ def code_fingerprint(*namespaces) -> Optional[str]:
     them.
 
     What changes it: the bytecode of any function or method, their constants
-    and defaults, a module-level constant, a name, and the Python version (the
-    same bytecode is not the same program on another interpreter). What does
-    not: comments, docstrings, blank lines, where a block sits in the file (line
-    numbers), the install path, the hash seed, what else was imported, and
-    module-level lists, dicts and sets (state, see _is_const).
+    and defaults, a module-level constant, a name, a module-level object that
+    configures behaviour (what its fingerprint_data() returns: for
+    qmax.DEFAULT_CURVE the curve's data, its parameters and the tables built
+    from them), and the Python version (the same bytecode is not the same
+    program on another interpreter). What does not: comments, docstrings, blank
+    lines, where a block sits in the file (line numbers), the install path, the
+    hash seed, what else was imported, and module-level lists, dicts and sets
+    (state, see _is_const).
 
     Why not a hash of the .py file: Python may execute a timestamp-valid .pyc
     compiled from different source, and the file hash then vouches for code
     that is not running. Imported names count with the module that defines
-    them, which must be passed too. Objects that are not plain data (the
-    logger, an OcvCurve instance) are left out; they are built by fingerprinted
-    code from fingerprinted constants.
+    them, which must be passed too. Of the other module-level objects only the
+    logger and type annotations are left out; any other object without a
+    fingerprint_data() makes the fingerprint None. An object built by
+    fingerprinted code is not therefore fingerprinted: OcvCurve(sigma=1.0)
+    runs the same code as OcvCurve() and is another curve.
 
     Call it at the END of the module, once everything is defined. None when
     anything cannot be fingerprinted: unknown code never matches, so nothing

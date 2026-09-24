@@ -154,8 +154,9 @@ open rest and every rest and segment timed after that sample are dropped (logged
 blocking later segments until real time catches up. What lies before it is kept. A pack that the chemistry check switched off stays off after a restart.
 
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
-`bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV curve, every
-gate), or the Python version. Comments, docstrings, blank lines and where code sits in the file do not count, so an
+`bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV table, every
+gate), the built-in curve as built (its data, smoothing and slope gate, and the tables made from them), or the Python
+version. Comments, docstrings, blank lines and where code sits in the file do not count, so an
 update that only touches those keeps months of segments.
 
 ## Cost
