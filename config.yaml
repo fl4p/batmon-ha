@@ -102,7 +102,8 @@ schema:
       adapter: "str?"
       algorithm: "str?"
       current_calibration: "float?"
-      # design (nameplate) capacity in Ah, the SoH denominator of soh_estimator
+      # design (nameplate) capacity in Ah: soh_estimator's reference, which it
+      # needs to publish anything (the BMS-reported capacity is never used)
       capacity: "float?"
       note: "str?"
 
@@ -185,9 +186,9 @@ schema:
 
   # Experimental: estimate the present capacity (Qmax) of LiFePO4 packs from
   # relaxed-rest cell voltages and the coulomb count between them, published as
-  # `qmax_est` (Ah) and `soh_est` (%, against the device's `capacity:` or the
-  # BMS-reported capacity). Needs long rests near empty; see doc/SoH.md for how
-  # rarely that gives a value.
+  # `qmax_est` (Ah) and `soh_est` (%, against the device's `capacity:`, without
+  # which nothing is published). Needs long rests near empty; see doc/SoH.md for
+  # how rarely that gives a value.
   soh_estimator: "bool?"
 
   # Experimental: estimate the cell temperature of packs whose BMS only reports

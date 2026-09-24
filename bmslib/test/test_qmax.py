@@ -364,11 +364,52 @@ def test_calibration_without_the_current_bound_the_glitches_are_published(monkey
     assert pub[-1]['plausibility_checked']
 
 
-def test_the_bms_reported_capacity_is_used_when_no_option_is_set():
-    est = q.QmaxEstimator('t', curve=SYNTH)
-    pub = [r for t, i, v, temp in full_cycles().rows if (r := est.add(t, i, v, temp=temp, capacity=120.0))]
-    assert pub[-1]['capacity'] == 120.0 and pub[-1]['capacity_source'] == 'bms'
-    assert pub[-1]['soh'] == pytest.approx(100 * pub[-1]['qmax'] / 120.0)
+def _with_bms_capacity(rows, bms_cap, cap=None):
+    """The BMS reports bms_cap with every sample; cap is the option."""
+    est = q.QmaxEstimator('t', design_capacity=cap, curve=SYNTH)
+    est._log_summary = lambda: None
+    pub = [r for t, i, v, temp in rows if (r := est.add(t, i, v, temp=temp, capacity=bms_cap))]
+    return est, pub
+
+
+@pytest.mark.parametrize('bms_cap', [90.0, 100.0, 110.0, 120.0, 150.0])
+def test_the_bms_reported_capacity_is_never_the_reference(bms_cap):
+    """Third review: without the option the BMS's capacity was the SoH
+    denominator, and a healthy 98 Ah pack read SoH 108.3 / 88.6 / 81.3 /
+    65.0 % with the BMS set to 90 / 110 / 120 / 150 Ah. Now nothing goes out
+    without the option, and with it the option is the reference whatever the
+    BMS says."""
+    est, pub = _with_bms_capacity(full_cycles().rows, bms_cap)
+    assert pub == [] and not est.segments and est.capacity() == (None, None)
+    assert est.pair_reasons['no_capacity'] >= 4 and 'accepted' not in est.pair_reasons
+    est, pub = _with_bms_capacity(full_cycles().rows, bms_cap, cap=100.0)
+    assert pub[-1]['capacity'] == 100.0 and pub[-1]['capacity_source'] == 'option'
+    assert pub[-1]['soh'] == pytest.approx(pub[-1]['qmax']) == pytest.approx(97.5, abs=0.2)
+
+
+def test_calibration_the_bms_capacity_as_the_reference_publishes_its_setting_as_soh():
+    """What the fallback did: the BMS's number used as if it were the
+    option. The same healthy pack's SoH then follows the BMS setting."""
+    sohs = {c: run(full_cycles().rows, cap=c)[1][-1]['soh'] for c in (90.0, 150.0)}
+    assert sohs[90.0] == pytest.approx(108.3, abs=0.2) and sohs[150.0] == pytest.approx(65.0, abs=0.2)
+
+
+def test_without_the_option_qmax_alone_is_not_published_either():
+    """Why Qmax alone does not go out without the option: the plausibility
+    window is all that sees a current scale error, and with the BMS's
+    capacity as its reference it vouches for a gain error with a number from
+    the same unchecked configuration. A 1.4x gain with the BMS set to 150 Ah
+    for a 98 Ah pack."""
+    est, pub = _with_bms_capacity(_gain(1.4), 150.0)
+    assert pub == [] and not est.segments
+    est, pub = run(_gain(1.4), cap=100.0)  # the option (nameplate) rejects it
+    assert pub == [] and est.pair_reasons['implausible'] >= 4
+
+
+def test_calibration_the_bms_capacity_as_the_plausibility_reference_passes_a_gain_error():
+    est, pub = run(_gain(1.4), cap=150.0)
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] == pytest.approx(1.4 * 97.5, rel=0.01) and pub[-1]['plausibility_checked']  # 136.5 Ah
 
 
 def test_segments_do_not_overlap():
@@ -1712,11 +1753,24 @@ def test_sampler_temperature_falls_back_to_the_mosfet_and_never_defaults():
         assert seen == [want, want]
 
 
-def test_sampler_passes_the_bms_capacity_and_the_design_option_wins():
-    s, _ = _run_sampler(2, bms=_Bms(capacity=230.0), soh_estimator=True)
-    assert s.qmax.capacity() == (230.0, 'bms')
-    s, _ = _run_sampler(2, bms=_Bms(capacity=230.0), soh_estimator=True, design_capacity=280.0)
-    assert s.qmax.capacity() == (280.0, 'option')
+class _DalyDerived(_Bms):
+    """Legacy Daly: remaining charge and SoC, no capacity. BmsSample derives
+    capacity = round(charge / soc * 100) per sample: 267 Ah here."""
+
+    async def fetch(self):
+        s = await super().fetch()
+        return BmsSample(voltage=53.0, current=self.current, soc=0.3, charge=0.8, timestamp=s.timestamp)
+
+
+def test_sampler_never_makes_the_bms_capacity_the_reference():
+    """The precondition in the real call path: whatever the BMS reports, set
+    or derived, the estimator's capacity is the option or unknown."""
+    assert BmsSample(voltage=53.0, current=0.0, soc=0.3, charge=0.8).capacity == 267  # derived, not reported
+    for bms in (_Bms(capacity=230.0), _DalyDerived()):
+        s, _ = _run_sampler(2, bms=bms, soh_estimator=True)
+        assert s.qmax.capacity() == (None, None)
+        s, _ = _run_sampler(2, bms=bms, soh_estimator=True, design_capacity=280.0)
+        assert s.qmax.capacity() == (280.0, 'option')
 
 
 def test_sampler_skips_virtual_bms_and_is_off_by_default():
@@ -1780,14 +1834,14 @@ class _Counting(_Bms):
 def test_a_restart_through_the_sampler_continues_only_on_the_bms_counter():
     """The precondition in the real call path: the sampler passes the counter,
     and a restart restored from soh_state is checked against it."""
-    s, bms = _run_sampler(5, bms=_Counting(capacity=100.0), soh_estimator=True)
+    s, bms = _run_sampler(5, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
     est = s.qmax
     assert est._last_c == pytest.approx(80.0 - 10.0 * 5 / 3600, abs=1e-3) and est.q_c is not None
     st = json.loads(json.dumps(est.get_state(full=True)))
     for jump, verdict in ((0.0, 0), (30.0, 1)):
         again = _Counting(t0=bms.t0, k0=bms.k + 60, jump=jump, capacity=100.0)  # back a minute later
         s2 = BmsSampler(again, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, soh_estimator=True,
-                        soh_state=st)
+                        soh_state=st, design_capacity=100.0)
         s2.num_samples = 1
         s2._last_power = again.current * 53.0
         asyncio.run(s2())

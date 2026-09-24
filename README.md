@@ -163,8 +163,8 @@ For verbose logs of particular BMS add `debug: true`.
   it as a `Cell Resistance` sensor in mΩ. See [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
 * `soh_estimator` (experimental, off by default) estimates the present capacity of LiFePO4 packs from long rests and
   the charge counted between them, as `Qmax (est.)` (Ah) and `SoH (est.)` (%) sensors, against the per-device
-  `capacity:` (Ah) or the capacity the BMS reports. On its built-in OCV curve it gives no value yet; see
-  [doc/SoH.md](doc/SoH.md).
+  `capacity:` (Ah, nameplate), without which it publishes nothing. On its built-in OCV curve it gives no value yet;
+  see [doc/SoH.md](doc/SoH.md).
 * `pack_temp_estimator` (experimental, off by default) estimates the cell temperature of packs whose BMS only reports a
   MOSFET temperature, as a `Pack Temp (RC est.)` sensor. `pack_temp_room_topic` / `pack_temp_outdoor_topic` are MQTT
   topics carrying ambient temperatures (e.g. from HA's `mqtt_statestream`); both are optional, without them the

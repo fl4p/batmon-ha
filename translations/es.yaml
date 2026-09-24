@@ -50,7 +50,9 @@ configuration:
     name: Capacidad nominal (Ah)
     description: >-
       Capacidad nominal de la batería en Ah. Solo la usa el estimador de SoH,
-      como referencia; sin ella se usa la capacidad que reporta el BMS.
+      como referencia del SoH y de su control de plausibilidad; sin ella el
+      estimador no publica nada. Nunca se usa la capacidad que reporta el
+      BMS.
 
   concurrent_sampling:
     name: Muestreo concurrente

@@ -237,8 +237,9 @@ class BmsSampler:
 
         # self.power_stats = EWM(span=120, std_regularisation=0.1)
 
-        # The per-device `capacity:` option [Ah] or None; the estimators fall
-        # back to the capacity the BMS reports.
+        # The per-device `capacity:` option [Ah] or None. The cell resistance
+        # estimator falls back to the capacity the BMS reports (there it only
+        # bounds the current); the Qmax/SoH estimator never does.
         self._design_capacity = design_capacity
 
         # Experimental cell-resistance estimator (impedance_estimator, off by
@@ -255,14 +256,15 @@ class BmsSampler:
 
         # Experimental Qmax/SoH estimator (soh_estimator, off by default), real
         # packs only for the same reason. design_capacity: the per-device
-        # `capacity:` option [Ah], else the BMS-reported capacity is used.
+        # `capacity:` option [Ah]; without it nothing is published.
         self.qmax = None
         if soh_estimator and not bms.is_virtual:
             from bmslib.qmax import QmaxEstimator
             self.qmax = QmaxEstimator(bms.name, design_capacity=design_capacity)
             logger.info('%s: Qmax/SoH estimator enabled (experimental), design capacity %s', bms.name,
                         ('%.1f Ah' % self.qmax.design_capacity) if self.qmax.design_capacity else
-                        'not set (the BMS-reported capacity is used; without one nothing is published)')
+                        'not set: nothing is published (set the device\'s capacity: to the nameplate; the '
+                        'capacity the BMS reports is never used)')
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None

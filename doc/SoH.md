@@ -14,12 +14,16 @@ and the charge that flowed in between is counted from the BMS current. Then, per
     Qmax = charge counted × 100 / (SoC at the second rest − SoC at the first)
 
 The pack's Qmax is that of the weakest cell: in a series string the cell that is empty first ends the discharge. SoH is
-Qmax against the device's `capacity:` option (Ah, nameplate), or, if that is not set, the capacity the BMS reports.
-Without either nothing is published: the capacity is also what the result is checked against (see below), and a check
-that cannot be made does not count as passed. The `Qmax (est.)` sensor carries attributes: how many segments the value is
+Qmax against the device's `capacity:` option (Ah, nameplate). **Without that option nothing is published**, neither SoH
+nor Qmax: the capacity is also what the result is checked against (see below), and a check that cannot be made does not
+count as passed. The capacity the BMS reports is never used. It is a setting in the BMS that nothing checks: a healthy
+98 Ah pack read SoH 108 % and 65 % with the BMS set to 90 and 150 Ah. On the legacy Daly driver it is not even a
+setting but remaining charge ÷ SoC, which swings between 160 and 300 Ah near empty. And as the reference of the
+plausibility check it would vouch for Qmax with a number from the same unchecked BMS configuration as the current
+scale: set to 150 Ah, it let a current reading 1.4× too high through as 137 Ah for that 98 Ah pack. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
-not an error bound, see below), the capacity used and where it came from.
+not an error bound, see below), and the capacity used.
 
 ### How it relates to TI Impedance Track
 
@@ -32,7 +36,7 @@ bat-impedance project (WHITEPAPER §2.1, §6, §8), which this is a port of.
 
 ## What counts
 
-A **rest** is at least 90 minutes with the current below min(1.5 A, capacity/100) (1.5 A without a known capacity).
+A **rest** is at least 90 minutes with the current below min(1.5 A, capacity/100).
 1.5 A is what the OCV curve was measured with, on a 280 Ah pack. At capacity/100 an LFP cell sits within about 6 mV
 of its OCV. The C/20 usually quoted for TI gauges would leave ~28 mV, 5 % of SoC at the steepest part the gates accept.
 Per cell, the relaxed voltage is extrapolated from the rest with an exponential fit when that fit is trustworthy (it saw

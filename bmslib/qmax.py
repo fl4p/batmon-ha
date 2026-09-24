@@ -101,10 +101,18 @@ discharge, rests reading 0 A, published 21 % low while the segment's drift at
 the assumed 0.3 A was 3.4 %. What is published says so: offset_assumed_a and
 offset_drift_pct, the drift at that assumed offset.
 
-Without a capacity (neither the `capacity:` option nor one reported
-by the BMS) nothing is accepted: the plausibility check is then unevaluable,
-and it is the only one that catches a wrong current scale (a shunt setting
-off by 3x) or a glitch below the input bound.
+The capacity is the per-device `capacity:` option (the nameplate) and
+nothing else. Without it nothing is accepted, neither SoH nor Qmax alone:
+the plausibility check is then unevaluable, and it is the only one that
+catches a wrong current scale (a shunt setting off by 3x) or a glitch below
+the input bound. The capacity the BMS reports is never the reference. It is
+a setting in the BMS that nobody checked (a healthy 98 Ah pack read SoH 108 %
+and 65 % with the BMS set to 90 and 150 Ah, third review); on the legacy Daly
+driver it is not even a setting but round(charge / SoC * 100) per sample
+(bms.py), which swings between 160 and 300 Ah below 1.1 % SoC. And as the
+reference of the plausibility window it would vouch for Qmax with a number
+from the same unchecked configuration as the current scale: set to 150 Ah,
+it let a 1.4x gain error through as 137 Ah for a 98 Ah pack.
 
 STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
 smoothed slope reaches 5 mV/% only between 0 and 11 % SoC; its top is flat
@@ -259,9 +267,10 @@ DRIFT_MAX_FRAC = 0.05
 
 # ---------------------------------------------------------------- segments
 MIN_DSOC = 60.0  # %, every cell
-# A capacity is required: without one the plausibility window below cannot be
-# evaluated, and an unevaluable check never counts as passed. (A switch only so
-# that a test can show what goes out without it.)
+# A capacity (the `capacity:` option, never the BMS's) is required: without one
+# the plausibility window below cannot be evaluated, and an unevaluable check
+# never counts as passed (module doc). (A switch only so that a test can show
+# what goes out without it.)
 REQUIRE_CAPACITY = True
 # Every cell's Qmax must be within this ratio of the capacity. A current gain
 # error goes 1:1 into Qmax (gain 0.6 / 0.9 / 1.1 published 58.5 / 87.8 / 107.3
@@ -525,7 +534,6 @@ class QmaxEstimator:
         self._rest_n = 0
         self._load_ewma: Optional[float] = None  # mean charge current of recent load minutes, for the direction tag
         self._t_volt: Optional[float] = None
-        self.bms_capacity: Optional[float] = None
         # results
         self.anchors = deque(maxlen=MAX_ANCHORS)
         self.segments = deque(maxlen=SUMMARY_K)
@@ -543,12 +551,11 @@ class QmaxEstimator:
     # ------------------------------------------------------------ properties
 
     def capacity(self) -> Tuple[Optional[float], Optional[str]]:
-        """Design capacity for SoH and for the rest threshold: the per-device
-        option, else what the BMS reports, else unknown."""
+        """Design capacity for SoH, the plausibility window, the rest
+        threshold and the current bound: the per-device `capacity:` option,
+        else unknown -- never what the BMS reports (module doc)."""
         if self.design_capacity is not None:
             return self.design_capacity, 'option'
-        if self.bms_capacity is not None:
-            return self.bms_capacity, 'bms'
         return None, None
 
     def rest_current(self) -> float:
@@ -609,8 +616,8 @@ class QmaxEstimator:
         discharging) before invert_current; voltages: cell voltages [mV] or
         None when not fetched this time; temp [degC]: the best cell temperature
         known (pack estimate, BMS probes, or the MOSFET at rest), None when
-        unknown; capacity [Ah]: what the BMS reports, None/NaN when unknown;
-        bms_charge [Ah]: the BMS's own remaining-charge counter, None/NaN when
+        unknown; capacity [Ah]: what the BMS reports, None/NaN when unknown,
+        never used as a reference (module doc); bms_charge [Ah]: the BMS's own remaining-charge counter, None/NaN when
         unknown (only used as evidence across a restart, see the module doc).
 
         Returns result() when this call accepted a segment and at least
@@ -622,8 +629,6 @@ class QmaxEstimator:
             return None  # the BMS re-served the same measurement
         if self._last_t is not None and t < self._last_t:
             self._clock_back(t)  # before anything else: the sample then starts a new record
-        if finite(capacity) and capacity > 0:
-            self.bms_capacity = float(capacity)
         if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
             # Not a current, and not a sample: never integrated, never binned.
             # _last_t/_last_i stay at the last good sample, so the next good one
@@ -1024,7 +1029,7 @@ class QmaxEstimator:
             t_glitch=self._t_glitch,
             q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
-            last_seg_t=self._last_seg_t, bms_capacity=self.bms_capacity, load_ewma=self._load_ewma,
+            last_seg_t=self._last_seg_t, load_ewma=self._load_ewma,
             announced=self._announced,
         )
         if full:
@@ -1141,9 +1146,6 @@ class QmaxEstimator:
                 (segments and (last_t is None or segments[-1]['t'] > last_t)):
             raise ValueError('segments not in time order')
         last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
-        cap = v_opt_fin(st.get('bms_capacity'), 'bms_capacity')
-        if cap is not None and cap <= 0:
-            raise ValueError('bms_capacity %r' % cap)
 
         self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
         self._last_c, self.q_c = last_c, q_c
@@ -1151,7 +1153,7 @@ class QmaxEstimator:
         self._resumed = last_t is not None  # the next sample decides whether the open segment goes on
         self.anchors.extend(anchors[-MAX_ANCHORS:])
         self.segments.extend(segments[-SUMMARY_K:])
-        self._last_seg_t, self.bms_capacity = last_seg_t, cap
+        self._last_seg_t = last_seg_t
         self._load_ewma = v_opt_fin(st.get('load_ewma'), 'load_ewma')
 
         if 'rest_bins' in st:  # full state
