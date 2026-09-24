@@ -83,7 +83,9 @@ then. The lower end stays at 0.4 so that a pack that has genuinely lost half its
 gain down to 0.4 passes.
 
 A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
-(2³¹ mA) seen from a JK BMS: it is not counted, and it ends the open segment like a gap in the record.
+(2³¹ mA) seen from a JK BMS. It is not counted: an isolated one is left out and bridged like a sample that never came
+(the 5-minute rule above). A second within 5 minutes ends the open segment, because a burst of garbled frames can
+hide garbled readings below the bound, and those would be counted.
 
 The sensors show the median of the last 5 accepted segments of the past year, once there are 3. Nothing is published
 between accepted segments, and the entities expire a year after the last one.

@@ -46,10 +46,15 @@ plausible wrong number without it:
 
 Coulomb counting: the BMS current (BmsSample sign, before invert_current) is
 integrated with the trapezoid rule at whatever cadence it arrives. A gap
-longer than MAX_GAP_S, or a current no pack can carry (a decode glitch, above
-I_MAX_C_RATE x capacity or I_MAX_ABS_A, estimator_common) invalidates the open
-segment (anchors on the far side of it cannot be paired), but keeps the
-anchors. The glitch itself is never integrated. A clock step back (a sample
+longer than MAX_GAP_S invalidates the open segment (anchors on the far side of
+it cannot be paired), but keeps the anchors; a shorter one is bridged
+linearly. A current no pack can carry (a decode glitch, above I_MAX_C_RATE x
+capacity or I_MAX_ABS_A, estimator_common) is never integrated and is no
+sample: an isolated one leaves a hole that the next good sample bridges under
+the same rule, as if it had not come. A second within GLITCH_ISOLATION_S of the
+last ends the epoch like a long gap: a burst of garbled frames says that the
+readings around them, which the bound cannot catch, may be garbled too. A
+clock step back (a sample
 older than the last one) does more: every anchor and segment timed after the
 new sample is dropped, with the open rest, because its age can no longer be
 measured -- a Pi without a hardware clock boots behind real time, and a state
@@ -219,6 +224,11 @@ MAX_GAP_S = 300.0
 # order as what the linear bridge itself may cost (above: 1.7 %), and it lets a
 # counter with 1 % steps (an integer SoC) continue across a restart at rest.
 RESUME_TOL_FRAC = 0.02
+# An impossible current reading is bridged over like a missing sample only
+# when no other one came within this long before it (module doc). One per load
+# is what the real 2^31 mA JK glitch looks like; ending the epoch on it threw
+# away segments identical to the clean run once the hole was bridged.
+GLITCH_ISOLATION_S = MAX_GAP_S
 # Intervals longer than this count as bridged, not measured, for the coverage
 # gate: the add-on samples every sample_period (default 1 s); 60 s is the
 # resolution of the minute data the prototype and the replay ran on.
@@ -488,6 +498,7 @@ class QmaxEstimator:
         self._last_c: Optional[float] = None  # the BMS's charge counter [Ah] at _last_t, None when unknown
         self.q_c: Optional[float] = None  # its resolution: the smallest non-zero step seen [Ah]
         self._resumed = False  # set by restore(): the next sample is the first after a restart
+        self._t_glitch: Optional[float] = None  # the last impossible current reading
         self.q_ah = 0.0
         self.covered_s = 0.0
         self.epoch = 0  # bumped by every gap: anchors of different epochs never pair
@@ -603,15 +614,19 @@ class QmaxEstimator:
         if finite(capacity) and capacity > 0:
             self.bms_capacity = float(capacity)
         if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
-            # Not a current. Never integrated; and the charge around it is
-            # unknown (the true current at that instant was not measured), so
-            # it ends the epoch like a gap. _last_t/_last_i stay at the last
-            # good sample: the next one integrates from there, inside the new
-            # epoch and before any of its anchors, so that charge can only
-            # enter a segment that starts after it.
-            logger.debug('%s: Qmax: current %.6g A at %s is not a measurement, open segment invalidated',
-                         self.name, current, fmt_t(t))
-            return self._gap(t, 'current_implausible')
+            # Not a current, and not a sample: never integrated, never binned.
+            # _last_t/_last_i stay at the last good sample, so the next good one
+            # bridges the hole under the gap rule (linear up to MAX_GAP_S, a new
+            # epoch beyond), exactly as if this frame had not come. A burst
+            # ends the epoch now; the next good sample then integrates inside
+            # the new epoch and before any of its anchors.
+            self.counts['current_implausible'] += 1
+            burst = self._t_glitch is not None and 0 <= t - self._t_glitch <= GLITCH_ISOLATION_S
+            self._t_glitch = t
+            logger.debug('%s: Qmax: current %.6g A at %s is not a measurement%s', self.name, current, fmt_t(t),
+                         ', the second within %.0f s: open segment invalidated' % GLITCH_ISOLATION_S if burst else
+                         ', left out and bridged')
+            return self._gap(t, 'current_implausible_burst') if burst else None
 
         i = -float(current)  # charge current
         c = float(bms_charge) if finite(bms_charge) else None
@@ -719,7 +734,7 @@ class QmaxEstimator:
         self.epoch += 1
         self._resumed = False
         self.counts[why] += 1
-        if why != 'current_implausible':
+        if why != 'current_implausible_burst':
             logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
                          self.name, why, t - (self._last_t or t))
         return new
@@ -746,6 +761,8 @@ class QmaxEstimator:
             self._t_summary = t
         if self._oob_since is not None and self._oob_since > t:
             self._oob_since = t
+        if self._t_glitch is not None and self._t_glitch > t:
+            self._t_glitch = None
         self._t_volt = None
         self._last_t = self._last_i = self._last_c = None
         self._resumed = False
@@ -993,6 +1010,7 @@ class QmaxEstimator:
             version=STATE_VERSION, code=CODE_FINGERPRINT,
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
             last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, q_charge=self.q_c,
+            t_glitch=self._t_glitch,
             q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
             last_seg_t=self._last_seg_t, bms_capacity=self.bms_capacity, load_ewma=self._load_ewma,
@@ -1118,6 +1136,7 @@ class QmaxEstimator:
 
         self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
         self._last_c, self.q_c = last_c, q_c
+        self._t_glitch = v_opt_fin(st.get('t_glitch'), 't_glitch')
         self._resumed = last_t is not None  # the next sample decides whether the open segment goes on
         self.anchors.extend(anchors[-MAX_ANCHORS:])
         self.segments.extend(segments[-SUMMARY_K:])

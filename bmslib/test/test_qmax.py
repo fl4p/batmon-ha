@@ -257,21 +257,24 @@ def test_calibration_without_the_capacity_requirement_a_wrong_scale_is_published
 
 # ================================================================ known-bad: decode glitch in the current
 
-def test_an_impossible_current_is_never_integrated_and_breaks_the_epoch():
-    """The reviewer's case: 2 147 483.136 A (about 2^31 mA, seen in real JK
-    telemetry) between two 15 s samples, no capacity known. It used to add
-    8 948 Ah to the count with the epoch intact."""
+def test_an_impossible_current_is_never_integrated_and_is_bridged_like_a_missing_sample():
+    """The first review's case: 2 147 483.136 A (about 2^31 mA, seen in real
+    JK telemetry) between two 15 s samples, no capacity known. It used to add
+    8 948 Ah to the count. It is left out, and the 30 s hole is bridged as if
+    the frame had never come (second review: ending the epoch on one glitch
+    threw away segments identical to the clean run)."""
     for cap in (None, 100.0):
         est = q.QmaxEstimator('g', design_capacity=cap, curve=SYNTH)
         est.add(T0, 0.0, [3300], temp=25)
         est.add(T0 + 15, 2147483.136, [3300], temp=25)
         est.add(T0 + 30, 0.0, [3300], temp=25)
-        assert est.q_ah == 0.0 and est.epoch == 1 and est.counts['current_implausible'] == 1
+        assert est.q_ah == 0.0 and est.epoch == 0 and est.counts['current_implausible'] == 1
+        assert est.covered_s == 30.0 and est._bin['n'] == 2  # not binned either
     # the bound follows a known capacity: 655.35 A (0xFFFF x 10 mA) is no current for 100 Ah
     est = q.QmaxEstimator('g', design_capacity=100.0, curve=SYNTH)
     for k, i in enumerate((10.0, 655.35, 10.0)):
         est.add(T0 + 10 * k, i, None)
-    assert est.epoch == 1 and est.q_ah == pytest.approx(-20.0 / 360)
+    assert est.epoch == 0 and est.q_ah == pytest.approx(-20.0 / 360)
 
 
 def _glitched_current(rows, every=2):
@@ -294,10 +297,62 @@ def _glitched_current(rows, every=2):
     return out
 
 
-def test_a_glitch_in_every_load_publishes_nothing_wrong():
-    est, pub = run(_glitched_current(full_cycles(n=3).rows))
-    assert est.counts['current_implausible'] == 6
-    assert pub == [] and not est.segments  # every segment spans a glitch
+def test_a_glitch_in_every_load_is_left_out_and_bridged():
+    """The second review's case: one glitch per load, each dropped and its
+    20 s hole bridged, gives the segments of the clean run. It used to end
+    the epoch every time and publish nothing."""
+    rows = full_cycles(n=3).rows
+    clean, pub_clean = run(rows)
+    est, pub = run(_glitched_current(rows))
+    assert est.counts['current_implausible'] == 6 and est.epoch == 0
+    assert seg_q(est) == pytest.approx(seg_q(clean), rel=2e-3) and len(pub) == len(pub_clean)
+
+
+def _glitch_burst(rows, n_caught=5, uncaught=450.0):
+    """In the middle of every discharge, a burst of garbled frames 10 s apart:
+    n_caught read +3553.5 A (above the bound), and between them frames that
+    read `uncaught` A -- garbled too, but below 5C for 100 Ah, so no bound can
+    tell them from a current."""
+    out = list(rows)
+    k, n = 0, len(rows)
+    while k < n:
+        if rows[k][1] > 30:
+            j = k
+            while j < n and rows[j][1] > 30:
+                j += 1
+            m = (k + j) // 2
+            for b in range(2 * n_caught - 1):
+                t, _, v, temp = out[m + b]
+                out[m + b] = (t, 3553.5 if b % 2 == 0 else uncaught, v, temp)
+            k = j
+        k += 1
+    return out
+
+
+def test_a_burst_of_impossible_currents_ends_the_segment():
+    est, pub = run(_glitch_burst(full_cycles(n=3).rows))
+    assert est.counts['current_implausible_burst'] >= 3
+    assert all(s['dq'] > 0 for s in est.segments)  # only the charges, which had no burst
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_bridging_every_glitch_publishes_the_garbled_frames_between_them(monkeypatch):
+    monkeypatch.setattr(q, 'GLITCH_ISOLATION_S', -1.0)  # every rejection counts as isolated
+    est, pub = run(_glitch_burst(full_cycles(n=3).rows))
+    dis = [s for s in est.segments if s['dq'] < 0]
+    assert dis, 'scenario is harmless'
+    assert all(s['qmax'] / 98.0 - 1 > 0.08 for s in dis)  # 4 frames of +400 A garbage: 107.3 Ah, +9.5 %
+    assert all(s['cov'] >= q.MIN_COVERAGE and s['drift'] <= q.DRIFT_MAX_FRAC for s in dis)  # no other gate sees it
+
+
+def test_monotone_in_glitches_per_burst():
+    """1 is an isolated glitch (bridged); 2 or more within 5 minutes end it."""
+    def accepted(n):
+        rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
+        return _accepts(_glitch_burst(rows, n_caught=n) if n else rows)
+    verdicts = [accepted(n) for n in (0, 1, 2, 3, 5, 10)]
+    _monotone(verdicts)
+    assert verdicts[:3] == [True, True, False]
 
 
 def test_calibration_without_the_current_bound_the_glitches_are_published(monkeypatch):
