@@ -1,7 +1,7 @@
 """
 Unit tests for the online lumped-RC pack-temp estimator.
 
-The offline RC model in tools/impedance/thermal_rc.py and the online estimator
+The offline RC model in thermal_rc.py (bat-impedance project) and the online estimator
 must give the SAME result given the same inputs at the same dt — this file is
 also the cross-check between the two.
 """
@@ -31,7 +31,7 @@ def test_valid_filter_handles_nan_none_outliers():
 # ---------- bit-exact match with the offline simulator ----------
 
 def _offline_simulate(mos_seq, room_seq, outdoor_seq, T0, coeffs=RC_COEFFS_DEFAULT):
-    """Reproduce tools/impedance/thermal_rc.py exactly, in one place."""
+    """Reproduce thermal_rc.py (bat-impedance project) exactly, in one place."""
     n = len(mos_seq)
     T = np.empty(n); T[0] = T0
     for k in range(n - 1):

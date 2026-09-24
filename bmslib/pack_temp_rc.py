@@ -15,7 +15,7 @@ model:
                   + a_mos     * (mos[k]      - T_pack[k])
 
 Coefficients fitted offline by non-negative least squares on bat_caravan 2023
-data (see tools/impedance/thermal_rc.py). Free-running validation:
+data (see thermal_rc.py of the bat-impedance project). Free-running validation:
 
     RMSE = 1.42 C / R^2 = 0.65  (held-out time-split test)
 
@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-# Coefficients from `tools/impedance/thermal_rc.py` NNLS fit (variant
+# Coefficients from the bat-impedance project's `thermal_rc.py` NNLS fit (variant
 # "room+outdoor+mos", dt = 60s).  Total conductance = 0.0032 / min ->
 # thermal time constant tau = dt / sum(a_*) = 313 min ~ 5.2 h, which matches
 # the pack's observed thermal damping.
