@@ -17,6 +17,12 @@ Sources:
 The decoder is verified against those frames; the driver itself has not yet
 run against the hardware.
 
+Protocol mode: with the BMS's inverter protocol (DIP switches) on Pylontech,
+the header ignores every '>' request, at any ADR, and answers only Pylontech
+'~' frames: 61H system summary from the master (voltage, current, SOC, cell
+min/max, no per-cell data), zeros from a slave, and no reply to per-pack 42H.
+This driver therefore needs Voltronic mode, which is what the reporter runs.
+
 Wire format: the ASCII-hex YD/T 1363 framing already implemented in
 ``bmslib.models.pace`` (builder, parser, LENGTH/CHKSUM), with a different SOI:
 
