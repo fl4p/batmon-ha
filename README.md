@@ -207,7 +207,10 @@ Supported types (baud rate in parentheses):
   the pack address (default 1). It follows the DIP switch, but how is
   unverified; if nothing answers, try 1 to 16. Connect a 3.3 V USB-TTL
   adapter to the BMS's internal 4-pin UART header in place of its FC41D
-  WiFi/BLE module (GND, TX, RX; leave VIN open). Needs the BMS's inverter
+  WiFi/BLE module (GND, TX, RX; leave VIN open). Put a USB isolator
+  (ADuM3160) between the host and the adapter: the header's GND is the
+  battery's, not the host's earth, and three plain adapters burned out on it in
+  #403 (cause not yet measured). Needs the BMS's inverter
   protocol set to Voltronic: in Pylontech mode the header answers only
   Pylontech `~` system-summary requests. Decoder checked against real reply
   frames ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
