@@ -175,6 +175,35 @@ def test_real_frames_decode_consistently(serial_stub):
     assert volts[:3] == [3355, 3356, 3356] and volts[-1] == 3354
 
 
+# Both parallel packs answering on one RS485 bus (2026-09-29), ADR 1 and 2. His
+# 1 s capture window cut each reply after the first two CHKSUM characters, so
+# these are checked as INFO plus the CHKSUM prefix, not as complete frames.
+RS485_TRUNCATED = {
+    1: b">22014200E0C60013EB145E100CBD0CB90CBC0CBC0CBD0CB90CBD0CB90CBC0CBA0CBD0CB90CBD0CBA0CBD0CB8014A"
+       b"01220136040122012201220122F6D000000064012EE017E7004C000000020000000000230000000000000000000000"
+       b"000000000000000000000000D3",
+    2: b">22024200E0C6001073145E100CB90CBB0CBB0CBC0CBB0CBB0CBC0CBC0CBC0CBB0CBC0CBC0CBB0CBC0CBC0CB80140"
+       b"0118012C040118011801180118F6FD00000064012EE013BD000C000000020000000000230000000000000000000000"
+       b"000000000000000000000000D3",
+}
+
+
+def test_rs485_replies_from_two_packs_on_one_bus():
+    for adr, raw in RS485_TRUNCATED.items():
+        body = raw[1:]
+        assert body[2:4] == b'%02X' % adr and body[4:8] == b'4200'
+        lenid = int(body[9:12], 16)
+        info = body[12:12 + lenid]
+        assert ('%04X' % _checksum(body[:12 + lenid])).encode()[:2] == body[12 + lenid:]
+        a = decode_analog(info)
+        assert len(a['cell_mv']) == 16 and a['voltage'] == pytest.approx(52.14)
+        assert sum(a['cell_mv']) / 1000 == pytest.approx(a['voltage'], abs=0.02)
+        assert a['remaining_ah'] / a['full_ah'] * 100 == pytest.approx(a['soc'], abs=0.01)
+        assert a['current'] < -20 and a['status']['current'] & 0b10  # discharging bit
+    soc = {adr: decode_analog(r[13:13 + 198])['soc'] for adr, r in RS485_TRUNCATED.items()}
+    assert soc == pytest.approx({1: 50.99, 2: 42.11})
+
+
 # --- (a) request bytes ----------------------------------------------------------
 
 def test_request_matches_reporters_esphome_builder():

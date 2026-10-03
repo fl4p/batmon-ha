@@ -1,9 +1,14 @@
 """BraunPWR / KS48100-HO20_V1 rack BMS over its wired UART (#403).
 
-Wiring: the BMS's internal 4-pin TTL UART header (GND/TX/RX/VIN) that its
-Quectel FC41D WiFi/BLE module plugs into. The #403 reporter (bialy39) pulled
-the module, whose BLE link kept dropping, and polls the BMS from an ESP32 on
-that header; a 3.3 V USB-TTL adapter there does the same job.
+Wiring: a USB-RS485 adapter on the packs' RS485 port. In #403 two parallel
+packs answered the 42H request there as ADR 1 and 2 on one bus (2026-09-29),
+so one adapter serves both (`braunpwr_uart:1`, `braunpwr_uart:2`). The BMS's
+internal 4-pin TTL UART header (GND/TX/RX/VIN), where its Quectel FC41D
+WiFi/BLE module plugs in, speaks the same protocol: the reporter (bialy39)
+polls it from an ESP32. But its GND is the battery's, and four mains-earthed
+USB-TTL adapters burned out on it there; prefer RS485. (The module's BLE drops
+that started #403 went away when it was powered externally: the BMS's own
+supply to it is unstable.)
 
 Sources:
   - the reporter's working ESPHome config (``uartex`` component);
