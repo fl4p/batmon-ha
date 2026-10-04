@@ -64,7 +64,7 @@ def test_bad_crc_is_ignored_and_times_out():
     bms.TIMEOUT = 0.2
     bms.client = _FakeClient(bms, bytes(corrupt))
 
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(asyncio.TimeoutError, match="try type: daly"):
         asyncio.run(bms.fetch())
 
 

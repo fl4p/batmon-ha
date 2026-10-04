@@ -155,7 +155,13 @@ class Daly2Bt(BtBms):
         with self._fetch_futures.acquire(func):
             self.logger.debug("daly2 send: %s", request.hex())
             await self.client.write_gatt_char(self.UUID_TX, request, response=False)
-            return await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
+            try:
+                return await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
+            except asyncio.TimeoutError:
+                # J/T/A/U/W-series modules use the same fff0 GATT layout but only
+                # answer classic A5 frames, so they ignore every Modbus request (#416)
+                raise asyncio.TimeoutError("no Modbus reply to func 0x%02x; if this BMS never answers, "
+                                         "it may speak the classic protocol: try type: daly" % func)
 
     async def fetch(self) -> BmsSample:
         # binary reading
