@@ -26,6 +26,20 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
 
+_SIG_BASE_SUFFIX = '-0000-1000-8000-00805f9b34fb'
+
+
+def _is_sig_characteristic(uuid: str) -> bool:
+    """True for Bluetooth SIG-assigned characteristics (0x2A00-0x2BFF), e.g. GAP
+    Device Name 0x2A00. Probing must never write these: an ESPHome proxy exposes
+    the GAP service and a Daly module stored the probe frame as its name (#416).
+    Vendor chars (fff2, ff02, ...) share the base UUID but sit outside this range."""
+    uuid = str(uuid).lower()
+    if not uuid.endswith(_SIG_BASE_SUFFIX) or not uuid.startswith('0000'):
+        return False
+    return 0x2A00 <= int(uuid[4:8], 16) <= 0x2BFF
+
+
 # Probe frames for known BMS families. Snoop writes these to every writable
 # characteristic on the target device until one responds. Frames for the
 # `aiobmsble`-backed families were snapshotted from each plugin's `_cmd()`
@@ -236,6 +250,8 @@ class SnoopBt(BtBms):
         for service in self.client.services:
             for char in service.characteristics:
                 props = set(char.properties)
+                if _is_sig_characteristic(char.uuid):
+                    continue
                 if 'write' in props or 'write-without-response' in props:
                     writable.append(char)
 
