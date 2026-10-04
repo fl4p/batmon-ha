@@ -139,6 +139,7 @@ def _factory(device):
     def make(address, **kw):
         bms = AutoDetectBt('test_jbd', **kw)  # test_ address: no real BLE client is created
         bms.client = device
+        bms._connect_with_scanner = device.connect  # never start a real scanner in tests
         return bms
 
     return make
@@ -202,20 +203,144 @@ def test_unreachable_device_is_unverified_not_negative():
 
 
 def test_resolve_rewrites_type_and_skips_failures(monkeypatch):
-    async def fake_detect(addr, **kw):
-        return ad.Result(type='daly', probe='daly (A5) on fff1/fff2', connected=True) if addr == 'AA:01' \
-            else ad.Result(connected=False, error='cannot connect')
+    async def fake_detect(addr, res=None, **kw):
+        if addr == 'AA:00:00:00:00:01':
+            res.type, res.probe, res.connected = 'daly', 'daly (A5) on fff1/fff2', True
+        else:
+            res.error = 'cannot connect'
+        return res
 
     monkeypatch.setattr(ad, 'detect', fake_detect)
-    devices = [dict(address='AA:01', type='auto', alias='a'),
-               dict(address='AA:02', type='Auto', alias='b'),
+    devices = [dict(address='AA:00:00:00:00:01', type='auto', alias='a'),
+               dict(address='aa:00:00:00:00:02', type='Auto', alias='b'),
                dict(address='serial', type='auto', alias='c', adapter='/dev/ttyUSB0'),
                dict(address='AA:03', type='jbd', alias='d')]
-    out = asyncio.run(resolve_auto_devices(devices, {}))
+    out, unresolved = asyncio.run(resolve_auto_devices(devices, {}))
     assert out[0]['type'] == 'daly'
-    assert out[1]['address'] == '#AA:02'
+    assert out[1]['address'] == '#aa:00:00:00:00:02'
     assert out[2]['address'] == '#serial'
     assert out[3] is devices[3]
+    # a group naming the failed device by alias or by MAC (any case) finds it here
+    from bmslib.group import resolve_member_ref
+    assert resolve_member_ref(unresolved, 'b') == 'b'
+    assert resolve_member_ref(unresolved, ' AA:00:00:00:00:02') == 'b'
+    assert 'serial' not in unresolved  # a wired device is only known by its alias
+    assert resolve_member_ref(unresolved, 'a') is None
+
+
+def test_pair_only_marks_auto_unresolved_without_probing(monkeypatch):
+    async def boom(*a, **kw):
+        raise AssertionError('must not probe in pair-only')
+
+    monkeypatch.setattr(ad, 'detect', boom)
+    out, unresolved = asyncio.run(resolve_auto_devices([dict(address='AA:01', type='auto', alias='a')], {},
+                                                       detect_now=False))
+    assert out[0]['address'] == '#AA:01' and 'a' in unresolved
+
+
+def test_name_address_is_resolved_to_the_mac(monkeypatch):
+    seen = {}
+
+    async def fake_detect(addr, adv=None, res=None, **kw):
+        seen['addr'], seen['adv'] = addr, adv
+        res.type, res.connected = 'daly', True
+        return res
+
+    monkeypatch.setattr(ad, 'detect', fake_detect)
+    discovered = [SimpleNamespace(address='D6:C1:4E:10:00:D1', name='DL-D6C14E1000D1')]
+    adverts = {'D6:C1:4E:10:00:D1': 'ADV'}
+    out, _ = asyncio.run(resolve_auto_devices([dict(address='DL-D6C14E1000D1', type='auto')], adverts, discovered))
+    assert seen == dict(addr='D6:C1:4E:10:00:D1', adv='ADV')
+    assert out[0] == dict(address='DL-D6C14E1000D1', type='daly')  # construct_bms resolves the name itself
+
+
+def test_timeout_keeps_what_was_learned(monkeypatch, caplog):
+    async def slow_detect(addr, res=None, **kw):
+        res.connected = True
+        res.tried.append('daly (A5) on fff1/fff2')
+        await asyncio.Event().wait()  # hangs (asyncio.sleep is shortened by _fast)
+
+    monkeypatch.setattr(ad, 'detect', slow_detect)
+    monkeypatch.setattr(ad, 'DETECT_TIMEOUT', 0.05)
+    caplog.set_level('INFO')
+    out, unresolved = asyncio.run(resolve_auto_devices([dict(address='AA:01', type='auto', alias='a')], {}))
+    assert out[0]['address'] == '#AA:01' and 'a' in unresolved
+    msg = caplog.text
+    assert 'never reached' not in msg and 'daly (A5) on fff1/fff2' in msg and 'timed out' in msg
+
+
+def test_stuck_unsubscribe_does_not_keep_the_link(monkeypatch):
+    # the deadline fires while waiting for a reply; teardown then meets an
+    # unsubscribe that never returns. It must be bounded on its own, since nothing
+    # cancels it a second time.
+    monkeypatch.setattr(ad, 'TEARDOWN_TIMEOUT', 0.05)
+    monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 30)
+
+    class Stuck(_FakeDevice):
+        async def stop_notify(self, char):
+            await asyncio.Event().wait()  # never returns
+
+    dev = Stuck(GATT_416, lambda f: None)
+
+    async def run():
+        t0 = asyncio.get_running_loop().time()
+        try:
+            # outer watchdog: only reached if the inner deadline can't finish
+            await asyncio.wait_for(asyncio.wait_for(detect('aa', 'x', bms_factory=_factory(dev)), 0.3), 3)
+        except asyncio.TimeoutError:
+            pass
+        return asyncio.get_running_loop().time() - t0
+
+    assert asyncio.run(run()) < 1.5
+    assert not dev.is_connected
+
+
+def test_falls_back_to_connecting_with_scanner():
+    dev = _FakeDevice(GATT_416, _daly_a5, connect_ok=False)
+
+    def make(address, **kw):
+        bms = _factory(dev)(address, **kw)
+
+        async def with_scanner(timeout=20):
+            dev.is_connected = True
+
+        bms._connect_with_scanner = with_scanner
+        return bms
+
+    res = asyncio.run(detect('aa', 'x', bms_factory=make))
+    assert res.type == 'daly'
+
+
+def test_waits_for_late_service_discovery():
+    class Late(_FakeDevice):
+        calls = 0
+
+        @property
+        def services(self):
+            Late.calls += 1
+            return GATT_416 if Late.calls > 2 else []
+
+        @services.setter
+        def services(self, v):
+            pass
+
+    dev = Late(GATT_416, _daly_a5)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'daly'
+
+
+def test_structurally_empty_replies_are_rejected():
+    probes = {p.type: p for p in _build_probes()}
+    # JBD: checksum-valid, but no basic info / no cells to decode
+    assert not _accepts(probes['jbd'], _jbd(0x03, b'') + _jbd(0x04, b''))
+    # ANT: CRC-valid status frame without a status payload
+    assert not _accepts(probes['ant'], bytes.fromhex('7ea1110000009ce5aa55'))
+    # JK: a checksum-colliding 0x03 header in front of a real status frame
+    status = bytearray(_jk(0x02))
+    fake = bytearray(b'\x55\xaa\xeb\x90\x03') + status
+    fake = fake[:300]
+    fake[-1] = sum(fake[:-1]) & 0xFF
+    assert not _accepts(probes['jk'], bytes(fake) + bytes(status)[len(fake) - 5:])
 
 
 def test_dl_advertisement_hints_daly_protocols():

@@ -85,3 +85,27 @@ Review log: `~/codex-reviews/batmon-type-auto-plan/review.log`. Implemented in
    evaluated, not just the first; a missing advertisement only means no ordering.
 8. *Scope* — the five native families; other aiobmsble types the advertisement
    matches are named in the failure message, never probed.
+
+## Implementation review (Codex, 2026-10-04) and fixes
+
+Review log: `~/codex-reviews/batmon-type-auto-impl/review.log`. All seven fixed;
+each fix has a test that fails with the fix removed (checked).
+
+1. *Unresolved auto device in a group aborted startup* (also in pair-only) —
+   `resolve_auto_devices` returns the unresolved devices' refs; main() disables
+   only a group naming one (error logged), everything else starts. Pair-only
+   marks auto devices unresolved without probing. (main.py wiring not unit-tested.)
+2. *Teardown unbounded* — `stop_notify` bounded by `TEARDOWN_TIMEOUT` on its own;
+   the probe connection is closed via `BtBms._force_disconnect` (bounded, closes
+   the client directly if `disconnect()` fails); a link that stays open is logged.
+3. *Name addresses* — `resolve_device_name()` shared with construct_bms; detection
+   and the advertisement lookup use the MAC.
+4. *Connection recovery* — plain connect, then `_connect_with_scanner` as
+   Daly/ANT/JK do; waits up to 4 s for late service discovery (JK v19).
+5. *Structurally empty replies* — JK through the production `feed_frames`; JBD
+   basic info needs 23 + 2·NTC bytes, cell voltages an even, non-empty payload;
+   ANT status must hold what `AntBt.fetch()` reads. Values are never checked.
+6. *3 s reply budget* — `REPLY_TIMEOUT` 8 s (driver range 8–16 s);
+   `DETECT_TIMEOUT` derived from the connect and reply budgets (~117 s worst case).
+7. *Timeout reported "never reached"* — the caller passes the `Result` in, so a
+   timeout keeps `connected`/`tried`; a timed-out run never yields a type.

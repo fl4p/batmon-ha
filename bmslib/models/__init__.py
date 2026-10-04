@@ -111,6 +111,12 @@ def is_serial_device(dev: dict) -> bool:
     return device_address(dev) == 'serial'
 
 
+def resolve_device_name(addr: str, bt_discovered_devices) -> str:
+    """`address:` may be a device name as shown in the discovery list (README):
+    return the MAC of the discovered device with that name, else `addr` as is."""
+    return next((d.address for d in bt_discovered_devices if (d.name or "").strip() == addr.strip()), addr)
+
+
 def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     addr: str = device_address(dev)
 
@@ -147,7 +153,7 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
         logger.info('Verbose log for %s enabled', addr)
 
     def name2addr(name: str):
-        return next((d.address for d in bt_discovered_devices if (d.name or "").strip() == name.strip()), name)
+        return resolve_device_name(name, bt_discovered_devices)
 
     def dev_by_addr(address: str):
         dev = next((d for d in bt_discovered_devices if d.address.lower() == address.strip().lower()), None)

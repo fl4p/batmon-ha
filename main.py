@@ -287,11 +287,14 @@ async def main():
     dev_args: Dict[str, dict] = {}
 
     devices = user_config.get('devices', [])
-    if not pair_only and any(str(d.get('type') or '').strip().lower() == 'auto' for d in devices):
+    unresolved_auto: Dict[str, str] = {}  # ref -> label of `type: auto` devices left out
+    if any(str(d.get('type') or '').strip().lower() == 'auto' for d in devices):
         # before construction: each `type: auto` becomes the type its device
-        # answered, or is skipped (doc in bmslib/auto_detect.py)
+        # answered, or is skipped (doc in bmslib/auto_detect.py). The pair-only
+        # pre-step doesn't probe, it only needs to know which devices are left out.
         from bmslib.auto_detect import resolve_auto_devices
-        devices = await resolve_auto_devices(devices, bmslib.bt.discovered_adverts)
+        devices, unresolved_auto = await resolve_auto_devices(
+            devices, bmslib.bt.discovered_adverts, ble_devices, detect_now=not pair_only)
 
     for dev in devices:
 
@@ -311,6 +314,7 @@ async def main():
     bms_by_name: dict[str, bmslib.bt.BtBms] = {bms.address: bms for bms in bms_list if not bms.is_virtual}
     bms_by_name.update({bms.name: bms for bms in bms_list})
     groups_by_bms: dict[str, BmsGroup] = {}
+    disabled_groups = []
 
     for bms in bms_list:
         if 'keep_alive' in user_config:
@@ -318,6 +322,15 @@ async def main():
 
         if isinstance(bms, VirtualGroupBms):
             group_bms = bms
+            missing = [r for r in bms.get_member_refs() if resolve_member_ref(bms_by_name, r) is None
+                       and resolve_member_ref(unresolved_auto, r) is not None]
+            if missing:
+                # a member whose `type: auto` was not detected: drop the group (a
+                # partial group would publish a wrong battery), start everything else
+                logger.error('group %s disabled: member(s) %s have `type: auto` and were not detected',
+                             group_bms.name, ', '.join(m.strip() for m in missing))
+                disabled_groups.append(group_bms)
+                continue
             for member_ref in bms.get_member_refs():
                 member = resolve_member_ref(bms_by_name, member_ref)
                 if member is None:
@@ -337,6 +350,10 @@ async def main():
 
                 groups_by_bms[member_name] = group_bms.group
                 bms.add_member(member)
+
+    for group_bms in disabled_groups:
+        bms_list.remove(group_bms)
+        bms_by_name.pop(group_bms.name, None)
 
     # import env vars from addon_main.sh
     for k, en in dict(mqtt_broker='MQTT_HOST', mqtt_port='MQTT_PORT', mqtt_user='MQTT_USER',

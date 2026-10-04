@@ -33,10 +33,14 @@ logger = get_logger()
 
 AUTO = 'auto'
 
-# per device: connect + probe; the probes themselves take a few seconds at most
-DETECT_TIMEOUT = 60
 CONNECT_ATTEMPTS = 3
-REPLY_TIMEOUT = 3.0
+CONNECT_TIMEOUT = 20
+# per request; the drivers allow 8 s (Daly, Daly2) to 16 s (JBD), a busy proxy can be slow
+REPLY_TIMEOUT = 8.0
+TEARDOWN_TIMEOUT = 5.0
+# per device: worst case is every connect attempt failing, or a silent device on the
+# ff01/ff02 layout where three probes each wait REPLY_TIMEOUT
+DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 4 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
 
 
 def _uuid16(short: int) -> str:
@@ -79,6 +83,16 @@ def _daly2_reply(count: int) -> Callable[[bytes], bool]:
     return check
 
 
+def _jbd_payload_ok(cmd: int, payload: bytes) -> bool:
+    # what JbdBt.fetch()/fetch_voltages() need to decode: basic info is 23 fixed
+    # bytes plus 2 per NTC, cell voltages 2 bytes per cell. Values are not checked.
+    if cmd == 0x03:
+        return len(payload) >= 23 and len(payload) >= 23 + 2 * payload[22]
+    if cmd == 0x04:
+        return len(payload) >= 2 and len(payload) % 2 == 0
+    return True
+
+
 def _jbd_reply(cmd: int) -> Callable[[bytes], bool]:
     from bmslib.models.jbd import _validate_jbd_response
 
@@ -88,28 +102,35 @@ def _jbd_reply(cmd: int) -> Callable[[bytes], bool]:
                 continue
             n = buf[i + 3] + 7
             try:
-                _validate_jbd_response(buf[i:i + n], expected_command=cmd)
-                return True
+                payload = _validate_jbd_response(buf[i:i + n], expected_command=cmd)
             except ValueError:
                 continue
+            if _jbd_payload_ok(cmd, payload):
+                return True
         return False
 
     return check
 
 
 def _jk_reply(frame_type: int) -> Callable[[bytes], bool]:
-    from bmslib.models.jikong import FRAME_SIZE, HEADER, calc_crc
+    from bmslib.models.jikong import feed_frames
 
     def check(buf: bytes) -> bool:
-        i = buf.find(HEADER)
-        while i != -1:
-            f = buf[i:i + FRAME_SIZE]
-            if len(f) == FRAME_SIZE and f[4] == frame_type and calc_crc(f[:-1]) == f[-1]:
-                return True
-            i = buf.find(HEADER, i + 1)
-        return False
+        # the production framer: resyncs on the header, checks the CRC and rejects a
+        # window that contains a second header
+        frames, _dropped, _corrupt = feed_frames(bytearray(), buf)
+        return any(f[4] == frame_type for f in frames)
 
     return check
+
+
+def _ant_status_ok(f: bytes) -> bool:
+    # AntBt.fetch() reads cells from offset 34, then temperatures, then 14 bytes of
+    # MOS/balancer temp, voltage, current, SOC, SOH and the two switch bytes
+    if len(f) < 10:
+        return False
+    num_cell, num_temp = f[9], min(f[8], 8)
+    return 1 <= num_cell <= 32 and len(f) - 4 >= 34 + 2 * num_cell + 2 * num_temp + 14
 
 
 def _ant_reply(func: int) -> Callable[[bytes], bool]:
@@ -122,7 +143,8 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
                 n = 6 + buf[i + 5] + 4
                 f = buf[i:i + n]
                 if (len(f) == n and f[-2:] == b'\xaa\x55'
-                        and calc_crc16(f[1:n - 4]) == list(f[n - 4:n - 2])):
+                        and calc_crc16(f[1:n - 4]) == list(f[n - 4:n - 2])
+                        and _ant_status_ok(f)):
                     return True
             i = buf.find(b'\x7e\xa1', i + 1)
         return False
@@ -231,6 +253,7 @@ class Result:
     skipped: List[str] = field(default_factory=list)  # chars missing on this device
     advert_others: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    link_left_open: bool = False
 
 
 class AutoDetectBt(BtBms):
@@ -249,6 +272,31 @@ class AutoDetectBt(BtBms):
                 if char.uuid.lower() == uuid and set(props) & set(char.properties):
                     return char
         return None
+
+    async def open(self):
+        """Connect like the drivers do (plain, then with a scanner running, as
+        DalyBt/AntBt/JKBt fall back to), and wait for service discovery: JK v19
+        sometimes returns from connect() with no services yet (jikong.py)."""
+        try:
+            await self.connect(timeout=CONNECT_TIMEOUT)
+        except Exception as e:
+            self.logger.info('auto: %s plain connect failed (%s), connecting with scanner',
+                             self.name, str(e) or type(e).__name__)
+            await self._force_disconnect(TEARDOWN_TIMEOUT)
+            await self._connect_with_scanner(timeout=CONNECT_TIMEOUT)
+        deadline = time.monotonic() + 4
+        while not list(self.client.services):
+            get_svc = getattr(self.client, 'get_services', None)
+            if get_svc is not None:
+                try:
+                    await get_svc()
+                except Exception:
+                    pass
+            if list(self.client.services):
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('GATT service discovery returned no services')
+            await asyncio.sleep(0.5)
 
     async def run_probe(self, probe: Probe) -> bool:
         rx = self._char(probe.rx, ('notify', 'indicate'))
@@ -271,10 +319,12 @@ class AutoDetectBt(BtBms):
                     await asyncio.sleep(0.05)
             return True
         finally:
+            # bounded, also when cancelled: a stuck unsubscribe must not keep the
+            # link (and a proxy slot) from being closed
             try:
-                await self.client.stop_notify(rx)
-            except Exception:
-                pass
+                await asyncio.wait_for(self.client.stop_notify(rx), TEARDOWN_TIMEOUT)
+            except Exception as e:
+                self.logger.debug('auto: stop_notify: %s', str(e) or type(e).__name__)
 
     def has_chars(self, probe: Probe) -> bool:
         return (self._char(probe.rx, ('notify', 'indicate')) is not None
@@ -282,8 +332,11 @@ class AutoDetectBt(BtBms):
 
 
 async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
-                 probes: Optional[List[Probe]] = None, bms_factory=AutoDetectBt) -> Result:
-    res = Result()
+                 probes: Optional[List[Probe]] = None, bms_factory=AutoDetectBt,
+                 res: Optional[Result] = None) -> Result:
+    """Probe one device. Fills `res` as it goes, so a caller that times out still
+    knows whether the device was reached and what was tried."""
+    res = res if res is not None else Result()
     preferred, res.advert_others = advert_hints(adv, address)
     probes = order_probes(probes if probes is not None else _build_probes(), preferred)
 
@@ -292,16 +345,13 @@ async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
         last_exc = None
         for attempt in range(CONNECT_ATTEMPTS):
             try:
-                await bms.connect(timeout=20)
+                await bms.open()
                 res.connected = True
                 break
             except Exception as e:
                 last_exc = e
                 logger.info('auto: %s connect attempt %d failed: %s', name, attempt + 1, str(e) or type(e).__name__)
-                try:
-                    await bms.disconnect()
-                except Exception:
-                    pass
+                await bms._force_disconnect(TEARDOWN_TIMEOUT)
                 await asyncio.sleep(2)
         if not res.connected:
             res.error = 'cannot connect: %s' % (str(last_exc) or type(last_exc).__name__)
@@ -323,58 +373,82 @@ async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
                 return res
         return res
     finally:
-        try:
-            await bms.disconnect()
-        except Exception as e:
-            logger.debug('auto: %s disconnect: %s', name, e)
+        # bounded (disconnect, then the client directly), also on cancellation
+        await bms._force_disconnect(TEARDOWN_TIMEOUT)
+        if bms.is_connected:
+            res.link_left_open = True
+            logger.warning('auto: %s: could not close the probe connection', name)
 
 
-async def resolve_auto_devices(devices: List[dict], adverts: dict) -> List[dict]:
-    """Return `devices` with every `type: auto` replaced by the detected type, or
-    commented out (address prefixed `#`, which construct_bms skips) when detection
-    did not confirm one. Devices are probed one at a time: proxies have few slots."""
-    out = []
+async def resolve_auto_devices(devices: List[dict], adverts: dict, bt_discovered_devices=(),
+                               detect_now=True) -> Tuple[List[dict], Dict[str, str]]:
+    """Return (`devices` with every `type: auto` replaced by the detected type,
+    the devices left unresolved as {ref: label}).
+
+    An unresolved device is commented out (address prefixed `#`, which
+    construct_bms skips); its refs (alias, address, MAC) let main() disable a group
+    that names it instead of aborting the add-on. `detect_now=False` (pair-only
+    pre-step) marks every auto device unresolved without touching it. Devices are
+    probed one at a time: proxies have few connection slots."""
+    out, unresolved = [], {}
     for dev in devices:
         if str(dev.get('type') or '').strip().lower() != AUTO:
             out.append(dev)
             continue
-        out.append(await _resolve_one(dev, adverts))
-    return out
+        new, mac = await _resolve_one(dev, adverts, bt_discovered_devices, detect_now)
+        out.append(new)
+        if str(new.get('type')).strip().lower() == AUTO:
+            label = dev.get('alias') or str(dev.get('address'))
+            refs = (dev.get('alias'),) if mac is None else (dev.get('alias'), str(dev.get('address') or '').strip(), mac)
+            for ref in refs:
+                if ref:
+                    unresolved[ref] = label
+                    unresolved[normalize_ble_address(ref)] = label
+    return out, unresolved
 
 
-async def _resolve_one(dev: dict, adverts: dict) -> dict:
-    from bmslib.models import device_address, is_serial_device
+async def _resolve_one(dev: dict, adverts: dict, bt_discovered_devices, detect_now) -> Tuple[dict, Optional[str]]:
+    from bmslib.models import device_address, is_serial_device, resolve_device_name
     addr = device_address(dev)
     label = dev.get('alias') or addr
     if not addr or addr.startswith('#'):
-        return dev
+        return dev, None
     if is_serial_device(dev):
         logger.error('auto: %s: `type: auto` is Bluetooth only, set the wired type (e.g. daly_uart)', label)
-        return dict(dev, address='#' + addr)
+        return dict(dev, address='#' + addr), None
+    # `address:` may be the device name (README); detect and look up by its MAC
+    mac = resolve_device_name(addr, bt_discovered_devices)
+    if not detect_now:
+        return dict(dev, address='#' + addr), mac
 
-    adv = adverts.get(normalize_ble_address(addr))
-    logger.info('auto: detecting the BMS type of %s (%s)%s', label, addr,
+    adv = adverts.get(normalize_ble_address(mac))
+    logger.info('auto: detecting the BMS type of %s (%s)%s', label, mac,
                 '' if adv else ', no advertisement seen')
+    res = Result()
     try:
-        res = await asyncio.wait_for(
-            detect(addr, name=label, adapter=dev.get('adapter'), psk=dev.get('pin'), adv=adv),
+        await asyncio.wait_for(
+            detect(mac, name=label, adapter=dev.get('adapter'), psk=dev.get('pin'), adv=adv, res=res),
             DETECT_TIMEOUT)
     except Exception as e:  # incl. timeout: one device must not stop the others
-        res = Result(error='%s: %s' % (type(e).__name__, e))
+        res.type = None  # never accept a type from a run that did not finish
+        if isinstance(e, asyncio.TimeoutError):
+            res.error = 'timed out after %.0f s' % DETECT_TIMEOUT
+        else:
+            res.error = '%s: %s' % (type(e).__name__, e)
 
     if res.type:
         logger.info('auto: %s answers %s -> using `type: %s`. Put `type: %s` in the config to skip '
                     'this detection on every start.', label, res.probe, res.type, res.type)
-        return dict(dev, type=res.type)
+        return dict(dev, type=res.type), mac
 
     if not res.connected:
         logger.error('auto: %s: type NOT detected, the device was never reached (%s). Not a protocol '
                      'verdict; skipping it until the next start.', label, res.error)
     else:
-        logger.error('auto: %s: no audited protocol answered (tried: %s; not offered by this device: %s)%s%s. '
+        logger.error('auto: %s: type NOT detected (tried: %s; not offered by this device: %s)%s%s. '
                      'Skipping it. Set `type:` by hand, or post a passive `type: snoop` log (doc/SNOOP.md).',
                      label, ', '.join(res.tried) or 'none', ', '.join(res.skipped) or 'none',
                      ('; advertisement also matches aiobmsble ' + ', '.join(res.advert_others) +
                       ' (try `type: <name without _bms>_ble`)') if res.advert_others else '',
                      ('; ' + res.error) if res.error else '')
-    return dict(dev, address='#' + addr)
+    return dict(dev, address='#' + addr), mac
