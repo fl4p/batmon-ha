@@ -114,6 +114,11 @@ displayed in the discovery list.
 `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
+`type: auto` (Bluetooth only) asks the device at every start which protocol it speaks and logs the `type:` to put in
+the config instead. It knows `daly` (A5), `daly2` (Modbus), `jbd`, `jk` and `ant`, and accepts a type only on a
+valid reply to a read request, sent to that driver's own characteristic. A device that doesn't answer is skipped
+with an error, never guessed. Any other BMS still needs its `type:` set by hand.
+
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.
 

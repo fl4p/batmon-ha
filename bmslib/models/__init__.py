@@ -131,6 +131,12 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
         if type_spec:
             extra_kwargs['type_spec'] = type_spec
 
+    if slug.lower() == 'auto':
+        # main() resolves these before construction (bmslib/auto_detect.py); one
+        # still here was not resolved, e.g. in the pair-only pre-step
+        logger.info('%s: type auto not resolved in this run', addr)
+        return None
+
     bms_class = get_bms_model_class(slug)
 
     if bms_class is None:

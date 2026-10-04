@@ -286,7 +286,14 @@ async def main():
     names = set()
     dev_args: Dict[str, dict] = {}
 
-    for dev in user_config.get('devices', []):
+    devices = user_config.get('devices', [])
+    if not pair_only and any(str(d.get('type') or '').strip().lower() == 'auto' for d in devices):
+        # before construction: each `type: auto` becomes the type its device
+        # answered, or is skipped (doc in bmslib/auto_detect.py)
+        from bmslib.auto_detect import resolve_auto_devices
+        devices = await resolve_auto_devices(devices, bmslib.bt.discovered_adverts)
+
+    for dev in devices:
 
         bms = construct_bms(dev, verbose_log, ble_devices)
 

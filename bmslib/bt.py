@@ -37,6 +37,11 @@ except ImportError:
         pass
 
 
+# Last advertisement seen per normalized address, from every bt_discovery() run on
+# any adapter. bt_discovery() returns bare devices; `type: auto` needs the rest.
+discovered_adverts: dict = {}
+
+
 @backoff.on_exception(backoff.expo, Exception, max_time=10, logger=get_logger())
 async def bt_discovery(logger, timeout: int = 5, adapter=None):
     ad = adapter or 'default'
@@ -54,6 +59,7 @@ async def bt_discovery(logger, timeout: int = 5, adapter=None):
                 logger.info("%s %*s %26s %4s", ad, addr_len, 'addr', 'name', 'rssi')
             for d, a in sorted(devices.values(), key=lambda t: t[0].address):
                 logger.info("%s %*s %26s %4s", ad, addr_len, d.address, d.name, a.rssi)
+                discovered_adverts[normalize_ble_address(d.address)] = a
             return [d for d, a in devices.values()]
         else:
             devices = scanner.discovered_devices
