@@ -6,6 +6,7 @@
 * Fix (`soh_estimator`): garbled frames on both sides of a caught current glitch were counted (101–109 Ah for 97.5), because only the two readings next to it had to agree. Now the 5 readings either side must agree with their level, which ends more segments around real glitches (doc/SoH.md).
 * `soh_estimator`: `capacity:` is the nameplate of this one pack. A bank's capacity there passed the plausibility check (a 100 Ah pack in a bank of two read SoH 48.8 %); now nothing is published when it differs from the capacity the BMS reports by more than 1.5×, and the log names both.
 * Experimental estimators: the code fingerprint that guards saved state now covers what functions close over (factory and decorator arguments) and lists or dicts at module or class level; a change to those kept old state before.
+* Fix (`soh_estimator`): a BMS counter that had stopped before a restart was judged by the net charge since then, so ±22 A that netted to zero hid it (49 Ah published for 98). It now counts the charge moved either way.
 
 ## [2.23]
 

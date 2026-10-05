@@ -2026,11 +2026,88 @@ def test_calibration_without_the_staleness_term_a_stopped_counter_publishes_half
     rows, cuts, charge, soc = _stuck_counter(600.0, n=3)
 
     def fresh_looking(est):
-        est._c_q = est.q_ah  # as if the counter had just moved: the old check
+        est._c_q = est.q_moved  # as if the counter had just moved: the old check
     est, pub = _split_run(rows, cuts, charge=charge, soc=soc, after_restore=fresh_looking)
     dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
     assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
     assert dis[0] < 0.55 * 98.0 and pub[0]['plausibility_checked']  # 49 Ah
+
+
+def _netzero_frozen(swing_s, n=3, after_restore=None):
+    """Fourth review, finding 5c: _frozen_clock (22 A, 44 Ah while the host is
+    off, 2 minutes on its clock), with the BMS's counter stopped swing_s x 2
+    before the shutdown, and the current swinging +22 A then -22 A since
+    (net zero), the counter reading the same up to the first sample after the
+    restart."""
+    p = Pack().rest()
+    cuts, frozen, i = [], [], 22.0
+    for _ in range(n):
+        p.run(i, 3600)
+        f0 = len(p.rows)
+        p.run(i, swing_s).run(-i, swing_s)
+        cuts.append(len(p.rows))
+        frozen.append(f0)
+        p.run(i, 3600 * 44 / i, sample=False)
+        p.run(i, 3600 * (88 - 22 - 44) / i).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    p.end()
+    rows, charge, soc, shift, k = [], {}, {}, 0.0, 0
+    for j, (t, cur, v, temp) in enumerate(p.rows):
+        if k < len(cuts) and j == cuts[k]:
+            shift += 3600 * 44 / i + p.dt - 120.0
+            k += 1
+        rows.append((t - shift, cur, v, temp))
+        charge[t - shift], soc[t - shift] = p.charge[t], p.soc_bms[t]
+    for f0, c in zip(frozen, cuts):
+        held = charge[rows[f0 - 1][0]]
+        for j in range(f0, c + 1):
+            charge[rows[j][0]] = held
+    return _split_run(rows, cuts, charge=charge, soc=soc, after_restore=after_restore)
+
+
+@pytest.mark.parametrize('swing_min', [10, 30, 60])
+def test_a_counter_stopped_through_a_net_zero_swing_is_no_evidence(swing_min):
+    """The staleness term used the net charge since the counter last moved:
+    +-22 A for 2 x swing_min nets to zero, so a counter stopped for 20-120
+    minutes read as fresh and 48.7-49.5 Ah went out for 98. The charge moved
+    either way is 7-44 Ah."""
+    est, pub = _netzero_frozen(60.0 * swing_min)
+    assert est.counts['restart_unverified'] == 3 and not any(s['dq'] < 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def _netzero_frozen_net_term(swing_s):
+    """_netzero_frozen with the old term: the net charge since the counter
+    last moved (q_ah then, recorded here) in place of the charge moved."""
+    box, add = {}, q.QmaxEstimator.add
+
+    def recording(self, *a, **k):
+        c_q = self._c_q
+        r = add(self, *a, **k)
+        if self._c_q != c_q:
+            box['net'] = self.q_ah
+        return r
+
+    def net_term(est):
+        est._c_q = est.q_moved - abs(est.q_ah - box['net'])
+    try:
+        q.QmaxEstimator.add = recording
+        return _netzero_frozen(swing_s, after_restore=net_term)
+    finally:
+        q.QmaxEstimator.add = add
+
+
+def test_calibration_with_the_net_charge_a_stopped_counter_publishes_half_the_pack():
+    est, pub = _netzero_frozen_net_term(600.0)
+    dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+    assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
+    assert all(x < 0.55 * 98.0 for x in dis) and pub[0]['plausibility_checked']  # 48.7 Ah
+
+
+def test_monotone_in_the_swing_a_stopped_counter_missed():
+    verdicts = [_netzero_frozen(60.0 * m, n=1)[0].counts['restart_unverified'] == 0 for m in (0, 1, 2, 3, 5, 10, 60)]
+    _monotone(verdicts)
+    assert verdicts[0] and not verdicts[-1]  # 0: the documented residual (stopped right at the shutdown)
 
 
 def test_a_counter_read_from_a_30_s_cache_still_continues():
@@ -2046,8 +2123,10 @@ def test_monotone_in_how_long_the_counter_was_stale():
     """Nothing hidden, the counter repeated for stuck_s before the shutdown
     and live again after it: accepted while the lag is small, and never again
     once refused. With 44 Ah hidden and the counter stuck through the restart
-    it is refused once it had been stuck for ~250 s (1.5 Ah at 22 A) before
-    the shutdown; below that is the residual the module doc names."""
+    it is refused once the charge that moved since it last moved, with the
+    bridge's miss and the resolution, exceeds 2 % of the capacity: a bound in
+    charge, ~1.5 Ah moved, which at this 22 A takes ~250 s (at 44 A half
+    that). Below it is the residual the module doc names."""
     def ok(stuck_s, hidden):
         rows, cuts, charge, soc = _stuck_counter(stuck_s, hidden_ah=hidden)
         if not hidden:  # live again after the restart: the first sample reads the truth
@@ -2478,6 +2557,9 @@ BAD_STATES = [
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
     ('q_ah NaN', lambda s: s.update(q_ah=float('nan'))),
+    ('q_moved missing', lambda s: s.pop('q_moved')),
+    ('q_moved negative', lambda s: s.update(q_moved=-1.0)),
+    ('charge_q beyond q_moved', lambda s: s.update(charge_q=s['q_moved'] + 1.0)),
     ('last_i without last_t', lambda s: s.update(last_t=None)),
     ('epoch negative', lambda s: s.update(epoch=-1)),
     ('anchor soc out of range', lambda s: s['anchors'][1]['soc'].__setitem__(0, 140.0)),

@@ -103,9 +103,9 @@ it for good and turns that one test off. Not covered: a counter that runs into
 a stop and back out while the host is off (charged to full, then discharged by
 what it had counted), a full end that moved below the counter's highest
 reading and that nothing reports, or a counter that stops counting less than
-RESUME_TOL_FRAC of the capacity before the shutdown and still reads the same
-after it (the frozen-clock case above then still publishes 49 Ah for 98) --
-they read like a pack at rest.
+RESUME_TOL_FRAC of the capacity of charge (moved either way, not net) before
+the shutdown and still reads the same after it (the frozen-clock case above
+then still publishes 49 Ah for 98) -- they read like a pack at rest.
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
@@ -647,7 +647,7 @@ class QmaxEstimator:
         self._last_c: Optional[float] = None  # the BMS's charge counter [Ah] at _last_t, None when unknown
         self._c_src: Optional[str] = None  # which counter (charge_counter); q_c belongs to it
         self.q_c: Optional[float] = None  # its resolution: the smallest non-zero step seen of THAT counter [Ah]
-        self._c_q: Optional[float] = None  # q_ah when that counter was last seen to move (None with q_c)
+        self._c_q: Optional[float] = None  # q_moved when that counter was last seen to move (None with q_c)
         self._c_max: Optional[float] = None  # the highest plausible reading of THAT counter [Ah] (None with _c_src)
         self._last_soc: Optional[float] = None  # the BMS's SoC [%] at _last_t, None when unknown
         self._last_soc_raw: Optional[float] = None  # ... as the driver reported it (BmsSample.soc_reported)
@@ -662,6 +662,7 @@ class QmaxEstimator:
         self._glitch_nb: Optional[Dict[str, List[float]]] = None
         self._recent: deque = deque(maxlen=GLITCH_NB_N)  # the last good samples' charge currents
         self.q_ah = 0.0
+        self.q_moved = 0.0  # the charge moved either way, the integral of |I| [Ah]: what a stalled counter misses
         self.covered_s = 0.0
         self.epoch = 0  # bumped by every gap: anchors of different epochs never pair
         # rest detection
@@ -864,6 +865,7 @@ class QmaxEstimator:
             else:
                 assert self._last_i is not None
                 self.q_ah += 0.5 * (i + self._last_i) * dt / 3600.0
+                self.q_moved += self._moved(self._last_i, i, dt)
                 if dt <= COVERED_DT_S:
                     self.covered_s += dt
         self._resumed = False
@@ -882,7 +884,7 @@ class QmaxEstimator:
         if c is not None and self._last_c is not None:
             step = abs(c - self._last_c)
             if step > 1e-9 * max(1.0, abs(c)):
-                self._c_q = self.q_ah  # it moved: what it reads now includes the charge counted up to here
+                self._c_q = self.q_moved  # it moved: what it reads now includes the charge up to here
                 if self.q_c is None or step < self.q_c:
                     self.q_c = step
         if c is not None and self._counter_plausible(c):
@@ -996,6 +998,11 @@ class QmaxEstimator:
                 return 'the counter read %.2f Ah %s it, at its full end: %s, %.2f Ah' % (c, when, what, full)
         return None
 
+    @staticmethod
+    def _moved(i0: float, i1: float, dt: float) -> float:
+        """Charge moved either way over one interval [Ah] (trapezoid of |I|)."""
+        return 0.5 * (abs(i0) + abs(i1)) * dt / 3600.0
+
     def _resume_ok(self, t: float, i: float, dt: float, c: Optional[float], src: Optional[str],
                    ends: Tuple[Optional[float], ...]) -> bool:
         """First sample after a restart, dt after the last one saved: may the
@@ -1023,16 +1030,18 @@ class QmaxEstimator:
         if why is None:
             assert c is not None and self._last_c is not None and self.q_c is not None and self._c_q is not None
             moved = c - self._last_c
-            # Its last reading may lag what was counted since it last moved (a
-            # cached reading, or a counter that stopped): that counts as missed.
-            stale = abs(self.q_ah - self._c_q)
+            # Its last reading may lag what moved since it last moved (a cached
+            # reading, or a counter that stopped): that counts as missed. The
+            # charge moved either way, not the net: +-22 A that nets to zero
+            # while the counter stood still is 22 A of charge it did not see.
+            stale = abs(self.q_moved - self._c_q)
             miss = abs(moved - bridge) + self.q_c + stale
             if miss <= RESUME_TOL_FRAC * cap:
                 logger.info('%s: Qmax: restart after %.0f s, open segment continued: the BMS counted %+.2f Ah, the '
-                            'bridge %+.2f Ah (resolution %.2f Ah, %.2f Ah counted since it last moved)', self.name,
+                            'bridge %+.2f Ah (resolution %.2f Ah, %.2f Ah moved since it last moved)', self.name,
                             dt, moved, bridge, self.q_c, stale)
                 return True
-            why = 'the BMS counted %+.2f Ah, the bridge %+.2f Ah (resolution %.2f Ah, %.2f Ah counted since it last ' \
+            why = 'the BMS counted %+.2f Ah, the bridge %+.2f Ah (resolution %.2f Ah, %.2f Ah moved since it last ' \
                   'moved): %.2f Ah unaccounted for, more than %.0f %% of %.0f Ah' \
                   % (moved, bridge, self.q_c, stale, miss, 100 * RESUME_TOL_FRAC, cap)
         logger.info('%s: Qmax: restart after %.0f s by the clock, open segment ended: %s', self.name, dt, why)
@@ -1336,7 +1345,7 @@ class QmaxEstimator:
             last_soc_raw=self._last_soc_raw, last_charge_full=self._last_cfull, last_aged=self._last_aged,
             t_glitch=self._t_glitch, glitch_nb=copy.deepcopy(self._glitch_nb), recent=list(self._recent),
             bms_caps=[list(x) for x in self._bms_caps],
-            q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
+            q_ah=self.q_ah, q_moved=self.q_moved, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
             last_seg_t=self._last_seg_t, load_ewma=self._load_ewma,
             announced=self._announced,
@@ -1424,6 +1433,9 @@ class QmaxEstimator:
         if last_aged is not None and not last_aged > 0:
             raise ValueError('last_aged %r' % last_aged)
         q_ah = v_fin(st.get('q_ah'), 'q_ah')
+        q_moved = v_fin(st.get('q_moved'), 'q_moved')
+        if q_moved < 0 or (c_q is not None and not 0 <= c_q <= q_moved):
+            raise ValueError('q_moved %r, charge_q %r' % (q_moved, c_q))
         covered = v_fin(st.get('covered_s'), 'covered_s')
         epoch = v_int(st.get('epoch'), 'epoch')
 
@@ -1496,6 +1508,7 @@ class QmaxEstimator:
                            'option (%s) discarded', self.name, dropped, _fmt_ah(self.design_capacity))
 
         self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
+        self.q_moved = q_moved
         self._last_c, self._c_src, self.q_c, self._c_q, self._c_max = last_c, c_src, q_c, c_q, c_max
         self._last_soc, self._last_soc_raw, self._last_cfull, self._last_aged = last_soc, last_soc_raw, last_cfull, \
             last_aged
