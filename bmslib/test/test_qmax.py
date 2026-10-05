@@ -428,32 +428,171 @@ def test_calibration_without_the_neighbour_rule_the_garbled_frames_are_counted(m
 
 def test_monotone_in_how_far_a_glitch_neighbour_is_off():
     """A 50 A discharge; the sample after the caught glitch reads 50 + d A.
-    Up to 16.7 A (25 % of the larger, 66.7 A) the hole is bridged; beyond,
-    never again -- up to
-    the far tail, where the neighbour is itself above the bound (a burst)."""
+    Up to 12.5 A (25 % of the local level, the neighbourhood's median 50 A)
+    the hole is bridged; beyond, never again -- up to the far tail, where the
+    neighbour is itself above the bound (a burst)."""
     def accepted(d):
         rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
         return _accepts(_glitch_with_neighbours(rows, 1, value=50.0 + d))
-    verdicts = [accepted(d) for d in (0.0, 5.0, 16.0, 17.0, 50.0, 400.0, 3000.0)]
+    verdicts = [accepted(d) for d in (0.0, 5.0, 12.0, 13.0, 16.0, 50.0, 400.0, 3000.0)]
     _monotone(verdicts)
     assert verdicts[:3] == [True] * 3 and not verdicts[3]
 
 
-def _spaced_glitches(rows, spacing_s=120.0, n_garbled=4, value=450.0):
+def _glitch_symmetric(rows, k, value=450.0, every_load=True):
+    """Fourth review, finding 3: one caught glitch in the middle of every load
+    (charge and discharge, or discharges only), and k garbled frames on BOTH
+    sides of it that read `value` A in the load's direction. The two samples
+    beside the hole then agree with each other."""
+    out = list(rows)
+    j, n = 0, len(rows)
+    while j < n:
+        if abs(rows[j][1]) > 30 and (every_load or rows[j][1] > 0):
+            sgn = 1.0 if rows[j][1] > 0 else -1.0
+            e = j
+            while e < n and abs(rows[e][1]) > 30:
+                e += 1
+            m = (j + e) // 2
+            t, _, v, temp = out[m]
+            out[m] = (t, sgn * 3553.5, v, temp)
+            for b in list(range(1, k + 1)) + [-x for x in range(1, k + 1)]:
+                t, _, v, temp = out[m + b]
+                out[m + b] = (t, sgn * value, v, temp)
+            j = e
+        j += 1
+    return out
+
+
+@pytest.mark.parametrize('value', [450.0, 300.0])
+@pytest.mark.parametrize('k', [1, 2, 4])
+def test_garbled_frames_on_both_sides_of_a_glitch_end_the_segment(k, value):
+    """The review published 101.2 / 103.7 / 108.6 Ah (450 A) and 99.8 /
+    101.4 / 104.4 Ah (300 A) for 97.5: the samples either side of the hole
+    agreed with each other. The 5 either side do not agree with their level."""
+    est, pub = run(_glitch_symmetric(full_cycles(n=3).rows, k, value))
+    assert est.counts['current_implausible_neighbours'] == 6 and est.counts['current_implausible_burst'] == 0
+    assert not est.segments and pub == []  # every load had one: nothing left to publish
+
+
+def test_calibration_with_only_the_two_neighbours_the_symmetric_garbage_is_published(monkeypatch):
+    """GLITCH_NB_N = 1 is the old rule: the sample before and the one after."""
+    monkeypatch.setattr(q, 'GLITCH_NB_N', 1)
+    rows = full_cycles(n=3).rows
+    for k, value, want in ((1, 450.0, 101.2), (2, 450.0, 103.7), (4, 450.0, 108.6), (4, 300.0, 104.4)):
+        est, pub = run(_glitch_symmetric(rows, k, value))
+        assert est.counts['current_implausible_neighbours'] == 0 and pub, 'scenario is harmless'
+        assert pub[-1]['qmax'] == pytest.approx(want, abs=0.2) and pub[-1]['plausibility_checked'], (k, value)
+
+
+def test_monotone_in_garbled_frames_either_side_of_a_glitch():
+    """0 is a clean isolated glitch (bridged); 1 to GLITCH_NB_N - 1 garbled
+    frames either side are refused. From GLITCH_NB_N on, the window is all
+    garbage that agrees with itself, which is a real load pulse to any rule
+    that sees only the current, and the same run without the caught frame
+    passes every rule: the documented limit, not a verdict that flips back
+    within the range the rule covers. Magnitude, to the far tail: refused
+    from just beyond the tolerance up to a neighbour above the bound."""
+    def accepted(k, value=450.0):
+        rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
+        return _accepts(_glitch_symmetric(rows, k, value) if k else rows)
+    verdicts = [accepted(k) for k in range(q.GLITCH_NB_N)]
+    _monotone(verdicts)
+    assert verdicts == [True] + [False] * (q.GLITCH_NB_N - 1)
+    _monotone([accepted(1, 50.0 + d) for d in (0.0, 12.0, 13.0, 100.0, 400.0, 3000.0)])
+
+
+def _glitch_at_restart(at_glitch):
+    """A caught glitch 200 samples into every discharge with 3 garbled 450 A
+    frames after it; batmon restarts (full state) right after the glitch
+    (at_glitch False: the garbage comes after the restart) or with the glitch
+    as the first sample after the restart (at_glitch True)."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(50.0, 3600 * 88 / 50).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    p.end()
+    rows, cuts = list(p.rows), []
+    for s in [k for k in range(1, len(rows)) if rows[k][1] > 30 and rows[k - 1][1] < 5]:
+        m = s + 200
+        t, _, v, temp = rows[m]
+        rows[m] = (t, 3553.5, v, temp)
+        for b in range(1, 4):
+            t, _, v, temp = rows[m + b]
+            rows[m + b] = (t, 450.0, v, temp)
+        cuts.append(m if at_glitch else m + 1)
+    return _split_run(rows, cuts, **bms(p))
+
+
+@pytest.mark.parametrize('at_glitch', [False, True])
+def test_a_glitch_next_to_a_restart_is_judged_by_its_whole_neighbourhood(at_glitch):
+    """Fourth review, finding 5a: the open decision is saved and restored
+    (otherwise the garbage just after a restart counted, 101.8 Ah), and a
+    glitch that is the first sample after a restart opens one too."""
+    est, _ = _glitch_at_restart(at_glitch)
+    assert est.counts['restart_unverified'] == 0 and est.counts['current_implausible_neighbours'] == 3
+    assert not any(s['dq'] < 0 for s in est.segments)
+
+
+@pytest.mark.parametrize('at_glitch', [False, True])
+def test_calibration_without_the_open_decision_across_a_restart_the_garbage_is_counted(at_glitch, monkeypatch):
+    orig = q.QmaxEstimator._restore
+
+    def forget(self, st):
+        orig(self, st)
+        self._glitch_nb = None  # finding 5a's first break
+    monkeypatch.setattr(q.QmaxEstimator, '_restore', forget)
+    if at_glitch:  # the second: a glitch right after a restart opens nothing
+        add = q.QmaxEstimator.add
+
+        def no_open(self, t, current, *a, **k):
+            resumed = self._resumed
+            r = add(self, t, current, *a, **k)
+            if resumed and abs(current) > 1000:
+                self._glitch_nb = None
+            return r
+        monkeypatch.setattr(q.QmaxEstimator, 'add', no_open)
+    est, _ = _glitch_at_restart(at_glitch)
+    dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+    assert est.counts['current_implausible_neighbours'] == 0 and dis, 'scenario is harmless'
+    assert all(x == pytest.approx(101.8, abs=0.2) for x in dis)
+
+
+def test_a_clean_glitch_right_after_a_restart_is_still_bridged():
+    """The samples before the restart are saved too (the state's `recent`):
+    without them the neighbourhood is unevaluable and the segment ends."""
+    p = Pack().rest()
+    for _ in range(3):
+        p.run(50.0, 3600 * 88 / 50).rest()
+        p.run(-50.0, 3600 * 88 / 50).rest()
+    p.end()
+    rows, cuts = list(p.rows), []
+    for s in [k for k in range(1, len(rows)) if rows[k][1] > 30 and rows[k - 1][1] < 5]:
+        t, _, v, temp = rows[s + 200]
+        rows[s + 200] = (t, 3553.5, v, temp)
+        cuts.append(s + 200)
+    est, _ = _split_run(rows, cuts, **bms(p))
+    assert est.counts['current_implausible_neighbours'] == 0 and len(est.segments) == 5
+    est, _ = _split_run(rows, cuts, after_restore=lambda e: e._recent.clear(), **bms(p))
+    assert est.counts['current_implausible_neighbours'] == 3  # unevaluable is no agreement
+
+
+def _spaced_glitches(rows, spacing_s=240.0, n_garbled=4, value=450.0):
     """In the middle of every discharge (10 s cadence): a caught glitch, n
-    garbled frames of `value` A from 30 s after it, and a second caught
-    glitch spacing_s after the first. The samples beside each glitch are
-    clean, so the neighbour rule bridges each one; only the isolation window
-    sees that there were two."""
+    garbled frames of `value` A from GLITCH_NB_N + 1 samples after it, and a
+    second caught glitch spacing_s after the first. The GLITCH_NB_N samples
+    either side of each glitch are clean, so the neighbourhood rule bridges
+    each one; only the isolation window sees that there were two."""
     out = list(rows)
     j, n, step = 0, len(rows), int(round(spacing_s / 10.0))
+    first = q.GLITCH_NB_N + 1
+    assert not n_garbled or first + n_garbled + q.GLITCH_NB_N <= step, 'the garbage would be beside a glitch'
     while j < n:
         if rows[j][1] > 30:
             e = j
             while e < n and rows[e][1] > 30:
                 e += 1
             m = (j + e) // 2 - step // 2
-            for b in [0, step] + list(range(3, 3 + n_garbled)):
+            for b in [0, step] + list(range(first, first + n_garbled)):
                 t, _, v, temp = out[m + b]
                 out[m + b] = (t, 3553.5 if b in (0, step) else value, v, temp)
             j = e
@@ -462,9 +601,10 @@ def _spaced_glitches(rows, spacing_s=120.0, n_garbled=4, value=450.0):
 
 
 def test_two_glitches_minutes_apart_end_the_segment():
-    """The isolation window, on its own: two caught glitches 120 s apart with
-    garbled frames between them but not beside them. The burst test spaces
-    its frames 10 s apart, so a window cut to 60 s passed it."""
+    """The isolation window, on its own: two caught glitches 240 s apart with
+    garbled frames between them but not within GLITCH_NB_N samples of either.
+    The burst test spaces its frames 10 s apart, so a window cut to 60 s
+    passed it."""
     est, pub = run(_spaced_glitches(full_cycles(n=3).rows))
     assert est.counts['current_implausible_burst'] == 3 and est.counts['current_implausible_neighbours'] == 0
     assert all(s['dq'] > 0 for s in est.segments)
@@ -477,13 +617,14 @@ def test_calibration_with_a_60_s_isolation_window_the_garbage_between_is_counted
     dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
     assert dis, 'scenario is harmless'
     assert all(x / 97.5 - 1 > 0.04 for x in dis)  # 4 x 400 A x 10 s = 4.4 Ah of garbage: 102.4 Ah
+    assert est.counts['current_implausible_neighbours'] == 0  # nothing else saw it
 
 
 def test_monotone_in_glitch_spacing():
     """Closer glitches are worse: bridged beyond 300 s, and never again below."""
     def accepted(spacing):
         rows = Pack().rest().run(50.0, 3600 * 88 / 50).rest().end().rows
-        return _accepts(_spaced_glitches(rows, spacing_s=spacing))
+        return _accepts(_spaced_glitches(rows, spacing_s=spacing, n_garbled=0))
     verdicts = [accepted(x) for x in (900.0, 600.0, 310.0, 290.0, 120.0, 60.0, 20.0)]
     _monotone(verdicts)
     assert verdicts[:3] == [True] * 3 and not verdicts[3]
@@ -2262,8 +2403,12 @@ BAD_STATES = [
                                                      last_charge=None)),
     ('last_charge_full not positive', lambda s: s.update(last_charge_full=-1.0)),
     ('charge_q without q_charge', lambda s: s.update(q_charge=None)),
-    ('glitch_open without a glitch', lambda s: s.update(glitch_open=True, t_glitch=None)),
-    ('glitch_open not a bool', lambda s: s.update(glitch_open='yes')),
+    ('glitch_nb without a glitch', lambda s: s.update(glitch_nb=dict(before=[1.0], after=[]), t_glitch=None)),
+    ('glitch_nb garbage', lambda s: s.update(glitch_nb='yes', t_glitch=1.0)),
+    ('glitch_nb already decided', lambda s: s.update(glitch_nb=dict(before=[1.0] * 5, after=[1.0] * 5), t_glitch=1.0)),
+    ('glitch_nb not numbers', lambda s: s.update(glitch_nb=dict(before=['a'], after=[]), t_glitch=1.0)),
+    ('recent too long', lambda s: s.update(recent=[1.0] * 6)),
+    ('recent missing', lambda s: s.pop('recent')),
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
     ('q_ah NaN', lambda s: s.update(q_ah=float('nan'))),

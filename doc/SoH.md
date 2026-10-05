@@ -88,10 +88,19 @@ gain down to 0.4 passes.
 
 A current reading above 5× the capacity (never above 1000 A) is a decode glitch, not a current, like the 2 147 483 A
 (2³¹ mA) seen from a JK BMS. It is not counted: an isolated one is left out and bridged like a sample that never came
-(the 5-minute rule above), if the readings either side of it agree (within 25 % of the larger, or 1 A). Otherwise, and
-at a second one within 5 minutes, the open segment ends: garbled frames come in runs, and those below the bound read like
-a current. One caught glitch with one to four 450 A frames beside it was counted as 99.4–103.0 Ah for a 97.5 Ah pack
-before this. A real load step right at a glitch costs the segment, not a value.
+(the 5-minute rule above), if the 5 readings before it and the 5 after it all lie within 25 % (or 1 A) of their median,
+the current's level there. Otherwise, and at a second one within 5 minutes, the open segment ends: garbled frames come
+in runs, and those below the bound read like a current. One caught glitch with one to four 450 A frames beside it was
+counted as 99.4–103.0 Ah for a 97.5 Ah pack, and with them on both sides (where the two readings next to the hole agree
+with each other) as 101.2–108.6 Ah. Still counted: garbled frames within that 25 %, and runs of 5 or more frames of the
+same wrong value on both sides, which look exactly like a real load pulse.
+
+What this costs: a load that changes within those 10 readings ends the segment. Measured on real data by placing a
+glitch at every position: in 16 telemetry packs (15 s between readings, 3.9 million positions under load) 39 % of the
+positions under load would end the segment, against 16 % when only the two neighbours had to agree; on the Daly
+capture (60 s) 37 % against 13 %. Of the 53 real isolated JK glitches in that telemetry, 43 are bridged (51 with the
+two neighbours). At the default 1 s sampling the 10 readings span 10 s rather than 2.5 minutes, so the cost there
+should be lower; it has not been measured.
 
 The sensors show the median of the last 5 accepted segments of the past year, once there are 3. Nothing is published
 between accepted segments, and the entities expire a year after the last one.
