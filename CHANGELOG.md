@@ -5,6 +5,7 @@
 * Fix (`soh_estimator`): saved segments survived a change of `capacity:`, so a replaced 100 Ah pack went out as SoH 34.8 % of the new 280 Ah one. Saved state measured against another capacity is now discarded, and only segments inside the present plausibility window and of the present cell count are published.
 * Fix (`soh_estimator`): garbled frames on both sides of a caught current glitch were counted (101–109 Ah for 97.5), because only the two readings next to it had to agree. Now the 5 readings either side must agree with their level, which ends more segments around real glitches (doc/SoH.md).
 * `soh_estimator`: `capacity:` is the nameplate of this one pack. A bank's capacity there passed the plausibility check (a 100 Ah pack in a bank of two read SoH 48.8 %); now nothing is published when it differs from the capacity the BMS reports by more than 1.5×, and the log names both.
+* Experimental estimators: the code fingerprint that guards saved state now covers what functions close over (factory and decorator arguments) and lists or dicts at module or class level; a change to those kept old state before.
 
 ## [2.23]
 

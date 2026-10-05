@@ -299,6 +299,7 @@ def _diffs(x):
 
 
 _LAG_ORDER_CACHE = {}
+_FINGERPRINT_STATE = frozenset({'_LAG_ORDER_CACHE'})  # filled at run time: state (estimator_common)
 
 
 def _best_lag_diffs(du, di, max_lag=None, min_diffs=None):

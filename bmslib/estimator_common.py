@@ -89,13 +89,20 @@ _SCALAR_TYPES = (bool, int, float, complex, str, bytes, type(None))
 
 def _is_const(x) -> bool:
     """Immutable plain data: numbers, strings, bytes, None, and tuples and
-    frozensets of them. A list, dict or set at module level is taken as state,
-    not as a constant: it can change while the module runs (a cache such as
-    impedance._LAG_ORDER_CACHE), so its value at the moment of the call says
-    nothing about the code. Configuration therefore lives in tuples."""
+    frozensets of them."""
     if isinstance(x, _SCALAR_TYPES) or _is_builtin_type(x):
         return True
     return isinstance(x, (tuple, frozenset)) and all(_is_const(v) for v in x)
+
+
+# A module names here the module-level containers that are state, not
+# configuration: filled while it runs (a cache such as
+# impedance._LAG_ORDER_CACHE), so their value when the fingerprint is taken
+# says nothing about the code. Every other list, dict or set, at module or
+# class level, is configuration and counts (fourth review: a dict of
+# tolerances kept the fingerprint whatever it held). An explicit list, so
+# that the safe side is the default.
+STATE_NAMES_ATTR = '_FINGERPRINT_STATE'
 
 
 def _is_builtin_type(x) -> bool:
@@ -161,6 +168,69 @@ def _put(h, *parts):
     h.update(repr(parts).encode() + b'\0')
 
 
+def _canon_fn(f, seen):
+    """A Python function as code: its code object (docstring masked), its
+    defaults and the contents of its closure cells, each through _canon_obj --
+    a closure is how a factory (_mk(3)), a lambda over a value or a decorator
+    with arguments (@_tol(1.0)) configures a function, and the code alone is
+    the same for every value. A function met again on the way (a recursive
+    closure) is named, not walked."""
+    if id(f) in seen:
+        return ('<recursive>', f.__qualname__)
+    seen = seen | {id(f)}
+    cells = []
+    for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ()):
+        try:
+            v = cell.cell_contents
+        except ValueError:
+            cells.append((name, '<empty>'))
+            continue
+        if name == '__class__' and isinstance(v, type):
+            cells.append((name, ('<class>', v.__module__, v.__qualname__)))  # super(): the class is walked itself
+        else:
+            cells.append((name, _canon_obj(v, seen)))
+    return ('<func>', f.__qualname__, _canon(f.__code__, f.__doc__), _canon_obj(f.__defaults__, seen),
+            _canon_obj(f.__kwdefaults__, seen), tuple(cells))
+
+
+def _canon_obj(x, seen=frozenset()):
+    """_canon, extended to what a closure cell or a default can hold:
+    functions (walked, _canon_fn), modules and imported C functions (by name:
+    fingerprinted as their own module, or as the interpreter's code), the
+    logger (configures nothing), configured objects (their
+    fingerprint_data()), and containers of those. Anything else raises
+    TypeError: what cannot be described is never taken as known."""
+    if isinstance(x, (staticmethod, classmethod)):
+        x = x.__func__
+    if isinstance(x, types.FunctionType):
+        return _canon_fn(x, seen)
+    if isinstance(x, types.ModuleType):
+        return ('<module>', x.__name__)
+    if isinstance(x, types.BuiltinFunctionType) and (x.__self__ is None or isinstance(x.__self__, types.ModuleType)):
+        return ('<builtin>', getattr(x, '__module__', None), x.__qualname__)
+    if isinstance(x, logging.Logger):
+        return ('<logger>',)
+    if isinstance(x, (list, tuple)):
+        return ('<%s>' % type(x).__name__,) + tuple(_canon_obj(v, seen) for v in x)
+    if isinstance(x, (set, frozenset)):
+        return ('<set>',) + tuple(sorted((_canon_obj(v, seen) for v in x), key=repr))
+    if isinstance(x, dict):
+        return ('<dict>',) + tuple(sorted(((_canon_obj(k, seen), _canon_obj(v, seen)) for k, v in x.items()),
+                                          key=repr))
+    if not isinstance(x, type) and callable(getattr(x, 'fingerprint_data', None)):
+        return ('<object>', type(x).__qualname__, _canon(x.fingerprint_data()))
+    return _canon(x)
+
+
+def _imported(f) -> bool:
+    """A function defined in another module and bound here under import: the
+    very object its module holds. A function made there and bound here
+    (a closure from a factory, partial-like wrappers) is not: its closure is
+    this module's configuration."""
+    home = sys.modules.get(f.__module__)
+    return home is not None and getattr(home, f.__name__, None) is f
+
+
 def _feed(h, name: str, obj, modname: str, depth: int = 0):
     if isinstance(obj, (staticmethod, classmethod)):
         obj = obj.__func__
@@ -169,10 +239,9 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
             if f is not None:
                 _feed(h, name + '.' + k, f, modname, depth)
     elif isinstance(obj, types.FunctionType):
-        if obj.__module__ != modname:
+        if obj.__module__ != modname and _imported(obj):
             return  # imported: fingerprinted with its own module
-        _put(h, 'def', name, _canon(obj.__code__, obj.__doc__), _canon(obj.__defaults__),
-             _canon(obj.__kwdefaults__))
+        _put(h, 'def', name, _canon_fn(obj, frozenset()))
         if hasattr(obj, '__wrapped__'):  # a decorated method (locked): its body is the wrapped function
             _feed(h, name + '.__wrapped__', obj.__wrapped__, modname, depth)
     elif isinstance(obj, type):
@@ -189,8 +258,8 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
         return  # an imported C function (math.floor, bisect.bisect_left): the interpreter's code, whose version counts
     elif _is_const(obj):
         _put(h, 'const', name, _canon(obj))
-    elif isinstance(obj, (list, dict, set, bytearray)):
-        return  # state, not configuration (_is_const)
+    elif isinstance(obj, (list, dict, set)):
+        _put(h, 'container', name, _canon_obj(obj))  # configuration (STATE_NAMES_ATTR names the state)
     elif callable(getattr(obj, 'fingerprint_data', None)) and not isinstance(obj, type):
         # A configured object, e.g. qmax.DEFAULT_CURVE = OcvCurve(...): its
         # class's code is fingerprinted as a class, but the arguments it was
@@ -216,14 +285,16 @@ def code_fingerprint(*namespaces) -> Optional[str]:
     them.
 
     What changes it: the bytecode of any function or method, their constants
-    and defaults, a module-level constant, a name, a module-level object that
-    configures behaviour (what its fingerprint_data() returns: for
-    qmax.DEFAULT_CURVE the curve's data, its parameters and the tables built
-    from them), and the Python version (the same bytecode is not the same
-    program on another interpreter). What does not: comments, docstrings, blank
-    lines, where a block sits in the file (line numbers), the install path, the
-    hash seed, what else was imported, and module-level lists, dicts and sets
-    (state, see _is_const).
+    and defaults, the contents of their closures (a factory's argument, a
+    decorator's), a module-level or class-level constant or container, a
+    name, a module-level object that configures behaviour (what its
+    fingerprint_data() returns: for qmax.DEFAULT_CURVE the curve's data, its
+    parameters and the tables built from them), and the Python version (the
+    same bytecode is not the same program on another interpreter). What does
+    not: comments, docstrings, blank lines, where a block sits in the file
+    (line numbers), the install path, the hash seed, what else was imported,
+    and the module-level containers the module names as state
+    (STATE_NAMES_ATTR).
 
     Why not a hash of the .py file: Python may execute a timestamp-valid .pyc
     compiled from different source, and the file hash then vouches for code
@@ -243,8 +314,11 @@ def code_fingerprint(*namespaces) -> Optional[str]:
         for ns in namespaces:
             modname = ns['__name__']
             _put(h, 'module', modname)
+            state = ns.get(STATE_NAMES_ATTR, frozenset())
+            if not (isinstance(state, frozenset) and all(isinstance(n, str) for n in state)):
+                raise TypeError('%s.%s must be a frozenset of names' % (modname, STATE_NAMES_ATTR))
             for name in sorted(ns):
-                if not name.startswith('__') and name != 'CODE_FINGERPRINT':
+                if not name.startswith('__') and name != 'CODE_FINGERPRINT' and name not in state:
                     _feed(h, name, ns[name], modname)
     except Exception:
         return None

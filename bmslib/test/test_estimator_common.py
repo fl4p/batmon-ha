@@ -190,7 +190,8 @@ def _own_lag_cache(monkeypatch):
 
 def test_module_state_is_not_fingerprinted(monkeypatch):
     """impedance._LAG_ORDER_CACHE is filled at run time. It was hashed as a
-    constant, so the fingerprint depended on when it was computed."""
+    constant, so the fingerprint depended on when it was computed. The module
+    names it as state (_FINGERPRINT_STATE)."""
     imp = _own_lag_cache(monkeypatch)
     before = ec.code_fingerprint(vars(imp), vars(ec))
     imp._best_lag_diffs([0.1] * 30, [0.2] * 30, max_lag=7)  # a new cache entry
@@ -200,24 +201,110 @@ def test_module_state_is_not_fingerprinted(monkeypatch):
 
 def test_calibration_a_mutable_container_counted_as_a_constant_follows_the_state(monkeypatch):
     imp = _own_lag_cache(monkeypatch)
-    orig = ec._is_const
-    monkeypatch.setattr(ec, '_is_const', lambda x: isinstance(x, dict) or orig(x))
+    monkeypatch.setattr(imp, '_FINGERPRINT_STATE', frozenset())  # not named as state: configuration
     before = ec.code_fingerprint(vars(imp), vars(ec))
     assert before is not None
     imp._best_lag_diffs([0.1] * 30, [0.2] * 30, max_lag=7)
     assert ec.code_fingerprint(vars(imp), vars(ec)) != before
 
 
-def test_the_estimators_keep_no_configuration_in_mutable_containers():
-    """Module-level lists, dicts and sets are left out of the fingerprint as
-    state. So configuration must not live in one, or a change to it would
-    restore state computed with the old value. A new one fails here and needs
-    a decision: a tuple, or state (then name it here)."""
+def test_the_estimators_name_their_run_time_state_and_nothing_else():
+    """Module-level containers are configuration unless the module names them
+    as state; what it names must be a container that is filled at run time,
+    never configuration. A new one fails here and needs that decision."""
     import bmslib.impedance as imp
     import bmslib.qmax as q
     found = {m.__name__ + '.' + k for m in (q, imp, ec) for k, v in vars(m).items()
              if not k.startswith('__') and isinstance(v, (list, dict, set, bytearray))}
     assert found == {'bmslib.impedance._LAG_ORDER_CACHE'}
+    named = {m.__name__ + '.' + k for m in (q, imp, ec) for k in getattr(m, ec.STATE_NAMES_ATTR, ())}
+    assert named == found
+
+
+# ---------------------------------------------------------------- closures and containers (fourth review)
+
+FP_HOLES = [
+    # (what, source with {V}, a, b) -- each pair must fingerprint differently
+    ('closure', 'def _mk(k):\n    def f(x):\n        return x * k\n    return f\n_SCALE = _mk({V})\n', '3', '4'),
+    ('lambda closure', '_F = (lambda k: (lambda x: x * k))({V})\n', '3', '4'),
+    ('decorator argument', 'import functools as _ft\ndef _tol(x):\n    def deco(f):\n        @_ft.wraps(f)\n'
+     '        def w(*a):\n            return f(*a) * x\n        return w\n    return deco\n@_tol({V})\n'
+     'def _g(v):\n    return v\n', '1.0', '1.1'),
+    ('class dict', 'class _E:\n    _CFG = {{"tol": {V}}}\n', '0.02', '0.03'),
+    ('class list', 'class _E:\n    _TBL = [{V}, 2]\n', '1', '5'),
+    ('module dict', '_CFG = {{"tol": {V}}}\n', '0.02', '0.03'),
+    ('module list', '_TBL = [{V}, 2]\n', '1', '5'),
+    ('closure over a closure', 'def _mk(k):\n    def g(x):\n        return x * k\n    def f(x):\n'
+     '        return g(x) + 1\n    return f\n_SCALE = _mk({V})\n', '3', '4'),
+    ('closure default', 'def _mk(k):\n    def f(x, y=k):\n        return x * y\n    return f\n_SCALE = _mk({V})\n',
+     '3', '4'),
+]
+
+
+def _fp_src(src):
+    ns = {'__name__': 'fake_mod'}
+    exec(compile(src, 'fake.py', 'exec'), ns)
+    ns.pop('__builtins__', None)
+    return ec.code_fingerprint(ns)
+
+
+@pytest.mark.parametrize('what,src,a,b', FP_HOLES, ids=[h[0] for h in FP_HOLES])
+def test_closures_and_containers_are_configuration(what, src, a, b):
+    """Each kept the fingerprint whatever value it held (fourth review):
+    the code is the same, the configuration is in a closure cell or a
+    container."""
+    fa, fb = _fp_src(src.format(V=a)), _fp_src(src.format(V=b))
+    assert fa is not None and fb is not None
+    assert fa != fb
+    assert _fp_src(src.format(V=a)) == fa  # and stable
+
+
+def test_calibration_without_the_closure_cells_the_factory_argument_is_unseen(monkeypatch):
+    orig = ec._canon_fn
+    monkeypatch.setattr(ec, '_canon_fn', lambda f, seen: orig(_no_closure(f), seen))
+    for what, src, a, b in FP_HOLES:
+        if ('closure' in what or 'decorator' in what) and what != 'closure default':  # (that one: __defaults__)
+            assert _fp_src(src.format(V=a)) == _fp_src(src.format(V=b)), what
+
+
+def _no_closure(f):
+    import types
+    return types.FunctionType(f.__code__, f.__globals__, f.__name__, f.__defaults__,
+                              tuple(types.CellType(None) for _ in f.__code__.co_freevars) or None)
+
+
+def test_a_closure_made_in_another_module_is_configuration_here(tmp_path, monkeypatch):
+    """A factory imported from elsewhere: the function it returns has the
+    other module's __module__ and used to be skipped as imported."""
+    import sys
+    import types
+    other = types.ModuleType('fake_factory')
+    exec(compile('def mk(k):\n    def f(x):\n        return x * k\n    return f\n', 'ff.py', 'exec'),
+         other.__dict__)
+    monkeypatch.setitem(sys.modules, 'fake_factory', other)
+    fa = ec.code_fingerprint(_ns(_S=other.mk(3), mk=other.mk))
+    fb = ec.code_fingerprint(_ns(_S=other.mk(4), mk=other.mk))
+    assert None not in (fa, fb) and fa != fb
+    assert ec.code_fingerprint(_ns(mk=other.mk)) == ec.code_fingerprint(_ns())  # the import itself: its own module's
+
+
+def test_unknown_closure_contents_leave_the_fingerprint_unknown():
+    assert _fp_src('_O = object()\ndef _mk(o):\n    def f(x):\n        return o\n    return f\n_F = _mk(_O)\n'
+                   'del _O\n') is None
+    assert _fp_src('class _E:\n    _CFG = {{"x": object()}}\n'.format()) is None
+    assert _fp_src('_CFG = [object()]\n') is None
+
+
+def test_a_recursive_closure_is_fingerprinted():
+    src = 'def _mk(k):\n    def f(x):\n        return f(x - 1) if x > k else x\n    return f\n_F = _mk({V})\n'
+    fa, fb = _fp_src(src.format(V=1)), _fp_src(src.format(V=2))
+    assert None not in (fa, fb) and fa != fb
+
+
+def test_state_names_must_be_a_frozenset_of_names():
+    assert ec.code_fingerprint(_ns(K=1, _FINGERPRINT_STATE=['K'])) is None
+    assert ec.code_fingerprint(_ns(K=1, C={}, _FINGERPRINT_STATE=frozenset({'C'}))) == \
+        ec.code_fingerprint(_ns(K=1, C={'filled': 1}, _FINGERPRINT_STATE=frozenset({'C'})))
 
 
 def _ns(**kw):
