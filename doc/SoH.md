@@ -180,11 +180,18 @@ pack. Every one of those signs is needed: a driver that reports a whole-number S
 legacy JK, most aiobmsble types) gets it replaced by remaining charge ÷ capacity, so on an aged pack whose counter tops
 out at its learnt full capacity, 0.97× the design capacity it reports, "100 %" showed as 97 % and the same numbers were
 published again. The price is that a restart at the top of a charge (or near empty) ends the segment, and so does one
-with the counter back at the highest value it has reached before, whether or not it is held there. Not covered,
+with the counter back at the highest value it has reached before, whether or not it is held there. That is a real cost
+for a pack that rests at full: with a 4-hour rest at SoC 100 % after each charge and one clean 2-minute restart in it
+per cycle, 2 of the 6 segments of 3 cycles are lost whenever the restart falls less than 90 minutes from either end of
+that rest (the restart cuts the rest in two and the shorter piece is too short to anchor the segment); with 90 minutes
+or more on both sides none are. Without the stop rule the restart would continue the segment and nothing would be
+lost. Not covered,
 because they read like a pack at rest: a counter that runs into its end and back out while the host is off, a full end
 that dropped below the counter's highest value without the BMS reporting it, and a counter that stops counting with
 less than about 2 % of the capacity moved before the shutdown (a bound in charge, not in time: for a 100 Ah pack about
-4 minutes at 22 A, one at 100 A) and still reads the same afterwards (the 49 Ah case above, with a frozen BMS counter). A file that does not validate is discarded (the log says why).
+4 minutes at 22 A, one at 100 A) and still reads the same afterwards (the 49 Ah case above, with a frozen BMS counter).
+What would close the last one, holding a segment that spans a restart back until the counter has been seen moving with
+the current again, is not built yet. A file that does not validate is discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the
