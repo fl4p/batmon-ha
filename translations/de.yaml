@@ -48,10 +48,12 @@ configuration:
   capacity:
     name: Nennkapazität (Ah)
     description: >-
-      Nennkapazität des Akkus in Ah. Nur für den SoH-Schätzer, als Bezug für
-      den SoH und dessen Plausibilitätsprüfung; ohne Angabe veröffentlicht
-      der Schätzer nichts. Die vom BMS gemeldete Kapazität wird nie
-      verwendet.
+      Nennkapazität dieses einen Akkus in Ah, nicht die einer Bank aus
+      mehreren Akkus. Nur für den SoH-Schätzer, als Bezug für den SoH und
+      dessen Plausibilitätsprüfung; ohne Angabe veröffentlicht der Schätzer
+      nichts. Die vom BMS gemeldete Kapazität ist nie der Bezug; weichen
+      beide um mehr als das 1,5-Fache voneinander ab, veröffentlicht der
+      Schätzer nichts.
 
   concurrent_sampling:
     name: Parallele Abtastung

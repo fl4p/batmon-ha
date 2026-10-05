@@ -149,7 +149,9 @@ driver it is not even a setting but round(charge / SoC * 100) per sample
 (bms.py), which swings between 160 and 300 Ah below 1.1 % SoC. And as the
 reference of the plausibility window it would vouch for Qmax with a number
 from the same unchecked configuration as the current scale: set to 150 Ah,
-it let a 1.4x gain error through as 137 Ah for a 98 Ah pack.
+it let a 1.4x gain error through as 137 Ah for a 98 Ah pack. It is a sanity
+check of the option only: nothing is published when the two differ by more
+than CAPACITY_MISMATCH_MAX (the option set to a bank's capacity).
 
 STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
 smoothed slope reaches 5 mV/% only between 0 and 11 % SoC; its top is flat
@@ -363,6 +365,22 @@ REQUIRE_CAPACITY = True
 # genuinely failing cell (SoH 50 %) is reported, not rejected; the price is
 # that a gain down to 0.4 passes.
 PLAUSIBLE_REL = (0.4, 1.2)
+# The option is checked against what the BMS reports as its capacity: nothing
+# is published when one is more than this factor of the other. The window
+# above cannot see an option entered for the whole bank: a 100 Ah pack in a
+# bank of two with the option at 200 published SoH 48.8 % with the check
+# passed (0.4 x 200 = 80 < 97.5). The BMS's figure is a sanity check only,
+# never the reference (it is a setting nobody checked, or derived); without
+# one, nothing changes. 1.5: a BMS set to its usable capacity or to a learnt
+# one passes; a second pack's worth does not. What it costs: a pack whose BMS
+# reports its learnt capacity as the capacity (braunpwr_uart, renogy_uart, JK
+# through aiobmsble) is refused below SoH 67 %, where the BMS's own figure
+# says the same thing. The figure is the median of one reading per hour over
+# the last BMS_CAP_N hours, so the derived capacity of the legacy Daly driver,
+# which swings near empty, needs hours there to move it.
+CAPACITY_MISMATCH_MAX = 1.5
+BMS_CAP_PERIOD_S = 3600.0
+BMS_CAP_N = 5
 MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, MAX_SEGMENT_S is 10 days
 
 # ---------------------------------------------------------------- output
@@ -636,6 +654,8 @@ class QmaxEstimator:
         self._last_cfull: Optional[float] = None  # the capacity the BMS reported at _last_t [Ah], None when unknown
         self._last_aged: Optional[float] = None  # the aged (learnt full) capacity it reported [Ah], None when unknown
         self._resumed = False  # set by restore(): the next sample is the first after a restart
+        self._bms_caps: deque = deque(maxlen=BMS_CAP_N)  # [t, capacity the BMS reported], one an hour
+        self._cap_warned = False  # the mismatch was logged by this process
         self._t_glitch: Optional[float] = None  # the last impossible current reading
         # An isolated impossible reading waiting for its neighbourhood (GLITCH_NB_N):
         # {'before': [charge current of the good samples before it], 'after': [...]}
@@ -680,6 +700,27 @@ class QmaxEstimator:
             return self.design_capacity, 'option'
         return None, None
 
+    def bms_capacity(self) -> Optional[float]:
+        """What the BMS reports as its capacity, the median of the last
+        BMS_CAP_N hourly readings, None when it reports none. A sanity check
+        of the option only (CAPACITY_MISMATCH_MAX)."""
+        return median([c for _, c in self._bms_caps]) if self._bms_caps else None
+
+    def capacity_mismatch(self) -> Optional[Tuple[float, float]]:
+        """(option, BMS capacity) when both are known and one is more than
+        CAPACITY_MISMATCH_MAX x the other, else None."""
+        cap, bms = self.design_capacity, self.bms_capacity()
+        if cap is None or bms is None or not max(cap, bms) > CAPACITY_MISMATCH_MAX * min(cap, bms):
+            return None
+        return cap, bms
+
+    def _warn_mismatch(self, what: str):
+        mm = self.capacity_mismatch()
+        assert mm is not None
+        logger.warning('%s: Qmax/SoH: %s: the capacity option is %g Ah and the BMS reports %g Ah. The option must be '
+                       'the nameplate of this one pack, not of a bank of packs; correct whichever is wrong',
+                       self.name, what, mm[0], mm[1])
+
     def rest_current(self) -> float:
         cap, _ = self.capacity()
         return min(REST_I_MAX_A, REST_C_RATE * cap) if cap else REST_I_MAX_A
@@ -715,7 +756,7 @@ class QmaxEstimator:
         """What would be published now: Qmax, SoH (None without a capacity) and
         the provenance of the newest segment that counts."""
         segs = self._counted()
-        if len(segs) < PUBLISH_MIN_SEGMENTS:
+        if len(segs) < PUBLISH_MIN_SEGMENTS or self.capacity_mismatch() is not None:
             return None
         v = median([s['qmax'] for s in segs])
         cap, src = self.capacity()
@@ -848,6 +889,11 @@ class QmaxEstimator:
             self._c_max = c if self._c_max is None else max(self._c_max, c)
         self._last_t, self._last_i, self._last_c = t, i, c
         self._last_soc, self._last_soc_raw, self._last_cfull, self._last_aged = soc, soc_raw, cfull, aged
+        if cfull is not None and (not self._bms_caps or not 0 <= t - self._bms_caps[-1][0] < BMS_CAP_PERIOD_S):
+            self._bms_caps.append([t, cfull])
+            if not self._cap_warned and self.capacity_mismatch() is not None:
+                self._cap_warned = True
+                self._warn_mismatch('nothing will be published')
 
         if self._t_summary is None:
             self._t_summary = t
@@ -1035,6 +1081,7 @@ class QmaxEstimator:
             self._t_glitch = None
         self._glitch_nb = None
         self._recent.clear()  # timed on the other clock
+        self._bms_caps = deque((x for x in self._bms_caps if x[0] <= t), maxlen=BMS_CAP_N)
         self._t_volt = None
         self._last_t = self._last_i = self._last_c = self._last_soc = self._last_cfull = None
         self._last_soc_raw = self._last_aged = None
@@ -1248,6 +1295,8 @@ class QmaxEstimator:
                     ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
                     100 * seg['drift'], seg['i_off'])
         res = self.result()
+        if res is None and self.capacity_mismatch() is not None and len(self._counted()) >= PUBLISH_MIN_SEGMENTS:
+            self._warn_mismatch('estimate not published')
         if res is not None and not self._announced:
             self._announced = True
             logger.info('%s: first Qmax estimate %.1f Ah%s (from %d segments)', self.name, res['qmax'],
@@ -1286,6 +1335,7 @@ class QmaxEstimator:
             q_charge=self.q_c, charge_q=self._c_q, charge_max=self._c_max, last_soc=self._last_soc,
             last_soc_raw=self._last_soc_raw, last_charge_full=self._last_cfull, last_aged=self._last_aged,
             t_glitch=self._t_glitch, glitch_nb=copy.deepcopy(self._glitch_nb), recent=list(self._recent),
+            bms_caps=[list(x) for x in self._bms_caps],
             q_ah=self.q_ah, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
             last_seg_t=self._last_seg_t, load_ewma=self._load_ewma,
@@ -1459,6 +1509,13 @@ class QmaxEstimator:
             nb = dict(before=[v_fin(v, 'glitch_nb') for v in nb['before']],
                       after=[v_fin(v, 'glitch_nb') for v in nb['after']])
         self._glitch_nb = nb
+        bc = st.get('bms_caps')
+        if not isinstance(bc, list) or len(bc) > BMS_CAP_N or not all(isinstance(x, list) and len(x) == 2 for x in bc):
+            raise ValueError('bms_caps %r' % (bc,))
+        for x in bc:
+            if not v_fin(x[1], 'bms_caps') > 0 or v_fin(x[0], 'bms_caps t') > (last_t if last_t is not None else -1e300):
+                raise ValueError('bms_caps %r' % (bc,))
+        self._bms_caps.extend([float(x[0]), float(x[1])] for x in bc)
         rec = st.get('recent')
         if not isinstance(rec, list) or len(rec) > GLITCH_NB_N:
             raise ValueError('recent %r' % (rec,))

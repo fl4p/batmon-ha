@@ -669,6 +669,69 @@ def test_calibration_the_bms_capacity_as_the_reference_publishes_its_setting_as_
     assert sohs[90.0] == pytest.approx(108.3, abs=0.2) and sohs[150.0] == pytest.approx(65.0, abs=0.2)
 
 
+@pytest.mark.parametrize('bms_cap', [100.0, 99.0])
+def test_a_bank_capacity_as_the_option_is_not_published(bms_cap, caplog):
+    """Fourth review, finding 4: a 100 Ah pack in a bank of two, the option
+    set to the bank's 200 Ah. 97.5 Ah is inside 0.4-1.2 x 200, and SoH 48.8 %
+    went out with the plausibility check passed. The BMS reports 100: the two
+    differ by more than 1.5x, nothing is published, and the log names both."""
+    with caplog.at_level('WARNING'):
+        est, pub = _with_bms_capacity(full_cycles(n=3).rows, bms_cap, cap=200.0)
+    assert pub == []
+    assert len(est._counted()) == 5 and est.result() is None
+    assert 'capacity option is 200 Ah and the BMS reports %g Ah' % bms_cap in caplog.text
+
+
+def test_calibration_without_a_bms_capacity_the_bank_capacity_publishes_half_the_soh():
+    """No BMS figure, no check (as before), and the same run publishes the
+    review's 48.8 %; so does one with the check's factor out of reach."""
+    est, pub = _with_bms_capacity(full_cycles(n=3).rows, None, cap=200.0)
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['soh'] == pytest.approx(48.8, abs=0.2) and pub[-1]['plausibility_checked']
+
+
+def test_calibration_with_the_mismatch_factor_out_of_reach_the_bank_capacity_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'CAPACITY_MISMATCH_MAX', math.inf)
+    est, pub = _with_bms_capacity(full_cycles(n=3).rows, 100.0, cap=200.0)
+    assert pub and pub[-1]['soh'] == pytest.approx(48.8, abs=0.2)
+
+
+def test_monotone_in_how_far_the_option_is_from_the_bms_capacity():
+    """Published up to 1.5x either way, never again beyond, to the far tail.
+    (Up: the option 100 against a BMS that reports less; down: more.)"""
+    rows = full_cycles(n=3).rows
+    up = [bool(_with_bms_capacity(rows, 100.0 / r, cap=100.0)[1]) for r in (1.0, 1.2, 1.5, 1.51, 2.0, 10.0, 1e6)]
+    down = [bool(_with_bms_capacity(rows, 100.0 * r, cap=100.0)[1]) for r in (1.0, 1.2, 1.5, 1.51, 2.0, 10.0, 1e6)]
+    for v in (up, down):
+        _monotone(v)
+        assert v[:3] == [True] * 3 and not v[3]
+
+
+def test_the_bms_capacity_is_the_median_of_hourly_readings():
+    """The legacy Daly derivation swings near empty: one odd reading does not
+    refuse, readings that persist do."""
+    est = _fresh()
+    for k, c in enumerate((100.0, 100.0, 267.0, 100.0, 100.0)):
+        est.add(T0 + 3600 * k, 1.0, None, capacity=c)
+    assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None
+    for k in range(5, 8):
+        est.add(T0 + 3600 * k, 1.0, None, capacity=267.0)
+    assert est.capacity_mismatch() == (100.0, 267.0)
+    for k in range(8, 10):  # within the hour: no new reading
+        est.add(T0 + 3600 * 7 + 60 * k, 1.0, None, capacity=100.0)
+    assert len(est._bms_caps) == q.BMS_CAP_N and est.bms_capacity() == 267.0
+
+
+def test_the_sampler_passes_the_bms_capacity_to_the_check():
+    """The precondition in the real call path: what BmsSample says, set or
+    derived, reaches the check (never the reference)."""
+    s, _ = _run_sampler(2, bms=_Bms(capacity=100.0), soh_estimator=True, design_capacity=200.0)
+    assert s.qmax.bms_capacity() == 100.0 and s.qmax.capacity_mismatch() == (200.0, 100.0)
+    assert s.qmax.capacity() == (200.0, 'option')
+    s, _ = _run_sampler(2, bms=_DalyDerived(), soh_estimator=True, design_capacity=280.0)
+    assert s.qmax.bms_capacity() == 267 and s.qmax.capacity_mismatch() is None
+
+
 def test_without_the_option_qmax_alone_is_not_published_either():
     """Why Qmax alone does not go out without the option: the plausibility
     window is all that sees a current scale error, and with the BMS's
@@ -1481,8 +1544,8 @@ def test_full_state_continues_exactly_where_it_stopped():
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
-        if k in ('_log_summary', '_lock', '_resumed'):
-            continue  # the test stub; a lock is not state; a restored estimator knows it was restarted
+        if k in ('_log_summary', '_lock', '_resumed', '_cap_warned'):
+            continue  # the test stub; a lock is not state; a restored estimator knows it was restarted; a log-once flag
         if isinstance(v, deque):
             v = list(v)
         out[k] = v
@@ -2408,6 +2471,9 @@ BAD_STATES = [
     ('glitch_nb already decided', lambda s: s.update(glitch_nb=dict(before=[1.0] * 5, after=[1.0] * 5), t_glitch=1.0)),
     ('glitch_nb not numbers', lambda s: s.update(glitch_nb=dict(before=['a'], after=[]), t_glitch=1.0)),
     ('recent too long', lambda s: s.update(recent=[1.0] * 6)),
+    ('bms_caps garbage', lambda s: s.update(bms_caps=[[1.0]])),
+    ('bms_caps not positive', lambda s: s.update(bms_caps=[[s['last_t'], 0.0]])),
+    ('bms_caps after last_t', lambda s: s.update(bms_caps=[[s['last_t'] + 1, 100.0]])),
     ('recent missing', lambda s: s.pop('recent')),
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),

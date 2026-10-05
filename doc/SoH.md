@@ -14,13 +14,19 @@ and the charge that flowed in between is counted from the BMS current. Then, per
     Qmax = charge counted × 100 / (SoC at the second rest − SoC at the first)
 
 The pack's Qmax is that of the weakest cell: in a series string the cell that is empty first ends the discharge. SoH is
-Qmax against the device's `capacity:` option (Ah, nameplate). **Without that option nothing is published**, neither SoH
-nor Qmax: the capacity is also what the result is checked against (see below), and a check that cannot be made does not
+Qmax against the device's `capacity:` option (Ah, the nameplate of this one pack, not of the bank it is in). **Without
+that option nothing is published**, neither SoH nor Qmax: the capacity is also what the result is checked against (see below), and a check that cannot be made does not
 count as passed. The capacity the BMS reports is never used. It is a setting in the BMS that nothing checks: a healthy
 98 Ah pack read SoH 108 % and 65 % with the BMS set to 90 and 150 Ah. On the legacy Daly driver it is not even a
 setting but remaining charge ÷ SoC, which swings between 160 and 300 Ah near empty. And as the reference of the
 plausibility check it would vouch for Qmax with a number from the same unchecked BMS configuration as the current
-scale: set to 150 Ah, it let a current reading 1.4× too high through as 137 Ah for that 98 Ah pack. The `Qmax (est.)` sensor carries attributes: how many segments the value is
+scale: set to 150 Ah, it let a current reading 1.4× too high through as 137 Ah for that 98 Ah pack. It is only a sanity
+check of the option: when the option and the capacity the BMS reports (the median of one reading an hour over the last
+five hours) differ by more than 1.5×, nothing is published and the log names both. That catches the option set to a
+bank's capacity, which the plausibility check below cannot: a 100 Ah pack in a bank of two with the option at 200 went
+out as SoH 48.8 %. It costs a value where the BMS reports its own learnt capacity as the capacity (braunpwr_uart,
+renogy_uart, JK through the aiobmsble driver) and that has dropped below 67 % of the nameplate. Without a capacity from
+the BMS there is no such check. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
 not an error bound, see below), and the capacity used.

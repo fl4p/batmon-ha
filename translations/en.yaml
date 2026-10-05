@@ -47,10 +47,11 @@ configuration:
   capacity:
     name: Design capacity (Ah)
     description: >-
-      Nameplate capacity of the pack in Ah. Only used by the SoH estimator,
-      as the reference for SoH and its plausibility check; without it the
-      estimator publishes nothing. The capacity the BMS reports is never
-      used.
+      Nameplate capacity of this one pack in Ah, not of a bank of packs.
+      Only used by the SoH estimator, as the reference for SoH and its
+      plausibility check; without it the estimator publishes nothing. The
+      capacity the BMS reports is never the reference; when the two differ
+      by more than 1.5x, the estimator publishes nothing.
 
   concurrent_sampling:
     name: Concurrent sampling
