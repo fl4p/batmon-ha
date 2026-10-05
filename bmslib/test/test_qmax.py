@@ -2534,7 +2534,7 @@ BAD_STATES = [
     ('q_charge zero', lambda s: s.update(q_charge=0.0)),
     ('q_charge negative', lambda s: s.update(q_charge=-0.1)),
     ('q_charge NaN', lambda s: s.update(q_charge=float('nan'))),
-    ('q_charge of no counter', lambda s: s.update(charge_src=None)),
+    ('q_charge of no counter', lambda s: s.update(charge_src=None, charge_max=None)),  # (only that rule)
     ('charge_src unknown', lambda s: s.update(charge_src='voltage')),
     ('charge_src bad capacity', lambda s: s.update(charge_src='soc*-5.0')),
     ('last_soc not a number', lambda s: s.update(last_soc='full')),
