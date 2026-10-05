@@ -178,6 +178,13 @@ blocking later segments until real time catches up. What lies before it is kept.
 the one before it is only skipped (a reordered frame, a clock that jitters or is stepped back by a second or two); that
 costs at most those seconds of current, where the drop used to cost one or two segments. A pack that the chemistry check switched off stays off after a restart.
 
+Saved state is also discarded when the device's `capacity:` differs from the one it was measured against: the option
+was corrected or the pack replaced, and either way the old segments say nothing about this pack (a 100 Ah pack's 97.5 Ah,
+restored after a 274 Ah pack replaced it with the option at 280, went out as SoH 34.8 %). The log says so. When a value
+goes out, every segment in it is checked again: measured against the present option, every cell inside 0.4–1.2× of it,
+and with the cell count of the newest segment, so segments of a pack with another number of cells are left out too. A
+new pack with the same nameplate and cell count is not recognised; delete `qmax_<name>.json` when replacing one.
+
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
 `bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, a module-level constant (the OCV table, every
 gate), the built-in curve as built (its data, smoothing and slope gate, and the tables made from them), or the Python

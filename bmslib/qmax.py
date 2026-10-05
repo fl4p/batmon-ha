@@ -135,7 +135,11 @@ the assumed 0.3 A was 3.4 %. What is published says so: offset_assumed_a and
 offset_drift_pct, the drift at that assumed offset.
 
 The capacity is the per-device `capacity:` option (the nameplate) and
-nothing else. Without it nothing is accepted, neither SoH nor Qmax alone:
+nothing else. Saved anchors and segments are only restored under the option
+they were measured against (another one means a corrected option or another
+pack), and what is published is the median of the segments that still pass
+the plausibility window of the present option and have the newest segment's
+cell count (_counted). Without it nothing is accepted, neither SoH nor Qmax alone:
 the plausibility check is then unevaluable, and it is the only one that
 catches a wrong current scale (a shunt setting off by 3x) or a glitch below
 the input bound. The capacity the BMS reports is never the reference. It is
@@ -584,6 +588,10 @@ def _counter_src_ok(src) -> bool:
     return math.isfinite(cap) and cap > 0
 
 
+def _fmt_ah(x: Optional[float]) -> str:
+    return 'not set' if x is None else '%g Ah' % x
+
+
 def _same_sign(dq: float, dsoc: Sequence[float]) -> bool:
     """Charge in (dq > 0) must raise every cell's SoC, charge out lower it.
     Otherwise the current sign is wrong (a driver, or invert_current applied
@@ -660,24 +668,44 @@ class QmaxEstimator:
         cap, _ = self.capacity()
         return min(REST_I_MAX_A, REST_C_RATE * cap) if cap else REST_I_MAX_A
 
+    def _counted(self) -> List[Dict[str, Any]]:
+        """The kept segments that may go into what is published, checked again
+        against the present configuration: measured against the present
+        capacity option, every cell's Qmax inside its plausibility window
+        now, and of the newest segment's cell count. A segment that fails
+        (one restored from before the option or the pack changed) is left
+        out, never published as if it belonged to this pack."""
+        if not self.segments:
+            return []
+        cap, _ = self.capacity()
+        n = len(self.segments[-1]['q_cells'])
+        return [s for s in self.segments if self._counts(s, cap, n)]
+
+    @staticmethod
+    def _counts(s, cap: Optional[float], n_cells: int) -> bool:
+        return s.get('cap') == cap and len(s['q_cells']) == n_cells \
+            and (cap is None or all(PLAUSIBLE_REL[0] * cap <= x <= PLAUSIBLE_REL[1] * cap for x in s['q_cells']))
+
     @property
     def value(self) -> Optional[float]:
-        """Median Qmax over the kept segments [Ah], or None with fewer than
-        PUBLISH_MIN_SEGMENTS."""
-        if len(self.segments) < PUBLISH_MIN_SEGMENTS:
+        """Median Qmax over the kept segments that count (_counted) [Ah], or
+        None with fewer than PUBLISH_MIN_SEGMENTS of them."""
+        segs = self._counted()
+        if len(segs) < PUBLISH_MIN_SEGMENTS:
             return None
-        return median([s['qmax'] for s in self.segments])
+        return median([s['qmax'] for s in segs])
 
     def result(self) -> Optional[Dict[str, Any]]:
         """What would be published now: Qmax, SoH (None without a capacity) and
-        the provenance of the newest segment."""
-        v = self.value
-        if v is None:
+        the provenance of the newest segment that counts."""
+        segs = self._counted()
+        if len(segs) < PUBLISH_MIN_SEGMENTS:
             return None
+        v = median([s['qmax'] for s in segs])
         cap, src = self.capacity()
-        new = self.segments[-1]
+        new = segs[-1]
         return dict(qmax=v, soh=100.0 * v / cap if cap else None, capacity=cap, capacity_source=src,
-                    segments=len(self.segments), newest=fmt_t(new['t']), newest_t=new['t'],
+                    segments=len(segs), newest=fmt_t(new['t']), newest_t=new['t'],
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
                     offset_assumed_a=round(new['i_off'], 2), offset_drift_pct=round(100.0 * new['drift'], 1),
@@ -1203,7 +1231,7 @@ class QmaxEstimator:
                         ('; %d samples dropped with a cell outside %.0f..%.0f mV'
                          % (self.n_dropped, LFP_MV_LO, LFP_MV_HI)) if self.n_dropped else '',
                         ('%.1f Ah' % v) if v is not None else
-                        'none yet (%d/%d segments)' % (len(self.segments), PUBLISH_MIN_SEGMENTS))
+                        'none yet (%d/%d segments)' % (len(self._counted()), PUBLISH_MIN_SEGMENTS))
         self.counts.clear()
         self.pair_reasons.clear()
         self.n_dropped = 0
@@ -1219,7 +1247,7 @@ class QmaxEstimator:
         rest in progress then restarts after a crash. full=True (at shutdown)
         is everything."""
         st: Dict[str, Any] = dict(
-            version=STATE_VERSION, code=CODE_FINGERPRINT,
+            version=STATE_VERSION, code=CODE_FINGERPRINT, capacity=self.design_capacity,
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
             last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, charge_src=self._c_src,
             q_charge=self.q_c, charge_q=self._c_q, charge_max=self._c_max, last_soc=self._last_soc,
@@ -1264,6 +1292,17 @@ class QmaxEstimator:
         if CODE_FINGERPRINT is None or st.get('code') != CODE_FINGERPRINT:
             logger.info('%s: Qmax/SoH estimator code changed since the state was saved: anchors, segments and the '
                         'open coulomb count discarded', self.name)
+            return
+        saved_cap = v_opt_fin(st.get('capacity'), 'capacity')
+        if saved_cap != self.design_capacity:
+            # The option was corrected or the pack replaced: what was measured
+            # and checked against the old option says nothing about this one
+            # (a 100 Ah pack's segments, divided by a new 280, went out as SoH
+            # 34.8 % with the plausibility check passed). Nor does the open
+            # count, the counter or the chemistry verdict of another pack.
+            logger.warning('%s: Qmax/SoH: the capacity option is %s, the saved state was measured against %s: a '
+                           'corrected option or another pack, so anchors, segments and the open coulomb count are '
+                           'discarded', self.name, _fmt_ah(self.design_capacity), _fmt_ah(saved_cap))
             return
 
         reason = st.get('disabled_reason')
@@ -1315,7 +1354,7 @@ class QmaxEstimator:
                 out.append(s)
             return out
 
-        anchors = []
+        anchors, dropped = [], 0
         for a in st.get('anchors') or []:
             if not isinstance(a, dict):
                 raise ValueError('anchor is %r' % type(a).__name__)
@@ -1336,7 +1375,9 @@ class QmaxEstimator:
                 raise ValueError('anchor soc/why disagree')
             for o in ocv:
                 v_opt_fin(o, 'anchor ocv')
-            v_opt_fin(a.get('cap'), 'anchor cap')
+            if v_opt_fin(a.get('cap'), 'anchor cap') != self.design_capacity:
+                dropped += 1  # checked against another capacity than the option (above)
+                continue
             anchors.append(dict(a))
         if any(x['t'] > y['t'] for x, y in zip(anchors, anchors[1:])) or \
                 any(x['epoch'] > y['epoch'] for x, y in zip(anchors, anchors[1:])) or \
@@ -1359,12 +1400,17 @@ class QmaxEstimator:
                 raise ValueError('segment cells %r' % (s,))
             v_fin(s.get('spread'), 'segment spread')
             v_fin(s.get('cov'), 'segment cov')
-            v_opt_fin(s.get('cap'), 'segment cap')
+            if v_opt_fin(s.get('cap'), 'segment cap') != self.design_capacity:
+                dropped += 1
+                continue
             segments.append(dict(s))
         if any(x['t'] > y['t'] for x, y in zip(segments, segments[1:])) or \
                 (segments and (last_t is None or segments[-1]['t'] > last_t)):
             raise ValueError('segments not in time order')
         last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
+        if dropped:
+            logger.warning('%s: Qmax/SoH: %d saved anchor(s)/segment(s) checked against another capacity than the '
+                           'option (%s) discarded', self.name, dropped, _fmt_ah(self.design_capacity))
 
         self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
         self._last_c, self._c_src, self.q_c, self._c_q, self._c_max = last_c, c_src, q_c, c_q, c_max
@@ -1435,7 +1481,7 @@ class QmaxEstimator:
             self.pair_reasons.update({str(k): int(v) for k, v in (st.get('pair_reasons') or {}).items()})
             self.n_dropped = v_int(st.get('n_dropped') or 0, 'n_dropped')
             self._t_summary = v_opt_fin(st.get('t_summary'), 't_summary')
-        self._announced = bool(st.get('announced')) or len(self.segments) >= PUBLISH_MIN_SEGMENTS
+        self._announced = bool(st.get('announced')) or len(self._counted()) >= PUBLISH_MIN_SEGMENTS
 
         v = self.value
         logger.info('%s: Qmax/SoH state restored: %d anchors, %d segments%s, coulomb count %s, estimate %s '
@@ -1443,7 +1489,7 @@ class QmaxEstimator:
                     len(self.segments), (', newest from %s' % fmt_t(self.segments[-1]['t'])) if self.segments else '',
                     ('%+.1f Ah since %s' % (self.q_ah, fmt_t(last_t))) if last_t is not None else 'empty',
                     ('%.1f Ah' % v) if v is not None else
-                    'none yet (%d/%d segments)' % (len(self.segments), PUBLISH_MIN_SEGMENTS))
+                    'none yet (%d/%d segments)' % (len(self._counted()), PUBLISH_MIN_SEGMENTS))
 
 
 DEFAULT_CURVE = OcvCurve()

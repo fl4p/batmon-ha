@@ -2,6 +2,7 @@
 
 * Fix: 2.23's `daly` connect could fail every time on a module that drops the first request after connecting, because the address it had learned was asked only once. The address is now asked again, a late reply still counts, the layout that answered is tried first on reconnect, and a connect where nothing answered keeps the subscribed layout instead of failing (#416).
 * Fix (`soh_estimator`): a restart with the BMS's counter held at its full end could still pass when the driver reports a whole-number SoC, which batmon replaces by remaining charge ÷ capacity (97 % for an aged pack that reads 100 %). The stop rule now also uses the SoC as reported, the aged capacity and the counter's highest reading.
+* Fix (`soh_estimator`): saved segments survived a change of `capacity:`, so a replaced 100 Ah pack went out as SoH 34.8 % of the new 280 Ah one. Saved state measured against another capacity is now discarded, and only segments inside the present plausibility window and of the present cell count are published.
 
 ## [2.23]
 

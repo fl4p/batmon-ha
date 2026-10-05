@@ -1932,6 +1932,97 @@ def test_a_restart_across_a_change_of_counter_ends_the_segment():
     assert est.counts['restart_unverified'] == 1 and not any(s['dq'] < 0 for s in est.segments)
 
 
+def _replaced(newcap, new_caps, forge_capacity=False, n_new=1):
+    """Fourth review, finding 2: the 100 Ah pack's state (5 segments, 97.5 Ah)
+    restored under the option newcap, then n_new cycles of the new pack
+    (cells new_caps). forge_capacity: the saved state claims newcap, as a
+    state without the check would pass it. Returns (estimator, published)."""
+    p = full_cycles(n=3)
+    est, pub = run(p.rows, cap=100.0)
+    assert pub[-1]['qmax'] == pytest.approx(97.5, abs=0.2) and len(est.segments) == 5
+    st = _via_json(est.get_state(full=True))
+    if forge_capacity:
+        st['capacity'] = newcap
+        for x in st['anchors'] + st['segments']:
+            x['cap'] = newcap
+    e2 = _fresh(newcap)
+    assert e2.restore(st)
+    p2 = Pack(caps=new_caps, t0=p.t + 86400).rest()
+    for _ in range(n_new):
+        p2.cycle(dq=0.88 * min(new_caps), i=0.5 * newcap)
+    return run(p2.end().rows, est=e2)
+
+
+def test_a_changed_capacity_option_discards_the_saved_segments(caplog):
+    """The review's case: a 100 Ah pack replaced by a 274 Ah one and the
+    option set to 280. The old median, 97.5, went out as SoH 34.8 % with the
+    plausibility check passed, though 97.5 is outside 112-336 Ah. Now the
+    old state is dropped (logged) and the new pack's value comes out once it
+    has its own segments."""
+    caps = tuple(c * 2.8 for c in CAPS)
+    with caplog.at_level('WARNING'):
+        est, pub = _replaced(280.0, caps)
+    assert pub == []  # 2 segments of the new pack: not enough yet
+    assert 'measured against 100 Ah' in caplog.text
+    est, pub = _replaced(280.0, caps, n_new=2)
+    assert pub and all(r['qmax'] == pytest.approx(273.0, rel=0.01) for r in pub)
+    assert all(r['soh'] == pytest.approx(97.5, abs=0.5) for r in pub)
+
+
+def test_the_same_capacity_option_keeps_the_saved_segments():
+    est, pub = _replaced(100.0, CAPS)
+    assert pub and pub[-1]['qmax'] == pytest.approx(97.5, abs=0.2) and pub[-1]['segments'] == 5
+
+
+def test_a_segment_outside_the_present_window_is_not_published():
+    """The check at publication, on its own: a state that claims the new
+    option (as one without the restore check would) still holds segments of
+    97.5 Ah, outside 0.4-1.2 x 280. They are left out of the median."""
+    est, pub = _replaced(280.0, tuple(c * 2.8 for c in CAPS), forge_capacity=True)
+    assert len(est.segments) == 5 and pub == []
+    assert all(r['qmax'] > 0.4 * 280 for r in _replaced(280.0, tuple(c * 2.8 for c in CAPS), forge_capacity=True,
+                                                        n_new=2)[1])
+
+
+def test_calibration_without_either_check_the_old_pack_is_published_as_the_new_ones_soh(monkeypatch):
+    monkeypatch.setattr(q.QmaxEstimator, '_counts', staticmethod(lambda s, cap, n: True))
+    est, pub = _replaced(280.0, tuple(c * 2.8 for c in CAPS), forge_capacity=True)
+    assert pub, 'scenario is harmless'
+    assert pub[-1]['qmax'] == pytest.approx(97.5, abs=0.2) and pub[-1]['soh'] == pytest.approx(34.8, abs=0.2)
+    assert pub[-1]['plausibility_checked']
+
+
+def test_segments_of_another_cell_count_are_not_published():
+    """Another pack identity sign: the 4-cell pack (worn, Qmax 68.6) replaced
+    by an 8-cell one of the same nameplate. Only segments with the newest
+    one's cell count go into the median."""
+    worn = tuple(0.7 * c for c in CAPS)
+    p = full_cycles(n=3, caps=worn, dq=0.88 * min(worn))
+    est, pub = run(p.rows, cap=100.0)
+    assert pub[-1]['qmax'] == pytest.approx(0.7 * 97.5, abs=0.3)
+    e2 = _fresh(100.0)
+    assert e2.restore(_via_json(est.get_state(full=True)))
+    p2 = Pack(caps=CAPS + CAPS, t0=p.t + 86400).rest().cycle().end()
+    _, pub2 = run(p2.rows, est=e2)
+    assert pub2 == []  # 2 segments of 8 cells
+    p3 = Pack(caps=CAPS + CAPS, t0=p2.t + 86400).rest().cycle().end()
+    _, pub3 = run(p3.rows, est=e2)
+    assert pub3 and all(r['qmax'] == pytest.approx(97.5, abs=0.3) for r in pub3)
+
+
+def test_calibration_without_the_cell_count_check_the_old_pack_outvotes_the_new_one(monkeypatch):
+    orig = q.QmaxEstimator._counts
+    monkeypatch.setattr(q.QmaxEstimator, '_counts', staticmethod(lambda s, cap, n: orig(s, cap, len(s['q_cells']))))
+    worn = tuple(0.7 * c for c in CAPS)
+    p = full_cycles(n=3, caps=worn, dq=0.88 * min(worn))
+    est, _ = run(p.rows, cap=100.0)
+    e2 = _fresh(100.0)
+    assert e2.restore(_via_json(est.get_state(full=True)))
+    _, pub2 = run(Pack(caps=CAPS + CAPS, t0=p.t + 86400).rest().cycle().end().rows, est=e2)
+    assert pub2, 'scenario is harmless'
+    assert pub2[-1]['qmax'] == pytest.approx(0.7 * 97.5, abs=0.3)  # the old pack's value for the new one
+
+
 def test_restoring_publishes_nothing_by_itself():
     est, pub = run(full_cycles().rows)
     assert pub
@@ -2228,13 +2319,17 @@ def test_calibration_without_the_qmax_check_a_forged_segment_would_be_restored()
 def test_a_chemistry_disable_survives_a_restart_an_internal_error_does_not():
     est, _ = run(_nmc_day().rows)
     assert not est.enabled
-    r = q.QmaxEstimator('t', curve=SYNTH)
+    r = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
     r.restore(_via_json(est.get_state(full=False)))
     assert not r.enabled and 'LiFePO4' in r.disabled_reason
+    # under another capacity option it may be another pack: re-checked from scratch
+    r = q.QmaxEstimator('t', design_capacity=280.0, curve=SYNTH)
+    r.restore(_via_json(est.get_state(full=False)))
+    assert r.enabled
 
     est2, _ = run(full_cycles(n=1).rows)
     est2.disable('internal error', persistent=False)
-    r2 = q.QmaxEstimator('t', curve=SYNTH)
+    r2 = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
     r2.restore(_via_json(est2.get_state(full=False)))
     assert r2.enabled
 
