@@ -176,9 +176,10 @@ def _build_probes() -> List[Probe]:
     from bmslib.models.jbd import _jbd_command
     from bmslib.models.jikong import _jk_command
 
-    def daly_steps():
-        # 0x90 SOC/voltage/current, 0x94 status; host address 8 = BLE, as DalyBt sends
-        return [(bytes(daly_command_message(c, address=8)), _daly_reply(c)) for c in (0x90, 0x94)]
+    def daly_steps(addr_byte):
+        # 0x90 SOC/voltage/current, 0x94 status; host address 0x80 as DalyBt sends,
+        # 0x40 as it falls back to when 0x80 gets no reply (#416)
+        return [(bytes(daly_command_message(c, addr_byte=addr_byte)), _daly_reply(c)) for c in (0x90, 0x94)]
 
     daly2_steps = [(_read_request(0x0000, 0x003E), _daly2_reply(0x3E))]
 
@@ -189,7 +190,8 @@ def _build_probes() -> List[Probe]:
         if layout == 'ff01/ff02':
             # JBD's own layout: without an advertisement saying Daly, JBD goes first
             probes.append(Probe('jbd', rx, tx, [(_jbd_command(c), _jbd_reply(c)) for c in (0x03, 0x04)]))
-        probes.append(Probe('daly', rx, tx, daly_steps(), label='daly (A5) on ' + layout))
+        probes.append(Probe('daly', rx, tx, daly_steps(0x80), label='daly (A5) on ' + layout))
+        probes.append(Probe('daly', rx, tx, daly_steps(0x40), label='daly (A5, host 0x40) on ' + layout))
         probes.append(Probe('daly2', rx, tx, daly2_steps, response=False, label='daly2 (D2 Modbus) on ' + layout))
     # JK: only 0x97 (device info, reply frame type 0x03); 0x96 would start the stream
     probes.append(Probe('jk', _uuid16(0xFFE1), _uuid16(0xFFE1), [(_jk_command(0x97, []), _jk_reply(0x03))]))

@@ -367,3 +367,9 @@ def test_reply_that_arrived_before_the_request_does_not_count():
     dev = _FakeDevice(GATT_416, lambda f: DALY_90 + DALY_94 if f[0] == 0xA5 and f[2] == 0x90 else None)
     res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
     assert res.type is None
+
+
+def test_module_answering_only_host_0x40_is_daly():
+    dev = _FakeDevice(GATT_416, lambda f: _daly_a5(f) if f[1] == 0x40 else None)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'daly' and res.probe == 'daly (A5, host 0x40) on fff1/fff2'

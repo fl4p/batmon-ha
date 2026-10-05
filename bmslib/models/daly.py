@@ -114,6 +114,10 @@ class DalyBt(BtBms):
         # self._num_cells = 0
         self._states = None
         self._last_response = None
+        # BLE host-address byte. None = WIRE_ADDRESS (0x80). Some modules were only
+        # seen answering 0x40 (#416), so until the first valid reply _q alternates.
+        self._ble_addr_byte = None
+        self._addr_confirmed = False
 
     async def get_states_cached(self, key):
         if not self._states:
@@ -158,6 +162,7 @@ class DalyBt(BtBms):
                     # this happens if buf is already full and still receiving messages
                     continue
 
+            self._addr_confirmed = True
             self._last_response = response_bytes
             self._fetch_futures.set_result(command, response_bytes)
 
@@ -187,7 +192,12 @@ class DalyBt(BtBms):
                 try:
                     await self.client.write_gatt_char(sx, bytearray(b""))
                 except:
-                    await self.client.write_gatt_char(tx, bytearray(b""))
+                    # best effort: a module that refuses an empty write (GATT error
+                    # 258 on fff2, #416) still answers real requests on this layout
+                    try:
+                        await self.client.write_gatt_char(tx, bytearray(b""))
+                    except Exception as e:
+                        self.logger.debug("empty write to %s refused (%s), keeping this layout", tx, e)
                 self.UUID_RX = rx
                 self.UUID_TX = tx
                 self.logger.debug("found rx uuid to be working: %s (tx %s, sx %s)", rx, tx, sx)
@@ -208,6 +218,8 @@ class DalyBt(BtBms):
     def _build_request(self, command: int, extra="") -> bytearray:
         """Single place every outbound frame is built, so DalyUart can override
         the addressing / payload fill without duplicating the command list."""
+        if self._ble_addr_byte is not None:
+            return daly_command_message(command, extra=extra, addr_byte=self._ble_addr_byte)
         return daly_command_message(command, extra=extra, address=self.WIRE_ADDRESS)
 
     def _q_timeout_context(self) -> str:
@@ -230,6 +242,11 @@ class DalyBt(BtBms):
                 sample = await self._fetch_futures.wait_for(command, self.TIMEOUT)
             except TimeoutError:
                 n_recv = num_responses - self._fetch_nr.get(command, [None]).count(None)
+                if not self._addr_confirmed:
+                    # never got a valid reply: try the other host address next time
+                    self._ble_addr_byte = 0x80 if self._ble_addr_byte == 0x40 else 0x40
+                    self.logger.warning('%s no reply yet, next request uses host address 0x%02x (#416)',
+                                        self.name, self._ble_addr_byte)
                 ctx = self._q_timeout_context()
                 raise TimeoutError(
                     "timeout awaiting result for cmd=0x%02x, got %d/%d responses%s"
