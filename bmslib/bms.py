@@ -72,6 +72,14 @@ class BmsSample:
         self._power = power  # 0 -> +0
         self.balance_current = balance_current
 
+        # The SoC as the driver reported it, before the derivation below may
+        # replace it. An integer SoC of 100 % next to a remaining charge that
+        # tops out below `capacity` (an aged pack whose BMS counts against its
+        # learnt full capacity, e.g. supervolt) becomes 93 % here; the Qmax
+        # estimator's stop rule must still see that the BMS said full. Not
+        # part of values(): sinks get the SoC as before.
+        self.soc_reported = soc
+
         # infer soc from capacity if soc is nan or type(soc)==int (for higher precision)
         if capacity > 0 and (math.isnan(soc) or (isinstance(soc, int) and charge > 0)):
             soc = round(charge / capacity * 100, 2)
@@ -146,7 +154,9 @@ class BmsSample:
         return (self.voltage * self.current) if math.isnan(self._power) else self._power
 
     def values(self):
-        return {**self.__dict__, "power": self.power}
+        d = {**self.__dict__, "power": self.power}
+        d.pop('soc_reported', None)
+        return d
 
     def __str__(self):
         # noinspection PyStringFormat

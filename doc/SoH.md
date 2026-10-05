@@ -157,13 +157,19 @@ another capacity setting: the resolution is learnt per counter) or without a cap
 longer one.
 
 It also ends it when the counter may be held at one of its ends on either side of the restart: the BMS reads SoC 99 % or
-more, or 1 % or less, reports no SoC at all, or the counter reads its capacity setting or 0. A BMS's counter stops at
-100 % while cells that hold 105–110 % of their nameplate keep taking charge, so it reads "moved 0" while the charger
-ran: with 3, 6 and 10 Ah going in unseen that way, 95.0, 91.7 and 87.3 Ah were published for a 98 Ah pack. The price is
-that a restart at the top of a charge (or near empty) ends the segment. Not covered, because they read like a pack at
-rest: a counter that runs into its end and back out while the host is off, and one that stops counting less than about
-2 % of the capacity before the shutdown and still reads the same afterwards (the 49 Ah case above, with a frozen BMS
-counter). A file that does not validate is discarded (the log says why).
+more, or 1 % or less (as batmon shows it, or as the BMS reported it), reports no SoC at all, or the counter reads 0, the
+capacity the BMS reports, the aged capacity it reports, or the highest value this counter has been seen at. A BMS's
+counter stops at full while cells that hold 105–110 % of their nameplate keep taking charge, so it reads "moved 0"
+while the charger ran: with 3, 6 and 10 Ah going in unseen that way, 95.0, 91.7 and 87.3 Ah were published for a 98 Ah
+pack. Every one of those signs is needed: a driver that reports a whole-number SoC (supervolt, jbd, ant, litime, basen,
+legacy JK, most aiobmsble types) gets it replaced by remaining charge ÷ capacity, so on an aged pack whose counter tops
+out at its learnt full capacity, 0.97× the design capacity it reports, "100 %" showed as 97 % and the same numbers were
+published again. The price is that a restart at the top of a charge (or near empty) ends the segment, and so does one
+with the counter back at the highest value it has reached before, whether or not it is held there. Not covered,
+because they read like a pack at rest: a counter that runs into its end and back out while the host is off, a full end
+that dropped below the counter's highest value without the BMS reporting it, and a counter that stops counting less
+than about 2 % of the capacity before the shutdown and still reads the same afterwards (the 49 Ah case above, with a
+frozen BMS counter). A file that does not validate is discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the

@@ -17,6 +17,7 @@ therefore run on SYNTH, a synthetic curve with a steep top knee, through the
 same code.
 """
 import asyncio
+import bisect
 import csv
 import gzip
 import json
@@ -1307,6 +1308,18 @@ def _split_run(rows, cuts, full=True, cap=100.0, charge=None, src=None, soc=None
     return est, pub
 
 
+def _seen_fuller(p, by=1.0, n=10):
+    """The BMS's counter read `by` Ah more for the first n samples: it has
+    been seen fuller than the tops of the cycles that follow (the pack was
+    charged further once). Without that, a counter back at its highest
+    reading may be held at its full end, and a restart there ends the
+    segment (test_a_counter_back_at_its_highest_reading_is_no_evidence)."""
+    charge = dict(p.charge)
+    for t, _, _, _ in p.rows[:n]:
+        charge[t] = round(charge[t] + by, 3)
+    return dict(charge=charge, soc=p.soc_bms)
+
+
 def test_full_state_continues_exactly_where_it_stopped():
     """With the BMS's charge counter confirming each restart. The first cut
     is inside the first discharge: before the counter has moved once, its
@@ -1314,10 +1327,10 @@ def test_full_state_continues_exactly_where_it_stopped():
     (test_a_restart_before_the_counter_has_moved_ends_the_segment)."""
     p = full_cycles(n=2, dt=7.0)
     rows = p.rows
-    whole, pub_whole = run(rows, **bms(p))
+    whole, pub_whole = run(rows, **_seen_fuller(p))
     n = len(rows)
     cuts = [n // 7, n // 5 + 1, n // 3 + 2, n // 2 + 3, (4 * n) // 5 + 1]  # inside rests, loads and open bins
-    split, pub_split = _split_run(rows, cuts, **bms(p))
+    split, pub_split = _split_run(rows, cuts, **_seen_fuller(p))
     assert split.counts['restart_unverified'] == 0
     assert pub_whole and pub_split == pub_whole
     assert [s['q_cells'] for s in split.segments] == [s['q_cells'] for s in whole.segments]
@@ -1547,16 +1560,185 @@ def test_calibration_without_the_stop_check_a_held_counter_publishes_the_hidden_
         assert all(x == pytest.approx(want, abs=0.3) for x in chg) and pub[-1]['plausibility_checked']
 
 
-def _resume_at(soc0=50.0, soc1=50.0, c1_off=0.0, cfull0=None, cfull1=None, c0=50.0):
-    """A 10 A discharge, the counter in 0.1 Ah steps ending at c0 with the BMS
-    reading soc0 and reporting cfull0; restart; the first sample 36 s later
-    reads c0 - 0.1 + c1_off, soc1, cfull1. Returns restart_unverified."""
+def _drive(coro):
+    """Run a coroutine that never suspends (BmsSampler._feed_qmax with the
+    temperatures in the sample) without an event loop per sample."""
+    try:
+        coro.send(None)
+    except StopIteration as e:
+        return e.value
+    raise AssertionError('the coroutine waited for something')
+
+
+def _int_soc_top(hidden, ratio, aged=False, raw_soc=True, after_restore=None, same_top=False):
+    """The fourth review's finding 1, through the real call path. The third
+    review's held counter (_pinned_top, the counter at its full end at the
+    shutdown), read by a driver that reports an INTEGER SoC next to a
+    remaining charge that tops out at its learnt full capacity, and as its
+    capacity the design value, `ratio` x that full end higher (supervolt:
+    remainingAh tops out at completeAh, capacity=designedAh). BmsSample
+    replaces the integer SoC by charge / capacity: 100 % reads 97 % at ratio
+    0.97. aged: the driver also reports the learnt full end as aged_capacity
+    (supervolt does). raw_soc False: the sampler does not pass the SoC as
+    reported (calibration). same_top: the counter's full end is the same in
+    every cycle, as a learnt full capacity is (in _pinned_top it moves down by
+    the hidden charge each cycle, so it is never a reading held before): from
+    each bottom rest on, where such a BMS re-learns its empty end, the counter
+    reads as if the charge hidden at its last stop had been counted. Each row is built into a BmsSample as the driver
+    does and fed through BmsSampler._feed_qmax; each restart is a new sampler
+    restored from the saved state, as main.py does. Returns (estimator,
+    published Qmax values)."""
+    rows, cuts, charge, _ = _pinned_top(hidden, headroom=0.0)
+    ends = [charge[rows[k][0]] for k in cuts]  # where the counter is held at each restart
+    if same_top:
+        top = charge[rows[0][0]]
+        starts = [j for j in range(1, len(rows)) if rows[j][1] < -30 and rows[j - 1][1] > -5]  # charges
+        charge = dict(charge)
+        for j, (t, _, _, _) in enumerate(rows):
+            k = bisect.bisect_right(starts, j) - 1
+            if k >= 0:
+                charge[t] = round(charge[t] + top - ends[k], 3)
+        ends = [top] * len(ends)
+    pub = []
+
+    def sampler(state=None):
+        s = BmsSampler(_Bms(), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, soh_estimator=True,
+                       design_capacity=100.0, soh_state=state)
+        s.qmax.curve = SYNTH
+        s.qmax._log_summary = lambda: None
+        add = s.qmax.add
+
+        def published(*a, **k):  # what _feed_qmax hands to publish_qmax
+            if not raw_soc:
+                k.pop('bms_soc_raw')
+            r = add(*a, **k)
+            if r is not None:
+                pub.append(r['qmax'])
+            return r
+        s.qmax.add = published
+        return s
+
+    s = sampler()
+    for a, b in zip([0] + cuts, cuts + [len(rows)]):
+        for j in range(a, b):
+            t, i, v, temp = rows[j]
+            full = ends[min(bisect.bisect_left(cuts, j), len(ends) - 1)]  # the end its next stop is at
+            smp = BmsSample(voltage=53.0, current=i, charge=charge[t], capacity=round(full / ratio, 2),
+                            soc=int(round(min(100.0, 100.0 * charge[t] / full))), temperatures=[temp], timestamp=t,
+                            aged_capacity=full if aged else math.nan)
+            _drive(s._feed_qmax(smp, i, v))
+        if b < len(rows):
+            s = sampler(_via_json(s.qmax.get_state(full=True)))
+            if after_restore:
+                after_restore(s.qmax)
+    return s.qmax, pub
+
+
+def test_an_integer_soc_replaced_by_charge_over_capacity_reads_full_as_97_percent():
+    """The precondition: BmsSample replaces it, and keeps what was reported."""
+    s = BmsSample(voltage=53.0, current=0.0, charge=93.0, capacity=100.0, soc=100)
+    assert s.soc == 93.0 and s.soc_reported == 100 and 'soc_reported' not in s.values()
+
+
+@pytest.mark.parametrize('ratio', [1.0, 0.99, 0.97, 0.95, 0.90])
+@pytest.mark.parametrize('hidden', [3.0, 6.0, 10.0])
+def test_a_counter_held_below_the_reported_capacity_is_no_evidence(hidden, ratio):
+    """Fourth review, finding 1: at ratio <= 0.97 the derived SoC (97 %) and
+    the counter (0.97 x the reported capacity) passed both stop checks, and
+    95.0 / 91.7 / 87.3 Ah went out for 98 again. The driver's SoC said 100 %,
+    and the counter is at the highest reading it has held."""
+    est, pub = _int_soc_top(hidden, ratio)
+    assert est.counts['restart_unverified'] == 3
+    assert not any(s['dq'] > 0 for s in est.segments)  # the charges across the restarts
+    assert pub and all(x == pytest.approx(97.5, abs=0.2) for x in pub)
+
+
+def _no_counter_max(est):
+    est._c_max = 1e6  # as if it had once read far more: its highest reading says nothing
+
+
+@pytest.mark.parametrize('what', ['the SoC as reported', 'the highest reading', 'the aged capacity'])
+def test_each_evidence_of_a_full_counter_alone_ends_the_segment(what):
+    """Each of the three, with the other two switched off, on the same input."""
+    if what == 'the SoC as reported':
+        est, _ = _int_soc_top(6.0, 0.97, after_restore=_no_counter_max)
+    elif what == 'the highest reading':
+        est, _ = _int_soc_top(6.0, 0.97, raw_soc=False, same_top=True)
+    else:
+        est, _ = _int_soc_top(6.0, 0.97, aged=True, raw_soc=False, after_restore=_no_counter_max)
+    assert est.counts['restart_unverified'] == 3 and not any(s['dq'] > 0 for s in est.segments)
+
+
+@pytest.mark.parametrize('same_top', [False, True])
+def test_calibration_without_the_reported_soc_and_the_counter_maximum_the_hidden_charge_is_published(same_top):
+    """The review's numbers, with what the old code had: the derived SoC and
+    the reported capacity. On both inputs of the tests above."""
+    for hidden, want in ((3.0, 95.0), (6.0, 91.7), (10.0, 87.3)):
+        est, pub = _int_soc_top(hidden, 0.97, raw_soc=False, after_restore=_no_counter_max, same_top=same_top)
+        chg = [s['qmax'] for s in est.segments if s['dq'] > 0]
+        assert est.counts['restart_unverified'] == 0 and chg, 'scenario is harmless'
+        assert all(x == pytest.approx(want, abs=0.3) for x in chg) and pub[-1] == pytest.approx(want, abs=0.3)
+
+
+def test_a_counter_back_at_its_highest_reading_is_no_evidence():
+    """The cost of the counter-maximum rule, measured: a pack whose counter
+    returns to the same top every cycle (no stop, SoC 97 %) is refused at a
+    restart in the top rest, exactly as a counter held there would be. Once
+    the counter has been seen fuller, the same restart continues."""
+    p = full_cycles(n=2, dt=7.0)
+    cut = len(p.rows) // 2 + 3  # in the top rest after the first charge, the counter at 97.2 Ah
+    assert p.soc_bms[p.rows[cut][0]] < 99.0
+    est, _ = _split_run(p.rows, [cut], **bms(p))
+    assert est.counts['restart_unverified'] == 1
+    est, _ = _split_run(p.rows, [cut], **_seen_fuller(p))
+    assert est.counts['restart_unverified'] == 0
+
+
+def test_a_garbled_counter_reading_does_not_raise_the_counter_maximum():
+    """Only readings the pack can hold (<= 1.2 x the capacity) teach it: one
+    garbled 6553.5 Ah would hide the real full end for good."""
+    est = _fresh()
+    for k, c in enumerate((90.0, 90.1, 6553.5, 90.2, 90.3)):
+        est.add(T0 + 10 * k, -36.0, None, bms_charge=c, bms_soc=90.0)
+    assert est._c_max == 90.3
+
+
+def test_monotone_in_how_far_the_counter_tops_out_below_the_reported_capacity():
+    """Refused at every ratio down to 0.5 (the SoC as reported is 100 % at
+    each), never accepted again."""
+    verdicts = [_int_soc_top(6.0, r)[0].counts['restart_unverified'] == 0 for r in (1.0, 0.97, 0.9, 0.7, 0.5)]
+    assert verdicts == [False] * 5
+
+
+def test_a_soc_above_100_is_kept_across_a_restart_and_taken_as_a_stop():
+    """A remaining charge above the capacity gives a derived SoC above 100.
+    That used to fail the saved state's validation, which then discarded
+    every segment at the next start."""
+    assert BmsSample(voltage=53.0, current=0.0, charge=100.5, capacity=100.0, soc=100).soc == 100.5
     est = _fresh()
     for k in range(10):
-        est.add(T0 + 36 * k, 10.0, None, bms_charge=c0 + 0.1 * (9 - k), bms_soc=soc0, capacity=cfull0)
+        est.add(T0 + 36 * k, 10.0, None, bms_charge=50.0 + 0.1 * (9 - k), bms_soc=100.5)
+    st = _via_json(est.get_state())
+    r = _fresh()
+    assert r.restore(st) and r._last_soc == 100.5
+    r.add(T0 + 360, 10.0, None, bms_charge=49.9, bms_soc=50.0)
+    assert r.counts['restart_unverified'] == 1
+
+
+def _resume_at(soc0=50.0, soc1=50.0, c1_off=0.0, cfull0=None, cfull1=None, c0=50.0, raw0=None, raw1=None,
+               aged0=None, aged1=None):
+    """A 10 A discharge, the counter in 0.1 Ah steps ending at c0 with the BMS
+    reading soc0 (raw0 as the driver reported it) and reporting cfull0 and
+    aged0; restart; the first sample 36 s later reads c0 - 0.1 + c1_off,
+    soc1, raw1, cfull1, aged1. Returns restart_unverified."""
+    est = _fresh()
+    for k in range(10):
+        est.add(T0 + 36 * k, 10.0, None, bms_charge=c0 + 0.1 * (9 - k), bms_soc=soc0, capacity=cfull0,
+                bms_soc_raw=raw0, aged_capacity=aged0)
     r = _fresh()
     assert r.restore(_via_json(est.get_state()))
-    r.add(T0 + 360, 10.0, None, bms_charge=c0 - 0.1 + c1_off, bms_soc=soc1, capacity=cfull1)
+    r.add(T0 + 360, 10.0, None, bms_charge=c0 - 0.1 + c1_off, bms_soc=soc1, capacity=cfull1, bms_soc_raw=raw1,
+          aged_capacity=aged1)
     return r.counts['restart_unverified']
 
 
@@ -1571,13 +1753,20 @@ STOPS = [
     ('the counter at empty', dict(c0=0.15)),
     ('the counter at the capacity the BMS reports', dict(cfull1=49.95)),
     ('the counter at it before', dict(cfull0=50.05)),
+    ('SoC 100 as reported after', dict(raw1=100)),
+    ('SoC 100 as reported before', dict(raw0=100)),
+    ('SoC 0 as reported after', dict(raw1=0)),
+    ('the counter at the aged capacity after', dict(aged1=49.95)),
+    ('the counter at the aged capacity before', dict(aged0=50.05)),
+    ('the counter at its highest reading after', dict(c1_off=1.0)),
+    ('a counter reading the pack cannot hold after', dict(c1_off=200.0)),
 ]
 
 
 @pytest.mark.parametrize('what,kw', STOPS, ids=[x[0] for x in STOPS])
 def test_a_counter_that_may_be_at_a_stop_is_no_evidence(what, kw):
     assert _resume_at() == 0  # the same restart with the counter mid-range continues
-    assert _resume_at(cfull0=100.0, cfull1=100.0) == 0
+    assert _resume_at(cfull0=100.0, cfull1=100.0, raw0=50, raw1=50, aged0=90.0, aged1=90.0) == 0
     assert _resume_at(**kw) == 1
 
 
@@ -1586,6 +1775,14 @@ def test_monotone_in_the_soc_at_a_restart():
     _monotone([_resume_at(soc1=x) == 0 for x in (50.0, 90.0, 98.0, 98.9, 99.0, 99.5, 100.0)])
     _monotone([_resume_at(soc1=x) == 0 for x in (50.0, 10.0, 2.0, 1.1, 1.0, 0.5, 0.0)])
     _monotone([_resume_at(soc0=x) == 0 for x in (50.0, 90.0, 98.0, 98.9, 99.0, 99.5, 100.0)])
+    _monotone([_resume_at(raw1=x) == 0 for x in (50, 90, 98, 99, 100, 101, 255)])  # to the far tail
+    _monotone([_resume_at(soc1=x) == 0 for x in (50.0, 99.5, 100.5, 150.0)])
+
+
+def test_monotone_in_how_close_the_counter_is_to_its_ends():
+    """Towards the aged capacity and towards the counter's highest reading."""
+    _monotone([_resume_at(aged1=x) == 0 for x in (90.0, 60.0, 50.0, 49.95, 49.9, 40.0, 1.0)])
+    _monotone([_resume_at(c1_off=x) == 0 for x in (0.0, 0.5, 0.9, 1.0, 5.0, 69.0, 200.0)])
 
 
 def _stuck_counter(stuck_s, hidden_ah=44.0, cache_s=0.0, n=1):
@@ -1966,7 +2163,12 @@ BAD_STATES = [
     ('q_charge of no counter', lambda s: s.update(charge_src=None)),
     ('charge_src unknown', lambda s: s.update(charge_src='voltage')),
     ('charge_src bad capacity', lambda s: s.update(charge_src='soc*-5.0')),
-    ('last_soc out of range', lambda s: s.update(last_soc=140.0)),
+    ('last_soc not a number', lambda s: s.update(last_soc='full')),
+    ('last_soc_raw not a number', lambda s: s.update(last_soc_raw=[100])),
+    ('last_aged not positive', lambda s: s.update(last_aged=0.0)),
+    ('charge_max negative', lambda s: s.update(charge_max=-1.0)),
+    ('charge_max of no counter', lambda s: s.update(charge_src=None, q_charge=None, charge_q=None,
+                                                     last_charge=None)),
     ('last_charge_full not positive', lambda s: s.update(last_charge_full=-1.0)),
     ('charge_q without q_charge', lambda s: s.update(q_charge=None)),
     ('glitch_open without a glitch', lambda s: s.update(glitch_open=True, t_glitch=None)),
