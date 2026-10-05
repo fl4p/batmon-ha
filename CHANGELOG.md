@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix: 2.23's `daly` connect could fail every time on a module that drops the first request after connecting, because the address it had learned was asked only once. The address is now asked again, a late reply still counts, the layout that answered is tried first on reconnect, and a connect where nothing answered keeps the subscribed layout instead of failing (#416).
+
 ## [2.23]
 
 * Fix: 2.22's `daly` host-address fallback could get stuck on `0x40` for a module that only answers `0x80`, if a reply came in late, and it accepted a layout whose write characteristic didn't work. `daly` now settles the layout and address on connect with one request per address, using a different command for each, so a late reply can't be credited to the wrong one. Wired `daly_uart` no longer logs a BLE address switch on timeouts (#416).

@@ -26,16 +26,19 @@ class Module:
     empty writes (GATT error 258), answers host address 0x40 only."""
 
     def __init__(self, answers=(0x40,), rx=FFF1, tx=FFF2, empty_write_ok=False, delay=0.0,
-                 broken_tx=(), echo=False):
+                 broken_tx=(), echo=False, drop_first=False):
         self.answers, self.rx, self.tx = answers, rx, tx
         self.empty_write_ok, self.delay, self.broken_tx, self.echo = empty_write_ok, delay, broken_tx, echo
         self.is_connected = False
         self.services = []
         self._cb = {}
         self.sent = []  # (char, frame)
+        self.drop_first = drop_first  # ignores the first request after each connect
+        self._dropped = False
 
     async def connect(self, timeout=20):
         self.is_connected = True
+        self._dropped = False
 
     async def disconnect(self):
         self.is_connected = False
@@ -66,6 +69,9 @@ class Module:
         self.sent.append((char, data))
         if char != self.tx:
             return
+        if self.drop_first and not self._dropped:
+            self._dropped = True
+            return
         if self.echo:
             reply = data
         elif data[1] in self.answers and data[2] in REPLIES:
@@ -82,7 +88,7 @@ def _bms(device):
     bms = DalyBt('test_jbd', name='daly')  # test_ address: no real BLE client
     bms.client = device
     bms.TIMEOUT = 0.2
-    bms.HANDSHAKE_TIMEOUT = 0.2
+    bms.HANDSHAKE_STEP = 0.1
     return bms
 
 
@@ -156,14 +162,40 @@ def test_reconnect_tries_the_learned_address_first():
     assert [(f[1], f[2]) for _, f in dev.sent] == [(0x40, 0x90)]
 
 
-def test_silent_module_with_refused_empty_write_is_an_error(monkeypatch):
-    import pytest
-    import bmslib.models.daly as daly_mod
-
-    async def no_enum(*a, **kw):
-        pass
-
-    monkeypatch.setattr(daly_mod, 'enumerate_services', no_enum)
+def test_silent_module_still_connects_on_the_subscribed_layout():
+    # nothing answered: don't tear the link down, let sampling and reconnects retry
     bms = _bms(Module(answers=()))
-    with pytest.raises(Exception, match='not found'):
-        asyncio.run(bms.connect())
+    asyncio.run(bms.connect())
+    assert (bms.UUID_RX, bms.UUID_TX, bms._ble_addr_byte) == (FFF1, FFF2, None)
+
+
+def test_module_dropping_the_first_request_after_connect_recovers_on_0x40():
+    # review finding: after learning 0x40 a reconnect sent 0x40 only once
+    dev = Module(drop_first=True)
+    bms = _bms(dev)
+
+    async def run():
+        await bms.connect()
+        first = bms._ble_addr_byte
+        await bms.disconnect()
+        dev.sent.clear()
+        await bms.connect()
+        return first
+
+    assert asyncio.run(run()) == 0x40
+    assert bms._ble_addr_byte == 0x40
+    assert [(f[1], f[2]) for _, f in dev.sent] == [(0x40, 0x90), (0x80, 0x94), (0x40, 0x90)]
+
+
+def test_reconnect_tries_the_remembered_layout_first():
+    dev = Module(answers=(0x80,), rx=FF01, tx=FF02, empty_write_ok=True)
+    bms = _bms(dev)
+
+    async def run():
+        await bms.connect()
+        await bms.disconnect()
+        dev.sent.clear()
+        await bms.connect()
+
+    asyncio.run(run())
+    assert dev.sent == [(FF02, dev.sent[0][1])] and dev.sent[0][1][1:3] == bytes([0x80, 0x90])
