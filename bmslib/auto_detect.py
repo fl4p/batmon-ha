@@ -54,18 +54,8 @@ def _uuid16(short: int) -> str:
 # request itself (an echo) by checking the reply-side address/command.
 
 def _daly_reply(cmd: int) -> Callable[[bytes], bool]:
-    from bmslib.models.daly import calc_crc
-
-    def check(buf: bytes) -> bool:
-        for i in range(len(buf) - 12):
-            f = buf[i:i + 13]
-            # replies carry the board number (0x01..), requests 0x40/0x80
-            if (f[0] == 0xA5 and 0x01 <= f[1] <= 0x10 and f[2] == cmd and f[3] == 0x08
-                    and calc_crc(f[:12]) == f[12]):
-                return True
-        return False
-
-    return check
+    from bmslib.models.daly import daly_reply_valid
+    return lambda buf: daly_reply_valid(buf, cmd)
 
 
 def _daly2_reply(count: int) -> Callable[[bytes], bool]:
