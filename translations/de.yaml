@@ -49,11 +49,12 @@ configuration:
     name: Nennkapazität (Ah)
     description: >-
       Nennkapazität dieses einen Akkus in Ah, nicht die einer Bank aus
-      mehreren Akkus. Nur für den SoH-Schätzer, als Bezug für den SoH und
-      dessen Plausibilitätsprüfung; ohne Angabe veröffentlicht der Schätzer
-      nichts. Die vom BMS gemeldete Kapazität ist nie der Bezug; weichen
-      beide um mehr als das 1,5-Fache voneinander ab, veröffentlicht der
-      Schätzer nichts.
+      mehreren Akkus. Der SoH-Schätzer nutzt sie als Bezug für den SoH und
+      dessen Plausibilitätsprüfung und veröffentlicht ohne Angabe nichts;
+      die vom BMS gemeldete Kapazität ist nie der Bezug, und weichen beide
+      um mehr als das 1,5-Fache voneinander ab, veröffentlicht er nichts.
+      Der Zellwiderstands-Schätzer verwirft damit (sonst mit der Kapazität
+      des BMS) Ströme über 5C, die kein Akku führen kann.
 
   concurrent_sampling:
     name: Parallele Abtastung

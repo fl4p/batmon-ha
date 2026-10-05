@@ -48,10 +48,12 @@ configuration:
     name: Design capacity (Ah)
     description: >-
       Nameplate capacity of this one pack in Ah, not of a bank of packs.
-      Only used by the SoH estimator, as the reference for SoH and its
-      plausibility check; without it the estimator publishes nothing. The
-      capacity the BMS reports is never the reference; when the two differ
-      by more than 1.5x, the estimator publishes nothing.
+      The SoH estimator uses it as the reference for SoH and its
+      plausibility check, and publishes nothing without it; the capacity
+      the BMS reports is never the reference, and when the two differ by
+      more than 1.5x the estimator publishes nothing. The cell resistance
+      estimator uses it (else the BMS's capacity) to reject currents no
+      pack can carry, above 5C.
 
   concurrent_sampling:
     name: Concurrent sampling
