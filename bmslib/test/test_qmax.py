@@ -557,6 +557,19 @@ def test_calibration_without_the_open_decision_across_a_restart_the_garbage_is_c
     assert all(x == pytest.approx(101.8, abs=0.2) for x in dis)
 
 
+def test_a_gap_ends_a_glitchs_open_decision():
+    """A glitch, then a gap: the gap ends the epoch, and the samples after it
+    (here a load that starts within 5 samples) are not judged against the
+    ones before the glitch; that would end the next epoch for nothing."""
+    est = _fresh()
+    for k in range(10):
+        est.add(T0 + 10 * k, 0.0, None)
+    est.add(T0 + 100, 3553.5, None)
+    for k in range(10):
+        est.add(T0 + 1000 + 10 * k, 50.0 if k > 1 else 0.0, None)
+    assert est.counts['gap'] == 1 and est.counts['current_implausible_neighbours'] == 0 and est.epoch == 1
+
+
 def test_a_clean_glitch_right_after_a_restart_is_still_bridged():
     """The samples before the restart are saved too (the state's `recent`):
     without them the neighbourhood is unevaluable and the segment ends."""
@@ -713,7 +726,7 @@ def test_the_bms_capacity_is_the_median_of_hourly_readings():
     est = _fresh()
     for k, c in enumerate((100.0, 100.0, 267.0, 100.0, 100.0)):
         est.add(T0 + 3600 * k, 1.0, None, capacity=c)
-    assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None
+        assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None  # also right after the 267
     for k in range(5, 8):
         est.add(T0 + 3600 * k, 1.0, None, capacity=267.0)
     assert est.capacity_mismatch() == (100.0, 267.0)
@@ -1898,6 +1911,23 @@ def test_a_counter_back_at_its_highest_reading_is_no_evidence():
     assert est.counts['restart_unverified'] == 0
 
 
+def test_an_unknown_counter_maximum_is_no_evidence():
+    """A counter whose highest reading is unknown (an inconsistent state, or
+    no plausible reading) cannot be told from one at its full end."""
+    def resume(before):
+        est = _fresh()
+        for k in range(10):
+            est.add(T0 + 36 * k, 10.0, None, bms_charge=50.0 + 0.1 * (9 - k), bms_soc=50.0)
+        r = _fresh()
+        assert r.restore(_via_json(est.get_state()))
+        before(r)
+        r.add(T0 + 360, 10.0, None, bms_charge=49.9, bms_soc=50.0)
+        return r.counts['restart_unverified']
+    assert resume(lambda r: None) == 0
+    assert resume(lambda r: setattr(r, '_c_max', None)) == 1
+    assert resume(lambda r: setattr(r, '_c_max', 49.0)) == 1  # below the reading: not this counter's maximum
+
+
 def test_a_garbled_counter_reading_does_not_raise_the_counter_maximum():
     """Only readings the pack can hold (<= 1.2 x the capacity) teach it: one
     garbled 6553.5 Ah would hide the real full end for good."""
@@ -2273,6 +2303,24 @@ def test_calibration_without_either_check_the_old_pack_is_published_as_the_new_o
     assert pub, 'scenario is harmless'
     assert pub[-1]['qmax'] == pytest.approx(97.5, abs=0.2) and pub[-1]['soh'] == pytest.approx(34.8, abs=0.2)
     assert pub[-1]['plausibility_checked']
+
+
+def test_a_saved_segment_of_another_capacity_is_dropped_and_never_counted(caplog):
+    """Inside a state that claims the present option, a segment (or anchor)
+    checked against another capacity is dropped on restore, logged; and one
+    that got in anyway is not counted at publication, though its value is
+    inside the present window."""
+    est, pub = run(full_cycles(n=3).rows, cap=100.0)
+    st = _via_json(est.get_state(full=True))
+    st['segments'][0]['cap'] = 120.0
+    st['anchors'][-1]['cap'] = 120.0
+    r = _fresh(100.0)
+    with caplog.at_level('WARNING'):
+        assert r.restore(st)
+    assert len(r.segments) == 4 and len(r.anchors) == len(st['anchors']) - 1
+    assert '2 saved anchor(s)/segment(s) checked against another capacity' in caplog.text
+    r.segments.append(dict(r.segments[-1], cap=120.0))
+    assert len(r._counted()) == 4 and r.result()['segments'] == 4
 
 
 def test_segments_of_another_cell_count_are_not_published():
