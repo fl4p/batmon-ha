@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.23]
 
 * Fix: 2.22's `daly` host-address fallback could get stuck on `0x40` for a module that only answers `0x80`, if a reply came in late, and it accepted a layout whose write characteristic didn't work. `daly` now settles the layout and address on connect with one request per address, using a different command for each, so a late reply can't be credited to the wrong one. Wired `daly_uart` no longer logs a BLE address switch on timeouts (#416).
 
