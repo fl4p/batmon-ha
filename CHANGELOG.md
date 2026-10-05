@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.22]
 
 * Experimental `impedance_estimator` (off by default): estimates the per-cell resistance of LiFePO4 packs from sampled current and cell voltages and publishes it as a `Cell Resistance` sensor in mΩ; small packs may never draw the current steps it needs (doc/Cell Resistance.md).
 * The cell resistance estimator saves its state per BMS (`impedance_<name>.json`), so a restart keeps the collected windows instead of starting the warm-up again.
