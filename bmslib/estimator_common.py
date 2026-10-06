@@ -5,6 +5,7 @@ code for persisted state, and the validators `restore()` uses.
 
 Kept free of numpy on purpose: the add-on has none.
 """
+import dis
 import functools
 import hashlib
 import logging
@@ -140,7 +141,7 @@ def _canon(x, doc=None):
     fingerprinted as if it were known."""
     if isinstance(x, types.CodeType):
         consts = list(x.co_consts)
-        if doc is not None and consts and consts[0] == doc:
+        if doc is not None and consts and consts[0] == doc and not _const_used(x, 0):
             consts[0] = '<docstring>'
         return ('<code>', x.co_name, x.co_argcount, x.co_posonlyargcount, x.co_kwonlyargcount,
                 x.co_flags & ~_CO_HAS_DOCSTRING, x.co_code, getattr(x, 'co_exceptiontable', b''),
@@ -162,6 +163,13 @@ def _canon(x, doc=None):
     if isinstance(x, slice):  # a constant in 3.14 bytecode (x[:3])
         return ('<slice>', _canon(x.start), _canon(x.stop), _canon(x.step))
     raise TypeError('cannot fingerprint %s' % type(x).__name__)
+
+
+def _const_used(code, k: int) -> bool:
+    """Does the bytecode load constant k? A docstring is never loaded; a
+    constant equal to it is (def f(): "x"; return "x" keeps one constant for
+    both, and masking it hid a change of what f returns, rev8)."""
+    return any(ins.arg == k and ins.opcode in dis.hasconst for ins in dis.get_instructions(code))
 
 
 def _put(h, *parts):
@@ -189,8 +197,12 @@ def _canon_fn(f, seen):
             cells.append((name, ('<class>', v.__module__, v.__qualname__)))  # super(): the class is walked itself
         else:
             cells.append((name, _canon_obj(v, seen)))
+    # Attributes set on the function (f.lim = 5) configure it like a default
+    # (rev8). __wrapped__ (functools.wraps) is the wrapped function, walked by
+    # _feed; the rest of what wraps copies is the wrapped function's own.
+    attrs = {k: v for k, v in vars(f).items() if k != '__wrapped__'}
     return ('<func>', f.__qualname__, _canon(f.__code__, f.__doc__), _canon_obj(f.__defaults__, seen),
-            _canon_obj(f.__kwdefaults__, seen), tuple(cells))
+            _canon_obj(f.__kwdefaults__, seen), tuple(cells), _canon_obj(attrs, seen))
 
 
 def _canon_obj(x, seen=frozenset()):
@@ -245,8 +257,10 @@ def _feed(h, name: str, obj, modname: str, depth: int = 0):
         if hasattr(obj, '__wrapped__'):  # a decorated method (locked): its body is the wrapped function
             _feed(h, name + '.__wrapped__', obj.__wrapped__, modname, depth)
     elif isinstance(obj, type):
-        if obj.__module__ != modname or depth > 3:
+        if obj.__module__ != modname:
             return
+        if depth > 3:  # it used to be skipped: a constant in it went unseen (rev8)
+            raise TypeError('cannot fingerprint %s: classes nested more than 3 deep' % name)
         _put(h, 'class', name)
         for k in sorted(vars(obj)):
             if k not in _CLASS_SKIP:

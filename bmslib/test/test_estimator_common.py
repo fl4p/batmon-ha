@@ -24,7 +24,7 @@ def _py(cwd, code, *flags, seed='0'):
 def _copy_bmslib(dst):
     pkg = dst / 'bmslib'
     pkg.mkdir()
-    for f in ('__init__.py', 'estimator_common.py', 'qmax.py', 'impedance.py', 'util.py'):
+    for f in ('__init__.py', 'estimator_common.py', 'qmax.py', 'impedance.py', 'util.py', 'bms.py'):
         shutil.copy(os.path.join(BMSLIB, f), pkg / f)
     return pkg
 
@@ -238,6 +238,10 @@ FP_HOLES = [
      '        return g(x) + 1\n    return f\n_SCALE = _mk({V})\n', '3', '4'),
     ('closure default', 'def _mk(k):\n    def f(x, y=k):\n        return x * y\n    return f\n_SCALE = _mk({V})\n',
      '3', '4'),
+    # rev8: kept the fingerprint whatever value they held
+    ('function attribute', 'def _gate(x):\n    return x < _gate.lim\n_gate.lim = {V}\n', '5.0', '6.0'),
+    ('method attribute', 'class _K:\n    def m(self):\n        return self.m.__func__.lim\n_K.m.lim = {V}\n', '1', '2'),
+    ('docstring equal to a returned constant', 'def _mode():\n    "{V}"\n    return "{V}"\n', 'chg', 'dch'),
 ]
 
 
@@ -286,6 +290,39 @@ def test_a_closure_made_in_another_module_is_configuration_here(tmp_path, monkey
     fb = ec.code_fingerprint(_ns(_S=other.mk(4), mk=other.mk))
     assert None not in (fa, fb) and fa != fb
     assert ec.code_fingerprint(_ns(mk=other.mk)) == ec.code_fingerprint(_ns())  # the import itself: its own module's
+
+
+def test_the_qmax_fingerprint_covers_how_bmssample_derives_its_inputs_and_nothing_else_of_bms_py(tmp_path):
+    """Rev8: the SoC replacement in bms.py was outside it. Only that function
+    counts: an unrelated edit of bms.py keeps months of segments."""
+    pkg = _copy_bmslib(tmp_path)
+    src = pkg / 'bms.py'
+    text = src.read_text()
+    probe = 'import bmslib.qmax as m; print(m.CODE_FINGERPRINT)'
+    base, = _py(tmp_path, probe, '-B')
+    for old, new, same in (('elif math.isnan(capacity) and soc > .2', 'elif math.isnan(capacity) and soc > .3', False),
+                           ('MIN_VALUE_EXPIRY = 20', 'MIN_VALUE_EXPIRY = 21', True)):
+        assert text.count(old) == 1
+        src.write_text(text.replace(old, new))
+        edited, = _py(tmp_path, probe, '-B')
+        assert base != 'None' and edited != 'None' and (edited == base) == same, old
+    src.write_text(text)
+
+
+def test_a_class_nested_deeper_than_the_walk_leaves_the_fingerprint_unknown():
+    """It used to be skipped: a constant in it went unseen (rev8)."""
+    src = 'class _A:\n class _B:\n  class _C:\n   class _D:\n    class _E:\n     LIM = {V}\n'
+    assert _fp_src(src.format(V='1.0')) is None
+    assert _fp_src('class _A:\n class _B:\n  class _C:\n   LIM = 1.0\n') is not None
+
+
+def test_a_wrapped_function_is_not_configured_by_its_wrapper_attribute():
+    """functools.wraps sets __wrapped__: that is the wrapped code, walked on
+    its own, not a value."""
+    src = ('import functools as _ft\ndef _deco(f):\n    @_ft.wraps(f)\n    def w(*a):\n        return f(*a)\n    return w\n'
+           '@_deco\ndef _g(v):\n    return v + {V}\n')
+    fa, fb = _fp_src(src.format(V='1')), _fp_src(src.format(V='2'))
+    assert None not in (fa, fb) and fa != fb
 
 
 def test_unknown_closure_contents_leave_the_fingerprint_unknown():
@@ -380,8 +417,11 @@ def test_the_estimators_fingerprint_their_code_and_the_shared_helpers():
     import bmslib.impedance as imp
     import bmslib.qmax as q
     assert q.CODE_FINGERPRINT and imp.CODE_FINGERPRINT and q.CODE_FINGERPRINT != imp.CODE_FINGERPRINT
-    assert q.CODE_FINGERPRINT == ec.code_fingerprint(vars(q), vars(ec))
-    assert ec.code_fingerprint(vars(q)) != q.CODE_FINGERPRINT  # the shared helpers are in it
+    import bmslib.bms as bms
+    inputs = {'__name__': 'bmslib.bms', 'derive_charge_fields': bms.derive_charge_fields}
+    assert q.CODE_FINGERPRINT == q.code_fingerprint() == ec.code_fingerprint(vars(q), vars(ec), inputs)
+    assert ec.code_fingerprint(vars(q), inputs) != q.CODE_FINGERPRINT  # the shared helpers are in it
+    assert ec.code_fingerprint(vars(q), vars(ec)) != q.CODE_FINGERPRINT  # and BmsSample's derivation
 
 
 # ---------------------------------------------------------------- configured objects (third review)
@@ -389,7 +429,7 @@ def test_the_estimators_fingerprint_their_code_and_the_shared_helpers():
 def _curve_fp(monkeypatch, curve):
     import bmslib.qmax as q
     monkeypatch.setattr(q, 'DEFAULT_CURVE', curve)
-    return ec.code_fingerprint(vars(q), vars(ec))
+    return q.code_fingerprint()
 
 
 CURVE_MUTATIONS = [

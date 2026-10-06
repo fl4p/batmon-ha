@@ -785,19 +785,13 @@ class BmsSampler:
             publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)
 
     async def _qmax_temperature(self, sample: BmsSample):
-        """Best cell temperature known, None if none -- never a default. The
-        pack-temperature estimate if it runs, else the median BMS probe, else
-        the MOSFET, which is close to the cells at rest (the only time the
-        estimator uses it)."""
+        """Best cell temperature known, None if none (qmax.best_temperature)."""
+        from bmslib.qmax import best_temperature
         if self._pack_temp is not None and math.isfinite(self._pack_temp):
-            return self._pack_temp
+            return best_temperature(self._pack_temp, None, None)
         # sample.temperatures is only filled when a sink or a group wanted it
         temps = sample.temperatures or await self._fetch_temperatures_cached()
-        temps = sorted(t for t in (temps or []) if isinstance(t, (int, float)) and -40 < t < 100)
-        if temps:
-            return temps[len(temps) // 2]
-        mos = sample.mos_temperature
-        return mos if isinstance(mos, (int, float)) and -40 < mos < 100 else None
+        return best_temperature(None, temps, sample.mos_temperature)
 
     async def _feed_qmax(self, sample: BmsSample, current: float, voltages):
         est = self.qmax
@@ -805,11 +799,7 @@ class BmsSampler:
             return
         try:
             temp = await self._qmax_temperature(sample)
-            from bmslib.qmax import charge_counter
-            counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
-            r = est.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
-                        bms_charge=counter, charge_src=counter_src, bms_soc=sample.soc,
-                        bms_soc_raw=getattr(sample, 'soc_reported', None), aged_capacity=sample.aged_capacity)
+            r = est.add_sample(sample, current, voltages, temp)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),

@@ -216,8 +216,13 @@ new pack with the same nameplate and cell count is not recognised; delete `qmax_
 
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
 `bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, what a function closes over (a factory's or a
-decorator's argument), a module-level or class-level constant, list or dict (the OCV table, every gate), the built-in curve as built (its data, smoothing and slope gate, and the tables made from them), or the Python
-version. Comments, docstrings, blank lines and where code sits in the file do not count, so an
+decorator's argument), an attribute set on a function, a module-level or class-level constant, list or dict (the OCV
+table, every gate), the built-in curve as built (its data, smoothing and slope gate, and the tables made from them),
+how a BMS sample's SoC and capacities are derived (`derive_charge_fields` in `bmslib/bms.py`, which the restart rules
+read), or the Python version. What the sampler hands the estimator is decided in `qmax.py` (`add_sample`,
+`best_temperature`), so it counts too; the rest of `bms.py` and `sampling.py` does not, or every unrelated change there
+would discard months of segments. Anything the fingerprint cannot describe (a class nested more than three deep, an
+object that does not say what configures it) makes it unknown, and unknown never matches. Comments, docstrings, blank lines and where code sits in the file do not count, so an
 update that only touches those keeps months of segments.
 
 ## Cost

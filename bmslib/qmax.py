@@ -174,6 +174,7 @@ import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from bmslib import bms as _bms
 from bmslib import estimator_common
 from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, locked, median,
@@ -614,6 +615,20 @@ def charge_counter(charge, soc, capacity) -> Tuple[Optional[float], Optional[str
     return None, None
 
 
+def best_temperature(pack_temp, probes, mos) -> Optional[float]:
+    """The cell temperature an anchor is judged at [degC], None if none is
+    known -- never a default: the pack-temperature estimate if it runs, else
+    the median BMS probe, else the MOSFET, which is close to the cells at rest
+    (the only time an OCV anchor uses it). Here and not in the sampler, so
+    that the code fingerprint covers it."""
+    if finite(pack_temp):
+        return float(pack_temp)
+    temps = sorted(t for t in (probes or []) if finite(t) and -40 < t < 100)
+    if temps:
+        return temps[len(temps) // 2]
+    return float(mos) if finite(mos) and -40 < mos < 100 else None
+
+
 def _counter_src_ok(src) -> bool:
     if src == 'charge':
         return True
@@ -1001,6 +1016,16 @@ class QmaxEstimator:
         if self._glitch_nb is not None:
             return 'current_implausible_neighbours'
         return None
+
+    def add_sample(self, sample, current: float, voltages: Optional[Sequence[float]],
+                   temp: Optional[float]) -> Optional[Dict[str, Any]]:
+        """add() for a BmsSample: which of its fields go where. current: the
+        native (pre invert_current) current; temp: best_temperature(). Here
+        and not in the sampler, so that the code fingerprint covers it."""
+        counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
+        return self.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
+                        bms_charge=counter, charge_src=counter_src, bms_soc=sample.soc,
+                        bms_soc_raw=getattr(sample, 'soc_reported', None), aged_capacity=sample.aged_capacity)
 
     def _neighbourhood_ok(self, before: Sequence[float], after: Sequence[float]) -> bool:
         """The good samples either side of an isolated impossible reading
@@ -1673,5 +1698,15 @@ DEFAULT_CURVE = OcvCurve()
 
 # Anchors and segments are only restored into the code that made them: a change
 # to the curve or any gate would mix two definitions of Qmax. Computed last, over
-# the code that actually runs (estimator_common.code_fingerprint).
-CODE_FINGERPRINT = estimator_common.code_fingerprint(globals(), vars(estimator_common))
+# the code that actually runs (estimator_common.code_fingerprint): this module,
+# the shared helpers, and the one function of bms.py that derives inputs the
+# saved state depends on (the SoC and capacities the stop rule reads; rev8). Not
+# all of bms.py and sampling.py: every unrelated change there would discard
+# months of segments. What the sampler does with a sample is add_sample() and
+# best_temperature() here.
+def code_fingerprint() -> Optional[str]:
+    return estimator_common.code_fingerprint(
+        globals(), vars(estimator_common), {'__name__': _bms.__name__, 'derive_charge_fields': _bms.derive_charge_fields})
+
+
+CODE_FINGERPRINT = code_fingerprint()
