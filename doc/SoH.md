@@ -3,15 +3,19 @@
 `soh_estimator: true` makes batmon estimate the present capacity (Qmax) of each LiFePO4 pack, and from it the state
 of health, as two sensors per BMS: `Qmax (est.)` in Ah and `SoH (est.)` in %. It is off by default.
 
-**On the built-in OCV curve it cannot currently produce a value.** Read [Why no value](#why-no-value) before turning
-it on. It still logs every usable rest it finds and why nothing came of it, which is what it is for at this stage.
+**The built-in OCV curve alone gives no value**: it reads a SoC only near empty. What makes a value possible is the end
+of a charge, taken as SoC 100 % ([The top anchor](#the-top-anchor-the-end-of-a-charge)), paired with a rest near empty.
+In four months of 16 packs' telemetry that published for one pack (273–274 Ah for 304 Ah). Read
+[What it gives](#what-it-gives) before turning it on. It logs every usable rest and charge end it finds and why nothing
+came of it.
 
 ## How it works
 
-Between two long rests the state of charge of every cell is read off an OCV curve (relaxed cell voltage against SoC),
-and the charge that flowed in between is counted from the BMS current. Then, per cell,
+Between two anchors the state of charge of every cell is known, and the charge that flowed in between is counted from
+the BMS current. An anchor is a long rest, where each cell's SoC is read off an OCV curve (relaxed cell voltage against
+SoC), or the end of a charge, where every cell is at 100 % (the top anchor, below). Then, per cell,
 
-    Qmax = charge counted × 100 / (SoC at the second rest − SoC at the first)
+    Qmax = charge counted × 100 / (SoC at the second anchor − SoC at the first)
 
 The pack's Qmax is that of the weakest cell: in a series string the cell that is empty first ends the discharge. SoH is
 Qmax against the device's `capacity:` option (Ah, the nameplate of this one pack, not of the bank it is in). **Without
@@ -32,7 +36,8 @@ capacity (braunpwr_uart, renogy_uart, JK through the aiobmsble driver) and that 
 nameplate. Without a capacity from the BMS there is no such check. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
-not an error bound, see below), and the capacity used.
+not an error bound, see below), the capacity used, what the newest segment ran between (`anchors`, e.g. `ocv->top`: a
+rest near empty, then a charge end) and how many of the counted segments used a top anchor (`top_anchored`).
 
 ### How it relates to TI Impedance Track
 
@@ -101,8 +106,12 @@ A current reading above 5× the capacity (never above 1000 A) is a decode glitch
 the current's level there. Otherwise, and at a second one within 5 minutes, the open segment ends: garbled frames come
 in runs, and those below the bound read like a current. One caught glitch with one to four 450 A frames beside it was
 counted as 99.4–103.0 Ah for a 97.5 Ah pack, and with them on both sides (where the two readings next to the hole agree
-with each other) as 101.2–108.6 Ah. Still counted: garbled frames within that 25 %, and runs of 5 or more frames of the
-same wrong value on both sides, which look exactly like a real load pulse.
+with each other) as 101.2–108.6 Ah. A second one before the 5 readings after the first are in ends it too (the
+neighbourhood holds a glitch, so it cannot agree): with readings 80 s apart the second used to share the first one's
+verdict, and 4 or 8 garbled frames after it went out as 102.4 or 107.3 Ah for 97.5. What still passes is anything those
+10 readings allow: whatever values lie within 25 % (or 1 A) of their median, garbled or not. That is up to 25 % of the
+load per garbled reading beside the hole, and runs of 5 or more garbled frames on each side that agree with each other
+within that tolerance; to the rule they look exactly like a real load pulse.
 
 What this costs: a load that changes within those 10 readings ends the segment. Measured on real data by placing a
 glitch at every position: in 16 telemetry packs (15 s between readings, 3.9 million positions under load) 39 % of the
@@ -118,29 +127,120 @@ state is discarded at the start), when the capacity the BMS reports starts to di
 estimator is disabled, or when its segments are dropped. Earlier versions left such a value for up to a year. It comes back
 with the next accepted segment.
 
-## Why no value
+## The top anchor: the end of a charge
+
+Battery monitors such as Victron's synchronise their SoC to 100 % when a charge ends: the voltage above a "charged
+voltage", the current below a "tail current" for a "charged detection time". batmon does the same, per cell, and takes
+that moment as an anchor at which every cell is at SoC 100 %. A charge ends one of two ways.
+
+* **Tail.** After a bulk phase (a charge current of at least C/13.3 within the last 2 hours), the charge current stays
+  at C/20 or less for 3 minutes (Victron's default detection time), with at least 3 cell readings in them at most a
+  minute apart, while the highest cell holds: it rises by at most 10 mV in that time and stays within 25 mV of its
+  peak of the last 10 minutes. The first crossing of the tail while the highest cell still climbs is no end (in the
+  CC knee cells rise 30–90 mV a minute; in CV they rise 3–5 mV in 3 minutes as the cable drop shrinks), and neither
+  is a PV cloud, where the current falls and the voltage falls with it (50 mV and more within 20 s in the data).
+* **Cut-off.** The current drops in one sample from above the tail to about zero (at most the rest threshold of charge,
+  or a load of up to C/20) after the highest cell peaked at 3550 mV or more: a BMS's cell-overvoltage cut, or a
+  charger that terminates. The cut must come from at most C/4, and 1–2 minutes later every cell must still read
+  3400 mV or more. A cut at a voltage short of full (a temperature or current protection at 3.38 V) is not an end.
+
+Either way **every cell** must stand at 3400 mV or more, because the anchor gives every cell 100 %. On the
+maintainer's van pack (280 Ah, its ANT and Daly data, 38 and 11 charges to a top), after the lowest cell first stood at
+3400–3420 mV under at most C/20, a median 0.2 / 0.9 % of the capacity still went in before the highest reached
+3550 mV, at most 4.7 / 2.1 %; at 3390–3400 mV up to 7.8 / 18.8 %. Judged by the highest cell alone, 3400–3420 mV
+still left up to 7.9 / 18.6 %. A pack whose cells are not balanced at the top is refused: on one telemetry pack (16
+cells) the BMS cut a runner at 3671 mV and the lowest cell read 3362 mV a minute later.
+
+Nothing about a charge end is guessed: without the `capacity:` option (the tail and the bulk are fractions of it),
+without cell voltages or with readings more than a minute old, with a cell count that changes, without a known
+temperature of 10–45 °C (colder, a cell's resistance at C/20 lifts it to 3400 mV short of full), across a gap or a
+clock step, or while a current glitch waits for its neighbourhood, there is no top anchor. Two top anchors never pair:
+there is no SoC between them to count against. A top anchor pairs with the rests near empty before and after it,
+through every gate a segment has (gaps, coverage, the drift budget, 10 days, the plausibility window, the capacity
+check, the restart rules, the cell count).
+
+**What 100 % means.** It is full as this charger defines it, not the cells' own 100 %: a charger that holds 3.42 V
+per cell ends its charge earlier than one that holds 3.55 V. If the charge end leaves b % of the capacity out, Qmax
+and SoH read about b % low (Qmax = charge × 100 / (100 − SoC at the bottom), where the truth is
+charge × 100 / (100 − b − SoC at the bottom)). By the van data above b is typically 0.2–1.5 %, at most ~5 %; it is
+never negative, so the top anchor makes the estimate read low, never high. It stays the same as long as the charger's
+settings do; change the absorption voltage or the tail current and the estimate moves with them. What Qmax then
+measures is the capacity between this charger's full and the cells' empty end of the OCV curve.
+
+What it costs:
+
+* Cell voltages are fetched every 10 s while the pack charges (with the `capacity:` option set), not only near rest.
+  On a BMS that sends them in a frame of their own (Daly) that is one more request every 10 s while charging.
+* A charge after a bulk below C/13.3 makes no top anchor (1j6d, 304 Ah, bulked as weakly as C/17 before some of its
+  charge ends; at C/10 the van's solar charger made 2 top anchors in 462 days, at C/13.3 19). A charger that ends its absorption while the
+  current is still above C/20 makes none either: its stop reads as a cut-off short of a full voltage. So does a cut
+  from more than C/4, and a cell climbing the knee at a constant current below the tail (a CC charger without CV)
+  until the charger stops.
+* What a charge in progress has shown is not saved: a restart during it costs that top anchor. (At the top of a charge
+  a restart ends the open segment anyway: the BMS reads 99 % there, see Restarts.) An outage over the turn from bulk
+  to tail costs it too.
+* Per sample about 0.5 µs more (1.4 µs when cell voltages come with every sample), see Cost.
+
+## What it gives
+
+Replay of the 16 telemetry packs (2026-05-25 to 2026-09-24, 15 s between samples, `bat-impedance/tele_long_qmax.py`;
+the pack voltage ÷ cell count stands in for every cell, since these uploads carry almost no cell voltages, so the
+replay cannot see an imbalance and judges the cut-off peak by the mean cell; the median capacity the BMS reports
+stands in for the `capacity:` option):
+
+| pack | capacity | top anchors | rests usable near empty | segments | Qmax per segment | published |
+|---|---:|---:|---:|---:|---|---|
+| 1j6dTB_II15cAA | 304 Ah | 49 | 31 | 5 | 269.5, 272.6, 274.1, 278.0, 280.6 Ah (0.89–0.92) | 273, 273, 274 Ah |
+| POdoivGkBF6NaA | 105 Ah | 72 | 4 | 2 | 95.2, 100.9 Ah (0.91, 0.96) | nothing (2 of 3) |
+| YhUXrjdnCA8pig | 305 Ah | 73 | 2 | 1 | 282.2 Ah (0.93) | nothing |
+| aTTxcq2mGQwTqA | 320 Ah | 79 | 3 | 0 | – | nothing |
+| 8 more packs | | 0–231 | 0–36 | 0 | – | nothing |
+
+(Three more packs are skipped, their current sign could not be told from their data, and one id holds two packs.)
+
+On 1j6d, integrating the current between the BMS's own full and empty points gives 273–287 Ah, which matches.
+Most pairs fail on outages longer than 5 minutes in the uploads and on the drift budget (a pair spanning more than
+about a day), and most packs never rest near empty. aTTx, which a cruder screen of the same data split into two
+groups (0.63–0.76 from full to empty, 0.94–0.98 the other way), gets no segment here (outages, the drift budget, and
+top anchors next to each other). The split is not the screen's timing of the charge end: those ends were followed by a
+BMS cut at its full counter within minutes. It is the pack's balance, which the pack voltage hides. Its first two
+days carry cell voltages: the BMS cut a runner at 3671 and 3652 mV while the lowest cell was at 3407 and 3373 mV, and
+a minute later the lowest read 3362 and 3358 mV, the highest 3549 and 3556 mV; two hours later the 16 cells spread
+from 3336 to 3393 mV. Going down, the pack voltage read "near empty" (mean cell 6 % on the curve) on 06-10 while the
+BMS said 27 %, and the charge counted from full agrees with the BMS there (227.1 against 227.3 Ah), so most likely a
+few cells reached empty early and pulled the mean down. With cell voltages, as the add-on has them, the floor refuses
+such a top anchor, and a rest with most cells on the plateau gives no anchor.
+
+The maintainer's van pack (`bat-impedance/van_qmax.py`, two cells logged): its Daly data (2023-11 to 2025-11, 462 days
+with data) gives 19 top anchors and 23 usable rests near empty, its ANT data (2023-09 to 2026-05) 15 and 38, and no
+segment. Every pair between them breaks on the record: the Influx minute cache keeps a minute only when a field
+changed, and it has 2.3 (Daly) and 6.6 (ANT) breaks of more than 5 minutes a day; the add-on, sampling continuously,
+does not have them. So that data checks the top anchor's thresholds (above), not segments.
+
+### OCV anchors only
 
 The gates above are the "tightened universal gates" of the offline prototype, aimed at an error of a single segment
 near ±10 %. That aim leaves out the BMS's own measurement errors: its current scale (above) and its cell-voltage
 calibration. In the prototype's data the same pack, read by four different BMSes over 4.5 years, gave Qmax values
 4–43 % of nameplate apart (about 10 % on deep cycles), mostly from differences in their cell-voltage readings, and more
-segments do not average that away (bat-impedance WHITEPAPER, error budget and §9.1). Only the current-offset part of that has an explicit budget (5 %, above), and only for an offset of the
-assumed size; the rest is the prototype's tuning, not a proven limit. But the built-in curve, built from rests of 90 minutes and more on one pack, is steep
-only near empty, 0–11 % SoC. At its top it rises by less than 1 mV per % SoC. The steep "top knee" that the
-prototype's older 30-minute curve had (3440 mV at 100 %) came from its highest readings, most likely a cell still
-polarised from charging; that curve is also what biased the prototype's Qmax to 210 Ah. So on this curve no rest near
-full is usable, and no segment can reach 60 % of SoC.
+segments do not average that away (bat-impedance WHITEPAPER, error budget and §9.1). Only the current-offset part of
+that has an explicit budget (5 %, above), and only for an offset of the assumed size; the rest is the prototype's
+tuning, not a proven limit. The built-in curve, built from rests of 90 minutes and more on one pack, is steep only
+near empty, 0–11 % SoC. At its top it rises by less than 1 mV per % SoC. The steep "top knee" that the prototype's
+older 30-minute curve had (3440 mV at 100 %) came from its highest readings, most likely a cell still polarised from
+charging; that curve is also what biased the prototype's Qmax to 210 Ah. So on this curve no rest near full is
+usable, and no pair of rests can reach 60 % of SoC: without the top anchor nothing is published.
 
-What that shows and what it does not: **this curve, built from this data, has no region of ≥ 5 mV/% at the top, so
-the shipped gates accept no segment.** It does not show that relaxed LiFePO4 has no usable top region. The data behind
-the curve has no relaxed minute above 99.61 % of the BMS's SoC or above 3333 mV; the curve's top end is extrapolated
-from there, and its SoC axis is the BMS's own. TI's gauges use relaxed LiFePO4 readings above about 92–93 % SoC for
-Qmax updates ([SLYT402](https://www.ti.com/lit/pdf/slyt402), pp. 13–14, chemistry IDs 404 and 409), though TI gives
-no slope for that region. Whether these packs have a steep enough relaxed region there is open; rests taken closer to
-full would answer it.
+What that shows and what it does not: **this curve, built from this data, has no region of ≥ 5 mV/% at the top.** It
+does not show that relaxed LiFePO4 has no usable top region. The data behind the curve has no relaxed minute above
+99.61 % of the BMS's SoC or above 3333 mV; the curve's top end is extrapolated from there, and its SoC axis is the
+BMS's own. TI's gauges use relaxed LiFePO4 readings above about 92–93 % SoC for Qmax updates
+([SLYT402](https://www.ti.com/lit/pdf/slyt402), pp. 13–14, chemistry IDs 404 and 409), though TI gives no slope for
+that region. Whether these packs have a steep enough relaxed region there is open; rests taken closer to full would
+answer it.
 
 Replay of the maintainer's van pack (280 Ah, Daly BMS, two cells logged, 2023-11 to 2025-11, 412 days with data)
-through the add-on's code:
+through the add-on's code with OCV anchors only (before the top anchor):
 
 | gates | segments | Qmax of the weakest cell: median (IQR) | published |
 |---|---:|---|---|
@@ -159,10 +259,6 @@ what relaxing costs: with the prototype's gates the published SoH of this health
 Of the 231 rests of 90 minutes and more, the shipped version could use 23, all near empty; 194 were on the
 plateau, 4 off the curve, 10 without a usable temperature or voltages. With the current sign
 flipped, nothing is accepted: 158 pairs are rejected because the charge and the SoC moved in opposite directions.
-
-What would give values: an anchor at full charge that does not come from the OCV -- charge termination, the charger's
-absorption voltage reached and the current tailed off, the way battery monitors like Victron's synchronise to 100 % --
-or a pack that rests for hours near empty and near full. Neither is implemented yet.
 
 ## Restarts
 
@@ -233,6 +329,9 @@ update that only touches those keeps months of segments.
 
 ## Cost
 
-Per sample about 4 µs on an Apple M3 Pro and 10 µs on a Raspberry Pi 5 (16 cells, 1 s sampling). Closing a 12-hour rest
+Per sample about 4 µs on an Apple M3 Pro and 10 µs on a Raspberry Pi 5 (16 cells, 1 s sampling). The top anchor's
+detector adds 0.45 µs per sample on the M3 Pro with cell voltages every 10th sample, 1.4 µs with them in every sample
+(measured on a simulated 16-cell pack, 2026-10-06; the Pi not measured). Closing a 12-hour rest
 with 16 cells takes 25 ms and 60 ms. A Raspberry Pi 3 has not been measured; expect roughly 5–8× the Pi 5 figures.
-Cell voltages are fetched only near rest and at most every 10 s, unless something else fetches them anyway.
+Cell voltages are fetched only near rest and while charging, at most every 10 s, unless something else fetches them
+anyway.

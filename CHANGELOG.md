@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V or more) anchors SoC 100 %, paired with rests near empty (doc/SoH.md).
+* `soh_estimator` with `capacity:` set now fetches cell voltages every 10 s while charging. Qmax reads up to a few % low when the charger's absorption voltage is low.
 * Fix (`soh_estimator`): a BMS counter stopped just before a shutdown passed the restart check (49 Ah published for 98). Segments across a restart now wait until the counter moves again.
 
 ## [2.24]
@@ -8,6 +10,7 @@
 * Fix (`soh_estimator`): a restart with the BMS's counter held at its full end could still pass with a whole-number SoC. The stop rule now also checks the reported SoC.
 * Fix (`soh_estimator`): saved segments survived a change of `capacity:`, so a replaced 100 Ah pack showed SoH 34.8 % of the new 280 Ah one. Such state is now discarded.
 * Fix (`soh_estimator`): garbled frames around a caught current glitch were counted (101–109 Ah for 97.5). Now the 5 readings either side must agree with their level (doc/SoH.md).
+* Fix (`soh_estimator`): a second current glitch before the first one's 5 neighbours were in was never judged (107 Ah published for 97.5). It now ends the segment.
 * `soh_estimator`: `capacity:` is one pack's nameplate; a bank's capacity there passed (SoH 48.8 %). Nothing is published now when it differs over 1.25× from the BMS's capacity (24-hour median).
 * Experimental estimators: saved state was kept after changes to code the fingerprint missed (closures, function attributes, module/class lists or dicts, BmsSample's SoC derivation). The fingerprint now covers them.
 * `impedance_estimator`: the first start after updating from 2.23 discards its saved state once (the code fingerprint changed), so the warm-up starts again.

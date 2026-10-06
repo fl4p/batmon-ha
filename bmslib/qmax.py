@@ -2,6 +2,11 @@
 Experimental online Qmax / state-of-health estimator for LiFePO4 packs, per
 BMS, in pure Python.
 
+Two kinds of anchor: a relaxed rest whose OCV gives each cell's SoC (below),
+and the end of a charge, where every cell is taken as 100 % (the top anchor,
+TOP_* constants: on the built-in curve rests give a SoC only near empty, so
+only a rest paired with a charge end can swing far enough).
+
 Port of the Qmax part of the offline Impedance-Track prototype in the
 bat-impedance project (`qmax_soh.py`, `cell_degradation.py`, `ocv_table.py`;
 WHITEPAPER sections 2.1, 6 and 8). Between two relaxed rests the state of
@@ -161,8 +166,11 @@ than CAPACITY_MISMATCH_MAX (the option set to a bank's capacity).
 
 STRUCTURAL CONSEQUENCE, measured and not hidden: on the built-in curve the
 smoothed slope reaches 5 mV/% only between 0 and 11 % SoC; its top is flat
-(< 1 mV/%). So with these gates no segment can be accepted on THIS curve; see
-doc/SoH.md for the replay numbers and what relaxing a gate would cost. That is
+(< 1 mV/%). So with these gates no pair of rests can be accepted on THIS
+curve; see doc/SoH.md for the replay numbers and what relaxing a gate would
+cost. The top anchor exists because of that: a rest near empty and a charge
+end swing ~90 %. Its 100 % is full as the charger defines it, a few % at most
+below the cells' own, so it biases Qmax low, never high (doc/SoH.md). That is
 a property of this curve and the data it was built from, not a shown property
 of relaxed LiFePO4: the data holds no relaxed minute above 99.61 % BMS SoC or
 3333 mV, the curve's top end is extrapolated from there, and TI treats relaxed
@@ -175,6 +183,7 @@ Chemistry: LiFePO4 only, the same persistent-out-of-band rule as the cell
 resistance estimator (bmslib/estimator_common.py).
 """
 import copy
+import logging
 import math
 import threading
 from collections import Counter, deque
@@ -307,10 +316,11 @@ GLITCH_ISOLATION_S = MAX_GAP_S
 # good samples before it, as after a fresh start, or another glitch, a gap or
 # an unconfirmed restart before the window is full) ends the epoch too. A real
 # load change within the window costs the open segment, never a value. What
-# still passes: garbled frames within the tolerance (at most 25 % of the load
-# for one sample interval each), and runs of GLITCH_NB_N or more frames on
-# both sides that all read the same wrong value. GLITCH_NB_N = 5: the review's
-# runs went 4 deep. What it costs on real data: doc/SoH.md.
+# still passes is whatever the window allows: values within the tolerance of
+# its median, garbled or not (up to 25 % of the load for one sample interval
+# each), and runs of GLITCH_NB_N or more garbled frames on both sides that
+# agree with each other within it. GLITCH_NB_N = 5: the review's runs went 4
+# deep. What it costs on real data: doc/SoH.md.
 GLITCH_AGREE_A = 1.0
 GLITCH_AGREE_REL = 0.25
 GLITCH_NB_N = 5
@@ -441,10 +451,11 @@ TOP_TAIL_C = 0.05
 TOP_CELL_MIN_MV = 3400.0
 # A bulk phase: a charge current of TOP_BULK_C x capacity or more within the
 # last TOP_BULK_S. The tail must be a current that fell (CV), not one that was
-# low all along. C/10, twice the tail: in the 16 telemetry packs the chargers
-# bulk at C/10-C/3.4; the cost is the terminations after a weaker bulk (1j6d,
-# 304 Ah: 9 of 39 had C/17-C/10).
-TOP_BULK_C = 0.10
+# low all along. C/13.3, 1.5x the tail, not C/10: the van pack's solar charger
+# rarely reaches C/10 (2 top anchors in 462 days of its Daly data at C/10, 19
+# at C/13.3), and 1j6d (304 Ah) bulked at C/17-C/10 before 9 of its 39 charge
+# ends. What the floor below costs is measured independent of the bulk.
+TOP_BULK_C = 0.075
 TOP_BULK_S = 2 * 3600.0
 # Victron's default charged detection time, with at least TOP_HOLD_READINGS
 # cell voltage readings in it (one is no hold).
@@ -1215,7 +1226,9 @@ class QmaxEstimator:
 
     def _top_refuse(self, why: str, t: float, detail: str):
         self.counts[why] += 1
-        logger.info('%s: Qmax: charge end at %s is no top anchor: %s', self.name, fmt_t(t), detail)
+        # a low "cut" is any load switch or cloud after a bulk phase: several a day, in the daily summary only
+        logger.log(logging.DEBUG if why == 'top_cut_low' else logging.INFO,
+                   '%s: Qmax: charge end at %s is no top anchor: %s', self.name, fmt_t(t), detail)
 
     def _top_anchor(self, c: Dict[str, Any], mode: str, now: float, lo_hi) -> Optional[Dict[str, Any]]:
         """A termination passed: every cell at SoC 100 %, as an anchor that
