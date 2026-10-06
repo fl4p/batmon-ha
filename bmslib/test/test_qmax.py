@@ -807,6 +807,20 @@ def test_the_bms_capacity_is_the_median_of_hourly_readings():
     assert len(est._bms_caps) == q.BMS_CAP_N and est.bms_capacity() == 267.0
 
 
+def test_the_bms_capacity_is_read_once_an_hour_not_every_sample():
+    """Rev8 (M10): taking every sample's reading passed every test. Half an
+    hour of a swinging derived figure (legacy Daly near empty) at 10 s
+    cadence fills the deque with it then; read once an hour it is one of
+    BMS_CAP_N."""
+    est = _fresh()
+    for k in range(q.BMS_CAP_N):
+        est.add(T0 + 3600 * k, 1.0, None, capacity=100.0)
+    t1 = T0 + 3600 * (q.BMS_CAP_N - 1)
+    for k in range(1, 181):
+        est.add(t1 + 10 * k, 1.0, None, capacity=267.0)
+    assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None
+
+
 def test_the_sampler_passes_the_bms_capacity_to_the_check():
     """The precondition in the real call path: what BmsSample says, set or
     derived, reaches the check (never the reference)."""
@@ -1969,6 +1983,83 @@ def test_calibration_without_the_reported_soc_and_the_counter_maximum_the_hidden
         assert all(x == pytest.approx(want, abs=0.3) for x in chg) and pub[-1] == pytest.approx(want, abs=0.3)
 
 
+def _learnt_full_end(hidden, out_ah=0.5, n=3):
+    """Rev8, finding 4: a counter that clamps at a learnt full end of 95 Ah
+    below the capacity it reports (100 Ah), with a decimal SoC against that
+    capacity (95.0 % at the top, so neither SoC sign fires) and no aged
+    capacity. Per cycle: 88 Ah out, a bottom rest, a charge until the counter
+    reaches 95 Ah; the host shuts down; while it is off the charger pushes
+    `hidden` Ah more (the counter held at 95) and out_ah go out (counted); it
+    boots 120 s later by its frozen clock, at rest at the top. Only the
+    highest reading of the counter before the shutdown says it was at a stop.
+    Returns (estimator, published Qmax values)."""
+    top, res = 95.0, 0.1
+    p = Pack(soc0=91.0)
+    cnt, rows_c = [top], {}
+
+    def go(i, secs, sample=True):
+        n0 = len(p.rows)
+        p.run(i, secs, sample=sample)
+        if sample:
+            for t, _, _, _ in p.rows[n0:]:
+                cnt[0] = min(top, max(0.0, cnt[0] - i * p.dt / 3600.0))
+                rows_c[t] = round(cnt[0] / res) * res
+        else:
+            cnt[0] = min(top, max(0.0, cnt[0] - i * secs / 3600.0))
+    go(0.0, 7200)
+    cuts, shifts = [], []
+    for _ in range(n):
+        go(50.0, 3600 * 88 / 50)
+        go(0.0, 7200)
+        go(-50.0, 3600 * (top - cnt[0]) / 50)
+        cuts.append(len(p.rows))
+        go(-50.0, 3600 * hidden / 50, sample=False)
+        go(20.0, 3600 * out_ah / 20, sample=False)
+        shifts.append(3600 * hidden / 50 + 3600 * out_ah / 20 + p.dt - 120.0)
+        go(0.0, 7200)
+    go(20.0, 300)
+    rows, shift, k = [], 0.0, 0
+    for j, (t, cur, v, temp) in enumerate(p.rows):
+        if k < len(cuts) and j == cuts[k]:
+            shift += shifts[k]
+            k += 1
+        rows.append((t - shift, cur, v, temp, rows_c[t]))
+    est, pub = _fresh(), []
+    for a, b in zip([0] + cuts, cuts + [len(rows)]):
+        for t, i, v, temp, c in rows[a:b]:
+            r = est.add(t, i, v, temp=temp, capacity=100.0, bms_charge=c, bms_soc=c, bms_soc_raw=c)
+            if r is not None:
+                pub.append(r['qmax'])
+        if b < len(rows):
+            st = _via_json(est.get_state(full=True))
+            est = _fresh()
+            assert est.restore(st)
+    return est, pub
+
+
+@pytest.mark.parametrize('hidden', [3.0, 6.0])
+def test_a_counter_at_its_learnt_full_end_at_the_shutdown_is_no_evidence(hidden):
+    """Deleting the highest reading before the shutdown (rev8, M11) passed
+    every test; on this input it lets the restarts continue and 96.2 Ah (3 Ah
+    hidden) and 93.2 / 96.0 / 102.7 Ah (6 Ah) out as charge segments."""
+    est, pub = _learnt_full_end(hidden)
+    assert est.counts['restart_unverified'] == 3 and not any(s['dq'] > 0 for s in est.segments)
+    assert pub and all(x == pytest.approx(98.0, abs=0.6) for x in pub)
+
+
+def test_calibration_without_the_highest_reading_before_the_shutdown_the_hidden_charge_is_published(monkeypatch):
+    orig = q.QmaxEstimator._counter_stop
+
+    def no_max_before(self, c, ends, c_max, when):
+        return orig(self, c, ends, 1e9 if when == 'before' else c_max, when)
+    monkeypatch.setattr(q.QmaxEstimator, '_counter_stop', no_max_before)
+    for hidden, want in ((3.0, [96.2] * 3), (6.0, [93.2, 96.0, 102.7])):
+        est, _ = _learnt_full_end(hidden)
+        chg = [s['qmax'] for s in est.segments if s['dq'] > 0]
+        assert est.counts['restart_unverified'] == 0 and chg, 'scenario is harmless'
+        assert chg == pytest.approx(want, abs=0.2), (hidden, chg)
+
+
 def test_a_counter_back_at_its_highest_reading_is_no_evidence():
     """The cost of the counter-maximum rule, measured: a pack whose counter
     returns to the same top every cycle (no stop, SoC 97 %) is refused at a
@@ -2000,11 +2091,14 @@ def test_an_unknown_counter_maximum_is_no_evidence():
     assert resume(lambda r: setattr(r, '_c_max', 49.0)) == 1  # below the reading: not this counter's maximum
 
 
-def test_a_garbled_counter_reading_does_not_raise_the_counter_maximum():
+@pytest.mark.parametrize('garbled', [120.1, 130.0, 500.0, 1199.0, 6553.5])
+def test_a_garbled_counter_reading_does_not_raise_the_counter_maximum(garbled):
     """Only readings the pack can hold (<= 1.2 x the capacity) teach it: one
-    garbled 6553.5 Ah would hide the real full end for good."""
+    garbled 6553.5 Ah would hide the real full end for good. Rev8 (M6): a
+    limit 10x as loose passed every test; the readings between 1.2x and 12x
+    are what a looser limit lets in."""
     est = _fresh()
-    for k, c in enumerate((90.0, 90.1, 6553.5, 90.2, 90.3)):
+    for k, c in enumerate((90.0, 90.1, garbled, 90.2, 90.3)):
         est.add(T0 + 10 * k, -36.0, None, bms_charge=c, bms_soc=90.0)
     assert est._c_max == 90.3
 
@@ -2135,18 +2229,19 @@ def test_calibration_without_the_staleness_term_a_stopped_counter_publishes_half
     assert dis[0] < 0.55 * 98.0 and pub[0]['plausibility_checked']  # 49 Ah
 
 
-def _netzero_frozen(swing_s, n=3, after_restore=None):
+def _netzero_frozen(swing_s, n=3, after_restore=None, reps=1):
     """Fourth review, finding 5c: _frozen_clock (22 A, 44 Ah while the host is
     off, 2 minutes on its clock), with the BMS's counter stopped swing_s x 2
-    before the shutdown, and the current swinging +22 A then -22 A since
-    (net zero), the counter reading the same up to the first sample after the
-    restart."""
+    x reps before the shutdown, and the current swinging +22 A for swing_s
+    then -22 A for swing_s, reps times (net zero), the counter reading the
+    same up to the first sample after the restart."""
     p = Pack().rest()
     cuts, frozen, i = [], [], 22.0
     for _ in range(n):
         p.run(i, 3600)
         f0 = len(p.rows)
-        p.run(i, swing_s).run(-i, swing_s)
+        for _ in range(reps):
+            p.run(i, swing_s).run(-i, swing_s)
         cuts.append(len(p.rows))
         frozen.append(f0)
         p.run(i, 3600 * 44 / i, sample=False)
@@ -2210,6 +2305,25 @@ def test_monotone_in_the_swing_a_stopped_counter_missed():
     verdicts = [_netzero_frozen(60.0 * m, n=1)[0].counts['restart_unverified'] == 0 for m in (0, 1, 2, 3, 5, 10, 60)]
     _monotone(verdicts)
     assert verdicts[0] and not verdicts[-1]  # 0: the documented residual (stopped right at the shutdown)
+
+
+def test_a_counter_stopped_through_a_current_that_changes_sign_every_sample_is_no_evidence():
+    """Rev8, finding 5: the charge moved is the trapezoid of |I| per interval,
+    not |trapezoid of I|. They differ only where the current changes sign
+    between two samples (0.66 % of the charge moved in the 16 telemetry
+    packs, up to 75 % of one hour's on one): +-22 A alternating every sample
+    for 20 minutes moves 7.3 Ah and nets to zero in every interval."""
+    est, pub = _netzero_frozen(10.0, reps=60)
+    assert est.counts['restart_unverified'] == 3 and not any(s['dq'] < 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_with_the_net_charge_per_interval_a_stopped_counter_publishes_half_the_pack(monkeypatch):
+    monkeypatch.setattr(q.QmaxEstimator, '_moved', staticmethod(lambda i0, i1, dt: abs(0.5 * (i0 + i1) * dt / 3600.0)))
+    est, pub = _netzero_frozen(10.0, reps=60)
+    dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+    assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
+    assert all(x < 0.55 * 98.0 for x in dis) and pub[0]['plausibility_checked']
 
 
 def test_a_counter_read_from_a_30_s_cache_still_continues():
