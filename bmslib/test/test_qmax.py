@@ -1673,8 +1673,9 @@ def test_full_state_continues_exactly_where_it_stopped():
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
-        if k in ('_log_summary', '_lock', '_resumed', '_cap_warned'):
-            continue  # the test stub; a lock is not state; a restored estimator knows it was restarted; a log-once flag
+        if k in ('_log_summary', '_lock', '_resumed', '_cap_warned', '_out', '_started', '_withdraw'):
+            continue  # the test stub; a lock is not state; a restored estimator knows it was restarted; a log-once
+            # flag; what this process published
         if isinstance(v, deque):
             v = list(v)
         out[k] = v
@@ -3058,6 +3059,83 @@ def test_publish_qmax_leaves_out_an_unknown_soh(monkeypatch):
     assert float(c.published['dev/qmax_est']) == pytest.approx(pub[-1]['qmax'], rel=1e-3)
     assert 'dev/soh_est' not in c.published
     assert json.loads(c.published['dev/qmax_est/attributes'])['plausibility_checked'] is False
+
+
+# ================================================================ withdrawal (rev8, finding 2)
+
+def _published_state():
+    est, pub = _with_bms_capacity(full_cycles(n=3).rows, 100.0, cap=100.0)
+    assert pub
+    return est, _via_json(est.get_state(full=True))
+
+
+def test_a_corrected_capacity_option_withdraws_what_was_published():
+    """The option corrected (the state is discarded) or changed code: the
+    first sample after the start clears the estimate an earlier run put out.
+    The same state under the same option still publishes: nothing withdrawn."""
+    _, st = _published_state()
+    est = _fresh(cap=280.0)
+    est.restore(st)
+    est.add(T0 + 30 * 86400, 0.0, None)
+    assert est.result() is None and est.take_withdrawal() and est.take_withdrawal() is None
+    est = _fresh(cap=100.0)
+    assert est.restore(st) and est.result() is not None
+    est.add(st['last_t'] + 10, 0.0, None, capacity=100.0)
+    assert est.take_withdrawal() is None
+
+
+def test_a_capacity_mismatch_that_starts_later_withdraws_what_was_published():
+    """The BMS's figure moves to twice the option and stays there (a second
+    pack's worth set in the BMS): withdrawn once the hourly median follows."""
+    est, _ = _published_state()
+    t = est._last_t
+    seen = []
+    for k in range(1, q.BMS_CAP_N + 1):
+        est.add(t + 3600 * k, 0.0, None, capacity=200.0)
+        seen.append(est.take_withdrawal())
+    hit = [k for k, w in enumerate(seen) if w]
+    assert len(hit) == 1 and est.result() is None
+    assert hit[0] == q.BMS_CAP_N // 2 - 1  # at the 12th of 24 hourly readings the median is 150 Ah: 1.5x
+
+
+def test_a_disabled_estimator_withdraws_what_was_published():
+    est, _ = _published_state()
+    est.disable('test')
+    assert est.take_withdrawal()
+
+
+def _sampler_with_state(st, client, cap, monkeypatch):
+    import bmslib.mqtt_util as mu
+    monkeypatch.setattr(mu, '_last_values', {})
+    s = BmsSampler(_Bms(current=0.0), mqtt_client=client, dt_max_seconds=120, expire_after_seconds=60,
+                   publish_period=3600, soh_estimator=True, design_capacity=cap, soh_state=st)
+    s.num_samples = 1
+    s._last_power = 0.0
+    asyncio.run(s())
+    return s
+
+
+@pytest.mark.parametrize('how', ['option corrected', 'restored disabled'])
+def test_the_sampler_clears_a_withdrawn_estimate_in_home_assistant(how, monkeypatch):
+    """Through the real call path, to the MQTT topics: Home Assistant takes
+    the payload None as unknown."""
+    _, st = _published_state()
+    if how == 'restored disabled':
+        st['disabled_reason'] = 'the median cell voltage has been outside 2500..3700 mV'
+    c = _Client()
+    _sampler_with_state(st, c, 280.0 if how == 'option corrected' else 100.0, monkeypatch)
+    assert c.published['q_fake/qmax_est'] == 'None' and c.published['q_fake/soh_est'] == 'None'
+    c = _Client()
+    _sampler_with_state(_published_state()[1], c, 100.0, monkeypatch)  # still publishable: left as it is
+    assert 'q_fake/qmax_est' not in c.published
+
+
+def test_calibration_without_the_withdrawal_the_old_estimate_stays(monkeypatch):
+    monkeypatch.setattr(q.QmaxEstimator, 'take_withdrawal', lambda self: None)
+    _, st = _published_state()
+    c = _Client()
+    s = _sampler_with_state(st, c, 280.0, monkeypatch)
+    assert s.qmax.result() is None and 'q_fake/qmax_est' not in c.published  # HA keeps the old SoH for a year
 
 
 # ================================================================ sampler wiring

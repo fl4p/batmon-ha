@@ -183,13 +183,23 @@ def publish_cell_resistance(client, device_topic, value_mohm: float):
 
 # Qmax/SoH (bmslib/qmax.py) is published once per accepted segment -- weeks
 # apart at best -- and never refreshed. The entity expires with the estimate
-# itself: a year after the newest segment, the age limit of the median.
+# itself: a year after the newest segment, the age limit of the median. An
+# estimate that may no longer go out is withdrawn before that (withdraw_qmax).
 QMAX_EXPIRE_S = 365 * 86400
 
 # offset_drift_pct is the drift of the ASSUMED offset offset_assumed_a (a tuning
 # constant or the rest reading), not a bound on the error (bmslib/qmax.py).
 QMAX_ATTRIBUTES = ('segments', 'newest', 'limiting_cell', 'cell_spread_pct', 'min_dsoc', 'offset_assumed_a',
                    'offset_drift_pct', 'capacity', 'capacity_source', 'plausibility_checked')
+
+
+def withdraw_qmax(client, device_topic):
+    """Clear Qmax and SoH in Home Assistant: an MQTT sensor takes the payload
+    "None" as unknown (homeassistant/components/mqtt/sensor.py, PAYLOAD_NONE).
+    Without it a withdrawn estimate stayed for QMAX_EXPIRE_S."""
+    mqtt_single_out(client, f"{device_topic}/qmax_est/attributes", json.dumps({}))
+    mqtt_single_out(client, f"{device_topic}/qmax_est", "None")
+    mqtt_single_out(client, f"{device_topic}/soh_est", "None")
 
 
 def publish_qmax(client, device_topic, res: dict):

@@ -19,7 +19,7 @@ from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax
+    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -673,6 +673,8 @@ class BmsSampler:
                 if not voltages and self.qmax.wants_voltages(sample.timestamp, current_native):
                     voltages = await cached_fetch_voltages(optional=True)
                 await self._feed_qmax(sample, current_native, voltages)
+            elif self.qmax is not None:
+                self._withdraw_qmax()  # disabled (also restored disabled): clear what an earlier run published
 
             # z_score = self.power_stats.z_score(sample.power)
             # if abs(z_score) > 12:
@@ -813,9 +815,16 @@ class BmsSampler:
             logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
                          exc_info=True)
             est.disable('internal error', persistent=False)
-            return
+            r = None
+        self._withdraw_qmax()
         if r is not None:
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
+
+    def _withdraw_qmax(self):
+        why = self.qmax.take_withdrawal() if self.qmax is not None else None
+        if why is not None:
+            logger.info('%s: Qmax/SoH cleared in Home Assistant: %s', self.bms.name, why)
+            withdraw_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix)
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix

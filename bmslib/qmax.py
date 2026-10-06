@@ -384,7 +384,7 @@ PLAUSIBLE_REL = (0.4, 1.2)
 # caught. The figure is the median of one reading per hour over the last
 # BMS_CAP_N hours: the derived capacity of the legacy Daly driver swings near
 # empty (160-300 Ah for 280), and a mismatch now withdraws what was published
-# (wants_withdrawal), so it must persist for half a day to count.
+# (take_withdrawal), so it must persist for half a day to count.
 CAPACITY_MISMATCH_MAX = 1.25
 BMS_CAP_PERIOD_S = 3600.0
 BMS_CAP_N = 24
@@ -697,6 +697,15 @@ class QmaxEstimator:
         self.n_dropped = 0
         self._t_summary: Optional[float] = None
         self._announced = False
+        # What is out on MQTT: a published value stays in Home Assistant until
+        # its entity expires (a year), so one that may no longer go out must be
+        # withdrawn (take_withdrawal). Not saved: after a restart the first
+        # sample withdraws whatever is out unless the restored state still
+        # publishes (a corrected capacity option, changed code, a state that
+        # did not validate).
+        self._out = False  # a value from this process is out
+        self._started = False  # the first sample of this process came
+        self._withdraw: Optional[str] = None  # why what is out must be withdrawn, until taken
 
     # ------------------------------------------------------------ properties
 
@@ -784,9 +793,27 @@ class QmaxEstimator:
         return self._t_volt is None or not (0 <= t - self._t_volt < VOLTAGE_PERIOD_S)
 
     @locked
+    def take_withdrawal(self) -> Optional[str]:
+        """Why what was published must be withdrawn now, once, else None. The
+        caller clears the entities (mqtt_util.withdraw_qmax): an estimate that
+        would no longer be published -- the capacity option corrected (the
+        saved state is discarded), the BMS's capacity now disagreeing with it,
+        the estimator disabled, its segments dropped -- otherwise stayed in
+        Home Assistant until the entity expired a year later (rev8, finding
+        2)."""
+        why, self._withdraw = self._withdraw, None
+        return why
+
+    def _recheck_out(self, why: str):
+        """A value is out and nothing would be published now: withdraw it."""
+        if self._out and self.result() is None:
+            self._out, self._withdraw = False, why
+
+    @locked
     def disable(self, reason: str, persistent: bool = True):
         if self.enabled:
             logger.warning('%s: Qmax/SoH estimator disabled: %s', self.name, reason)
+        self._out, self._withdraw = False, 'the estimator is disabled: ' + reason
         self.enabled = False
         self.disabled_reason = reason
         self._disable_persistent = persistent
@@ -827,6 +854,12 @@ class QmaxEstimator:
         return value only ever publishes a fresh result."""
         if not self.enabled or not finite(t) or not finite(current):
             return None
+        if not self._started:
+            self._started = True
+            if self.result() is None:  # whatever an earlier run published may not stand
+                self._out, self._withdraw = False, 'nothing to publish at the start'
+            else:
+                self._out = True  # the restored estimate: an earlier run published it
         if self._last_t is not None and t == self._last_t:
             return None  # the BMS re-served the same measurement
         if self._last_t is not None and t < self._last_t:
@@ -903,6 +936,7 @@ class QmaxEstimator:
             if not self._cap_warned and self.capacity_mismatch() is not None:
                 self._cap_warned = True
                 self._warn_mismatch('nothing will be published')
+            self._recheck_out('the capacity option and the capacity the BMS reports disagree')
 
         if self._t_summary is None:
             self._t_summary = t
@@ -1124,6 +1158,7 @@ class QmaxEstimator:
         logger.info('%s: Qmax: the clock stepped back by %.0f s (now %s): open segment, open rest, %d anchor(s) and '
                     '%d segment(s) timed after it dropped', self.name, back, fmt_t(t),
                     n_a - len(self.anchors), n_s - len(self.segments))
+        self._recheck_out('the clock stepped back and the segments timed after it were dropped')
 
     def _close_bin(self, now: float) -> Optional[Dict[str, Any]]:
         b = self._bin
@@ -1319,6 +1354,7 @@ class QmaxEstimator:
         if not all(segment_age_ok(now - s['t']) for s in self.segments):
             self.segments = deque((s for s in self.segments if segment_age_ok(now - s['t'])), maxlen=SUMMARY_K)
         if seg is None:
+            self._recheck_out('the segments it was made of are too old')
             return None
         self.counts['segment'] += 1
         logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
@@ -1328,6 +1364,10 @@ class QmaxEstimator:
                     ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
                     100 * seg['drift'], seg['i_off'])
         res = self.result()
+        if res is None:
+            self._recheck_out('nothing would be published now')
+        else:
+            self._out, self._withdraw = True, None
         if res is None and self.capacity_mismatch() is not None and len(self._counted()) >= PUBLISH_MIN_SEGMENTS:
             self._warn_mismatch('estimate not published')
         if res is not None and not self._announced:
@@ -1424,6 +1464,7 @@ class QmaxEstimator:
         reason = st.get('disabled_reason')
         if reason is not None:
             self.enabled, self.disabled_reason, self._disable_persistent = False, str(reason), True
+            self._withdraw = 'the estimator stays disabled: %s' % reason  # add() never runs to do it
             logger.info('%s: Qmax/SoH estimator stays disabled (saved state): %s', self.name, reason)
             return
 

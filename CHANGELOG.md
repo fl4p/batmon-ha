@@ -7,6 +7,7 @@
 * `soh_estimator`: `capacity:` is the nameplate of this one pack. A bank's capacity there passed the plausibility check (a 100 Ah pack in a bank of two read SoH 48.8 %); now nothing is published when it differs from the capacity the BMS reports (median of the last 24 hourly readings) by more than 1.25×, which also catches a bank of unequal packs, and the log names both.
 * Experimental estimators: the code fingerprint that guards saved state now covers what functions close over (factory and decorator arguments) and lists or dicts at module or class level; a change to those kept old state before.
 * `impedance_estimator`: the first start after updating from 2.23 discards its saved state once (the code fingerprint changed), so the warm-up starts again.
+* Fix (`soh_estimator`): a published Qmax/SoH stayed in Home Assistant for up to a year after it stopped being valid (a corrected `capacity:`, a capacity mismatch, the estimator disabled), because only accepted segments were ever published. Such a value is now cleared to unknown.
 * Fix (`soh_estimator`): a BMS counter that had stopped before a restart was judged by the net charge since then, so ±22 A that netted to zero hid it (49 Ah published for 98). It now counts the charge moved either way.
 
 ## [2.23]
