@@ -38,7 +38,22 @@ from bmslib.mqtt_util import publish_hass_discovery, publish_qmax
 from bmslib.sampling import BmsSampler
 
 T0 = 1.7e9
-CAPS = (100.0, 98.0, 102.0, 101.0)  # Ah per cell; the pack's Qmax is the limiting cell, 98
+CAPS = (100.0, 98.0, 102.0, 101.0)
+
+
+@pytest.fixture(autouse=True)
+def _no_top_anchors_on_synth(monkeypatch):
+    """The tests run on SYNTH, whose synthetic relaxed top knee puts a cell at
+    97 % SoC at 3424 mV: by the termination rule's real-LFP calibration
+    (TOP_CELL_MIN_MV) that is full, and every simulated charge end would add a
+    top anchor 3 % high. Top anchors are on only where a test asks for them
+    (the `top_anchors` fixture), on an LFP-like charge curve (LfpPack)."""
+    monkeypatch.setattr(q, 'TOP_ANCHORS', False)
+
+
+@pytest.fixture
+def top_anchors(monkeypatch):
+    monkeypatch.setattr(q, 'TOP_ANCHORS', True)  # Ah per cell; the pack's Qmax is the limiting cell, 98
 
 
 # ================================================================ simulator
@@ -1621,20 +1636,20 @@ def _via_json(state):
     return json.loads(json.dumps(state))
 
 
-def _fresh(cap=100.0):
-    est = q.QmaxEstimator('p', design_capacity=cap, curve=SYNTH)
+def _fresh(cap=100.0, curve=SYNTH):
+    est = q.QmaxEstimator('p', design_capacity=cap, curve=curve)
     est._log_summary = lambda: None
     return est
 
 
-def _split_run(rows, cuts, full=True, cap=100.0, charge=None, src=None, soc=None, after_restore=None):
-    est, pub = _fresh(cap), []
+def _split_run(rows, cuts, full=True, cap=100.0, charge=None, src=None, soc=None, after_restore=None, curve=SYNTH):
+    est, pub = _fresh(cap, curve), []
     for a, b in zip([0] + cuts, cuts + [len(rows)]):
         _, p = run(rows[a:b], est, charge=charge, src=src, soc=soc)
         pub += p
         if b < len(rows):
             st = _via_json(est.get_state(full=full))
-            est = _fresh(cap)
+            est = _fresh(cap, curve)
             assert est.restore(st)
             if after_restore:
                 after_restore(est)
@@ -1673,9 +1688,10 @@ def test_full_state_continues_exactly_where_it_stopped():
 def _attrs(est):
     out = {}
     for k, v in vars(est).items():
-        if k in ('_log_summary', '_lock', '_resumed', '_cap_warned', '_out', '_started', '_withdraw'):
+        if k in ('_log_summary', '_lock', '_resumed', '_cap_warned', '_out', '_started', '_withdraw') \
+                or k.startswith('_top_'):
             continue  # the test stub; a lock is not state; a restored estimator knows it was restarted; a log-once
-            # flag; what this process published
+            # flag; what this process published; a charge in progress (not saved: a restart costs its top anchor)
         if isinstance(v, deque):
             v = list(v)
         out[k] = v
@@ -2440,6 +2456,21 @@ def test_a_counter_that_stays_stopped_after_the_restart_ends_the_segment():
     assert not any(s['dq'] < 0 for s in est.segments)
 
 
+def test_a_counter_stopped_after_the_restart_through_a_swinging_current_ends_the_segment():
+    """+-22 A alternating nets to zero, so the counted and the BMS's charge
+    agree; 7.3 Ah moved while the counter stood still is what ends it."""
+    est = _fresh()
+    for k in range(10):
+        est.add(T0 + 36 * k, 10.0, None, bms_charge=50.0 + 0.1 * (9 - k), bms_soc=50.0)
+    r = _fresh()
+    assert r.restore(_via_json(est.get_state()))
+    r.add(T0 + 360, 0.0, None, bms_charge=49.9, bms_soc=50.0)
+    assert r._audit is not None
+    for k in range(120):
+        r.add(T0 + 370 + 10 * k, 22.0 if k % 2 else -22.0, None, bms_charge=49.9, bms_soc=50.0)
+    assert r.counts['restart_audit'] == 1 and r._audit is None
+
+
 def test_a_clean_restart_is_released_once_the_counter_moves():
     """What the hold costs a clean restart: nothing but time. A restart in
     the bottom rest, then a 3 A load: the rest's anchor is made before the
@@ -3113,6 +3144,445 @@ def test_real_daly_with_the_current_sign_flipped_has_only_sign_rejections(monkey
     monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, _ = _run_real([(t, -i, v, temp) for t, i, v, temp in real_rows()])
     assert not est.segments and est.pair_reasons['sign'] >= 1
+
+
+# ================================================================ top anchor: charge termination
+
+def lfp_ocv(soc):
+    """LFP-like OCV for the top-anchor tests: the built-in relaxed curve up to
+    98 % (flat at the top, steep only near empty, as measured), then the top
+    knee a cell climbs while it is charged: 99 % 3360, 99.5 % 3400, 100 %
+    3460 mV, steep beyond."""
+    base = q._interp(100.0 - max(0.0, min(soc, 98.0)), q.DEFAULT_CURVE.smooth)
+    if soc <= 98.0:
+        return base
+    pts = [(98.0, base), (99.0, 3360.0), (99.5, 3400.0), (100.0, 3460.0), (101.0, 3860.0)]
+    for (s0, v0), (s1, v1) in zip(pts, pts[1:]):
+        if soc <= s1:
+            return v0 + (v1 - v0) * (soc - s0) / (s1 - s0)
+    return 3860.0 + 400.0 * (soc - 101.0)
+
+
+class LfpPack(Pack):
+    """Pack on lfp_ocv (the built-in curve gives the bottom anchors), with a
+    charger: charge_cv() holds the highest cell at v_abs (CC at i_bulk, then
+    CV until the current falls to i_end), charge_cc() charges at a constant
+    current until the highest cell reads v_stop (then the BMS cuts)."""
+
+    def __init__(self, soc0=99.8, socs=None, **kw):
+        super().__init__(soc0=soc0, curve=q.DEFAULT_CURVE, ocv_fn=lfp_ocv, **kw)
+        if socs is not None:
+            self.soc = [float(s) for s in socs]
+
+    def _vmax(self, i):
+        return max(self.ocv(s) + self.hyst / 2 + self.r0 * i - e1 - e2 for s, e1, e2 in zip(self.soc, self.e1, self.e2))
+
+    def charge_cv(self, i_bulk=50.0, v_abs=3450.0, i_end=1.0, max_s=6 * 3600):
+        for _ in range(int(max_s / self.dt)):
+            i = min(i_bulk, max(0.0, (v_abs - self._vmax(0.0)) / self.r0))
+            if i < i_end:
+                break
+            self.run(-i, self.dt)
+        return self
+
+    def charge_cc(self, i, v_stop):
+        while self._vmax(i) < v_stop:
+            self.run(-i, self.dt)
+        return self
+
+
+def lfp_cycles(n=3, dq=92.0, cut=False, i_cut=20.0, **kw):
+    """Rest at the top; n x (discharge dq at 50 A, 2 h rest near empty (an
+    OCV anchor on the built-in curve), charge back (CV to 1 A, or CC at i_cut
+    until a BMS cut at 3620 mV), 30 min rest)."""
+    p = LfpPack(**kw).rest()
+    for _ in range(n):
+        p.run(50.0, 3600 * dq / 50).rest()
+        (p.charge_cc(i_cut, 3620.0) if cut else p.charge_cv()).rest(1800)
+    return p.end()
+
+
+def run_lfp(rows, **kw):
+    return run(rows, curve=q.DEFAULT_CURVE, **kw)
+
+
+def tops(est):
+    return [a for a in est.anchors if a['kind'] == 'top']
+
+
+def test_without_a_top_anchor_the_built_in_curve_publishes_nothing():
+    """Why the top anchor exists: the same cycles, OCV anchors only."""
+    est, pub = run_lfp(lfp_cycles().rows)
+    assert pub == [] and not est.segments and est.pair_reasons['dsoc'] >= 3
+
+
+@pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
+def test_a_charge_termination_pairs_with_the_rests_near_empty_both_ways(top_anchors, cut):
+    """CV to the tail, or a BMS cut at the highest cell's 3620 mV at C/5: every
+    charge end is a top anchor, and each pairs with the OCV anchor near empty
+    before and after it. The limiting cell holds 98 Ah; the charger's full is
+    ~99.6 % of the cells' 100 %, so Qmax reads 0.2-0.8 % low."""
+    est, pub = run_lfp(lfp_cycles(cut=cut).rows)
+    assert est.counts['anchor_top'] == 3 and {a['mode'] for a in tops(est)} == {'cutoff' if cut else 'tail'}
+    assert [s['kinds'] for s in est.segments] == [['ocv', 'top'], ['top', 'ocv']] * 2 + [['ocv', 'top']]
+    assert all(s['qmax'] == pytest.approx(98.0, rel=0.01) for s in est.segments) and len(pub) == 3
+    assert all(s['qmax'] < 98.0 * 1.001 for s in est.segments)  # the bias is low (at most noise high)
+    assert pub[-1]['anchors'] == 'ocv->top' and pub[-1]['top_anchored'] == 5 and pub[-1]['limiting_cell'] == 2
+
+
+def test_two_charge_terminations_never_pair(top_anchors):
+    """A top-up after a shallow discharge: two fulls, and no SoC between them."""
+    p = LfpPack().rest()
+    p.charge_cv().rest(1800)
+    for _ in range(3):
+        p.run(50.0, 3600 * 30 / 50).charge_cv().rest(1800)
+    est, _ = run_lfp(p.end().rows)
+    assert est.counts['anchor_top'] >= 3 and est.pair_reasons['top_top'] >= 2 and not est.segments
+
+
+def test_top_anchors_are_saved_and_restored(top_anchors):
+    p = lfp_cycles()
+    whole, pub_whole = run_lfp(p.rows, **bms(p))
+    t_top = [a['t'] for a in tops(whole)]
+    # 30 min into the rest near empty after each of the first two: the top
+    # anchor is in the saved state, and pairs after the restart (at the top
+    # itself a restart ends the segment: the BMS's SoC reads 99 %, its stop rule)
+    cuts = [next(k for k, r in enumerate(p.rows) if r[0] > t + 1800 + 3600 * 92 / 50 + 1800) for t in t_top[:2]]
+    split, pub_split = _split_run(p.rows, cuts, curve=q.DEFAULT_CURVE, **bms(p))
+    assert [s['qmax'] for s in split.segments] == pytest.approx([s['qmax'] for s in whole.segments], rel=1e-9)
+    assert len(pub_split) == len(pub_whole) and split.counts['restart_unverified'] == 0
+
+
+# ---- what must not be a top anchor
+
+def _cloud_dip(r2=2.5, stale=False):
+    """A pack whose polarisation relaxes slowly (r2 = 2.5 mOhm, 20 min): a
+    50 A charge reads 3514 mV at 73 % SoC, then a cloud: 2 A for 15 minutes,
+    during which every cell still reads > 3400 mV and falls slowly. Then the
+    sun is back and the charge ends in CV; discharge, rest near empty.
+    stale: no cell voltages arrive during the dip (failed fetches)."""
+    p = LfpPack(r2=r2).rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    p.charge_cc(50.0, 3514.0)
+    t_dip = p.t
+    p.run(-2.0, 900)
+    t_sun = p.t
+    p.charge_cv().rest(1800)
+    p.run(50.0, 3600 * 92 / 50).rest().end()
+    rows = [(t, i, None if stale and t_dip < t <= t_sun else v, temp) for t, i, v, temp in p.rows]
+    return rows, t_dip, t_sun
+
+
+@pytest.mark.parametrize('stale', [False, True], ids=['voltages', 'no voltages in the dip'])
+def test_a_pv_cloud_dip_is_no_charge_end(top_anchors, stale):
+    """The current falls below the tail, and the voltage falls with it: not
+    held (TOP_CV_BAND_MV). With no voltages in the dip there is nothing to
+    judge it by (TOP_VOLT_GAP_S): the reading from the peak does not stand in."""
+    rows, t_dip, t_sun = _cloud_dip(stale=stale)
+    est, _ = run_lfp(rows)
+    assert [a['t'] > t_sun for a in tops(est)] == [True]
+    assert all(s['qmax'] == pytest.approx(98.0, rel=0.015) for s in est.segments)
+
+
+def test_calibration_without_the_band_or_the_staleness_rules_the_cloud_dip_is_a_full(top_anchors, monkeypatch):
+    """The staleness rule has a second layer, and the test says so: a hold
+    also needs TOP_HOLD_READINGS readings. Without both, the reading from the
+    peak stands in for the whole dip."""
+    rows, t_dip, t_sun = _cloud_dip(stale=True)
+    monkeypatch.setattr(q, 'TOP_VOLT_GAP_S', math.inf)
+    assert [a['t'] > t_sun for a in tops(run_lfp(rows)[0])] == [True]
+    monkeypatch.undo()
+    for patch, stale in ((('TOP_CV_BAND_MV',), False), (('TOP_VOLT_GAP_S', 'TOP_HOLD_READINGS'), True)):
+        with monkeypatch.context() as m:
+            for name in patch:
+                m.setattr(q, name, math.inf if name != 'TOP_HOLD_READINGS' else 0)
+            rows, t_dip, t_sun = _cloud_dip(stale=stale)
+            est, _ = run_lfp(rows)
+            dip = [s for s in est.segments if t_dip < s['t'] <= t_sun]
+            assert dip, (patch, 'scenario is harmless')
+            assert dip[0]['qmax'] < 0.75 * 98.0  # the dip at 73 % SoC taken as 100 %: 69 Ah, inside 0.4-1.2x
+
+
+def _rising(stop_s=720.0):
+    """Resting at 96.5 %, a 3 minute bulk at 50 A, then 4 A (below the tail)
+    while the highest cell climbs the knee, ~8 mV a minute, for stop_s; then
+    the charger stops and the pack rests."""
+    p = LfpPack(soc0=96.5).rest()
+    p.run(-50.0, 180)
+    t_tail = p.t
+    p.run(-4.0, stop_s)
+    t_stop = p.t
+    p.rest(1800).run(50.0, 3600 * 92 / 50).rest().end()
+    return p.rows, t_tail, t_stop
+
+
+def test_the_first_crossing_of_the_tail_while_the_cell_still_climbs_is_no_charge_end(top_anchors):
+    """TOP_RISE_MV: the top anchor comes after the climb, at the charge's end,
+    not 3 minutes after the current first fell below the tail."""
+    rows, t_tail, t_stop = _rising()
+    est, _ = run_lfp(rows)
+    assert [a['t'] >= t_stop for a in tops(est)] == [True]
+
+
+def test_calibration_without_the_rise_rule_the_anchor_comes_while_the_cell_climbs(top_anchors, monkeypatch):
+    """Here the climb is the last 0.5 % (the model's knee), so the cost is
+    small; in real data it was a BMS cut at 3.65 V that followed (aTTx)."""
+    monkeypatch.setattr(q, 'TOP_RISE_MV', math.inf)
+    rows, t_tail, t_stop = _rising()
+    est, _ = run_lfp(rows)
+    assert tops(est) and t_tail < tops(est)[0]['t'] < t_stop
+
+
+def _low_cut(peak=None):
+    """A 20 A charge from near empty is cut at 70 Ah (78 % SoC, the highest
+    cell at ~3.37 V under the current: a BMS's temperature or current
+    protection), then a rest and a discharge. peak: instead, cut once the
+    highest cell reads `peak` mV (a polarised pack, r2 3 mOhm)."""
+    p = LfpPack(r2=3.0 if peak else 1.0).rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    if peak:
+        p.charge_cc(20.0, peak)
+    else:
+        p.run(-20.0, 3600 * 70 / 20)
+    p.rest(3600).run(50.0, 3600 * 60 / 50).rest().end()
+    return p
+
+
+def test_a_cut_off_short_of_a_full_voltage_is_no_charge_end(top_anchors):
+    est, _ = run_lfp(_low_cut().rows)
+    assert not tops(est) and est.counts['top_cut_low'] == 1
+
+
+def test_calibration_a_cut_off_needs_both_its_peak_and_the_cells_after_it(top_anchors, monkeypatch):
+    """Redundant, and said so: without the peak rule, the cells a minute
+    after the cut (on the plateau) refuse it. Without both, 78 % is full."""
+    monkeypatch.setattr(q, 'TOP_CUTOFF_MV', 0.0)
+    est, _ = run_lfp(_low_cut().rows)
+    assert not tops(est) and est.counts['top_cut_not_full'] == 1
+    monkeypatch.setattr(q, 'TOP_CELL_MIN_MV', 0.0)
+    est, _ = run_lfp(_low_cut().rows)
+    assert tops(est) and est.segments and est.segments[-1]['qmax'] < 0.8 * 98.0
+
+
+def _trickle():
+    """Resting at 98.5 %, a charger that never gives more than 4 A (below the
+    tail) holds 3450 mV: no bulk phase, no tail-off."""
+    p = LfpPack(soc0=98.5).rest()
+    p.charge_cv(i_bulk=4.0).rest(1800)
+    return p.run(50.0, 3600 * 90 / 50).rest().end()
+
+
+def test_a_charge_without_a_bulk_phase_is_no_charge_end(top_anchors):
+    est, _ = run_lfp(_trickle().rows)
+    assert not tops(est)
+
+
+def test_calibration_without_the_bulk_rule_a_trickle_makes_top_anchors(top_anchors, monkeypatch):
+    """No measurable harm on this model (the trickle ends near full): the rule
+    is what makes a tail a current that fell, as Victron's is."""
+    monkeypatch.setattr(q, 'TOP_BULK_C', 0.0)
+    est, _ = run_lfp(_trickle().rows)
+    assert tops(est)
+
+
+def _imbalanced(offset, cut=False, n=3):
+    """Equal 100 Ah cells, the third `offset` % SoC below the others (self
+    discharge): it is empty first, and short of full when the others are."""
+    return lfp_cycles(n=n, dq=90.0, cut=cut, caps=(100.0,) * 4, socs=[99.6, 99.6, 99.6 - offset, 99.6]).rows
+
+
+@pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
+def test_a_cell_short_of_full_refuses_the_top_anchor(top_anchors, cut):
+    """5 % below the others: at the tail it sits on the plateau, under 3400
+    mV; after a BMS cut (aTTx: a runner at 3671 mV) it falls there within a
+    minute."""
+    est, pub = run_lfp(_imbalanced(5.0, cut=cut))
+    assert not tops(est) and not est.segments and pub == []
+    assert est.counts['top_cut_not_full' if cut else 'anchor_top'] == (3 if cut else 0)
+
+
+def test_calibration_with_the_floor_on_the_highest_cell_only_the_low_cell_is_taken_as_full(top_anchors, monkeypatch):
+    """Every cell gets 100 %: the low cell's swing reads 5 points too big and
+    the pack's Qmax (its cell's) 6 % low."""
+    monkeypatch.setattr(q, 'TOP_CELL_MIN_MV', 0.0)
+    est, pub = run_lfp(_imbalanced(5.0))
+    assert pub and pub[-1]['qmax'] < 0.95 * 100.0 and pub[-1]['limiting_cell'] == 3
+
+
+def test_monotone_in_how_far_a_cell_is_short_of_full(top_anchors):
+    verdicts = [bool(tops(run_lfp(_imbalanced(off, n=1))[0])) for off in (0.0, 0.1, 0.3, 0.5, 1.0, 2.0, 5.0, 30.0)]
+    _monotone(verdicts)
+    assert verdicts[0] and not verdicts[-1]
+
+
+def test_monotone_in_the_peak_before_a_cut_off(top_anchors):
+    """Lower peaks (an earlier cut on a polarised pack): accepted while the
+    cells a minute later stand above 3400 mV, never again below."""
+    verdicts = [bool(tops(run_lfp(_low_cut(peak=v).rows)[0])) for v in (3700.0, 3650.0, 3600.0, 3560.0, 3540.0,
+                                                                        3480.0, 3400.0)]
+    _monotone(verdicts)
+    assert not verdicts[-1]
+
+
+def test_monotone_in_missing_cell_voltages_at_the_tail(top_anchors):
+    """Voltages missing for longer and longer from the start of the tail:
+    once there is none to hold on, never a top anchor again."""
+    def ok(gap_s):
+        p = LfpPack().rest()
+        p.run(50.0, 3600 * 92 / 50).rest()
+        t0 = p.t
+        p.charge_cv(i_end=4.0)  # stops soon after the tail is reached: the hold ends at rest
+        t1 = p.t
+        p.run(0.0, 1800).run(50.0, 3600 * 30 / 50).end()
+        rows = [(t, i, None if t1 - 300 < t <= t1 - 300 + gap_s else v, temp) for t, i, v, temp in p.rows]
+        return bool(tops(run_lfp(rows)[0]))
+    verdicts = [ok(g) for g in (0.0, 30.0, 120.0, 600.0, 3600.0)]
+    _monotone(verdicts)
+    assert verdicts[0] and not verdicts[-1]
+
+
+def _fast_relaxing_cut(offset=3.0, i_cut=20.0, r1=4.0):
+    """A pack whose fast polarisation is large (r1 4 mOhm, 60 s): CC at
+    i_cut until a BMS cut at 3620 mV, with one cell `offset` % short of full.
+    Right after the cut that cell still reads above 3400 mV; a minute later
+    it is on the plateau."""
+    return lfp_cycles(n=1, dq=90.0, cut=True, i_cut=i_cut, caps=(100.0,) * 4, r1=r1, tau1=60.0,
+                      socs=[99.6, 99.6, 99.6 - offset, 99.6]).rows
+
+
+def test_a_cut_off_is_judged_a_minute_after_the_cut(top_anchors):
+    est, _ = run_lfp(_fast_relaxing_cut())
+    assert not tops(est) and est.counts['top_cut_not_full'] == 1
+
+
+def test_calibration_judged_right_after_the_cut_the_low_cell_passes(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_CUT_SETTLE_S', 0.0)
+    est, _ = run_lfp(_fast_relaxing_cut())
+    assert tops(est), 'scenario is harmless'
+
+
+def test_a_cut_off_from_a_high_current_is_no_charge_end(top_anchors):
+    """At C/2 the cells carry too much polarisation for the minute-after
+    check (TOP_CUT_I_MAX_C)."""
+    est, _ = run_lfp(_fast_relaxing_cut(i_cut=50.0, r1=2.5))
+    assert not tops(est) and est.counts['top_cut_current'] == 1
+
+
+def test_calibration_without_the_current_limit_a_cell_short_of_full_passes_the_cut_check(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_CUT_I_MAX_C', math.inf)
+    est, _ = run_lfp(_fast_relaxing_cut(i_cut=50.0, r1=2.5))
+    assert tops(est), 'scenario is harmless'  # the third cell at 96.6 % taken as full
+
+
+def _sparse_tail(every_s):
+    """A CV charge whose cell voltages come only every `every_s` from the
+    start of the charge to 30 min after it (fetches failing)."""
+    p = LfpPack().rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    t0 = p.t
+    p.charge_cv().rest(1800)
+    t1 = p.t
+    p.run(50.0, 3600 * 92 / 50).rest().end()
+    return [(t, i, v if not t0 < t <= t1 or (t - t0) % every_s < p.dt else None, temp) for t, i, v, temp in p.rows]
+
+
+def test_cell_voltages_more_than_a_minute_apart_hold_nothing(top_anchors):
+    """TOP_VOLT_GAP_S on its own: readings every 90 s are real, but a hold
+    needs them at most a minute apart."""
+    assert tops(run_lfp(_sparse_tail(30.0))[0])
+    assert not tops(run_lfp(_sparse_tail(90.0))[0])
+
+
+def test_a_gap_during_the_charge_forgets_its_bulk(top_anchors):
+    """An outage over the turn from bulk to tail: the charge after it has no
+    bulk phase in its record, so no top anchor; the epoch is new anyway."""
+    p = LfpPack().rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    p.run(-50.0, 3600 * 85 / 50)
+    p.charge_cv(max_s=1200)  # the bulk ends, CV begins ...
+    n = len(p.rows)
+    p.charge_cv()            # ... and the tail
+    gap = [r[0] for r in p.rows[n - 40:n + 20]]  # 10 minutes without samples around the turn
+    p.rest(1800).run(50.0, 3600 * 92 / 50).rest().end()
+    rows = [r for r in p.rows if r[0] not in gap]
+    est, _ = run_lfp(rows)
+    assert est.counts['gap'] == 1 and not tops(est)
+
+
+def test_a_top_anchor_needs_a_known_temperature(top_anchors):
+    rows = [(t, i, v, None) for t, i, v, temp in lfp_cycles(n=1).rows]
+    est, _ = run_lfp(rows)
+    assert not tops(est) and est.counts['top_temp_missing'] == 1
+    rows = [(t, i, v, 5.0) for t, i, v, temp in lfp_cycles(n=1).rows]
+    est, _ = run_lfp(rows)
+    assert not tops(est) and est.counts['top_temp_range'] == 1
+
+
+# ---- the gates of a segment still apply
+
+def test_a_gap_between_a_charge_end_and_the_rest_near_empty_ends_the_segment(top_anchors):
+    p = LfpPack().rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    p.charge_cv().rest(1800)
+    p.run(50.0, 1800).run(50.0, 1800, sample=False).run(50.0, 3600 * 92 / 50 - 3600).rest().end()
+    est, _ = run_lfp(p.rows)
+    assert [s['kinds'] for s in est.segments] == [['ocv', 'top']] and est.counts['gap'] == 1
+
+
+def test_the_drift_budget_applies_to_a_top_anchored_segment(top_anchors):
+    """Full, then 92 Ah out over two days at 2 A: 0.3 A x 46 h is 15 %."""
+    p = LfpPack().rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    p.charge_cv().rest(1800)
+    p.run(2.0, 3600 * 92 / 2).rest().end()
+    est, _ = run_lfp(p.rows)
+    assert est.pair_reasons['drift'] >= 1 and [s['kinds'] for s in est.segments] == [['ocv', 'top']]
+
+
+def test_the_plausibility_window_and_the_capacity_check_apply_to_top_anchored_segments(top_anchors):
+    rows = [(t, 1.3 * i, v, temp) for t, i, v, temp in lfp_cycles().rows]  # a 1.3x gain
+    est, pub = run_lfp(rows)
+    assert tops(est) and pub == [] and est.pair_reasons['implausible'] >= 3
+    est = q.QmaxEstimator('t', design_capacity=100.0, curve=q.DEFAULT_CURVE)
+    pub = [r for t, i, v, temp in lfp_cycles().rows if (r := est.add(t, i, v, temp=temp, capacity=200.0))]
+    assert len(est._counted()) == 5 and pub == []  # the BMS says 200 Ah
+
+
+def test_a_restart_during_the_tail_costs_that_top_anchor(top_anchors):
+    """The charge in progress is not saved (its voltages would have a hole
+    anyway), so a restart during the hold costs that top anchor -- and the
+    segment: the BMS reads SoC 99 % there, where its counter may be held at
+    full (the stop rule), so the restart ends it anyway."""
+    p = lfp_cycles(n=1)
+    whole, _ = run_lfp(p.rows, **bms(p))
+    t_top = tops(whole)[0]['t']
+    cut = next(k for k, r in enumerate(p.rows) if r[0] >= t_top - 60)
+    split, _ = _split_run(p.rows, [cut], curve=q.DEFAULT_CURVE, **bms(p))
+    assert len(tops(whole)) == 1 and whole.segments and not tops(split) and not split.segments
+    assert split.counts['restart_unverified'] == 1
+
+
+def test_the_sampler_fetches_voltages_while_charging_only_with_a_capacity():
+    s, bms_ = _run_sampler(25, bms=_Bms(current=-30.0), soh_estimator=True, design_capacity=100.0)
+    assert bms_.n_voltage_fetches == pytest.approx(1 + 25 / q.VOLTAGE_PERIOD_S, abs=1)
+    s, bms_ = _run_sampler(25, bms=_Bms(current=-30.0), soh_estimator=True)
+    assert bms_.n_voltage_fetches == 1  # the first, publishing cycle
+    s, bms_ = _run_sampler(25, bms=_Bms(current=30.0), soh_estimator=True, design_capacity=100.0)
+    assert bms_.n_voltage_fetches == 1  # discharging: no
+
+
+def test_a_top_anchor_restored_with_another_shape_does_not_validate(top_anchors):
+    est, _ = run_lfp(lfp_cycles().rows)
+    st = _via_json(est.get_state())
+    k = next(j for j, a in enumerate(st['anchors']) if a['kind'] == 'top')
+    for bad in (dict(soc=[99.0] * 4), dict(mode='guess'), dict(kind='full'), dict(temp=5.0), dict(i_rest=0.7)):
+        s2 = _via_json(st)
+        s2['anchors'][k].update(bad)
+        assert not _fresh().restore(s2), bad
+    s2 = _via_json(st)
+    s2['segments'][0]['kinds'] = ['top', 'top']
+    assert not _fresh().restore(s2)
+    assert _fresh().restore(st)
 
 
 # ================================================================ MQTT

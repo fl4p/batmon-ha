@@ -395,7 +395,100 @@ PLAUSIBLE_REL = (0.4, 1.2)
 CAPACITY_MISMATCH_MAX = 1.25
 BMS_CAP_PERIOD_S = 3600.0
 BMS_CAP_N = 24
-MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, MAX_SEGMENT_S is 10 days
+# Evaluable anchors kept: rests of >= 90 min come ~1-2 a day and a top anchor
+# with each full charge, so 16 reach back 5-8 days; the drift budget limits a
+# segment to 15-33 h anyway.
+MAX_ANCHORS = 16
+
+# ---------------------------------------------------------------- top anchor: charge termination
+# The built-in curve gives a SoC only near empty, so no pair of OCV anchors can
+# reach MIN_DSOC. The top anchor is the end of a charge, the way battery
+# monitors synchronise to 100 % (Victron: voltage above its "charged voltage"
+# and current below its "tail current" for its "charged detection time"):
+# every cell at SoC 100 %, at the moment the charge terminated. That is full as
+# THIS charger defines it, not the cell's 100 % (doc/SoH.md): Qmax is then the
+# charge between that full and the bottom anchor's OCV SoC, scaled to the
+# cells' 0-100 %. A charge ends one of two ways:
+#  * tail: after a bulk phase the charge current stays at most the tail while
+#    the highest cell holds (CV: not rising, within a band of its recent
+#    peak), for TOP_HOLD_S, every cell at TOP_CELL_MIN_MV or more;
+#  * cut-off: the current drops in one sample from above the tail to about 0
+#    (a BMS cell-overvoltage cut, a charger that terminates) after the highest
+#    cell peaked at TOP_CUTOFF_MV or more, and TOP_CUT_SETTLE_S later every
+#    cell is still at TOP_CELL_MIN_MV or more.
+# Unevaluable is never full: no capacity (the tail and bulk are fractions of
+# it), cell voltages missing, older than TOP_VOLT_GAP_S or dropped by the
+# chemistry guard, a cell count that changes, no temperature, a gap, a clock
+# step, or a glitch decision still open. Only the highest and lowest cells are
+# used, so the cost per sample is small (doc/SoH.md). The state of a charge in
+# progress is not saved: a restart during one costs that one top anchor.
+TOP_ANCHORS = True  # (a switch only for the tests on SYNTH, whose synthetic relaxed top would read 97 % as full)
+# Tail current: C/20. Victron's default is 4 % of the capacity; 0.05C is the
+# CV termination LFP cell datasheets give (e.g. EVE LF280K: 0.5C CC to 3.65 V,
+# CV to 0.05C), and the current the evidence for TOP_CELL_MIN_MV was taken at.
+TOP_TAIL_C = 0.05
+# Every cell must stand at TOP_CELL_MIN_MV or more: the anchor gives each one
+# 100 %, and a cell below it is not near full, whatever the highest one says
+# (an imbalanced pack; the per-cell rule is what MIN_DSOC "every cell" needs).
+# Measured on the maintainer's van pack (280 Ah; ANT BMS 2023-09..2026-05, 38
+# charges to a top, Daly 2024-08..2025-11, 11): the charge that still went in
+# after the LOWEST cell first stood at 3400-3420 mV under at most C/20, until
+# the highest reached 3550 mV, was a median 0.2 / 0.9 %, p90 1.4 / 1.6 %, at
+# most 4.7 / 2.1 % of 280 Ah; at 3390-3400 mV up to 7.8 / 18.8 %. Judged by
+# the HIGHEST cell at 3400-3420 mV it was up to 7.9 / 18.6 %. In telemetry
+# (aTTx, 16 cells) a BMS cut at a 3671 mV runner left three cells at 3362 mV a
+# minute later: not full.
+TOP_CELL_MIN_MV = 3400.0
+# A bulk phase: a charge current of TOP_BULK_C x capacity or more within the
+# last TOP_BULK_S. The tail must be a current that fell (CV), not one that was
+# low all along. C/10, twice the tail: in the 16 telemetry packs the chargers
+# bulk at C/10-C/3.4; the cost is the terminations after a weaker bulk (1j6d,
+# 304 Ah: 9 of 39 had C/17-C/10).
+TOP_BULK_C = 0.10
+TOP_BULK_S = 2 * 3600.0
+# Victron's default charged detection time, with at least TOP_HOLD_READINGS
+# cell voltage readings in it (one is no hold).
+TOP_HOLD_S = 180.0
+TOP_HOLD_READINGS = 3
+# CV: the highest cell may rise by at most TOP_RISE_MV during the hold (a new
+# hold starts above it). In CV it still rises a little as the cable drop
+# shrinks with the current (3-5 mV in 3 min at the tail, LCjx, 1 s cell
+# data); in the CC knee it rises 30-90 mV a minute (aTTx, Bvblf, POdo). The
+# first crossing of the tail while the cell still climbs is no termination.
+TOP_RISE_MV = 10.0
+# ... and stay within TOP_CV_BAND_MV of its peak over the last TOP_PEAK_S. In
+# absorption the balancer pulled the highest cell 13 mV below its peak (Bvblf);
+# a charge that stops (a PV cloud, a charger that ends) falls with the current,
+# 50 mV and more within 20 s at C/7-C/5 (aTTx, POdo) and 33 mV in 3 min from a
+# C/300 tail (LCjx).
+TOP_CV_BAND_MV = 25.0
+TOP_PEAK_S = 600.0
+# Cut-off: the highest cell peaked at TOP_CUTOFF_MV or more within TOP_PEAK_S
+# before the current dropped. The van pack's cut-offs peaked at 3554-3600 mV
+# (minute maxima), the telemetry's at 3651-3671; a cut at 3.38 V (a BMS's
+# temperature or current protection) is no full.
+TOP_CUTOFF_MV = 3550.0
+# ... and between TOP_CUT_SETTLE_S and TOP_CUT_CHECK_S after it, with the
+# current still about 0, every cell at TOP_CELL_MIN_MV or more. Full cells stay
+# high (aTTx 3540-3550 mV, POdo 3496 mV a minute after the cut), cells that
+# were not full fall to the plateau (aTTx 3362 mV at 60 s, 3347 at 5 min).
+TOP_CUT_SETTLE_S = 60.0
+TOP_CUT_CHECK_S = 120.0
+# ... from a charge current of at most TOP_CUT_I_MAX_C x capacity. The
+# minute-after check stands on the cells relaxing: the higher the current
+# before the cut, the more polarisation a cell that is not full still carries
+# a minute later (aTTx: 3407 mV under C/7, 3362 a minute later; scaled to C/2
+# that is ~3.39 V, at the floor). The cut-offs seen came from C/20-C/7 (van:
+# 14-31 A on 280 Ah; POdo C/11; aTTx C/7).
+TOP_CUT_I_MAX_C = 0.25
+# The cell voltages used are at most this old; in a hold no two readings are
+# further apart. (They are fetched every VOLTAGE_PERIOD_S while charging.)
+TOP_VOLT_GAP_S = 60.0
+# A known temperature, at least 10 degC: colder, the cell's resistance at C/20
+# lifts it to TOP_CELL_MIN_MV short of full. 45 degC: the charge limit of LFP
+# cell datasheets.
+TOP_TEMP_LO, TOP_TEMP_HI = 10.0, 45.0
+ANCHOR_KINDS = ('ocv', 'top')
 
 # ---------------------------------------------------------------- output
 # Published Qmax = median of the last SUMMARY_K accepted segments, once there
@@ -710,6 +803,7 @@ class QmaxEstimator:
         self._rest_n = 0
         self._load_ewma: Optional[float] = None  # mean charge current of recent load minutes, for the direction tag
         self._t_volt: Optional[float] = None
+        self._top_reset()  # charge termination (top anchor): what this charge has shown so far
         # results
         self.anchors = deque(maxlen=MAX_ANCHORS)
         self.segments = deque(maxlen=SUMMARY_K)
@@ -809,12 +903,19 @@ class QmaxEstimator:
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
                     offset_assumed_a=round(new['i_off'], 2), offset_drift_pct=round(100.0 * new['drift'], 1),
-                    plausibility_checked=new['cap'] is not None)
+                    plausibility_checked=new['cap'] is not None, anchors='->'.join(new['kinds']),
+                    top_anchored=sum('top' in s['kinds'] for s in segs))
 
     def wants_voltages(self, t: float, current: float) -> bool:
-        """Whether this iteration's cell voltages are worth a fetch: only near
-        rest (where anchors are made) and at most every VOLTAGE_PERIOD_S."""
-        if not self.enabled or not finite(current) or abs(current) > REST_ABS_FACTOR * self.rest_current():
+        """Whether this iteration's cell voltages are worth a fetch: near rest
+        (where OCV anchors are made), while charging (where a top anchor is:
+        with a capacity, which it needs) or a cut-off waits for its check, and
+        at most every VOLTAGE_PERIOD_S."""
+        if not self.enabled or not finite(current):
+            return False
+        rest = self.rest_current()
+        charging = self.design_capacity is not None and -current > rest
+        if abs(current) > REST_ABS_FACTOR * rest and not charging and self._top_cut is None:
             return False
         return self._t_volt is None or not (0 <= t - self._t_volt < VOLTAGE_PERIOD_S)
 
@@ -845,6 +946,7 @@ class QmaxEstimator:
         self._disable_persistent = persistent
         self._bin = None
         self._reset_rest()
+        self._top_reset()
         self.anchors.clear()
         self.segments.clear()
 
@@ -995,6 +1097,7 @@ class QmaxEstimator:
                     vt = None  # the current still counts, the voltages do not
             else:
                 vt = None
+        new = self._top_step(t, i, vt, bool(voltages) and vt is None, temp) or new
 
         idx = math.floor(t / REST_BIN_S)
         if self._bin is not None and self._bin['idx'] != idx:
@@ -1016,6 +1119,129 @@ class QmaxEstimator:
         if finite(temp) and -40.0 < temp < 100.0:
             b['temp'].append(float(temp))
         return new
+
+    # ------------------------------------------------------------ top anchor
+
+    def _top_reset(self):
+        """Forget the charge in progress (a gap, a clock step, a disable)."""
+        self._top_bulk: Optional[float] = None  # the last sample with the charge current at the bulk or more
+        self._top_peak: deque = deque()  # (t, highest cell), decreasing: the max over the last TOP_PEAK_S
+        self._top_v: Optional[Tuple[float, float, float, int]] = None  # last reading: t, highest, lowest, cells
+        self._top_hold: Optional[Dict[str, Any]] = None  # a tail termination in progress
+        self._top_cut: Optional[Dict[str, Any]] = None  # a cut-off waiting for its check
+        self._top_prev: Optional[Tuple[float, float]] = None  # the last sample: t, charge current
+        self._top_done: Optional[float] = None  # the last top anchor: one per bulk phase
+
+    def _top_step(self, t: float, i: float, vt: Optional[List[Optional[float]]], dropped: bool,
+                  temp: Optional[float]) -> Optional[Dict[str, Any]]:
+        """One sample of the charge-termination detector (TOP_* constants):
+        charge current i [A], cell voltages vt (None: not fetched, or dropped
+        by the chemistry guard -- dropped True)."""
+        cap = self.design_capacity
+        if cap is None:
+            return None  # the tail and the bulk are fractions of it: nothing is evaluable
+        tail, rest = TOP_TAIL_C * cap, self.rest_current()
+        if i >= TOP_BULK_C * cap:
+            self._top_bulk = t
+        if vt is not None and all(v is not None for v in vt):
+            hi, lo = max(vt), min(vt)
+            pk = self._top_peak
+            while pk and pk[-1][1] <= hi:
+                pk.pop()
+            pk.append((t, hi))
+            self._top_v = (t, hi, lo, len(vt))
+        elif vt is not None or dropped:
+            self._top_v = None  # a cell missing, or out of band: no reading to stand on
+        while self._top_peak and self._top_peak[0][0] < t - TOP_PEAK_S:
+            self._top_peak.popleft()
+        prev, self._top_prev = self._top_prev, (t, i)
+        v = self._top_v if self._top_v is not None and t - self._top_v[0] <= TOP_VOLT_GAP_S else None
+        peak = self._top_peak[0][1] if self._top_peak else None
+        bulk = self._top_bulk is not None and t - self._top_bulk <= TOP_BULK_S \
+            and (self._top_done is None or self._top_bulk > self._top_done)
+
+        c = self._top_cut
+        if c is not None:
+            if not -tail <= i <= rest:
+                self._top_cut = None
+                self._top_refuse('top_cut_resumed', c['t'], 'the current came back (%.1f A)' % -i)
+            elif t - c['t'] > TOP_CUT_CHECK_S:
+                self._top_cut = None
+                self._top_refuse('top_cut_unverified', c['t'], 'no cell voltages %.0f-%.0f s after it'
+                                 % (TOP_CUT_SETTLE_S, TOP_CUT_CHECK_S))
+            elif v is not None and v[0] == t and t - c['t'] >= TOP_CUT_SETTLE_S and self._glitch_nb is None:
+                self._top_cut = None
+                if v[3] != c['n']:
+                    self._top_refuse('top_cells', c['t'], 'the cell count changed')
+                elif v[2] < TOP_CELL_MIN_MV:
+                    self._top_refuse('top_cut_not_full', c['t'], 'a cell at %.0f mV %.0f s after it'
+                                     % (v[2], t - c['t']))
+                else:
+                    return self._top_anchor(c, 'cutoff', t, [v[2], v[1]])
+            return None
+        if prev is not None and prev[1] > tail and -tail <= i <= rest and t - prev[0] <= COVERED_DT_S:
+            self._top_hold = None
+            if not bulk:
+                return None  # (the charge before it was no bulk, or it already made its anchor)
+            if prev[1] > TOP_CUT_I_MAX_C * cap:
+                self._top_refuse('top_cut_current', t, 'cut from %.1f A, above C/%.0f' % (prev[1], 1 / TOP_CUT_I_MAX_C))
+                self._top_done = t
+                return None
+            if peak is None or peak < TOP_CUTOFF_MV or self._top_v is None or self._top_v[0] < prev[0] - TOP_VOLT_GAP_S:
+                self._top_refuse('top_cut_low', t, 'the highest cell peaked at %s'
+                                 % ('%.0f mV' % peak if peak is not None else 'an unknown voltage'))
+                self._top_done = t  # one verdict per bulk phase
+                return None
+            self._top_cut = dict(t=t, t0=t, q=self.q_ah, cov=self.covered_s, epoch=self.epoch, n=self._top_v[3],
+                                 temps=[temp] if finite(temp) else [])
+            return None
+
+        h = self._top_hold
+        if not (-rest <= i <= tail and bulk and v is not None and peak is not None and v[2] >= TOP_CELL_MIN_MV
+                and v[1] >= peak - TOP_CV_BAND_MV):
+            self._top_hold = None
+            return None
+        if h is None or v[3] != h['n'] or v[1] > h['v0'] + TOP_RISE_MV:
+            h = self._top_hold = dict(t0=v[0], v0=v[1], n=v[3], k=0, temps=[])  # (re)starts at this reading
+        if v[0] == t:
+            h['k'] += 1
+        if finite(temp):
+            h['temps'].append(float(temp))
+        if t - h['t0'] < TOP_HOLD_S or h['k'] < TOP_HOLD_READINGS or self._glitch_nb is not None:
+            return None
+        self._top_hold = None
+        return self._top_anchor(dict(t=t, t0=h['t0'], q=self.q_ah, cov=self.covered_s, epoch=self.epoch,
+                                     n=h['n'], temps=h['temps']), 'tail', t, [v[2], v[1]])
+
+    def _top_refuse(self, why: str, t: float, detail: str):
+        self.counts[why] += 1
+        logger.info('%s: Qmax: charge end at %s is no top anchor: %s', self.name, fmt_t(t), detail)
+
+    def _top_anchor(self, c: Dict[str, Any], mode: str, now: float, lo_hi) -> Optional[Dict[str, Any]]:
+        """A termination passed: every cell at SoC 100 %, as an anchor that
+        pairs like an OCV one (_pair), never with another top anchor."""
+        self._top_done = now
+        temp = median(c['temps']) if c['temps'] else None
+        if temp is None:
+            self._top_refuse('top_temp_missing', c['t'], 'no temperature known')
+            return None
+        if not TOP_TEMP_LO <= temp <= TOP_TEMP_HI:
+            self._top_refuse('top_temp_range', c['t'], '%.1f degC is outside %.0f..%.0f degC'
+                             % (temp, TOP_TEMP_LO, TOP_TEMP_HI))
+            return None
+        if not TOP_ANCHORS:
+            return None
+        if self.anchors and self.anchors[-1]['t'] > c['t']:
+            self._top_refuse('top_order', c['t'], 'an anchor ends after it')
+            return None
+        n = c['n']
+        a = dict(t=c['t'], t0=c['t0'], q=c['q'], cov=c['cov'], epoch=c['epoch'], temp=temp, dir='chg', i_rest=0.0,
+                 ocv=[None] * n, soc=[100.0] * n, why=[None] * n, fit=[None] * n, cap=self.design_capacity,
+                 kind='top', mode=mode)
+        logger.info('%s: Qmax top anchor (%s): charge end at %s, %.1f degC, cells %.0f..%.0f mV -> SoC 100 %%',
+                    self.name, mode, fmt_t(c['t']), temp, lo_hi[0], lo_hi[1])
+        self.counts['anchor_top'] += 1
+        return self._pair(a, now)
 
     def _glitch_ends(self, t: float) -> Optional[str]:
         """Does an impossible reading at t end the epoch, and why: a second
@@ -1210,6 +1436,7 @@ class QmaxEstimator:
         new = self._end_rest(t) or new
         self.epoch += 1
         self._resumed, self._glitch_nb, self._audit = False, None, None
+        self._top_reset()
         self.counts[why] += 1
         if why != 'current_implausible_burst':
             logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
@@ -1241,6 +1468,7 @@ class QmaxEstimator:
         if self._t_glitch is not None and self._t_glitch > t:
             self._t_glitch = None
         self._glitch_nb = self._audit = None
+        self._top_reset()
         self._recent.clear()  # timed on the other clock
         self._bms_caps = deque((x for x in self._bms_caps if x[0] <= t), maxlen=BMS_CAP_N)
         self._t_volt = None
@@ -1342,7 +1570,7 @@ class QmaxEstimator:
         cap, _ = self.capacity()
         a = dict(t=t1, t0=self._rest_t0, q=self._rest_q, cov=self._rest_cov, epoch=self.epoch, temp=temp,
                  dir=self._rest_dir, i_rest=self._rest_si / self._rest_n, ocv=ocv, soc=soc, why=why, fit=fit,
-                 cap=cap)
+                 cap=cap, kind='ocv')
         logger.info('%s: Qmax anchor: %.1f h rest ending %s, %.1f degC, OCV [%s] mV -> SoC [%s]', self.name,
                     dur / 3600, fmt_t(t1), temp, ', '.join('%.0f' % o if o is not None else '-' for o in ocv),
                     ', '.join('%.1f' % s if s is not None else str(w) for s, w in zip(soc, why)))
@@ -1384,6 +1612,9 @@ class QmaxEstimator:
             if self._last_seg_t is not None and a['t'] < self._last_seg_t:
                 reason = 'overlap'
                 break
+            if a['kind'] == b['kind'] == 'top':
+                reason = 'top_top'  # two terminations say nothing about the charge between them
+                continue
             if self._audit is not None and a['t'] < self._audit['t'] <= b['t']:
                 reason = 'restart_held'  # across a restart the counter has not confirmed yet (_audit_step)
                 if b['t'] not in self._audit['held']:
@@ -1393,7 +1624,7 @@ class QmaxEstimator:
             self.pair_reasons[reason or 'accepted'] += 1
             if seg is not None:
                 return self._accept(seg, now)
-        if reason in ('gap', 'span', 'overlap', 'no_prior_anchor', 'restart_held'):
+        if reason in ('gap', 'span', 'overlap', 'no_prior_anchor', 'restart_held', 'top_top'):
             self.pair_reasons[reason] += 1
         self.counts['anchor_unpaired'] += 1
         return None
@@ -1432,7 +1663,7 @@ class QmaxEstimator:
         med = median(qc)
         return dict(t=b['t'], t0=a['t'], dq=dq, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
                     spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap,
-                    i_off=i_off, drift=drift), None
+                    i_off=i_off, drift=drift, kinds=[a['kind'], b['kind']]), None
 
     def _accept(self, seg, now: float) -> Optional[Dict[str, Any]]:
         """Keep a segment and return what to publish. Ages count from now, the
@@ -1457,10 +1688,10 @@ class QmaxEstimator:
             self._recheck_out('the segments it was made of are too old')
             return None
         self.counts['segment'] += 1
-        logger.info('%s: Qmax segment %s -> %s: dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
+        logger.info('%s: Qmax segment %s -> %s (%s): dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
                     'spread %.1f %%, coverage %.3f, offset drift %.1f %% at an assumed %.2f A', self.name,
                     fmt_t(seg['t0']),
-                    fmt_t(seg['t']), seg['dq'], ', '.join('%+.1f' % d for d in seg['dsoc']),
+                    fmt_t(seg['t']), '->'.join(seg['kinds']), seg['dq'], ', '.join('%+.1f' % d for d in seg['dsoc']),
                     ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
                     100 * seg['drift'], seg['i_off'])
         res = self.result()
@@ -1625,9 +1856,14 @@ class QmaxEstimator:
                 raise ValueError('anchor fit %r' % a.get('fit'))
             if v_int(a.get('epoch'), 'anchor epoch') > epoch:
                 raise ValueError('anchor epoch %r after the counter %d' % (a['epoch'], epoch))
-            if not CURVE_TEMP_LO <= v_fin(a.get('temp'), 'anchor temp') <= CURVE_TEMP_HI:
-                raise ValueError('anchor temp %r' % a['temp'])
+            kind = a.get('kind')
+            lo, hi = (TOP_TEMP_LO, TOP_TEMP_HI) if kind == 'top' else (CURVE_TEMP_LO, CURVE_TEMP_HI)
+            if kind not in ANCHOR_KINDS or not lo <= v_fin(a.get('temp'), 'anchor temp') <= hi:
+                raise ValueError('anchor kind %r, temp %r' % (kind, a.get('temp')))
             socs = soc_list(a.get('soc'), 'anchor soc')
+            if kind == 'top' and (a.get('mode') not in ('tail', 'cutoff') or not socs
+                                  or any(x != 100.0 for x in socs) or v_fin(a.get('i_rest'), 'anchor i_rest') != 0.0):
+                raise ValueError('top anchor %r' % (a,))
             why, ocv, fit = a.get('why'), a.get('ocv'), a.get('fit')
             if not (isinstance(why, list) and isinstance(ocv, list) and isinstance(fit, list)
                     and len(why) == len(ocv) == len(fit) == len(socs)):
@@ -1661,6 +1897,10 @@ class QmaxEstimator:
                 raise ValueError('segment cells %r' % (s,))
             v_fin(s.get('spread'), 'segment spread')
             v_fin(s.get('cov'), 'segment cov')
+            kinds = s.get('kinds')
+            if not (isinstance(kinds, list) and len(kinds) == 2 and all(k in ANCHOR_KINDS for k in kinds)
+                    and kinds != ['top', 'top']):
+                raise ValueError('segment kinds %r' % (kinds,))
             if v_opt_fin(s.get('cap'), 'segment cap') != self.design_capacity:
                 dropped += 1
                 continue
