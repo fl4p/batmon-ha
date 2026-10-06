@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix (`soh_estimator`): a BMS counter stopped just before a shutdown passed the restart check (49 Ah published for 98). Segments across a restart now wait until the counter moves again.
+
 ## [2.24]
 
 * Fix: 2.23's `daly` connect could fail every time on a module that drops the first request after connecting, because the learned address was asked once; now it is retried (#416).
