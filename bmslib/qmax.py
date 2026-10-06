@@ -835,18 +835,18 @@ class QmaxEstimator:
             # ends the epoch now; the next good sample then integrates inside
             # the new epoch and before any of its anchors.
             self.counts['current_implausible'] += 1
-            burst = self._t_glitch is not None and 0 <= t - self._t_glitch <= GLITCH_ISOLATION_S
+            why = self._glitch_ends(t)
             self._t_glitch = t
-            if burst:
+            if why is not None:
                 self._glitch_nb = None
-            elif self._glitch_nb is None and self._last_t is not None:
+            elif self._last_t is not None:
                 self._glitch_nb = dict(before=list(self._recent), after=[])
-            # else one is waiting for its neighbourhood (samples more than a minute apart): this hole is
-            # judged by the same one
             logger.debug('%s: Qmax: current %.6g A at %s is not a measurement%s', self.name, current, fmt_t(t),
-                         ', the second within %.0f s: open segment invalidated' % GLITCH_ISOLATION_S if burst else
-                         ', left out and bridged')
-            return self._gap(t, 'current_implausible_burst') if burst else None
+                         ', left out and bridged' if why is None else
+                         ', the second within %.0f s: open segment invalidated' % GLITCH_ISOLATION_S
+                         if why == 'current_implausible_burst' else
+                         ', the second before the first one\'s neighbourhood was complete: open segment invalidated')
+            return None if why is None else self._gap(t, why)
 
         i = -float(current)  # charge current
         c = float(bms_charge) if finite(bms_charge) else None
@@ -943,6 +943,23 @@ class QmaxEstimator:
         if finite(temp) and -40.0 < temp < 100.0:
             b['temp'].append(float(temp))
         return new
+
+    def _glitch_ends(self, t: float) -> Optional[str]:
+        """Does an impossible reading at t end the epoch, and why: a second
+        one within GLITCH_ISOLATION_S of the last (a burst), or one that comes
+        while an earlier one still waits for its GLITCH_NB_N samples after it.
+        That window then holds an impossible reading, so it cannot be the clean
+        neighbourhood the first one needs; judging both holes by the first
+        one's decision closed it one good sample after the second (rev8: with
+        samples 80 s apart the second came more than GLITCH_ISOLATION_S
+        later, and 4 / 8 garbled 450 A frames after it published 102.4 / 107.3
+        Ah for 97.5). None: an isolated one, bridged if its neighbourhood
+        agrees."""
+        if self._t_glitch is not None and 0 <= t - self._t_glitch <= GLITCH_ISOLATION_S:
+            return 'current_implausible_burst'
+        if self._glitch_nb is not None:
+            return 'current_implausible_neighbours'
+        return None
 
     def _neighbourhood_ok(self, before: Sequence[float], after: Sequence[float]) -> bool:
         """The good samples either side of an isolated impossible reading

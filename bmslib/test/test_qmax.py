@@ -357,12 +357,14 @@ def test_a_burst_of_impossible_currents_ends_the_segment():
 
 def test_calibration_bridging_every_glitch_publishes_the_garbled_frames_between_them(monkeypatch):
     """Partly redundant, and said so: in this burst every caught frame has a
-    garbled neighbour, so with only the isolation rule off the neighbour rule
-    still ends the segment. With both off the garbage is counted."""
+    garbled neighbour and comes before the last one's neighbourhood is
+    complete, so with only the isolation rule off the neighbour rules still
+    end the segment. With all of them off the garbage is counted."""
     monkeypatch.setattr(q, 'GLITCH_ISOLATION_S', -1.0)  # every rejection counts as isolated
     est, _ = run(_glitch_burst(full_cycles(n=3).rows))
     assert all(s['dq'] > 0 for s in est.segments) and est.counts['current_implausible_neighbours'] >= 3
     monkeypatch.setattr(q, 'GLITCH_AGREE_REL', math.inf)
+    monkeypatch.setattr(q.QmaxEstimator, '_glitch_ends', lambda self, t: None)
     est, pub = run(_glitch_burst(full_cycles(n=3).rows))
     dis = [s for s in est.segments if s['dq'] < 0]
     assert dis, 'scenario is harmless'
@@ -641,6 +643,76 @@ def test_monotone_in_glitch_spacing():
     verdicts = [accepted(x) for x in (900.0, 600.0, 310.0, 290.0, 120.0, 60.0, 20.0)]
     _monotone(verdicts)
     assert verdicts[:3] == [True] * 3 and not verdicts[3]
+
+
+def _glitch_in_open_window(rows, n_garbled):
+    """Rev8, finding 1: in the middle of every discharge a caught glitch, its
+    next 4 samples 80 s apart (a slow BLE stretch), a second caught glitch
+    330 s after the first (no burst), one good sample, then n_garbled frames
+    of 450 A 10 s apart."""
+    out, j, n = [], 0, len(rows)
+    while j < n:
+        if rows[j][1] > 30:
+            e = j
+            while e < n and rows[e][1] > 30:
+                e += 1
+            m = (j + e) // 2
+            out.extend(rows[j:m])
+            t, _, v, temp = rows[m]
+            out.append((t, 3553.5, v, temp))
+            k = m
+            for _ in range(4):
+                k += 8
+                out.append(rows[k])
+            k += 1
+            t, _, v, temp = rows[k]
+            out.append((t, 3553.5, v, temp))
+            k += 1
+            out.append(rows[k])
+            for _ in range(n_garbled):
+                k += 1
+                t, _, v, temp = rows[k]
+                out.append((t, 450.0, v, temp))
+            out.extend(rows[k + 1:e])
+            j = e
+            continue
+        out.append(rows[j])
+        j += 1
+    return out
+
+
+@pytest.mark.parametrize('n_garbled', [0, 4, 8])
+def test_a_second_glitch_before_the_first_ones_neighbourhood_is_complete_ends_the_segment(n_garbled):
+    """The review published 102.4 / 107.3 Ah for 97.5 with 4 / 8 garbled
+    frames: the second glitch shared the first one's open decision, which
+    closed one good sample after it."""
+    est, pub = run(_glitch_in_open_window(full_cycles(n=3).rows, n_garbled))
+    assert est.counts['current_implausible_neighbours'] == 3 and est.counts['current_implausible_burst'] == 0
+    assert all(s['dq'] > 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_judged_by_the_first_ones_decision_the_garbage_after_the_second_is_counted(monkeypatch):
+    def shared(self, t):
+        burst = self._t_glitch is not None and 0 <= t - self._t_glitch <= q.GLITCH_ISOLATION_S
+        if self._glitch_nb is not None and not burst:
+            self._keep = self._glitch_nb  # the old code left the open decision as it was
+        return 'current_implausible_burst' if burst else None
+    add = q.QmaxEstimator.add
+
+    def keep(self, *a, **k):
+        r = add(self, *a, **k)
+        if getattr(self, '_keep', None) is not None:
+            self._glitch_nb, self._keep = self._keep, None
+        return r
+    monkeypatch.setattr(q.QmaxEstimator, '_glitch_ends', shared)
+    monkeypatch.setattr(q.QmaxEstimator, 'add', keep)
+    rows = full_cycles(n=3).rows
+    for n_garbled, want in ((4, 102.4), (8, 107.3)):
+        est, _ = run(_glitch_in_open_window(rows, n_garbled))
+        dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+        assert dis and est.counts['current_implausible_neighbours'] == 0, 'scenario is harmless'
+        assert all(x == pytest.approx(want, abs=0.2) for x in dis), (n_garbled, dis)
 
 
 def test_calibration_without_the_current_bound_the_glitches_are_published(monkeypatch):
