@@ -197,8 +197,14 @@ because they read like a pack at rest: a counter that runs into its end and back
 that dropped below the counter's highest value without the BMS reporting it, and a counter that stops counting with
 less than about 2 % of the capacity moved before the shutdown (a bound in charge, not in time: for a 100 Ah pack about
 4 minutes at 22 A, one at 100 A) and still reads the same afterwards (the 49 Ah case above, with a frozen BMS counter).
-What would close the last one, holding a segment that spans a restart back until the counter has been seen moving with
-the current again, is not built yet. A file that does not validate is discarded (the log says why).
+That last one is caught after the restart: a segment that spans a continued restart is held back until the BMS's counter
+has been seen moving with the current again (two of its steps, in the same direction, within the same 2 %). If it stays
+put while more than that moves, or comes back with the charge it missed, the segment ends there and the held ones are
+dropped. On counters stopped 1–4 minutes before the shutdown with 44 Ah unseen, it ends all three segments that went
+out as 49 Ah. A clean restart costs nothing but the wait: after a rest under load the counter has moved before the
+rest's anchor is made. What it cannot see is a counter that stopped only while the host was off and counts normally
+after it. A second restart before the counter has been seen moving ends the segment. A file that does not validate is
+discarded (the log says why).
 
 If the clock steps back (a Raspberry Pi without a hardware clock boots behind real time, or the state was saved while
 the clock ran ahead), the age of anything timed after the new sample can no longer be measured. The open segment, the

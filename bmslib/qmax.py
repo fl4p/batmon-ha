@@ -102,10 +102,16 @@ every cycle); one garbled reading below PLAUSIBLE_REL[1] x the capacity raises
 it for good and turns that one test off. Not covered: a counter that runs into
 a stop and back out while the host is off (charged to full, then discharged by
 what it had counted), a full end that moved below the counter's highest
-reading and that nothing reports, or a counter that stops counting less than
-RESUME_TOL_FRAC of the capacity of charge (moved either way, not net) before
-the shutdown and still reads the same after it (the frozen-clock case above
-then still publishes 49 Ah for 98) -- they read like a pack at rest.
+reading and that nothing reports -- they read like a pack at rest. A counter
+that stops counting less than RESUME_TOL_FRAC of the capacity of charge (moved
+either way, not net) before the shutdown and still reads the same after it
+passes the restart's check too (the frozen-clock case above published 49 Ah
+for 98 that way); so a continued restart is checked again afterwards
+(_audit_step): every pair across it is held back until the counter is seen
+moving with the current, and the epoch ends there if it stays put or comes
+back with what it missed. Still not covered: a counter that stopped only
+while the host was off and counts normally again after it (it missed what the
+bridge missed).
 
 Segments are accepted with the tightened universal gates from the prototype's
 TODO: every cell on a steep part of the curve at both ends, |dSoC| >= 60 % for
