@@ -738,11 +738,14 @@ def test_the_bms_reported_capacity_is_never_the_reference(bms_cap):
     denominator, and a healthy 98 Ah pack read SoH 108.3 / 88.6 / 81.3 /
     65.0 % with the BMS set to 90 / 110 / 120 / 150 Ah. Now nothing goes out
     without the option, and with it the option is the reference whatever the
-    BMS says."""
+    BMS says (150 is more than 1.25x the option: nothing at all)."""
     est, pub = _with_bms_capacity(full_cycles().rows, bms_cap)
     assert pub == [] and not est.segments and est.capacity() == (None, None)
     assert est.pair_reasons['no_capacity'] >= 4 and 'accepted' not in est.pair_reasons
     est, pub = _with_bms_capacity(full_cycles().rows, bms_cap, cap=100.0)
+    if bms_cap > q.CAPACITY_MISMATCH_MAX * 100.0:
+        assert pub == [] and est.segments
+        return
     assert pub[-1]['capacity'] == 100.0 and pub[-1]['capacity_source'] == 'option'
     assert pub[-1]['soh'] == pytest.approx(pub[-1]['qmax']) == pytest.approx(97.5, abs=0.2)
 
@@ -759,7 +762,7 @@ def test_a_bank_capacity_as_the_option_is_not_published(bms_cap, caplog):
     """Fourth review, finding 4: a 100 Ah pack in a bank of two, the option
     set to the bank's 200 Ah. 97.5 Ah is inside 0.4-1.2 x 200, and SoH 48.8 %
     went out with the plausibility check passed. The BMS reports 100: the two
-    differ by more than 1.5x, nothing is published, and the log names both."""
+    differ by more than 1.25x, nothing is published, and the log names both."""
     with caplog.at_level('WARNING'):
         est, pub = _with_bms_capacity(full_cycles(n=3).rows, bms_cap, cap=200.0)
     assert pub == []
@@ -782,29 +785,56 @@ def test_calibration_with_the_mismatch_factor_out_of_reach_the_bank_capacity_is_
 
 
 def test_monotone_in_how_far_the_option_is_from_the_bms_capacity():
-    """Published up to 1.5x either way, never again beyond, to the far tail.
+    """Published up to 1.25x either way, never again beyond, to the far tail.
     (Up: the option 100 against a BMS that reports less; down: more.)"""
     rows = full_cycles(n=3).rows
-    up = [bool(_with_bms_capacity(rows, 100.0 / r, cap=100.0)[1]) for r in (1.0, 1.2, 1.5, 1.51, 2.0, 10.0, 1e6)]
-    down = [bool(_with_bms_capacity(rows, 100.0 * r, cap=100.0)[1]) for r in (1.0, 1.2, 1.5, 1.51, 2.0, 10.0, 1e6)]
+    ratios = (1.0, 1.2, 1.25, 1.26, 1.5, 2.0, 10.0, 1e6)
+    up = [bool(_with_bms_capacity(rows, 100.0 / r, cap=100.0)[1]) for r in ratios]
+    down = [bool(_with_bms_capacity(rows, 100.0 * r, cap=100.0)[1]) for r in ratios]
     for v in (up, down):
         _monotone(v)
         assert v[:3] == [True] * 3 and not v[3]
 
 
+@pytest.mark.parametrize('option', [140.0, 150.0, 128.6])
+def test_an_option_set_for_an_unequal_bank_is_not_published(option):
+    """Rev8, finding 3: the 100 Ah pack (BMS 100) with the option at 140 /
+    150 went out as SoH 69.7 / 65.0 %, plausibility checked; 128.6 is the
+    280 + 100 Ah bank's 380 seen from its 280 Ah pack (1.36x)."""
+    est, pub = _with_bms_capacity(full_cycles(n=3).rows, 100.0, cap=option)
+    assert pub == [] and len(est._counted()) == 5
+
+
+def test_an_option_within_1_25x_of_the_bms_figure_still_publishes_its_soh():
+    """The documented limit: 120 for a 100 Ah pack whose BMS reports 100."""
+    est, pub = _with_bms_capacity(full_cycles(n=3).rows, 100.0, cap=120.0)
+    assert pub and pub[-1]['soh'] == pytest.approx(81.3, abs=0.2)
+
+
+def test_calibration_with_the_mismatch_factor_at_1_5_an_unequal_bank_is_published(monkeypatch):
+    monkeypatch.setattr(q, 'CAPACITY_MISMATCH_MAX', 1.5)
+    for option, want in ((140.0, 69.7), (150.0, 65.0), (128.6, 75.8)):
+        est, pub = _with_bms_capacity(full_cycles(n=3).rows, 100.0, cap=option)
+        assert pub, 'scenario is harmless'
+        assert pub[-1]['soh'] == pytest.approx(want, abs=0.2) and pub[-1]['plausibility_checked']
+
+
 def test_the_bms_capacity_is_the_median_of_hourly_readings():
-    """The legacy Daly derivation swings near empty: one odd reading does not
-    refuse, readings that persist do."""
+    """The legacy Daly derivation swings near empty: odd readings do not
+    refuse, readings that persist for half of BMS_CAP_N hours do."""
     est = _fresh()
-    for k, c in enumerate((100.0, 100.0, 267.0, 100.0, 100.0)):
+    n = q.BMS_CAP_N
+    for k in range(n):
+        c = 267.0 if k % 4 == 3 else 100.0
         est.add(T0 + 3600 * k, 1.0, None, capacity=c)
-        assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None  # also right after the 267
-    for k in range(5, 8):
+        assert est.bms_capacity() == 100.0 and est.capacity_mismatch() is None  # also right after a 267
+    for k in range(n, n + n // 2 + 1):
         est.add(T0 + 3600 * k, 1.0, None, capacity=267.0)
     assert est.capacity_mismatch() == (100.0, 267.0)
-    for k in range(8, 10):  # within the hour: no new reading
-        est.add(T0 + 3600 * 7 + 60 * k, 1.0, None, capacity=100.0)
-    assert len(est._bms_caps) == q.BMS_CAP_N and est.bms_capacity() == 267.0
+    t1 = T0 + 3600 * (n + n // 2)
+    for k in range(1, 10):  # within the hour: no new reading
+        est.add(t1 + 60 * k, 1.0, None, capacity=100.0)
+    assert len(est._bms_caps) == n and est.bms_capacity() == 267.0
 
 
 def test_the_bms_capacity_is_read_once_an_hour_not_every_sample():
@@ -1926,7 +1956,8 @@ def _int_soc_top(hidden, ratio, aged=False, raw_soc=True, after_restore=None, sa
         for j in range(a, b):
             t, i, v, temp = rows[j]
             full = ends[min(bisect.bisect_left(cuts, j), len(ends) - 1)]  # the end its next stop is at
-            smp = BmsSample(voltage=53.0, current=i, charge=charge[t], capacity=round(full / ratio, 2),
+            # the design capacity it reports is a fixed figure, ratio x the first full end
+            smp = BmsSample(voltage=53.0, current=i, charge=charge[t], capacity=round(ends[0] / ratio, 2),
                             soc=int(round(min(100.0, 100.0 * charge[t] / full))), temperatures=[temp], timestamp=t,
                             aged_capacity=full if aged else math.nan)
             _drive(s._feed_qmax(smp, i, v))

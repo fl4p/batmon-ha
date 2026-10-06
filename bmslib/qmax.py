@@ -371,16 +371,23 @@ PLAUSIBLE_REL = (0.4, 1.2)
 # bank of two with the option at 200 published SoH 48.8 % with the check
 # passed (0.4 x 200 = 80 < 97.5). The BMS's figure is a sanity check only,
 # never the reference (it is a setting nobody checked, or derived); without
-# one, nothing changes. 1.5: a BMS set to its usable capacity or to a learnt
-# one passes; a second pack's worth does not. What it costs: a pack whose BMS
-# reports its learnt capacity as the capacity (braunpwr_uart, renogy_uart, JK
-# through aiobmsble) is refused below SoH 67 %, where the BMS's own figure
-# says the same thing. The figure is the median of one reading per hour over
-# the last BMS_CAP_N hours, so the derived capacity of the legacy Daly driver,
-# which swings near empty, needs hours there to move it.
-CAPACITY_MISMATCH_MAX = 1.5
+# one, nothing changes. 1.25, tightened from 1.5 (rev8): at 1.5 an option
+# entered for a bank of UNEQUAL packs passed, e.g. 380 for the 280 Ah pack of
+# a 280 + 100 Ah bank (1.36), and a 100 Ah pack with the option at 120 / 140 /
+# 150 went out as SoH 81.3 / 69.7 / 65.0 %, plausibility checked. At 1.25 a
+# bank figure is caught when the other packs add more than a quarter of this
+# one; a BMS set to its usable capacity (0.8-1.0 of nameplate) still passes.
+# What it costs: a pack whose BMS reports its learnt capacity as the capacity
+# (braunpwr_uart, renogy_uart, JK through aiobmsble) is refused below SoH 80 %
+# (it was 67 %), the usual end-of-life mark, where the BMS's own figure says
+# the same thing; and an option within 1.25x of a wrong BMS setting is not
+# caught. The figure is the median of one reading per hour over the last
+# BMS_CAP_N hours: the derived capacity of the legacy Daly driver swings near
+# empty (160-300 Ah for 280), and a mismatch now withdraws what was published
+# (wants_withdrawal), so it must persist for half a day to count.
+CAPACITY_MISMATCH_MAX = 1.25
 BMS_CAP_PERIOD_S = 3600.0
-BMS_CAP_N = 5
+BMS_CAP_N = 24
 MAX_ANCHORS = 16  # evaluable anchors kept; rests of >= 90 min come ~1-2 a day, MAX_SEGMENT_S is 10 days
 
 # ---------------------------------------------------------------- output

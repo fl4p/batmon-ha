@@ -22,11 +22,14 @@ setting but remaining charge ÷ SoC, which swings between 160 and 300 Ah near em
 plausibility check it would vouch for Qmax with a number from the same unchecked BMS configuration as the current
 scale: set to 150 Ah, it let a current reading 1.4× too high through as 137 Ah for that 98 Ah pack. It is only a sanity
 check of the option: when the option and the capacity the BMS reports (the median of one reading an hour over the last
-five hours) differ by more than 1.5×, nothing is published and the log names both. That catches the option set to a
+24 hours) differ by more than 1.25×, nothing is published and the log names both. That catches the option set to a
 bank's capacity, which the plausibility check below cannot: a 100 Ah pack in a bank of two with the option at 200 went
-out as SoH 48.8 %. It costs a value where the BMS reports its own learnt capacity as the capacity (braunpwr_uart,
-renogy_uart, JK through the aiobmsble driver) and that has dropped below 67 % of the nameplate. Without a capacity from
-the BMS there is no such check. The `Qmax (est.)` sensor carries attributes: how many segments the value is
+out as SoH 48.8 %. At 1.5× a bank of unequal packs got through: the 280 Ah pack of a 280 + 100 Ah bank
+with the option at 380 (1.36×), or a 100 Ah pack with the option at 140 or 150, out as SoH 69.7 or 65.0 %. An option
+within 1.25× of the BMS's figure still goes through (120 for that pack: SoH 81.3 %), and so does a bank whose other
+packs add less than a quarter of this one. It costs a value where the BMS reports its own learnt capacity as the
+capacity (braunpwr_uart, renogy_uart, JK through the aiobmsble driver) and that has dropped below 80 % of the
+nameplate. Without a capacity from the BMS there is no such check. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
 not an error bound, see below), and the capacity used.
