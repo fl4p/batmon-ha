@@ -2250,11 +2250,23 @@ def test_a_counter_that_stopped_before_the_restart_is_no_evidence():
     assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
 
 
-def test_calibration_without_the_staleness_term_a_stopped_counter_publishes_half_the_pack():
+def _no_audit(monkeypatch):
+    """Switch off the check after a continued restart (_audit_step): it is
+    the second layer behind the restart's own evidence, and catches the
+    stopped counters below once they move again."""
+    monkeypatch.setattr(q.QmaxEstimator, '_start_audit', lambda self, *a: None)
+
+
+def test_calibration_without_the_staleness_term_a_stopped_counter_publishes_half_the_pack(monkeypatch):
+    """Redundant, and said so: the counter catches up after the restart, and
+    the check after it ends the segment. Without both, 49 Ah."""
     rows, cuts, charge, soc = _stuck_counter(600.0, n=3)
 
     def fresh_looking(est):
         est._c_q = est.q_moved  # as if the counter had just moved: the old check
+    est, _ = _split_run(rows, cuts, charge=charge, soc=soc, after_restore=fresh_looking)
+    assert est.counts['restart_audit'] == 3 and not any(s['dq'] < 0 for s in est.segments)
+    _no_audit(monkeypatch)
     est, pub = _split_run(rows, cuts, charge=charge, soc=soc, after_restore=fresh_looking)
     dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
     assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
@@ -2326,7 +2338,10 @@ def _netzero_frozen_net_term(swing_s):
         q.QmaxEstimator.add = add
 
 
-def test_calibration_with_the_net_charge_a_stopped_counter_publishes_half_the_pack():
+def test_calibration_with_the_net_charge_a_stopped_counter_publishes_half_the_pack(monkeypatch):
+    est, _ = _netzero_frozen_net_term(600.0)
+    assert est.counts['restart_audit'] == 3 and not any(s['dq'] < 0 for s in est.segments)  # (second layer)
+    _no_audit(monkeypatch)
     est, pub = _netzero_frozen_net_term(600.0)
     dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
     assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
@@ -2352,6 +2367,9 @@ def test_a_counter_stopped_through_a_current_that_changes_sign_every_sample_is_n
 
 def test_calibration_with_the_net_charge_per_interval_a_stopped_counter_publishes_half_the_pack(monkeypatch):
     monkeypatch.setattr(q.QmaxEstimator, '_moved', staticmethod(lambda i0, i1, dt: abs(0.5 * (i0 + i1) * dt / 3600.0)))
+    est, _ = _netzero_frozen(10.0, reps=60)
+    assert est.counts['restart_audit'] == 3 and not any(s['dq'] < 0 for s in est.segments)  # (second layer)
+    _no_audit(monkeypatch)
     est, pub = _netzero_frozen(10.0, reps=60)
     dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
     assert est.counts['restart_unverified'] == 0 and dis, 'scenario is harmless'
@@ -2385,6 +2403,74 @@ def test_monotone_in_how_long_the_counter_was_stale():
     held = [ok(x, 44.0) for x in (60.0, 120.0, 180.0, 240.0, 300.0, 600.0, 3600.0)]
     _monotone(held)
     assert held == [True] * 4 + [False] * 3  # 60..240 s passed, 300 s and more refused
+
+
+@pytest.mark.parametrize('stuck_s', [60.0, 120.0, 240.0])
+def test_a_counter_stopped_just_before_the_shutdown_is_caught_once_it_moves_again(stuck_s):
+    """The residual the restart's own check cannot see (module doc): the
+    counter stopped less than 2 % of the capacity before the shutdown and
+    reads the same after it, while the pack delivered 44 Ah unseen. The
+    restart continues -- and the pairs across it are held until the counter
+    is seen moving with the current. It comes back with the 44 Ah it counted:
+    the segment ends there, and 49 Ah no longer go out for 98."""
+    rows, cuts, charge, soc = _stuck_counter(stuck_s, n=3)
+    est, pub = _split_run(rows, cuts, charge=charge, soc=soc)
+    assert est.counts['restart_unverified'] == 0 and est.counts['restart_audit'] == 3
+    assert not any(s['dq'] < 0 for s in est.segments)
+    assert pub and all(r['qmax'] == pytest.approx(98.0, rel=0.01) for r in pub)
+
+
+def test_calibration_without_the_check_after_the_restart_the_stopped_counter_publishes_half_the_pack(monkeypatch):
+    _no_audit(monkeypatch)
+    rows, cuts, charge, soc = _stuck_counter(120.0, n=3)
+    est, pub = _split_run(rows, cuts, charge=charge, soc=soc)
+    dis = [s['qmax'] for s in est.segments if s['dq'] < 0]
+    assert dis, 'scenario is harmless'
+    assert all(x < 0.55 * 98.0 for x in dis) and pub[0]['plausibility_checked']
+
+
+def test_a_counter_that_stays_stopped_after_the_restart_ends_the_segment():
+    """A counter stopped for good (a hung BMS) never moves again: once more
+    than the tolerance has moved without it, the restart's evidence is void."""
+    rows, cuts, charge, soc = _frozen_clock(hidden_ah=0.0, n=1)
+    held = charge[rows[cuts[0] - 1][0]]
+    charge = {t: (held if t >= rows[cuts[0] - 1][0] else c) for t, c in charge.items()}
+    est, _ = _split_run(rows, cuts, charge=charge, soc=soc)
+    assert est.counts['restart_unverified'] == 0 and est.counts['restart_audit'] == 1
+    assert not any(s['dq'] < 0 for s in est.segments)
+
+
+def test_a_clean_restart_is_released_once_the_counter_moves():
+    """What the hold costs a clean restart: nothing but time. A restart in
+    the bottom rest, then a 3 A load: the rest's anchor is made before the
+    counter has moved two 0.1 Ah steps, so its pair across the restart waits,
+    and is accepted once the counter has, with the value of the run without
+    the restart. (After a rest under a real load the counter moves first.)"""
+    p = Pack().rest()
+    p.run(50.0, 3600 * 88 / 50).rest(7200)
+    cut = len(p.rows) - 300  # 50 min before the end of the bottom rest
+    p.run(3.0, 600).run(-50.0, 3600 * 88 / 50).rest().end()
+    whole, _ = run(p.rows, **bms(p))
+    est, pub = _split_run(p.rows, [cut], **bms(p))
+    assert est.counts['restart_audit'] == 0 and est.pair_reasons['restart_held'] == 1
+    assert seg_q(est) == pytest.approx(seg_q(whole), rel=1e-9) and len(est.segments) == 2
+
+
+def test_a_pending_check_survives_a_restart_and_a_second_restart_before_it_ends_the_segment():
+    """Saved and restored with the state; a second restart while the first is
+    unconfirmed has nothing to stand on (the counter has not been seen moving
+    since): it ends the segment like one without evidence."""
+    est = _fresh()
+    for k in range(10):
+        est.add(T0 + 36 * k, 10.0, None, bms_charge=50.0 + 0.1 * (9 - k), bms_soc=50.0)
+    r = _fresh()
+    assert r.restore(_via_json(est.get_state()))
+    r.add(T0 + 360, 0.0, None, bms_charge=49.9, bms_soc=50.0)
+    assert r._audit is not None and r.counts['restart_unverified'] == 0
+    r2 = _fresh()
+    assert r2.restore(_via_json(r.get_state())) and r2._audit == r._audit
+    r2.add(T0 + 400, 0.0, None, bms_charge=49.9, bms_soc=50.0)
+    assert r2.counts['restart_unverified'] == 1 and r2._audit is None
 
 
 def test_the_counter_resolution_is_learnt_per_counter():
@@ -2841,6 +2927,15 @@ BAD_STATES = [
     ('bin not at last_t', lambda s: s['bin'].update(t1=s['bin']['t1'] - 5)),
     ('rest bins without rest_t0', lambda s: s.update(rest_t0=None)),
     ('rest bin garbage', lambda s: s['rest_bins'].append('x')),
+    ('audit garbage', lambda s: s.update(audit='yes')),
+    ('audit after last_t', lambda s: s.update(audit=dict(t=s['last_t'] + 1, c=50.0, src='charge', q=0.0, m=0.0,
+                                                          held=[]))),
+    ('audit moved beyond q_moved', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='charge', q=0.0,
+                                                                  m=s['q_moved'] + 1, held=[]))),
+    ('audit of an unknown counter', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='volts', q=0.0, m=0.0,
+                                                                   held=[]))),
+    ('audit held not numbers', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='charge', q=0.0, m=0.0,
+                                                              held=['x']))),
 ]
 
 

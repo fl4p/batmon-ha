@@ -676,6 +676,11 @@ class QmaxEstimator:
         self._last_cfull: Optional[float] = None  # the capacity the BMS reported at _last_t [Ah], None when unknown
         self._last_aged: Optional[float] = None  # the aged (learnt full) capacity it reported [Ah], None when unknown
         self._resumed = False  # set by restore(): the next sample is the first after a restart
+        # A restart that continued the open segment, until the BMS's counter has
+        # been seen moving with the current again (_audit_step): {'t', 'c', 'src':
+        # the first sample after it and its counter reading, 'q', 'm': q_ah and
+        # q_moved there, 'held': times of the anchors whose pairs across it wait}
+        self._audit: Optional[Dict[str, Any]] = None
         self._bms_caps: deque = deque(maxlen=BMS_CAP_N)  # [t, capacity the BMS reported], one an hour
         self._cap_warned = False  # the mismatch was logged by this process
         self._t_glitch: Optional[float] = None  # the last impossible current reading
@@ -911,6 +916,7 @@ class QmaxEstimator:
         cfull = float(capacity) if finite(capacity) and capacity > 0 else None
         aged = float(aged_capacity) if finite(aged_capacity) and aged_capacity > 0 else None
         new = None
+        resumed = False  # this sample continues the open segment across a restart
         if self._last_t is not None:
             dt = t - self._last_t
             if not 0 <= dt <= MAX_GAP_S:  # (dt < 0 cannot reach here: _clock_back reset _last_t)
@@ -918,6 +924,7 @@ class QmaxEstimator:
             elif self._resumed and not self._resume_ok(t, i, dt, c, src, (soc, soc_raw, cfull, aged)):
                 new = self._gap(t, 'restart_unverified')
             else:
+                resumed = self._resumed
                 assert self._last_i is not None
                 self.q_ah += 0.5 * (i + self._last_i) * dt / 3600.0
                 self.q_moved += self._moved(self._last_i, i, dt)
@@ -946,6 +953,10 @@ class QmaxEstimator:
             self._c_max = c if self._c_max is None else max(self._c_max, c)
         self._last_t, self._last_i, self._last_c = t, i, c
         self._last_soc, self._last_soc_raw, self._last_cfull, self._last_aged = soc, soc_raw, cfull, aged
+        if resumed:
+            self._start_audit(t, c, src)
+        elif self._audit is not None:
+            new = self._audit_step(t, c, src) or new
         if cfull is not None and (not self._bms_caps or not 0 <= t - self._bms_caps[-1][0] < BMS_CAP_PERIOD_S):
             self._bms_caps.append([t, cfull])
             if not self._cap_warned and self.capacity_mismatch() is not None:
@@ -1095,7 +1106,9 @@ class QmaxEstimator:
         cap, _ = self.capacity()
         assert self._last_i is not None
         bridge = 0.5 * (i + self._last_i) * dt / 3600.0
-        if c is None or self._last_c is None:
+        if self._audit is not None:
+            why = "the BMS's counter has not been seen moving with the current since the restart before"
+        elif c is None or self._last_c is None:
             why = 'the BMS reports no remaining charge to check it against'
         elif src != self._c_src:
             why = 'the charge counter is another one than before (%s, was %s)' % (src, self._c_src)
@@ -1130,6 +1143,56 @@ class QmaxEstimator:
         logger.info('%s: Qmax: restart after %.0f s by the clock, open segment ended: %s', self.name, dt, why)
         return False
 
+    def _start_audit(self, t: float, c: Optional[float], src: Optional[str]):
+        """A restart continued the open segment on the counter's word, which
+        cannot tell a counter that stopped shortly before the shutdown (and
+        still reads the same) from one at rest (module doc). Hold every pair
+        across it back until the counter is seen moving with the current."""
+        assert c is not None
+        self._audit = dict(t=t, c=c, src=src, q=self.q_ah, m=self.q_moved, held=[])
+
+    def _audit_step(self, t: float, c: Optional[float], src: Optional[str]) -> Optional[Dict[str, Any]]:
+        """After a continued restart: the counter, compared with the charge
+        counted since, either moves with it (by at least two of its steps, in
+        the same direction, within the restart's tolerance: the pairs held
+        back are released) or does not -- it stays put while more than the
+        tolerance moves, or it disagrees by more (a stopped counter that came
+        back with what it had missed). Then the restart's evidence was
+        worthless: the epoch ends there and the held pairs are dropped."""
+        a = self._audit
+        assert a is not None
+        cap, _ = self.capacity()
+        if not cap or self.q_c is None or self._c_q is None or (c is not None and src != a['src']):
+            return self._audit_fail(t, 'the counter it was checked with is gone')
+        tol = RESUME_TOL_FRAC * cap + self.q_c
+        stale = self.q_moved - self._c_q
+        if stale > tol:
+            return self._audit_fail(t, 'the BMS counter has not moved while %.2f Ah did' % stale)
+        if c is None:
+            return None
+        d_bms, d_q = c - a['c'], self.q_ah - a['q']
+        if abs(d_bms - d_q) > tol:
+            return self._audit_fail(t, 'the BMS counted %+.2f Ah since it, batmon %+.2f Ah' % (d_bms, d_q))
+        if abs(d_bms) >= 2 * self.q_c and d_bms * d_q > 0:
+            logger.info('%s: Qmax: the BMS counter moves with the current again (%+.2f Ah, counted %+.2f Ah) since '
+                        'the restart at %s: %d anchor(s) held back may pair across it', self.name, d_bms, d_q,
+                        fmt_t(a['t']), len(a['held']))
+            self._audit = None
+            new = None
+            for bt in a['held']:
+                b = next((x for x in self.anchors if x['t'] == bt), None)
+                if b is not None:
+                    new = self._pair_new(b, t, [x for x in self.anchors if x['t'] < bt]) or new
+            return new
+        return None
+
+    def _audit_fail(self, t: float, why: str) -> Optional[Dict[str, Any]]:
+        a = self._audit
+        assert a is not None
+        logger.info('%s: Qmax: the restart at %s continued the open segment, but %s: segment ended, %d anchor(s) '
+                    'held back not paired across it', self.name, fmt_t(a['t']), why, len(a['held']))
+        return self._gap(t, 'restart_audit')  # (pairs across it stay held while it closes the open rest)
+
     def _gap(self, t, why) -> Optional[Dict[str, Any]]:
         """The current record broke at t: close what was measured before it (a
         rest long enough still makes its anchor, ending at its last sample
@@ -1140,7 +1203,7 @@ class QmaxEstimator:
             new = self._close_bin(t)
         new = self._end_rest(t) or new
         self.epoch += 1
-        self._resumed, self._glitch_nb = False, None
+        self._resumed, self._glitch_nb, self._audit = False, None, None
         self.counts[why] += 1
         if why != 'current_implausible_burst':
             logger.debug('%s: Qmax: %s of %.0f s in the current record, open segment invalidated',
@@ -1171,7 +1234,7 @@ class QmaxEstimator:
             self._oob_since = t
         if self._t_glitch is not None and self._t_glitch > t:
             self._t_glitch = None
-        self._glitch_nb = None
+        self._glitch_nb = self._audit = None
         self._recent.clear()  # timed on the other clock
         self._bms_caps = deque((x for x in self._bms_caps if x[0] <= t), maxlen=BMS_CAP_N)
         self._t_volt = None
@@ -1301,8 +1364,9 @@ class QmaxEstimator:
             while self.anchors[0]['t'] < b['t'] - MAX_SEGMENT_S:
                 self.anchors.popleft()  # too old to pair with anything to come
 
-    def _pair_new(self, b, now: float) -> Optional[Dict[str, Any]]:
-        cands = list(self.anchors)[:-1]
+    def _pair_new(self, b, now: float, cands=None) -> Optional[Dict[str, Any]]:
+        if cands is None:
+            cands = list(self.anchors)[:-1]
         reason = 'no_prior_anchor'
         for a in reversed(cands):
             if a['epoch'] != b['epoch']:
@@ -1314,11 +1378,16 @@ class QmaxEstimator:
             if self._last_seg_t is not None and a['t'] < self._last_seg_t:
                 reason = 'overlap'
                 break
+            if self._audit is not None and a['t'] < self._audit['t'] <= b['t']:
+                reason = 'restart_held'  # across a restart the counter has not confirmed yet (_audit_step)
+                if b['t'] not in self._audit['held']:
+                    self._audit['held'].append(b['t'])
+                break
             seg, reason = self._evaluate(a, b)
             self.pair_reasons[reason or 'accepted'] += 1
             if seg is not None:
                 return self._accept(seg, now)
-        if reason in ('gap', 'span', 'overlap', 'no_prior_anchor'):
+        if reason in ('gap', 'span', 'overlap', 'no_prior_anchor', 'restart_held'):
             self.pair_reasons[reason] += 1
         self.counts['anchor_unpaired'] += 1
         return None
@@ -1433,6 +1502,7 @@ class QmaxEstimator:
             q_charge=self.q_c, charge_q=self._c_q, charge_max=self._c_max, last_soc=self._last_soc,
             last_soc_raw=self._last_soc_raw, last_charge_full=self._last_cfull, last_aged=self._last_aged,
             t_glitch=self._t_glitch, glitch_nb=copy.deepcopy(self._glitch_nb), recent=list(self._recent),
+            audit=copy.deepcopy(self._audit),
             bms_caps=[list(x) for x in self._bms_caps],
             q_ah=self.q_ah, q_moved=self.q_moved, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
@@ -1612,6 +1682,16 @@ class QmaxEstimator:
             nb = dict(before=[v_fin(v, 'glitch_nb') for v in nb['before']],
                       after=[v_fin(v, 'glitch_nb') for v in nb['after']])
         self._glitch_nb = nb
+        au = st.get('audit')
+        if au is not None:
+            if not (isinstance(au, dict) and set(au) == {'t', 'c', 'src', 'q', 'm', 'held'} and last_t is not None
+                    and _counter_src_ok(au['src']) and isinstance(au['held'], list)
+                    and v_fin(au['t'], 'audit t') <= last_t and 0 <= v_fin(au['m'], 'audit m') <= q_moved):
+                raise ValueError('audit %r' % (au,))
+            v_fin(au['c'], 'audit c')
+            v_fin(au['q'], 'audit q')
+            au = dict(au, held=[v_fin(x, 'audit held') for x in au['held']])
+        self._audit = au
         bc = st.get('bms_caps')
         if not isinstance(bc, list) or len(bc) > BMS_CAP_N or not all(isinstance(x, list) and len(x) == 2 for x in bc):
             raise ValueError('bms_caps %r' % (bc,))
