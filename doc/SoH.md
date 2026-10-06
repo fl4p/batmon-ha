@@ -115,7 +115,7 @@ The sensors show the median of the last 5 accepted segments of the past year, on
 between accepted segments, and the entities expire a year after the last one. A value that would no longer go out is
 withdrawn at once (the sensors show unknown): when the `capacity:` option was corrected or the code changed (the saved
 state is discarded at the start), when the capacity the BMS reports starts to disagree with the option, when the
-estimator is disabled, or when its segments are dropped. Before 2.24 such a value stayed for up to a year. It comes back
+estimator is disabled, or when its segments are dropped. Earlier versions left such a value for up to a year. It comes back
 with the next accepted segment.
 
 ## Why no value
