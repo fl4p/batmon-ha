@@ -1,0 +1,28 @@
+name: Changelog
+
+# Every CHANGELOG.md entry is at most 30 words (bmslib/test/test_changelog.py).
+# The test needs nothing but pytest, so this runs on any change to either file.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'CHANGELOG.md'
+      - 'bmslib/test/test_changelog.py'
+      - '.github/workflows/changelog.yml'
+  pull_request:
+    paths:
+      - 'CHANGELOG.md'
+      - 'bmslib/test/test_changelog.py'
+      - '.github/workflows/changelog.yml'
+
+jobs:
+  entry-length:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install pytest
+      - run: python -m pytest -q -p no:cacheprovider bmslib/test/test_changelog.py

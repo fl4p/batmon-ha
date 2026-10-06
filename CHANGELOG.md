@@ -8,7 +8,7 @@
 * Fix (`soh_estimator`): a restart with the BMS's counter held at its full end could still pass with a whole-number SoC. The stop rule now also checks the reported SoC.
 * Fix (`soh_estimator`): saved segments survived a change of `capacity:`, so a replaced 100 Ah pack showed SoH 34.8 % of the new 280 Ah one. Such state is now discarded.
 * Fix (`soh_estimator`): garbled frames around a caught current glitch were counted (101–109 Ah for 97.5). Now the 5 readings either side must agree with their level (doc/SoH.md).
-* `soh_estimator`: `capacity:` is one pack's nameplate; a bank's capacity there passed (SoH 48.8 %). Nothing is published now when it differs from the BMS's reported capacity by over 1.25×.
+* `soh_estimator`: `capacity:` is one pack's nameplate; a bank's capacity there passed (SoH 48.8 %). Nothing is published now when it differs over 1.25× from the BMS's capacity (24-hour median).
 * Experimental estimators: saved state was kept after changes to code the fingerprint missed (closures, function attributes, module/class lists or dicts, BmsSample's SoC derivation). The fingerprint now covers them.
 * `impedance_estimator`: the first start after updating from 2.23 discards its saved state once (the code fingerprint changed), so the warm-up starts again.
 * Fix (`soh_estimator`): a published Qmax/SoH stayed in Home Assistant for up to a year after it stopped being valid (corrected `capacity:`, mismatch, estimator disabled). It is now cleared to unknown.
@@ -22,11 +22,11 @@
 
 * Experimental `impedance_estimator` (off by default): publishes per-cell resistance of LiFePO4 packs as a `Cell Resistance` sensor in mΩ; small packs may never draw the current steps it needs (doc/Cell Resistance.md).
 * The cell resistance estimator saves its state per BMS (`impedance_<name>.json`), so a restart keeps the collected windows instead of starting the warm-up again.
-* Experimental `soh_estimator` (off by default): estimates each LiFePO4 pack's capacity as `Qmax (est.)` and `SoH (est.)` sensors from the per-device `capacity:`. It publishes nothing yet; doc/SoH.md says why.
+* Experimental `soh_estimator` (off by default): `Qmax (est.)` and `SoH (est.)` from long rests and the charge counted between them. Needs the per-device nameplate `capacity:`; publishes nothing yet (doc/SoH.md).
 * Experimental `pack_temp_estimator` (off by default): a `Pack Temp (RC est.)` sensor estimating cell temperature from the MOSFET temperature and optional room/outdoor MQTT topics, for BMSes reporting only MOSFET temperature.
 * New wired type `braunpwr_uart` for BraunPWR packs with the KS48100 rack BMS, whose FC41D module keeps dropping BLE: a USB-TTL adapter on the module's header (9600 baud) instead (#403).
 * New `type: auto` for Bluetooth devices: batmon asks which protocol it speaks (`daly`, `daly2`, `jbd`, `jk`, `ant`) with read-only requests and logs the `type:` to set (#416).
-* Fix: `daly` never connected to modules that refuse an empty write on `fff2` (GATT error 258). `daly` now keeps the `fff1/fff2` layout and alternates host address `0x80`/`0x40` (#416).
+* Fix: `daly` never connected to modules that refuse an empty write on `fff2` (GATT error 258). It keeps that layout and, until the first reply, alternates host address `0x80`/`0x40` (#416).
 * Fix: `snoop` probing wrote into SIG characteristics, so via an ESPHome proxy a Daly module took the probe frame as its new name. It now probes vendor characteristics only (#416).
 * `daly2` timeouts now say to try `type: daly`: Daly modules that speak the classic `A5` protocol have the same `fff0` GATT layout and silently ignore Modbus requests (#416).
 * Fix: telemetry uploaded either a device's pack samples or its cell voltages, rarely both, because the two shared one 15 s slot. Each now has its own.
@@ -66,9 +66,9 @@
 * JBD: report which cells the balancer is bleeding, as a `balancing` binary sensor and a `balancing cells` list (e.g. `1,5,18`) (#283).
 * Fix (JBD): a basic-info frame whose NTC count byte overruns the payload is rejected instead of creating hundreds of phantom -273 °C temperature sensors in HA (#321).
 * `type: snoop`: add the `ej` probe family (E&J Technology `:`…`~` ASCII framing, incl. the Fogstar Drift app's poll) and fingerprint its replies (#351).
-* Telemetry: `doc/Telemetry.md` now states it is on by default, what is sent and how to opt out; the log says `Anonymous telemetry is ON`. Uploads now use HTTPS (#379).
+* Telemetry: `doc/Telemetry.md` states it is on by default, what is sent and how to opt out. Uploads prefer HTTPS and fall back to plain HTTP with a warning (#379).
 * Fix (JK): a status frame missing a BLE packet (busy ESPHome proxy) could publish values like 1,216,000 V, 107 kA and SOC 0%. Such frames are now rejected (#391).
-* `ble_stack: esphome`: a fresh 2.17 build failed every connect through ESPHome proxies, because a `bluetooth-data-tools<1.29` pin held habluetooth at 6.1.0. The packages are now pinned together (#401).
+* `ble_stack: esphome`: a fresh 2.17 build failed every connect through ESPHome proxies (habluetooth held at 6.1.0). Packages now pinned together; the connect fix awaits the reporter's confirmation (#401).
 * New optional `reconnect_interval_minutes`: drop each `keep_alive` BLE link every N minutes so the next connect re-picks the ESPHome proxy; otherwise a device stays on the first. Off by default (#406).
 * `concurrent_sampling`: a device that keeps failing now backs off up to 10 min (was 60 s), so its retries stop starving healthy neighbours on the same ESPHome proxy (#405).
 * Fix: a BMS failing every cycle for ~5 days crashed its fetch loop with `OverflowError` from the `1.1 ** n` error backoff; the exponent is now clamped.
@@ -79,7 +79,7 @@
 
 ## [2.17]
 
-* Bundled aiobmsble updated 0.25.0 → 0.27.0: fixes a permanent bogus Seplos v2 `problem_code` (#400, aiobmsble#98/#240), adds the `pwrboozt_bms` type and a TDT firmware-v1.1 fix.
+* Bundled aiobmsble updated 0.25.0 → 0.27.0: fixes a permanent bogus Seplos v2 `problem_code` (#400, aiobmsble#98/#240), adds the `pwrboozt_bms` type and a TDT firmware-v1.1 current/charge fix.
 
 ## [2.16]
 
@@ -93,7 +93,7 @@
 * Anonymous telemetry still hashes the address as written in the config, not the canonicalized form, so a device's telemetry identity does not move at this upgrade (#399).
 * With `ble_stack: esphome`, `adapter:` is no longer reported as used (habluetooth picks a proxy per connection), and start-up discovery scans once instead of once per adapter (#391).
 * With `ble_stack: esphome`, start-up no longer prints `BluetoothManager: does not implement _discover_service_info …`, which read like a fault but is harmless (#399).
-* New `bt_power_cycle_on_error` (off by default): power-cycles the Bluetooth controller when reconnects keep failing with `Operation already in progress`. At most once per 10 minutes; drops all BLE connections (#392).
+* New `bt_power_cycle_on_error` (off by default): power-cycles the Bluetooth controller when reconnecting a BMS keeps failing (e.g. `Operation already in progress`). At most every 10 minutes; drops all BLE connections (#392).
 * `tdt_nocrc`: a TDT/XiaoXiang variant accepting frames with a wrong firmware CRC, shipping since 2.14. Its invalid-CRC warning is now logged once per device, not per connection (#394).
 * Docs: Daly RS485 wiring that works (XH 5-pin: 1 = B−, 2 = A+, 3 = GND — GND is required), and UART/Bluetooth port sharing differs per Daly (#398).
 
