@@ -785,7 +785,8 @@ class BmsSampler:
             publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)
 
     async def _qmax_temperature(self, sample: BmsSample):
-        """Best cell temperature known, None if none (qmax.best_temperature)."""
+        """(best cell temperature known or None, whether it is the MOSFET's):
+        qmax.best_temperature."""
         from bmslib.qmax import best_temperature
         if self._pack_temp is not None and math.isfinite(self._pack_temp):
             return best_temperature(self._pack_temp, None, None)
@@ -798,8 +799,8 @@ class BmsSampler:
         if est is None:
             return
         try:
-            temp = await self._qmax_temperature(sample)
-            r = est.add_sample(sample, current, voltages, temp)
+            temp, temp_mos = await self._qmax_temperature(sample)
+            r = est.add_sample(sample, current, voltages, temp, temp_mos)
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: Qmax/SoH estimator failed, disabled: %s', self.bms.name, summarize_exc(e),

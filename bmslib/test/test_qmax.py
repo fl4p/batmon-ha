@@ -3111,6 +3111,88 @@ def _run_real(rows=None):
     return run(rows or real_rows(), est)
 
 
+REAL_COLD = os.path.join(os.path.dirname(__file__), 'data', 'daly_2025-11-21_cold_top.csv.gz')
+T_FULL_COLD = 1763728020.0  # 2025-11-21 12:27 UTC: the highest cell reaches 3550 mV
+
+
+def cold_rows(scale=1.0, bulk=None, remodel=0.0, warm=0.0):
+    """The van pack's cold morning (Daly, 280 Ah, two cells; 2025-11-21 05:00
+    -14:00 UTC, see data/SOURCES.md): 10-12 degC by its probe, and from 10:00
+    both cells at 3398-3412 mV under 13.7-15.8 A (C/20) while 33-45 Ah, 12-16 %,
+    were still to go. Perturbed as rev9 did: the charge current x scale (a
+    weaker sun), bulk = (A, minutes[, start]) from 08:20 or start (a DC-DC
+    charge while driving), the cell voltages moved by remodel [mOhm] x the change of the
+    current, warm degC added to the temperature (synthetic: the voltages stay
+    those of a cold pack)."""
+    def f(x):
+        return float(x) if x else math.nan
+    out = []
+    with gzip.open(REAL_COLD, 'rt') as fh:
+        for r in csv.DictReader(fh):
+            t, i = float(r['t']), f(r['current'])
+            new = i * scale if i < 0 else i  # (native sign: charging is negative)
+            t_bulk = bulk[2] if bulk and len(bulk) > 2 else 1763713200.0  # 08:20
+            if bulk and t_bulk <= t < t_bulk + 60 * bulk[1]:
+                new = -bulk[0]
+            dv = remodel * (i - new)  # mV per cell for a charge current changed by -(new - i)
+            out.append((t, new, [f(r['u1']) + dv, f(r['u2']) + dv], f(r['temp']) + warm))
+    return out
+
+
+def cold_tops(rows):
+    """[% of 280 Ah still to go after each top anchor, to 12:27]"""
+    est, _ = run(rows, q.QmaxEstimator('cold', design_capacity=280.0), curve=q.DEFAULT_CURVE)
+    out = []
+    for a in tops(est):
+        togo = sum(-i * 60 for t, i, v, temp in rows if a['t'] <= t < T_FULL_COLD and i < 0) / 3600
+        out.append(round(100 * togo / 280, 1))
+    return out
+
+
+def test_the_cold_morning_of_the_van_pack_is_no_charge_end(top_anchors):
+    """Rev9, finding 1. As recorded only the bulk rule's 2 A held it off;
+    with a DC-DC bulk (30 A for 20 min) and a 10 % weaker sun the old rules
+    took a tail anchor at 10:29 with 12 % still to go -- also with the cell
+    voltages moved by the cells' 0.5 mOhm for the changed current. Below 15
+    degC there is no top anchor (TOP_TEMP_LO). The cut-off at 13:35, at 15
+    degC, is a real full."""
+    assert cold_tops(cold_rows()) == [0.0]
+    for kw in (dict(scale=0.9, bulk=(30.0, 20)), dict(scale=0.9, bulk=(30.0, 20), remodel=0.5),
+               dict(scale=0.8, bulk=(30.0, 20), remodel=0.5)):
+        assert all(x <= 0.5 for x in cold_tops(cold_rows(**kw))), kw
+
+
+def test_calibration_above_10_degc_the_cold_morning_is_a_full_12_percent_short(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_TEMP_LO', 10.0)
+    short = cold_tops(cold_rows(scale=0.9, bulk=(30.0, 20), remodel=0.5))
+    assert short and short[0] > 10.0  # a 12 % low SoH for a healthy pack, every such day
+
+
+def test_one_strong_minute_is_no_bulk(top_anchors):
+    """The cold morning, warmed (synthetic) so the temperature rule passes it:
+    one 40 A minute at 08:30 before a steady C/20 is no bulk phase
+    (TOP_BULK_SUSTAIN_S)."""
+    assert all(x <= 0.5 for x in cold_tops(cold_rows(scale=0.9, bulk=(40.0, 1, 1763713800.0), warm=5.0)))
+
+
+def test_calibration_with_a_one_minute_bulk_the_warmed_cold_morning_is_a_full(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_BULK_SUSTAIN_S', 0.0)
+    short = cold_tops(cold_rows(scale=0.9, bulk=(40.0, 1, 1763713800.0), warm=5.0))
+    assert short and short[0] > 10.0
+
+
+def test_a_tail_that_did_not_fall_to_half_the_bulk_is_no_charge_end(top_anchors):
+    """The same, after 20 min of a 22 A bulk: the C/20 that follows is a
+    weaker source, not a CV taper (TOP_TAPER)."""
+    assert all(x <= 0.5 for x in cold_tops(cold_rows(scale=0.9, bulk=(22.0, 20), warm=5.0)))
+
+
+def test_calibration_without_the_taper_rule_the_warmed_cold_morning_is_a_full(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_TAPER', math.inf)
+    short = cold_tops(cold_rows(scale=0.9, bulk=(22.0, 20), warm=5.0))
+    assert short and short[0] > 10.0
+
+
 def test_real_daly_three_nights_give_anchors_but_no_segment():
     """Four rests of 2-7 h: three on the plateau, the last near empty and
     evaluable for both cells. No segment: an outage of 7 min, and without it,
@@ -3304,11 +3386,11 @@ def test_calibration_without_the_band_or_the_staleness_rules_the_cloud_dip_is_a_
 
 
 def _rising(stop_s=720.0):
-    """Resting at 96.5 %, a 3 minute bulk at 50 A, then 4 A (below the tail)
+    """Resting at 95.3 %, an 11 minute bulk at 20 A, then 4 A (below the tail)
     while the highest cell climbs the knee, ~8 mV a minute, for stop_s; then
     the charger stops and the pack rests."""
-    p = LfpPack(soc0=96.5).rest()
-    p.run(-50.0, 180)
+    p = LfpPack(soc0=95.3).rest()
+    p.run(-20.0, 660)
     t_tail = p.t
     p.run(-4.0, stop_s)
     t_stop = p.t
@@ -3381,6 +3463,7 @@ def test_calibration_without_the_bulk_rule_a_trickle_makes_top_anchors(top_ancho
     """No measurable harm on this model (the trickle ends near full): the rule
     is what makes a tail a current that fell, as Victron's is."""
     monkeypatch.setattr(q, 'TOP_BULK_C', 0.0)
+    monkeypatch.setattr(q, 'TOP_TAPER', math.inf)  # (the taper is measured against the bulk)
     est, _ = run_lfp(_trickle().rows)
     assert tops(est)
 
@@ -3507,6 +3590,33 @@ def test_a_gap_during_the_charge_forgets_its_bulk(top_anchors):
     rows = [r for r in p.rows if r[0] not in gap]
     est, _ = run_lfp(rows)
     assert est.counts['gap'] == 1 and not tops(est)
+
+
+def test_a_top_anchor_refuses_a_mosfet_only_temperature(top_anchors):
+    """Rev9, finding 2: during and right after a charge the MOSFET runs warm
+    from the current; it is a cell temperature only at rest (OCV anchors)."""
+    est = q.QmaxEstimator('t', design_capacity=100.0, curve=q.DEFAULT_CURVE)
+    for t, i, v, temp in lfp_cycles(n=1).rows:
+        est.add(t, i, v, temp=temp, temp_mos=True)
+    assert not tops(est) and est.counts['top_temp_mos'] == 1
+    assert est.counts['anchor'] >= 1  # the OCV anchor still takes it
+    assert q.best_temperature(None, [], 23.0) == (23.0, True)
+    assert q.best_temperature(None, [18.0, 20.0, 22.0], 40.0) == (20.0, False)
+    assert q.best_temperature(21.5, [], 40.0) == (21.5, False)
+
+
+def test_calibration_the_mosfet_as_the_cell_temperature_makes_the_top_anchor(top_anchors):
+    est, _ = run_lfp(lfp_cycles(n=1).rows)  # the same temperatures, from a probe
+    assert tops(est)
+
+
+def test_the_sampler_says_when_the_temperature_is_the_mosfets():
+    for bms_, want in ((_Bms(mos=23.0), True), (_Bms(temps=[20.0], mos=23.0), False)):
+        s, _ = _run_sampler(0, bms=bms_, soh_estimator=True)
+        seen, orig = [], s.qmax.add
+        s.qmax.add = lambda *a, **k: (seen.append((k.get('temp'), k.get('temp_mos'))), orig(*a, **k))[1]
+        asyncio.run(s())
+        assert seen and seen[0][1] is want
 
 
 def test_a_top_anchor_needs_a_known_temperature(top_anchors):

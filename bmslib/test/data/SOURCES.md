@@ -247,3 +247,12 @@ It holds four rests of 2–7 h: three on the OCV plateau and one near empty (cel
 estimator can use, and two outages of 6 and 7 minutes. With the shipped gates it gives no segment; with the gap limit at
 10 minutes and the slope gate at 0.8 mV/% it gives one, 2024-05-18 → 05-20, with the cells at ~287 and ~233 Ah.
 Columns: `t` (unix s), `current` (A), `u1`, `u2` (mV), `soc` (%), `temp` (°C).
+
+## Qmax/SoH top anchor, cold morning — `daly_2025-11-21_cold_top.csv.gz`
+
+The maintainer's van pack again (280 Ah LFP, Daly BMS, two cells), 2025-11-21 05:00–14:00 UTC (537 rows, 6 kB
+gzip'd), from the same cache and built the same way as the file above. The pack's probe read 10–12 °C until noon;
+from 10:00 both cells stood at 3398–3412 mV under 13.7–15.8 A (C/20) while 33–45 Ah, 12–16 % of 280, still went in
+before the highest cell reached 3550 mV at 12:27. Rev9 of the top anchor showed that only its bulk rule kept this
+from being a top anchor 12 % short; the tests perturb it (a DC-DC bulk, a weaker sun, cell voltages moved by 0.5 mΩ
+per cell for the changed current) as known-bad input. Columns as above.

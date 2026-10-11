@@ -44,7 +44,8 @@ plausible wrong number without it:
  * A known temperature inside the range the curve was measured at. Missing
    temperature makes the anchor unevaluable; it is never defaulted. At rest the
    MOSFET temperature is close to the cell's (WHITEPAPER 7), so the caller may
-   pass it when there is nothing better.
+   pass it when there is nothing better (flagged temp_mos: a top anchor, which
+   comes during or right after a charge, refuses it).
  * Voltages are the per-minute median, and the last value is the median of the
    last END_BINS minutes after removing isolated single-minute spikes: one
    garbled reading at the end of a rest must not move the anchor.
@@ -440,23 +441,39 @@ TOP_TAIL_C = 0.05
 # Every cell must stand at TOP_CELL_MIN_MV or more: the anchor gives each one
 # 100 %, and a cell below it is not near full, whatever the highest one says
 # (an imbalanced pack; the per-cell rule is what MIN_DSOC "every cell" needs).
-# Measured on the maintainer's van pack (280 Ah; ANT BMS 2023-09..2026-05, 38
-# charges to a top, Daly 2024-08..2025-11, 11): the charge that still went in
-# after the LOWEST cell first stood at 3400-3420 mV under at most C/20, until
-# the highest reached 3550 mV, was a median 0.2 / 0.9 %, p90 1.4 / 1.6 %, at
-# most 4.7 / 2.1 % of 280 Ah; at 3390-3400 mV up to 7.8 / 18.8 %. Judged by
-# the HIGHEST cell at 3400-3420 mV it was up to 7.9 / 18.6 %. In telemetry
-# (aTTx, 16 cells) a BMS cut at a 3671 mV runner left three cells at 3362 mV a
+# Evidence: bat-impedance top_floor_stat.py, the maintainer's van pack (280
+# Ah, two cells logged; Daly 11 and ANT 38 charges that reached 3550 mV): the
+# charge that still went in after the LOWEST cell first stood in a band under
+# 0.3 A..C/20, until the highest reached 3550 mV, % of 280 Ah, at 15 degC and
+# more (Daly / ANT): 3400-3405 mV max 2.0 (n=4) / 4.7 (n=7), 3405-3410 0.7
+# (3) / 4.3 (7), 3410-3420 1.1 (5) / 3.6 (7); one band down, 3390-3400, still
+# 2.7 (5) / 4.8 (10), so a cell reading 10 mV high costs about 5 %; two bands
+# down, 3380-3390, 7.6 (6) / 10.0 (16): a BMS whose cells read 20 mV high
+# puts a top anchor up to ~10 % short (not guarded; counts are small). Below
+# 15 degC the same 3390-3400 band left 16.2 (3) / 7.0 (2) % (TOP_TEMP_LO). By
+# the HIGHEST cell instead, up to 7.9 / 18.6 % at 3400-3420. In telemetry
+# (aTTx, 16 cells) a BMS cut at a 3671 mV runner left a cell at 3362 mV a
 # minute later: not full.
 TOP_CELL_MIN_MV = 3400.0
-# A bulk phase: a charge current of TOP_BULK_C x capacity or more within the
-# last TOP_BULK_S. The tail must be a current that fell (CV), not one that was
-# low all along. C/13.3, 1.5x the tail, not C/10: the van pack's solar charger
-# rarely reaches C/10 (2 top anchors in 462 days of its Daly data at C/10, 19
-# at C/13.3), and 1j6d (304 Ah) bulked at C/17-C/10 before 9 of its 39 charge
-# ends. What the floor below costs is measured independent of the bulk.
+# A bulk phase: TOP_BULK_SUSTAIN_S of minute means in a row, each a charge
+# current of TOP_BULK_C x capacity or more, ending within the last
+# TOP_BULK_S; and the tail must have fallen to TOP_TAPER x the lowest of them
+# (a CV taper), not just be a weaker source. Rev9: on the van's cold morning
+# (2025-11-21, 10-12 degC) both cells stood at 3398-3412 mV under C/20 with
+# 12-16 % still to go, and only the old bulk rule (one sample at C/13.3 or
+# more) held it off by 2 A: a 22 A minute and a 10 % weaker sun made a top
+# anchor 12 % short. One minute is no bulk now, and the C/20 after a 22 A bulk
+# is no taper; a real DC-DC bulk (30 A for 20 min) passes both, and what then
+# refuses that morning is TOP_TEMP_LO. C/13.3, 1.5x the tail: the van's solar
+# charger rarely reaches C/10. 5 minutes: 10 cost the van's Daly data 12 of
+# its 14 top anchors (at 5: 9) and 1j6d 9 of 43 (at 5: 5); the warm floor
+# evidence above holds for weak and strong bulks alike (it walks back from
+# every charge end). The taper costs no top anchor in the telemetry or van
+# replays.
 TOP_BULK_C = 0.075
 TOP_BULK_S = 2 * 3600.0
+TOP_BULK_SUSTAIN_S = 300.0
+TOP_TAPER = 0.5
 # Victron's default charged detection time, with at least TOP_HOLD_READINGS
 # cell voltage readings in it (one is no hold).
 TOP_HOLD_S = 180.0
@@ -495,10 +512,13 @@ TOP_CUT_I_MAX_C = 0.25
 # The cell voltages used are at most this old; in a hold no two readings are
 # further apart. (They are fetched every VOLTAGE_PERIOD_S while charging.)
 TOP_VOLT_GAP_S = 60.0
-# A known temperature, at least 10 degC: colder, the cell's resistance at C/20
-# lifts it to TOP_CELL_MIN_MV short of full. 45 degC: the charge limit of LFP
-# cell datasheets.
-TOP_TEMP_LO, TOP_TEMP_HI = 10.0, 45.0
+# A known cell temperature (a probe or pack_temp_estimator, never the MOSFET
+# alone: during and right after a charge it runs warm from the current) of at
+# least 15 degC: colder, the charge voltage at a given SoC is higher and 3400
+# mV comes early (the van at 10-12 degC: 16.2 % still to go at 3390-3400 mV,
+# 12-16 % on the cold morning at 3398-3412; at 15 degC and more at most 4.8 %,
+# see TOP_CELL_MIN_MV). 45 degC: the charge limit of LFP cell datasheets.
+TOP_TEMP_LO, TOP_TEMP_HI = 15.0, 45.0
 ANCHOR_KINDS = ('ocv', 'top')
 
 # ---------------------------------------------------------------- output
@@ -725,18 +745,20 @@ def charge_counter(charge, soc, capacity) -> Tuple[Optional[float], Optional[str
     return None, None
 
 
-def best_temperature(pack_temp, probes, mos) -> Optional[float]:
+def best_temperature(pack_temp, probes, mos) -> Tuple[Optional[float], bool]:
     """The cell temperature an anchor is judged at [degC], None if none is
-    known -- never a default: the pack-temperature estimate if it runs, else
-    the median BMS probe, else the MOSFET, which is close to the cells at rest
-    (the only time an OCV anchor uses it). Here and not in the sampler, so
-    that the code fingerprint covers it."""
+    known -- never a default -- and whether it is the MOSFET's: the
+    pack-temperature estimate if it runs, else the median BMS probe, else the
+    MOSFET. The MOSFET is close to the cells at rest, which is when an OCV
+    anchor reads it; a top anchor comes during or right after a charge, when
+    the MOSFET runs warm from the current, so it refuses a MOSFET-only one.
+    Here and not in the sampler, so that the code fingerprint covers it."""
     if finite(pack_temp):
-        return float(pack_temp)
+        return float(pack_temp), False
     temps = sorted(t for t in (probes or []) if finite(t) and -40 < t < 100)
     if temps:
-        return temps[len(temps) // 2]
-    return float(mos) if finite(mos) and -40 < mos < 100 else None
+        return temps[len(temps) // 2], False
+    return (float(mos), True) if finite(mos) and -40 < mos < 100 else (None, False)
 
 
 def _counter_src_ok(src) -> bool:
@@ -968,7 +990,7 @@ class QmaxEstimator:
             temp: Optional[float] = None, capacity: Optional[float] = None,
             bms_charge: Optional[float] = None, charge_src: Optional[str] = None,
             bms_soc: Optional[float] = None, bms_soc_raw: Optional[float] = None,
-            aged_capacity: Optional[float] = None) -> Optional[Dict[str, Any]]:
+            aged_capacity: Optional[float] = None, temp_mos: bool = False) -> Optional[Dict[str, Any]]:
         """Feed one sampler iteration.
 
         t: sample timestamp [s]; current [A], BmsSample sign (positive =
@@ -986,7 +1008,9 @@ class QmaxEstimator:
         charge / capacity (BmsSample.soc_reported), None/NaN when unknown;
         aged_capacity [Ah]: the BMS's aged or learnt full capacity
         (BmsSample.aged_capacity), None/NaN when unknown. All three only tell
-        the stop rule where the counter's full end may be.
+        the stop rule where the counter's full end may be. temp_mos: temp is
+        the MOSFET's (best_temperature): good enough at rest, not for a top
+        anchor, which comes during or right after a charge.
 
         Returns result() when this call accepted a segment and at least
         PUBLISH_MIN_SEGMENTS are in, else None -- a caller that publishes the
@@ -1108,7 +1132,7 @@ class QmaxEstimator:
                     vt = None  # the current still counts, the voltages do not
             else:
                 vt = None
-        new = self._top_step(t, i, vt, bool(voltages) and vt is None, temp) or new
+        new = self._top_step(t, i, vt, bool(voltages) and vt is None, None if temp_mos else temp, temp_mos) or new
 
         idx = math.floor(t / REST_BIN_S)
         if self._bin is not None and self._bin['idx'] != idx:
@@ -1135,7 +1159,10 @@ class QmaxEstimator:
 
     def _top_reset(self):
         """Forget the charge in progress (a gap, a clock step, a disable)."""
-        self._top_bulk: Optional[float] = None  # the last sample with the charge current at the bulk or more
+        self._top_bulk: Optional[float] = None  # the end of the last minute of a sustained bulk
+        self._top_bulk_i: Optional[float] = None  # ... and that bulk's level: its lowest minute mean [A]
+        self._top_min: Optional[list] = None  # the minute in progress: [index, sum of charge currents, samples]
+        self._top_run: Optional[list] = None  # minutes in a row at the bulk or more: [first, lowest mean, last]
         self._top_peak: deque = deque()  # (t, highest cell), decreasing: the max over the last TOP_PEAK_S
         self._top_v: Optional[Tuple[float, float, float, int]] = None  # last reading: t, highest, lowest, cells
         self._top_hold: Optional[Dict[str, Any]] = None  # a tail termination in progress
@@ -1143,8 +1170,31 @@ class QmaxEstimator:
         self._top_prev: Optional[Tuple[float, float]] = None  # the last sample: t, charge current
         self._top_done: Optional[float] = None  # the last top anchor: one per bulk phase
 
+    def _top_minute(self, t: float, i: float, cap: float):
+        """Minute means of the charge current: a bulk is TOP_BULK_SUSTAIN_S of
+        minutes in a row each at TOP_BULK_C x capacity or more (a spike is
+        none), and its level is the lowest of them."""
+        idx = math.floor(t / 60.0)
+        m = self._top_min
+        if m is not None and m[0] != idx:
+            mean, run = m[1] / m[2], self._top_run
+            if mean >= TOP_BULK_C * cap:
+                if run is None or run[2] != m[0] - 1:  # (a minute without samples breaks the run)
+                    run = self._top_run = [m[0], mean, m[0]]
+                else:
+                    run[1], run[2] = min(run[1], mean), m[0]
+                if 60.0 * (run[2] + 1 - run[0]) >= TOP_BULK_SUSTAIN_S:
+                    self._top_bulk, self._top_bulk_i = 60.0 * (run[2] + 1), run[1]
+            else:
+                self._top_run = None
+            m = None
+        if m is None:
+            m = self._top_min = [idx, 0.0, 0]
+        m[1] += i
+        m[2] += 1
+
     def _top_step(self, t: float, i: float, vt: Optional[List[Optional[float]]], dropped: bool,
-                  temp: Optional[float]) -> Optional[Dict[str, Any]]:
+                  temp: Optional[float], temp_mos: bool = False) -> Optional[Dict[str, Any]]:
         """One sample of the charge-termination detector (TOP_* constants):
         charge current i [A], cell voltages vt (None: not fetched, or dropped
         by the chemistry guard -- dropped True)."""
@@ -1152,8 +1202,7 @@ class QmaxEstimator:
         if cap is None:
             return None  # the tail and the bulk are fractions of it: nothing is evaluable
         tail, rest = TOP_TAIL_C * cap, self.rest_current()
-        if i >= TOP_BULK_C * cap:
-            self._top_bulk = t
+        self._top_minute(t, i, cap)
         if vt is not None and all(v is not None for v in vt):
             hi, lo = max(vt), min(vt)
             pk = self._top_peak
@@ -1196,33 +1245,34 @@ class QmaxEstimator:
                 return None  # (the charge before it was no bulk, or it already made its anchor)
             if prev[1] > TOP_CUT_I_MAX_C * cap:
                 self._top_refuse('top_cut_current', t, 'cut from %.1f A, above C/%.0f' % (prev[1], 1 / TOP_CUT_I_MAX_C))
-                self._top_done = t
                 return None
             if peak is None or peak < TOP_CUTOFF_MV or self._top_v is None or self._top_v[0] < prev[0] - TOP_VOLT_GAP_S:
+                # (no verdict on the charge: a cloud or a load switch reads the same; the tail may still come)
                 self._top_refuse('top_cut_low', t, 'the highest cell peaked at %s'
                                  % ('%.0f mV' % peak if peak is not None else 'an unknown voltage'))
-                self._top_done = t  # one verdict per bulk phase
                 return None
             self._top_cut = dict(t=t, t0=t, q=self.q_ah, cov=self.covered_s, epoch=self.epoch, n=self._top_v[3],
-                                 temps=[temp] if finite(temp) else [])
+                                 temps=[temp] if finite(temp) else [], mos=temp_mos)
             return None
 
         h = self._top_hold
-        if not (-rest <= i <= tail and bulk and v is not None and peak is not None and v[2] >= TOP_CELL_MIN_MV
+        taper = TOP_TAPER * self._top_bulk_i if bulk and self._top_bulk_i is not None else -math.inf
+        if not (-rest <= i <= min(tail, taper) and bulk and v is not None and peak is not None and v[2] >= TOP_CELL_MIN_MV
                 and v[1] >= peak - TOP_CV_BAND_MV):
             self._top_hold = None
             return None
         if h is None or v[3] != h['n'] or v[1] > h['v0'] + TOP_RISE_MV:
-            h = self._top_hold = dict(t0=v[0], v0=v[1], n=v[3], k=0, temps=[])  # (re)starts at this reading
+            h = self._top_hold = dict(t0=v[0], v0=v[1], n=v[3], k=0, temps=[], mos=False)  # (re)starts at this reading
         if v[0] == t:
             h['k'] += 1
         if finite(temp):
             h['temps'].append(float(temp))
+        h['mos'] = h['mos'] or temp_mos
         if t - h['t0'] < TOP_HOLD_S or h['k'] < TOP_HOLD_READINGS or self._glitch_nb is not None:
             return None
         self._top_hold = None
         return self._top_anchor(dict(t=t, t0=h['t0'], q=self.q_ah, cov=self.covered_s, epoch=self.epoch,
-                                     n=h['n'], temps=h['temps']), 'tail', t, [v[2], v[1]])
+                                     n=h['n'], temps=h['temps'], mos=h['mos']), 'tail', t, [v[2], v[1]])
 
     def _top_refuse(self, why: str, t: float, detail: str):
         self.counts[why] += 1
@@ -1236,16 +1286,17 @@ class QmaxEstimator:
         self._top_done = now
         temp = median(c['temps']) if c['temps'] else None
         if temp is None:
-            self._top_refuse('top_temp_missing', c['t'], 'no temperature known')
+            if c['mos']:
+                self._top_refuse('top_temp_mos', c['t'], 'only the MOSFET temperature is known, and while charging '
+                                 'it is not the cells\' (set up pack_temp_estimator or a probe)')
+            else:
+                self._top_refuse('top_temp_missing', c['t'], 'no temperature known')
             return None
         if not TOP_TEMP_LO <= temp <= TOP_TEMP_HI:
             self._top_refuse('top_temp_range', c['t'], '%.1f degC is outside %.0f..%.0f degC'
                              % (temp, TOP_TEMP_LO, TOP_TEMP_HI))
             return None
         if not TOP_ANCHORS:
-            return None
-        if self.anchors and self.anchors[-1]['t'] > c['t']:
-            self._top_refuse('top_order', c['t'], 'an anchor ends after it')
             return None
         n = c['n']
         a = dict(t=c['t'], t0=c['t0'], q=c['q'], cov=c['cov'], epoch=c['epoch'], temp=temp, dir='chg', i_rest=0.0,
@@ -1274,14 +1325,15 @@ class QmaxEstimator:
         return None
 
     def add_sample(self, sample, current: float, voltages: Optional[Sequence[float]],
-                   temp: Optional[float]) -> Optional[Dict[str, Any]]:
+                   temp: Optional[float], temp_mos: bool = False) -> Optional[Dict[str, Any]]:
         """add() for a BmsSample: which of its fields go where. current: the
         native (pre invert_current) current; temp: best_temperature(). Here
         and not in the sampler, so that the code fingerprint covers it."""
         counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
         return self.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
                         bms_charge=counter, charge_src=counter_src, bms_soc=sample.soc,
-                        bms_soc_raw=getattr(sample, 'soc_reported', None), aged_capacity=sample.aged_capacity)
+                        bms_soc_raw=getattr(sample, 'soc_reported', None), aged_capacity=sample.aged_capacity,
+                        temp_mos=temp_mos)
 
     def _neighbourhood_ok(self, before: Sequence[float], after: Sequence[float]) -> bool:
         """The good samples either side of an isolated impossible reading
