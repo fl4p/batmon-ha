@@ -1160,9 +1160,9 @@ class QmaxEstimator:
     def _top_reset(self):
         """Forget the charge in progress (a gap, a clock step, a disable)."""
         self._top_bulk: Optional[float] = None  # the end of the last minute of a sustained bulk
-        self._top_bulk_i: Optional[float] = None  # ... and that bulk's level: its lowest minute mean [A]
+        self._top_bulk_i: Optional[float] = None  # ... and its level: the highest current held that long [A]
         self._top_min: Optional[list] = None  # the minute in progress: [index, sum of charge currents, samples]
-        self._top_run: Optional[list] = None  # minutes in a row at the bulk or more: [first, lowest mean, last]
+        self._top_run: deque = deque()  # the last minutes in a row: (index, mean charge current)
         self._top_peak: deque = deque()  # (t, highest cell), decreasing: the max over the last TOP_PEAK_S
         self._top_v: Optional[Tuple[float, float, float, int]] = None  # last reading: t, highest, lowest, cells
         self._top_hold: Optional[Dict[str, Any]] = None  # a tail termination in progress
@@ -1171,22 +1171,27 @@ class QmaxEstimator:
         self._top_done: Optional[float] = None  # the last top anchor: one per bulk phase
 
     def _top_minute(self, t: float, i: float, cap: float):
-        """Minute means of the charge current: a bulk is TOP_BULK_SUSTAIN_S of
-        minutes in a row each at TOP_BULK_C x capacity or more (a spike is
-        none), and its level is the lowest of them."""
+        """Minute means of the charge current. A bulk is TOP_BULK_SUSTAIN_S of
+        minutes in a row, each at TOP_BULK_C x capacity or more (a spike is
+        none); its level is the highest current held that long (the largest
+        5-minute minimum within TOP_BULK_S), which the tail must fall to
+        TOP_TAPER of."""
         idx = math.floor(t / 60.0)
         m = self._top_min
         if m is not None and m[0] != idx:
-            mean, run = m[1] / m[2], self._top_run
-            if mean >= TOP_BULK_C * cap:
-                if run is None or run[2] != m[0] - 1:  # (a minute without samples breaks the run)
-                    run = self._top_run = [m[0], mean, m[0]]
-                else:
-                    run[1], run[2] = min(run[1], mean), m[0]
-                if 60.0 * (run[2] + 1 - run[0]) >= TOP_BULK_SUSTAIN_S:
-                    self._top_bulk, self._top_bulk_i = 60.0 * (run[2] + 1), run[1]
-            else:
-                self._top_run = None
+            run = self._top_run
+            if run and run[-1][0] != m[0] - 1:
+                run.clear()  # a minute without samples breaks the run
+            run.append((m[0], m[1] / m[2]))
+            n = max(1, int(round(TOP_BULK_SUSTAIN_S / 60.0)))
+            while len(run) > n:
+                run.popleft()
+            level = min(x for _, x in run)
+            if len(run) == n and level >= TOP_BULK_C * cap:
+                end = 60.0 * (m[0] + 1)
+                recent = self._top_bulk is not None and end - self._top_bulk <= TOP_BULK_S
+                self._top_bulk = end
+                self._top_bulk_i = max(level, self._top_bulk_i) if recent and self._top_bulk_i else level
             m = None
         if m is None:
             m = self._top_min = [idx, 0.0, 0]
