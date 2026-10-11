@@ -1,7 +1,7 @@
 ## [unreleased]
 
 * Fix (`soh_estimator`): a withdrawn Qmax/SoH was cleared by one MQTT publish; a failed one or a Home Assistant restart brought the old value back. Now retried and repeated hourly.
-* Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V or more) anchors SoC 100 %, paired with rests near empty (doc/SoH.md).
+* Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V or more, 15 °C or warmer by a probe) anchors SoC 100 % (doc/SoH.md).
 * `soh_estimator` with `capacity:` set now fetches cell voltages every 10 s while charging. Qmax reads up to a few % low when the charger's absorption voltage is low.
 * Fix (`soh_estimator`): a BMS counter stopped just before a shutdown passed the restart check (49 Ah published for 98). Segments across a restart now wait until the counter moves again.
 

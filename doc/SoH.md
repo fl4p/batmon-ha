@@ -5,7 +5,7 @@ of health, as two sensors per BMS: `Qmax (est.)` in Ah and `SoH (est.)` in %. It
 
 **The built-in OCV curve alone gives no value**: it reads a SoC only near empty. What makes a value possible is the end
 of a charge, taken as SoC 100 % ([The top anchor](#the-top-anchor-the-end-of-a-charge)), paired with a rest near empty.
-In four months of 16 packs' telemetry that published for one pack (273–274 Ah for 304 Ah). Read
+In four months of 16 packs' telemetry that published for one pack (273–275 Ah for 304 Ah). Read
 [What it gives](#what-it-gives) before turning it on. It logs every usable rest and charge end it finds and why nothing
 came of it.
 
@@ -124,8 +124,10 @@ The sensors show the median of the last 5 accepted segments of the past year, on
 between accepted segments, and the entities expire a year after the last one. A value that would no longer go out is
 withdrawn at once (the sensors show unknown): when the `capacity:` option was corrected or the code changed (the saved
 state is discarded at the start), when the capacity the BMS reports starts to disagree with the option, when the
-estimator is disabled, or when its segments are dropped. Earlier versions left such a value for up to a year. It comes back
-with the next accepted segment.
+estimator is disabled, or when its segments are dropped. Earlier versions left such a value for up to a year. Home
+Assistant keeps an MQTT sensor's state over its own restarts until the entity expires, so the clear is retried until
+it goes through and sent again every hour for as long as nothing may be published (not retained: a retained value
+would outlive the estimator in the broker). It comes back with the next accepted segment.
 
 ## The top anchor: the end of a charge
 
@@ -133,49 +135,83 @@ Battery monitors such as Victron's synchronise their SoC to 100 % when a charge 
 voltage", the current below a "tail current" for a "charged detection time". batmon does the same, per cell, and takes
 that moment as an anchor at which every cell is at SoC 100 %. A charge ends one of two ways.
 
-* **Tail.** After a bulk phase (a charge current of at least C/13.3 within the last 2 hours), the charge current stays
-  at C/20 or less for 3 minutes (Victron's default detection time), with at least 3 cell readings in them at most a
-  minute apart, while the highest cell holds: it rises by at most 10 mV in that time and stays within 25 mV of its
-  peak of the last 10 minutes. The first crossing of the tail while the highest cell still climbs is no end (in the
-  CC knee cells rise 30–90 mV a minute; in CV they rise 3–5 mV in 3 minutes as the cable drop shrinks), and neither
-  is a PV cloud, where the current falls and the voltage falls with it (50 mV and more within 20 s in the data).
-* **Cut-off.** The current drops in one sample from above the tail to about zero (at most the rest threshold of charge,
-  or a load of up to C/20) after the highest cell peaked at 3550 mV or more: a BMS's cell-overvoltage cut, or a
-  charger that terminates. The cut must come from at most C/4, and 1–2 minutes later every cell must still read
-  3400 mV or more. A cut at a voltage short of full (a temperature or current protection at 3.38 V) is not an end.
+* **Tail.** After a bulk phase (5 minute means in a row, each a charge current of at least C/13.3, ending within the
+  last 2 hours), the charge current stays at C/20 or less, and at most half the highest current that bulk held for 5
+  minutes (a CV taper, not just a weaker source), for 3 minutes (Victron's default detection time), with at least 3
+  cell readings in them at most a minute apart, while the highest cell holds: it rises by at most 10 mV in that time
+  and stays within 25 mV of its peak of the last 10 minutes. The first crossing of the tail while the highest cell
+  still climbs is no end (in the CC knee cells rise 30–90 mV a minute; in CV they rise 3–5 mV in 3 minutes as the
+  cable drop shrinks), and neither is a PV cloud, where the current falls and the voltage falls with it (50 mV and
+  more within 20 s in the data).
+* **Cut-off.** After a bulk phase, the current drops in one sample from above the tail to about zero (at most the rest
+  threshold of charge, or a load of up to C/20) after the highest cell peaked at 3550 mV or more: a BMS's
+  cell-overvoltage cut, or a charger that terminates. The cut must come from at most C/4, and a cell reading taken
+  1–2 minutes later must show every cell still at 3400 mV or more. A cut at a voltage short of full (a temperature
+  or current protection at 3.38 V) is not an end.
 
-Either way **every cell** must stand at 3400 mV or more, because the anchor gives every cell 100 %. On the
-maintainer's van pack (280 Ah, its ANT and Daly data, 38 and 11 charges to a top), after the lowest cell first stood at
-3400–3420 mV under at most C/20, a median 0.2 / 0.9 % of the capacity still went in before the highest reached
-3550 mV, at most 4.7 / 2.1 %; at 3390–3400 mV up to 7.8 / 18.8 %. Judged by the highest cell alone, 3400–3420 mV
-still left up to 7.9 / 18.6 %. A pack whose cells are not balanced at the top is refused: on one telemetry pack (16
-cells) the BMS cut a runner at 3671 mV and the lowest cell read 3362 mV a minute later.
+Either way **every cell** must stand at 3400 mV or more, because the anchor gives every cell 100 %, and the cells must
+be at **15 °C or more**, by a temperature probe or `pack_temp_estimator`. The MOSFET temperature alone does not count
+here: during and right after a charge it runs warm from the current. The evidence is in
+`bat-impedance/top_floor_stat.py`. It looks at the maintainer's van pack (280 Ah, two cells logged, 11 charges to a top
+in its Daly data and 38 in its ANT data) and asks how much charge still went in, after the lowest cell first stood in
+a voltage band under at most C/20, before the highest reached 3550 mV. At 15 °C and more (Daly / ANT, % of 280 Ah):
+
+| lowest cell | max (n) | median |
+|---|---|---|
+| 3410–3420 mV | 1.1 (5) / 3.6 (7) | 0.5 / 0.5 |
+| 3405–3410 mV | 0.7 (3) / 4.3 (7) | 0.4 / 0.9 |
+| 3400–3405 mV | 2.0 (4) / 4.7 (7) | 0.9 / 1.0 |
+| 3390–3400 mV | 2.7 (5) / 4.8 (10) | 1.6 / 0.7 |
+| 3380–3390 mV | 7.6 (6) / 10.0 (16) | 2.0 / 1.7 |
+
+The counts are small. A BMS whose cells read 10 mV high costs about 5 % that way; 20 mV high, up to about 10 %, and
+nothing checks the calibration. Below 15 °C the 3390–3400 mV band left up to 16.2 % (3) / 7.0 % (2): the cold raises a
+cell's charge voltage at a given SoC, so 3400 mV comes early. On the van's cold morning (2025-11-21, 10–12 °C) both
+cells stood at 3398–3412 mV under C/20 while 12–16 % were still to go. A 10 % weaker sun after a short burst of current,
+or after a DC-DC bulk while driving, made the earlier rules take a top anchor there 12 % short. Repeated on every such
+day, that is a healthy pack shown at SoH ~88 %. That morning is a test fixture now (the 15 °C rule, the 5-minute bulk
+and the taper each refuse a variant of it). Judged by the highest cell alone, 3400–3420 mV still left up to 7.9 / 18.6
+%. A pack whose cells are not balanced at the top is refused: on one telemetry pack (16 cells) the BMS cut a runner at
+3671 mV and the lowest cell read 3362 mV a minute later.
 
 Nothing about a charge end is guessed: without the `capacity:` option (the tail and the bulk are fractions of it),
-without cell voltages or with readings more than a minute old, with a cell count that changes, without a known
-temperature of 10–45 °C (colder, a cell's resistance at C/20 lifts it to 3400 mV short of full), across a gap or a
-clock step, or while a current glitch waits for its neighbourhood, there is no top anchor. Two top anchors never pair:
-there is no SoC between them to count against. A top anchor pairs with the rests near empty before and after it,
-through every gate a segment has (gaps, coverage, the drift budget, 10 days, the plausibility window, the capacity
-check, the restart rules, the cell count).
+without cell voltages or with readings more than a minute old, with a cell count that changes, without a known cell
+temperature of 15–45 °C, across a gap or a clock step, or while a current glitch waits for its neighbourhood, there is
+no top anchor. Two top anchors never pair: there is no SoC between them to count against. A top anchor pairs with the
+rests near empty before and after it, through every gate a segment has (gaps, coverage, the drift budget, 10 days,
+the plausibility window, the capacity check, the restart rules, the cell count).
 
 **What 100 % means.** It is full as this charger defines it, not the cells' own 100 %: a charger that holds 3.42 V
 per cell ends its charge earlier than one that holds 3.55 V. If the charge end leaves b % of the capacity out, Qmax
 and SoH read about b % low (Qmax = charge × 100 / (100 − SoC at the bottom), where the truth is
-charge × 100 / (100 − b − SoC at the bottom)). By the van data above b is typically 0.2–1.5 %, at most ~5 %; it is
-never negative, so the top anchor makes the estimate read low, never high. It stays the same as long as the charger's
-settings do; change the absorption voltage or the tail current and the estimate moves with them. What Qmax then
-measures is the capacity between this charger's full and the cells' empty end of the OCV curve.
+charge × 100 / (100 − b − SoC at the bottom)). For the top anchors the code takes on the van data
+(`bat-impedance/van_top_audit.py`), the charge that still went in after the anchor, until the charge ended or the
+highest cell reached 3550 mV, was a median 0.2 / 0.5 %, p90 1.2 / 3.6 %, at most 1.8 / 4.1 % (Daly 5, ANT 8 anchors).
+The rules before the 15 °C one took 19 / 15 there, at most 2.2 / 4.1 %. Rev9 measured on to the end of the charge
+including float, an upper bound, for the earlier rules: median 1.6 / 1.4 %, p90 2.9 / 3.2 %, at most 5.2 / 5.9 %. That
+term is never negative: the top anchor itself makes the estimate read low, never high. It stays the same as long as the
+charger's settings do; change the absorption voltage or the tail current and the estimate moves with them. What Qmax
+then measures is the capacity between this charger's full and the cells' empty end of the OCV curve.
+
+Other terms can read high. A balancer that takes charge from the highest cell while the pack charges does so past the
+shunt. In a segment from near empty to full, that cell then reaches 100 % with less charge than was counted, so its
+Qmax reads high by what the balancer took: about 1 % per 30 minutes at 2 A on 100 Ah. (Reasoned, not measured. It
+moves the published value only when that cell is the limiting one.) The current scale and offset terms of the segment
+apply as before (above).
 
 What it costs:
 
 * Cell voltages are fetched every 10 s while the pack charges (with the `capacity:` option set), not only near rest.
   On a BMS that sends them in a frame of their own (Daly) that is one more request every 10 s while charging.
-* A charge after a bulk below C/13.3 makes no top anchor (1j6d, 304 Ah, bulked as weakly as C/17 before some of its
-  charge ends; at C/10 the van's solar charger made 2 top anchors in 462 days, at C/13.3 19). A charger that ends its absorption while the
-  current is still above C/20 makes none either: its stop reads as a cut-off short of a full voltage. So does a cut
-  from more than C/4, and a cell climbing the knee at a constant current below the tail (a CC charger without CV)
-  until the charger stops.
+* No top anchor below 15 °C or with only a MOSFET temperature: in winter, or on a BMS without a probe and without
+  `pack_temp_estimator`, there is none.
+* A charge after a bulk below C/13.3, or one shorter than 5 minutes, makes no top anchor, and neither does a tail that
+  never fell to half its bulk. The van's solar charger rarely reaches C/10 (2 top anchors in 462 days at C/10). The
+  5-minute rule costs its Daly data 9 of 14 top anchors (10 minutes would cost 12), and 1j6d 5 of 43. The taper rule
+  costs no anchor in these replays.
+* A charger that ends its absorption while the current is still above C/20 makes none either: its stop reads as a
+  cut-off short of a full voltage. So does a cut from more than C/4, and a cell climbing the knee at a constant current
+  below the tail (a CC charger without CV) until the charger stops.
 * What a charge in progress has shown is not saved: a restart during it costs that top anchor. (At the top of a charge
   a restart ends the open segment anyway: the BMS reads 99 % there, see Restarts.) An outage over the turn from bulk
   to tail costs it too.
@@ -190,11 +226,11 @@ stands in for the `capacity:` option):
 
 | pack | capacity | top anchors | rests usable near empty | segments | Qmax per segment | published |
 |---|---:|---:|---:|---:|---|---|
-| 1j6dTB_II15cAA | 304 Ah | 49 | 31 | 5 | 269.5, 272.6, 274.1, 278.0, 280.6 Ah (0.89–0.92) | 273, 273, 274 Ah |
+| 1j6dTB_II15cAA | 304 Ah | 38 | 31 | 5 | 269.5, 272.6, 275.4, 278.0, 280.6 Ah (0.89–0.92) | 273, 274, 275 Ah |
 | POdoivGkBF6NaA | 105 Ah | 72 | 4 | 2 | 95.2, 100.9 Ah (0.91, 0.96) | nothing (2 of 3) |
-| YhUXrjdnCA8pig | 305 Ah | 73 | 2 | 1 | 282.2 Ah (0.93) | nothing |
-| aTTxcq2mGQwTqA | 320 Ah | 79 | 3 | 0 | – | nothing |
-| 8 more packs | | 0–231 | 0–36 | 0 | – | nothing |
+| YhUXrjdnCA8pig | 305 Ah | 66 | 2 | 1 | 282.2 Ah (0.93) | nothing |
+| aTTxcq2mGQwTqA | 320 Ah | 54 | 3 | 0 | – | nothing |
+| 8 more packs | | 0–117 | 0–36 | 0 | – | nothing |
 
 (Three more packs are skipped, their current sign could not be told from their data, and one id holds two packs.)
 
@@ -212,7 +248,7 @@ few cells reached empty early and pulled the mean down. With cell voltages, as t
 such a top anchor, and a rest with most cells on the plateau gives no anchor.
 
 The maintainer's van pack (`bat-impedance/van_qmax.py`, two cells logged): its Daly data (2023-11 to 2025-11, 462 days
-with data) gives 19 top anchors and 23 usable rests near empty, its ANT data (2023-09 to 2026-05) 15 and 38, and no
+with data) gives 5 top anchors and 23 usable rests near empty, its ANT data (2023-09 to 2026-05) 8 and 38, and no
 segment. Every pair between them breaks on the record: the Influx minute cache keeps a minute only when a field
 changed, and it has 2.3 (Daly) and 6.6 (ANT) breaks of more than 5 minutes a day; the add-on, sampling continuously,
 does not have them. So that data checks the top anchor's thresholds (above), not segments.
