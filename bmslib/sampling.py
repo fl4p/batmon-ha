@@ -19,7 +19,8 @@ from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
-    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax
+    subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
+    QMAX_CLEAR_REPEAT_S
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -268,6 +269,9 @@ class BmsSampler:
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None
+        # A withdrawn estimate is kept cleared until a new one goes out: [why,
+        # when the last clear went through or None] (_withdraw_qmax)
+        self._qmax_clear: Optional[list] = None
 
         # pack_temp_estimator (off by default): one RC estimator per real pack,
         # all sharing the ambient cache. Runs without MQTT too (mqtt_single_out
@@ -807,15 +811,27 @@ class BmsSampler:
                          exc_info=True)
             est.disable('internal error', persistent=False)
             r = None
-        self._withdraw_qmax()
         if r is not None:
+            self._qmax_clear = None  # a new estimate replaces the cleared one
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
+        else:
+            self._withdraw_qmax()
 
     def _withdraw_qmax(self):
+        """Clear what may no longer be published (the estimator says why, once)
+        and keep it cleared: again at the next sample while a publish fails,
+        and every QMAX_CLEAR_REPEAT_S until a new estimate goes out, for a Home
+        Assistant that missed it (rev9)."""
         why = self.qmax.take_withdrawal() if self.qmax is not None else None
         if why is not None:
             logger.info('%s: Qmax/SoH cleared in Home Assistant: %s', self.bms.name, why)
-            withdraw_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix)
+            self._qmax_clear = [why, None]
+        c = self._qmax_clear
+        now = time.time()
+        if c is None or (c[1] is not None and now - c[1] < QMAX_CLEAR_REPEAT_S):
+            return
+        if withdraw_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix):
+            c[1] = now
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix

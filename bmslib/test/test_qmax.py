@@ -34,6 +34,7 @@ import pytest
 
 import bmslib.qmax as q
 from bmslib.bms import BmsSample
+import bmslib.mqtt_util as q_mqtt
 from bmslib.mqtt_util import publish_hass_discovery, publish_qmax
 from bmslib.sampling import BmsSampler
 
@@ -3873,6 +3874,52 @@ def test_the_sampler_clears_a_withdrawn_estimate_in_home_assistant(how, monkeypa
     c = _Client()
     _sampler_with_state(_published_state()[1], c, 100.0, monkeypatch)  # still publishable: left as it is
     assert 'q_fake/qmax_est' not in c.published
+
+
+class _FlakyClient(_Client):
+    """A broker that refuses publishes while `down`."""
+    down = True
+
+    def publish(self, topic, payload, retain=False):
+        if self.down:
+            class R:
+                rc = paho.MQTT_ERR_NO_CONN
+            return R()
+        return super().publish(topic, payload, retain)
+
+
+def test_a_withdrawal_that_fails_is_sent_again_and_repeated_hourly(monkeypatch):
+    """Rev9, finding 6: it was one publish whose failure was dropped, and Home
+    Assistant then restored the old SoH (it keeps an MQTT sensor's state over
+    its own restarts until expire_after: a year). It is retried until it goes
+    through, and sent again every hour while nothing may be published, for a
+    Home Assistant that was down when it went."""
+    _, st = _published_state()
+    c = _FlakyClient()
+    s = _sampler_with_state(st, c, 280.0, monkeypatch)
+    assert 'q_fake/qmax_est' not in c.published and s._qmax_clear[1] is None
+    c.down = False
+    asyncio.run(s())
+    assert c.published['q_fake/qmax_est'] == 'None' and c.published['q_fake/soh_est'] == 'None'
+    c.published.clear()
+    asyncio.run(s())
+    assert 'q_fake/qmax_est' not in c.published  # not every sample
+    s._qmax_clear[1] -= q_mqtt.QMAX_CLEAR_REPEAT_S + 1  # an hour later ...
+    for k, (t_pub, data) in list(q_mqtt._last_values.items()):  # (... for the unchanged-value filter too)
+        q_mqtt._last_values[k] = (t_pub - q_mqtt.QMAX_CLEAR_REPEAT_S - 1, data)
+    asyncio.run(s())
+    assert c.published['q_fake/qmax_est'] == 'None'
+
+
+def test_calibration_sent_once_a_failed_withdrawal_is_lost(monkeypatch):
+    monkeypatch.setattr(BmsSampler, '_withdraw_qmax', lambda self: (
+        q_mqtt.withdraw_qmax(self.mqtt_client, self.mqtt_topic_prefix) if self.qmax.take_withdrawal() else None))
+    _, st = _published_state()
+    c = _FlakyClient()
+    s = _sampler_with_state(st, c, 280.0, monkeypatch)
+    c.down = False
+    asyncio.run(s())
+    assert 'q_fake/qmax_est' not in c.published  # HA keeps the old SoH
 
 
 def test_calibration_without_the_withdrawal_the_old_estimate_stays(monkeypatch):
