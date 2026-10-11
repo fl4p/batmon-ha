@@ -3628,6 +3628,76 @@ def test_a_top_anchor_needs_a_known_temperature(top_anchors):
     assert not tops(est) and est.counts['top_temp_range'] == 1
 
 
+def test_a_cut_off_is_judged_on_a_reading_taken_after_it(top_anchors):
+    """Rev9 (M4): with the voltage fetches failing after the cut, the reading
+    at the cut (polarised, the short cell still at 3415 mV) must not stand in
+    for the check a minute later."""
+    rows = _fast_relaxing_cut()
+    k = next(j for j in range(1, len(rows)) if rows[j - 1][1] < -5 and abs(rows[j][1]) < 1.5
+             and max(rows[j - 1][2]) > 3550)
+    rows = [(t, i, None if k < j <= k + 18 else v, temp) for j, (t, i, v, temp) in enumerate(rows)]
+    est, _ = run_lfp(rows)
+    assert not tops(est) and est.counts['top_cut_unverified'] == 1
+
+
+def test_a_discharge_is_no_tail(top_anchors):
+    """Rev9 (M5): the charger stops at 4.5 A and a 1.2 A load (above the rest
+    threshold) runs; on a pack without hysteresis the cells stay in the band.
+    The tail is a charge current of at most C/20, or about none."""
+    p = LfpPack(hyst=0.0).rest()
+    p.run(50.0, 3600 * 92 / 50).rest()
+    p.charge_cv(i_end=4.5)
+    p.run(1.2, 1800).run(50.0, 3600 * 60 / 50).rest().end()
+    assert not tops(run_lfp(p.rows)[0])
+
+
+def _glitch_at_the_top(cut):
+    """60 s sampling. A garbled frame that reads 450 A of charge (7.5 Ah,
+    below the 500 A bound), then a caught glitch; then the tail (or,
+    cut: the BMS cut two samples after the glitch). The glitch's neighbourhood
+    is judged 5 samples later -- after the 3-minute hold, and after the
+    cut-off's check a minute on."""
+    rows = list(lfp_cycles(n=1, cut=cut, dt=60.0).rows)
+    if cut:
+        c = next(j for j in range(1, len(rows)) if rows[j - 1][1] < -5 and abs(rows[j][1]) < 1.5)
+        bad, glitch = (c - 4,), c - 2  # (the last charging sample before the cut must be a good one)
+    else:
+        k = next(j for j in range(1, len(rows)) if -5 <= rows[j][1] < 0 and rows[j - 1][1] < -5) + 12
+        bad, glitch = (k - 2,), k - 1  # 12 minutes into the tail (60 s steps overshoot at its start)
+    for j in bad:
+        t, _, v, temp = rows[j]
+        rows[j] = (t, -450.0, v, temp)
+    t, _, v, temp = rows[glitch]
+    rows[glitch] = (t, -3000.0, v, temp)
+    return rows
+
+
+@pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
+def test_a_top_anchor_waits_for_a_glitchs_neighbourhood(top_anchors, cut):
+    """Rev9 (M13/M14): at >= 40 s sampling the hold (or the cut-off check)
+    completes before the glitch is judged; taken then, its segment counts the
+    garbled 7.5 Ah. It waits, the neighbourhood refuses, the epoch ends."""
+    est, _ = run_lfp(_glitch_at_the_top(cut))
+    assert est.counts['current_implausible_neighbours'] == 1
+    assert not tops(est) and not est.segments
+
+
+@pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
+def test_calibration_without_the_wait_the_garbled_charge_is_published_in_the_segment(top_anchors, cut, monkeypatch):
+    step = q.QmaxEstimator._top_step
+
+    def no_wait(self, *a, **k):
+        nb, self._glitch_nb = self._glitch_nb, None
+        try:
+            return step(self, *a, **k)
+        finally:
+            self._glitch_nb = nb if self._glitch_nb is None else self._glitch_nb
+    monkeypatch.setattr(q.QmaxEstimator, '_top_step', no_wait)
+    est, _ = run_lfp(_glitch_at_the_top(cut))
+    assert est.segments, 'scenario is harmless'
+    assert est.segments[0]['kinds'] == ['ocv', 'top'] and est.segments[0]['qmax'] > 1.06 * 98.0  # +8 %
+
+
 # ---- the gates of a segment still apply
 
 def test_a_gap_between_a_charge_end_and_the_rest_near_empty_ends_the_segment(top_anchors):
