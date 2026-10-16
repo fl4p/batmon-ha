@@ -21,7 +21,7 @@ from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.jk_settings_service import NullSettingsPublisher
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
-    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json
+    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -170,10 +170,11 @@ class BmsSampler:
                  ):
 
         self.bms = bms
-        # JK settings (jk_settings option), refreshed after each fetch
+        # JK settings read/write (jk_settings option), drained after each fetch
         self.settings_service = settings_service
         self.settings_publisher = None  # set to the MQTT settings publisher; None -> no-op
         self._settings_exclude = None  # settings without own entity, decided on the first tick
+        self._settings_subscribed = False
         self.mqtt_topic_prefix = re.sub(r'[^\w_.-/]', '_', bms.name)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
@@ -184,7 +185,7 @@ class BmsSampler:
             # set changes); the periodic discovery below repeats it
             self.settings_publisher = MqttSettingsPublisher(
                 mqtt_client, self.mqtt_topic_prefix, exclude=self._settings_excluded,
-                discover=True, expire_after_seconds=expire_after_seconds,
+                writable=settings_service.writable, expire_after_seconds=expire_after_seconds,
                 device_json=lambda: hass_device_json(self.mqtt_topic_prefix, self.device_info))
         self.num_samples = 0
         self.bms_group = bms_group  # group, virtual, parent
@@ -532,7 +533,7 @@ class BmsSampler:
             t_fetch = time.time()
 
             sample = await bms.fetch()
-            # the expiry check below is about the fetch, not about the settings read after it
+            # the expiry check below is about the fetch, not about the settings writes after it
             t_fetched = time.time()
 
             if self.settings_service is not None:
@@ -640,6 +641,11 @@ class BmsSampler:
                                    switches=sample.switches.keys())
             if self.num_samples == 0 and mqtt_client and getattr(bms, 'supports_set_soc', lambda: False)():
                 subscribe_set_soc(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms)
+            if (mqtt_client and self.settings_service is not None and not self._settings_subscribed
+                    and self._settings_exclude is not None and getattr(bms, 'settings', None) is not None):
+                subscribe_jk_settings(mqtt_client, self.mqtt_topic_prefix, self.settings_service,
+                                      exclude=self._settings_excluded)
+                self._settings_subscribed = True
 
             for sink in self.sinks:
                 try:

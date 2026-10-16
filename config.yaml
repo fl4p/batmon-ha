@@ -105,6 +105,10 @@ schema:
       # design (nameplate) capacity in Ah: soh_estimator's reference, which it
       # needs to publish anything (the BMS-reported capacity is never used)
       capacity: "float?"
+      # JK settings this device may change from HA (needs `jk_settings: true`):
+      # `all` (every writable setting except critical ones) and/or a comma list
+      # of names. A bad name keeps the device read-only. See doc/JK-Settings.md.
+      settings_write: "str?"
       note: "str?"
 
   mqtt_user: "str?"
@@ -192,7 +196,8 @@ schema:
   soh_estimator: "bool?"
 
   # Read the settings of JK BMSes (BLE, JK02_32S protocol, firmware >= 11) and
-  # show them in HA (read-only). See doc/JK-Settings.md.
+  # show them in HA. Read-only unless a device sets `settings_write`. See
+  # doc/JK-Settings.md.
   jk_settings: "bool?"
 
   # Experimental: estimate the cell temperature of packs whose BMS only reports

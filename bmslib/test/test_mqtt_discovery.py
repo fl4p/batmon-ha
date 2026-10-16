@@ -87,6 +87,7 @@ from bmslib.sampling import BmsSampler  # noqa: E402
 def _fresh_mqtt_state(monkeypatch):
     monkeypatch.setattr(mqtt_util, '_last_values', {})
     monkeypatch.setattr(mqtt_util, '_switch_callbacks', {})
+    monkeypatch.setattr(mqtt_util, '_command_callbacks', {})
 
 
 class _Recorder:
@@ -115,20 +116,35 @@ DEV = "test/jk"
 NODE = "test_jk"
 
 
-def _settings_discovery(exclude=()):
+def _settings_discovery(writable=(), exclude=()):
     c = _Recorder()
-    publish_jk_settings_discovery(c, DEV, hass_device_json(DEV, None), 30, exclude=exclude)
+    publish_jk_settings_discovery(c, DEV, hass_device_json(DEV, None), frozenset(writable), 30, exclude=exclude)
     return c
 
 
+def test_writable_setting_is_a_config_number():
+    c = _settings_discovery(writable={'charge_utp'})
+    d = c.config(f"homeassistant/number/{NODE}/setting_charge_utp/config")
+    assert d['unique_id'] == f"{DEV}__setting_charge_utp"
+    assert d['name'] == "Charge UTP"
+    assert d['entity_category'] == 'config'
+    assert d['mode'] == 'box'
+    s = SETTINGS['charge_utp']
+    assert (d['min'], d['max'], d['step']) == (s.min, s.max, s.step)
+    assert d['unit_of_measurement'] == '°C'
+    assert d['state_topic'] == f"{DEV}/settings/charge_utp"
+    assert d['command_topic'] == f"homeassistant/number/{NODE}/charge_utp/set"
+    assert d['device']['identifiers'] == [DEV]
+    # not writable -> no number entity (only the empty config that removes a stale one)
+    assert c.published[f"homeassistant/number/{NODE}/setting_cell_ovp/config"] == ''
+
+
 def test_read_only_setting_is_a_diagnostic_sensor():
-    c = _settings_discovery()
+    c = _settings_discovery(writable={'charge_utp'})
     d = c.config(f"homeassistant/sensor/{NODE}/setting_cell_count/config")
-    assert d['unique_id'] == f"{DEV}__setting_cell_count"
     assert d['entity_category'] == 'diagnostic'
     assert d['name'] == 'Cell count'
     assert d['state_topic'] == f"{DEV}/settings/cell_count"
-    assert d['device']['identifiers'] == [DEV]
     assert 'command_topic' not in d
     assert 'unit_of_measurement' not in d  # unit None
     assert d['expire_after'] >= 3600  # states come with the settings refresh, not every sample
@@ -136,19 +152,34 @@ def test_read_only_setting_is_a_diagnostic_sensor():
     assert d['name'] == 'Cell OVP' and d['unit_of_measurement'] == 'V'
 
 
-def test_read_only_switch_setting_is_a_binary_sensor():
-    c = _settings_discovery()
+def test_writable_switch_setting_and_read_only_switch():
+    c = _settings_discovery(writable={'display_always_on'})
+    d = c.config(f"homeassistant/switch/{NODE}/setting_display_always_on/config")
+    assert d['entity_category'] == 'config'
+    assert d['payload_on'] == 'ON' and d['payload_off'] == 'OFF'
+    assert d['state_topic'] == f"{DEV}/settings/display_always_on"
+    assert d['command_topic'] == f"homeassistant/switch/{NODE}/display_always_on/set"
     d = c.config(f"homeassistant/binary_sensor/{NODE}/setting_heating/config")
     assert d['entity_category'] == 'diagnostic'
     assert d['payload_on'] == 'ON' and d['payload_off'] == 'OFF'
-    assert d['state_topic'] == f"{DEV}/settings/heating"
     assert 'command_topic' not in d
 
 
-def test_settings_are_read_only():
-    c = _settings_discovery()
-    assert not [t for t in c.published if t.startswith(('homeassistant/number/', 'homeassistant/switch/'))]
-    assert all('command_topic' not in json.loads(p) for p in c.published.values())
+def test_entity_of_the_other_component_is_removed():
+    """Same unique_id as number/switch when writable, sensor/binary_sensor when read-only: after
+    `settings_write` changed, an empty config removes the entity of the other component in HA."""
+    c = _settings_discovery(writable={'charge_utp', 'display_always_on'})
+    assert c.published[f"homeassistant/sensor/{NODE}/setting_charge_utp/config"] == ''
+    assert c.published[f"homeassistant/number/{NODE}/setting_cell_ovp/config"] == ''
+    assert c.published[f"homeassistant/binary_sensor/{NODE}/setting_display_always_on/config"] == ''
+    assert c.published[f"homeassistant/switch/{NODE}/setting_heating/config"] == ''
+    # the live ones are real configs
+    assert c.config(f"homeassistant/number/{NODE}/setting_charge_utp/config")['command_topic']
+    assert c.config(f"homeassistant/sensor/{NODE}/setting_cell_ovp/config")['entity_category'] == 'diagnostic'
+    # removal before the new config with the same unique_id
+    topics = [t for t, _, _ in c.log]
+    assert topics.index(f"homeassistant/sensor/{NODE}/setting_charge_utp/config") < \
+        topics.index(f"homeassistant/number/{NODE}/setting_charge_utp/config")
     assert all(retain is False for _, _, retain in c.log)  # like all discovery here
 
 
@@ -159,8 +190,17 @@ def test_only_readable_settings_are_discovered():
     assert names == {n for n, s in SETTINGS.items() if s.read is not None}
 
 
+def test_settings_last_change_sensor():
+    c = _settings_discovery()
+    d = c.config(f"homeassistant/sensor/{NODE}/settings_last_change/config")
+    assert d['entity_category'] == 'diagnostic'
+    assert d['icon'] == 'mdi:cog-transfer'
+    assert d['state_topic'] == f"{DEV}/settings/last_change"
+    assert d['unique_id'] == f"{DEV}__settings_last_change"
+
+
 def test_discovery_exclude():
-    c = _settings_discovery(exclude={'charging_float_mode'})
+    c = _settings_discovery(writable={'charging_float_mode'}, exclude={'charging_float_mode'})
     assert not [t for t in c.published if 'charging_float_mode' in t]
 
 
@@ -187,6 +227,49 @@ def test_settings_states_exclude_and_force():
     assert len(c.log) == n
     pub.states({'cell_ovp': 3.65}, force=True)  # after discovery: HA must see it
     assert len(c.log) == n + 1
+
+
+def _jk_with_fixture(ignore_writes=False):
+    import os
+    from bmslib.models.dummy import JKDummy
+    from bmslib.models.jikong import JKBt
+    with open(os.path.join(os.path.dirname(__file__), 'data', 'jk_settings_b2a8s30p_fw15.26.bin'), 'rb') as f:
+        frame = f.read()
+    bms = JKBt("00:11:22:33:44:55", name="jk1")
+    bms.WRITE_SETTLE_S = bms.READBACK_DELAY_S = 0  # write timing is covered in test_jk_settings_driver
+    client = JKDummy(is_new_11x=True, settings_frame=frame, ignore_writes=ignore_writes, stream=False)
+    bms.client = client
+    bms.char_handle_write = JKBt.CHAR_UUID
+    bms.is_new_11fw_32s = bms.settings_protocol_confirmed = True
+    asyncio.run(client.start_notify(JKBt.CHAR_UUID, bms._notification_handler))
+    return bms
+
+
+@pytest.mark.parametrize('payload, ignore_writes', [('9', False), ('6', False), ('3', True)])
+def test_snap_back_reaches_the_broker(tmp_path, payload, ignore_writes):
+    """After a rejected (out of range / cross-field) or failed write HA must get the real value
+    again, even though it is the same value published seconds ago (mqtt_single_out deduplicates)."""
+    bms = _jk_with_fixture(ignore_writes)
+    c = _Recorder()
+    pub = MqttSettingsPublisher(c, DEV)
+    svc = JkSettingsService('jk1', frozenset({'charge_utp'}), workdir=str(tmp_path))
+    asyncio.run(svc.tick(bms, pub))
+    topic = f"{DEV}/settings/charge_utp"
+    assert [p for t, p, _ in c.log if t == topic] == ['2']
+    svc.enqueue('charge_utp', payload)
+    asyncio.run(svc.tick(bms, pub))
+    assert [p for t, p, _ in c.log if t == topic] == ['2', '2']
+
+
+def test_last_change_always_publishes():
+    c = _Recorder()
+    pub = MqttSettingsPublisher(c, DEV)
+    pub.last_change('Rejected cell_ovp 9: out of range')
+    pub.last_change('Rejected cell_ovp 9: out of range')
+    assert [p for t, p, _ in c.log if t == f"{DEV}/settings/last_change"] == [
+        'Rejected cell_ovp 9: out of range'] * 2
+    pub.last_change('x' * 400)
+    assert len(c.published[f"{DEV}/settings/last_change"]) <= 255  # HA sensor state limit
 
 
 # ---- sampler wiring
@@ -239,8 +322,8 @@ class _JkBms:
         return None
 
 
-def _jk_sampler(bms, client):
-    svc = JkSettingsService(bms.name)
+def _jk_sampler(bms, client, writable=frozenset({'charging_float_mode', 'display_always_on'})):
+    svc = JkSettingsService(bms.name, writable)
     s = BmsSampler(bms, mqtt_client=client, dt_max_seconds=120, expire_after_seconds=60, publish_period=3600,
                    settings_service=svc)
     return s
@@ -273,15 +356,16 @@ def _run_sampler(float_charger):
     return c
 
 
-def test_sampler_publishes_settings_discovery_and_states(_no_sleep):
+def test_sampler_publishes_settings_discovery_states_and_subscribes(_no_sleep):
     c = _run_sampler(False)
     dev = 'jk_fake'
-    assert f"homeassistant/binary_sensor/{dev}/setting_charging_float_mode/config" in c.published
-    assert f"homeassistant/binary_sensor/{dev}/setting_display_always_on/config" in c.published
+    assert f"homeassistant/switch/{dev}/setting_charging_float_mode/config" in c.published
+    assert f"homeassistant/switch/{dev}/setting_display_always_on/config" in c.published
     assert c.published[f"{dev}/settings/cell_ovp"] == '3.65'
     assert c.published[f"{dev}/settings/charging_float_mode"] == 'ON'
-    # read-only: no settings command topic subscribed
-    assert not [t for t, _ in c.subscribed if '/setting' in t or 'display_always_on' in t]
+    subs = {t for t, _ in c.subscribed}
+    assert f"homeassistant/switch/{dev}/display_always_on/set" in subs
+    assert f"homeassistant/switch/{dev}/charging_float_mode/set" in subs
     # states are published again after the discovery so HA sees them right away
     assert [t for t, _, _ in c.log].index(f"homeassistant/sensor/{dev}/setting_cell_ovp/config") < \
         max(i for i, (t, _, _) in enumerate(c.log) if t == f"{dev}/settings/cell_ovp")
@@ -291,7 +375,8 @@ def test_no_duplicate_float_switch_on_pb(_no_sleep):
     """JK-PB already exposes `float_charge` as a sample switch; no second entity for the same bit."""
     c = _run_sampler(True)
     assert not [t for t in c.published if 'charging_float_mode' in t]
-    assert "homeassistant/binary_sensor/jk_fake/setting_display_always_on/config" in c.published
+    assert not [t for t, _ in c.subscribed if 'charging_float_mode' in t]
+    assert "homeassistant/switch/jk_fake/setting_display_always_on/config" in c.published
 
 
 def test_float_switch_withheld_while_float_charger_unknown(_no_sleep):
@@ -303,12 +388,13 @@ def test_float_switch_withheld_while_float_charger_unknown(_no_sleep):
     s = _jk_sampler(_Unknown(False), c)
     asyncio.run(s())
     assert not [t for t in c.published if 'charging_float_mode' in t]
+    assert c.subscribed == []  # subscribed once the exclusion is known
     assert c.published['jk_fake/settings/cell_ovp'] == '3.65'
 
 
 def test_slow_settings_tick_does_not_expire_the_fetched_sample(_no_sleep, monkeypatch):
-    """A settings read (up to ~12 s on a timeout) runs between fetch() and the expiry check: its
-    duration must not turn the fresh sample into a SampleExpiredError."""
+    """Settings writes (~2 s each) run between fetch() and the expiry check: their duration must
+    not turn the fresh sample into a SampleExpiredError."""
     import bmslib.sampling as sampling
     clock = [1_800_000_000.0]
     monkeypatch.setattr(sampling.time, 'time', lambda: clock[0])
@@ -318,8 +404,10 @@ def test_slow_settings_tick_does_not_expire_the_fetched_sample(_no_sleep, monkey
             return BmsSample(voltage=26.0, current=1.0, soc=60.0, timestamp=clock[0])
 
     class _SlowService:
+        writable = frozenset()
+
         async def tick(self, bms, publish):
-            clock[0] += 120  # longer than expire_after and MIN_VALUE_EXPIRY
+            clock[0] += 120  # e.g. several writes, longer than expire_after and MIN_VALUE_EXPIRY
 
     s = BmsSampler(_Fresh(False), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60,
                    publish_period=3600, settings_service=_SlowService())
@@ -337,12 +425,12 @@ def _settings_config(t, node):
 
 def test_publisher_sends_discovery_before_the_first_states():
     c = _Recorder()
-    pub = MqttSettingsPublisher(c, DEV, discover=True, expire_after_seconds=30)
+    pub = MqttSettingsPublisher(c, DEV, writable=frozenset({'charge_utp'}), expire_after_seconds=30)
     pub.states({'cell_ovp': 3.65, 'charge_utp': 2.0})
     first_state = _first(c.log, lambda t: t.startswith(f"{DEV}/settings/"))
     configs = [i for i, (t, _, _) in enumerate(c.log) if _settings_config(t, NODE)]
     assert configs and max(configs) < first_state
-    assert c.config(f"homeassistant/sensor/{NODE}/setting_charge_utp/config")['entity_category'] == 'diagnostic'
+    assert c.config(f"homeassistant/number/{NODE}/setting_charge_utp/config")['command_topic']
     n = len(c.log)
     pub.states({'cell_ovp': 3.65, 'charge_utp': 2.0})  # discovery once, unchanged states deduplicated
     assert len(c.log) == n
@@ -350,19 +438,20 @@ def test_publisher_sends_discovery_before_the_first_states():
 
 def test_publisher_rediscovers_when_the_entities_change():
     c = _Recorder()
-    pub = MqttSettingsPublisher(c, DEV, exclude={'charging_float_mode'}, discover=True, expire_after_seconds=30)
+    pub = MqttSettingsPublisher(c, DEV, exclude={'charging_float_mode'}, writable=frozenset({'charging_float_mode'}),
+                                expire_after_seconds=30)
     pub.states({'cell_ovp': 3.65, 'charging_float_mode': True})
-    assert f"homeassistant/binary_sensor/{NODE}/setting_charging_float_mode/config" not in c.published
+    assert f"homeassistant/switch/{NODE}/setting_charging_float_mode/config" not in c.published
     n = len(c.log)
     pub.exclude = frozenset()  # e.g. float charger known now: one more entity
     pub.states({'cell_ovp': 3.65, 'charging_float_mode': True})
     new = [t for t, _, _ in c.log[n:]]
-    assert new.index(f"homeassistant/binary_sensor/{NODE}/setting_charging_float_mode/config") < \
+    assert new.index(f"homeassistant/switch/{NODE}/setting_charging_float_mode/config") < \
         new.index(f"{DEV}/settings/charging_float_mode")
     assert f"{DEV}/settings/cell_ovp" in new  # forced after the new discovery
 
 
-def test_publisher_without_discover_sends_no_discovery():
+def test_publisher_without_writable_sends_no_discovery():
     c = _Recorder()
     MqttSettingsPublisher(c, DEV).states({'cell_ovp': 3.65})
     assert [t for t, _, _ in c.log] == [f"{DEV}/settings/cell_ovp"]
@@ -372,13 +461,13 @@ def test_sampler_first_settings_states_after_discovery(_no_sleep):
     """After a restart the settings entities must not stay 'unavailable' until the next refresh:
     their HA configs go out before the first states."""
     c = _run_sampler(False)
-    first_state = _first(c.log, lambda t: t.startswith('jk_fake/settings/'))
+    first_state = _first(c.log, lambda t: t.startswith('jk_fake/settings/') and not t.endswith('last_change'))
     configs = [i for i, (t, _, _) in enumerate(c.log) if _settings_config(t, 'jk_fake')]
     assert configs and min(configs) < first_state
     live = {c.log[i][0] for i in configs if c.log[i][1]}
     live_before = {c.log[i][0] for i in configs if c.log[i][1] and i < first_state}
     assert live_before == live  # every entity's config before the first state
-    assert len(live) == len([s for s in SETTINGS.values() if s.read is not None])
+    assert len(live) == len([s for s in SETTINGS.values() if s.read is not None]) + 1  # + settings_last_change
 
 
 def test_states_sent_again_shortly_after_a_discovery(monkeypatch):
@@ -387,7 +476,7 @@ def test_states_sent_again_shortly_after_a_discovery(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(mqtt_util.time, 'time', lambda: clock[0])
     c = _Recorder()
-    pub = MqttSettingsPublisher(c, DEV, discover=True, expire_after_seconds=30)
+    pub = MqttSettingsPublisher(c, DEV, writable=frozenset(), expire_after_seconds=30)
     settings = {'cell_ovp': 3.65}
     pub.states(settings)
     topic = f"{DEV}/settings/cell_ovp"
@@ -412,4 +501,3 @@ def test_sampler_resends_settings_states_after_discovery(_no_sleep, monkeypatch)
     clock[0] += 5
     asyncio.run(s())
     assert [t for t, _, _ in c.log].count('jk_fake/settings/cell_ovp') == n + 1
-

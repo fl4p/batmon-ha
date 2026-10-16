@@ -56,6 +56,14 @@ configuration:
       1,5 veces no publica nada. El estimador de resistencia de celda la usa
       (si no, la capacidad del BMS) para descartar corrientes por encima de
       5C, que ninguna batería puede llevar.
+  settings_write:
+    name: Ajustes JK modificables
+    description: >-
+      Ajustes del BMS JK que se pueden cambiar desde Home Assistant (necesita
+      "Ajustes JK"): "all" y/o una lista de nombres separados por comas.
+      "all" significa todos los modificables salvo los críticos, que hay que
+      nombrar. Un nombre no válido deja el dispositivo en solo lectura. Ver
+      doc/JK-Settings.md.
 
   concurrent_sampling:
     name: Muestreo concurrente
@@ -215,7 +223,9 @@ configuration:
     name: Ajustes JK
     description: >-
       Lee los ajustes de los BMS JK (Bluetooth, firmware 11 o posterior) y
-      los muestra en Home Assistant (solo lectura). Ver doc/JK-Settings.md.
+      los muestra en Home Assistant. Solo lectura, salvo que un dispositivo
+      defina "Ajustes JK modificables". Cierra la app JK al cambiar ajustes.
+      Ver doc/JK-Settings.md.
   pack_temp_estimator:
     name: Estimar la temperatura de la batería (experimental)
     description: >-

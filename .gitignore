@@ -16,3 +16,7 @@ tools/impedance/influxdb_*.json
 user_id
 
 *.pickle
+
+# JK settings backups and audit log (jk_settings), standalone they land in the working directory
+/settings_backup/
+/settings_audit.jsonl

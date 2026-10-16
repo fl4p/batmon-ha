@@ -54,6 +54,13 @@ configuration:
       more than 1.5x the estimator publishes nothing. The cell resistance
       estimator uses it (else the BMS's capacity) to reject currents no
       pack can carry, above 5C.
+  settings_write:
+    name: JK settings writable
+    description: >-
+      JK BMS settings that may be changed from Home Assistant (needs "JK
+      settings"): "all" and/or a comma-separated list of names. "all" means
+      every writable setting except the critical ones, which must be named.
+      An invalid name keeps the device read-only. See doc/JK-Settings.md.
 
   concurrent_sampling:
     name: Concurrent sampling
@@ -194,7 +201,9 @@ configuration:
     name: JK settings
     description: >-
       Read the settings of JK BMSes (Bluetooth, firmware 11 and newer) and
-      show them in Home Assistant (read-only). See doc/JK-Settings.md.
+      show them in Home Assistant. Read-only unless a device sets "JK
+      settings writable". Close the JK app while changing settings. See
+      doc/JK-Settings.md.
   pack_temp_estimator:
     name: Pack temperature estimator (experimental)
     description: >-
