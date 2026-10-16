@@ -23,6 +23,7 @@ from typing import List, Callable, Dict, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms, enumerate_services
+from bmslib.models.jk_settings import decode_settings
 from bmslib.util import to_hex_str
 
 
@@ -146,7 +147,18 @@ class JKBt(BtBms):
         self.char_handle_notify = None
         self.char_handle_write = None
         self.is_new_11fw_32s = None  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
+        # True only when the JK02_32S protocol is known, not guessed: the firmware version parsed
+        # as major >= 11, or the type is forced to 32s (JKBt_32s). is_new_11fw_32s alone is not
+        # enough, _decode_sample falls back to True when detection failed, and a JK02_24S BMS
+        # gives other meanings to the same registers (e.g. 0x21 is voltage calibration there).
+        self.settings_protocol_confirmed = False
+        # completed connect() calls. Every new link goes through connect() (BtBms.__aenter__, also
+        # after the sampler's periodic reconnect or a half-done connect), and it is only counted
+        # once the link answered; the settings service re-reads the settings when it changes.
+        self.connect_count = 0
         self._has_float_charger = None # used for the `float_charge` switch
+        self.settings: Optional[dict] = None  # decoded 0x01 settings frame, see refresh_settings()
+        self.settings_raw: Optional[bytes] = None
 
     def _notification_handler(self, _sender, data):
         data = bytes(data)
@@ -324,6 +336,7 @@ class JKBt(BtBms):
         buf, _ = self._resp_table[0x01]
         self.num_cells = buf[114]
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
+        self.connect_count += 1
 
     async def disconnect(self):
         await self.client.stop_notify(self.char_handle_notify)
@@ -461,6 +474,7 @@ class JKBt(BtBms):
             try:
                 di = await self.fetch_device_info()
                 self.is_new_11fw_32s = int(di.sw_version.split('.')[0]) >= 11
+                self.settings_protocol_confirmed = self.is_new_11fw_32s
                 self.logger.info('%s SW ver %s detected frame ver: %s', self, di.sw_version,
                                  "32s (fw>=11)" if self.is_new_11fw_32s else "24s (fw<11)")
             except Exception as e:
@@ -515,6 +529,21 @@ class JKBt(BtBms):
         await asyncio.sleep(.2)
         self._resp_table.pop(0x01, None)  # settings frame is stale now
 
+    def supports_settings(self) -> bool:
+        # the register table in jk_settings is the JK02_32S one (firmware >= 11); only when
+        # that protocol was detected or forced, never on the fallback guess (see __init__)
+        return self.settings_protocol_confirmed is True
+
+    async def refresh_settings(self) -> dict:
+        """Request a fresh 0x01 settings frame and decode it."""
+        self._resp_table.pop(0x01, None)
+        buf = await self._q(cmd=0x96, resp=0x01)
+        raw = bytes(buf)
+        settings = decode_settings(raw)
+        self.settings_raw = raw
+        self.settings = settings
+        return settings
+
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
 
@@ -563,6 +592,7 @@ class JKBt_32s(JKBt):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.is_new_11fw_32s = True
+        self.settings_protocol_confirmed = True  # the user forced the 32s type
 
 
 if __name__ == '__main__':
