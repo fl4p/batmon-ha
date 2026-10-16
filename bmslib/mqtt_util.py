@@ -507,6 +507,15 @@ def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms):
     _switch_callbacks[topic] = set_soc
 
 
+def resubscribe_commands(mqtt_client: paho.Client):
+    """Subscribe every registered command topic again (switches, set SOC).
+    Call from on_connect: after a broker restart (clean session) the subscriptions
+    made on the first sample are gone."""
+    for topic in list(_switch_callbacks):
+        logger.debug("re-subscribe %s", topic)
+        mqtt_client.subscribe(topic, qos=2)
+
+
 def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
     # runs on paho's network thread: an exception here would end that thread,
     # and a state topic carries whatever the user pointed it at

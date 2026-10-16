@@ -397,6 +397,8 @@ async def main():
                 logger.info("mqtt connected to %s", user_config.mqtt_broker)
                 mqtt_connected.set()
                 bmslib.mqtt_util.subscribe_state_topics(client)
+                # switches and set SOC commands (no-op before the first sample)
+                bmslib.mqtt_util.resubscribe_commands(client)
 
         def _on_disconnect(client, userdata, flags, reason_code, properties):
             # a refused CONNACK is followed by a disconnect too; only report
