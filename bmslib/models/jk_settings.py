@@ -15,8 +15,9 @@ Deliberately not in this table:
   the 0x01 settings frame, so a write could not be read back and verified.
 """
 
+import math
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, FrozenSet, List, Optional, Tuple, Union
 
 HEADER = bytes([0x55, 0xAA, 0xEB, 0x90])
 FRAME_TYPE_SETTINGS = 0x01
@@ -126,6 +127,24 @@ _TABLE = [
 
 SETTINGS: Dict[str, Setting] = {s.name: s for s in _TABLE}
 
+CRITICAL = frozenset({
+    'cell_count', 'voltage_calibration', 'current_calibration',
+    'disable_temperature_sensors', 'gps_locked_charging', 'gps_locked_discharging',
+})
+
+# Readable, but not writable until verified on hardware:
+# - smart_sleep_voltage: syssi writes 0x01 with length 1 but factor 1000, which cannot
+#   hold e.g. 3.285 V.
+# - heating_start/stop_temp, discharge_utp/utpr, precharge_time: their read offsets could
+#   not be checked against a value shown in the app (heating reads start 60 > stop 50,
+#   discharge_utp/utpr both 0, which looks wrong).
+UNVERIFIED_WRITE = frozenset({
+    'smart_sleep_voltage',
+    'heating_start_temp', 'heating_stop_temp',
+    'discharge_utp', 'discharge_utpr',
+    'precharge_time',
+})
+
 LABELS: Dict[str, str] = {
     'smart_sleep_voltage': 'Smart sleep voltage',
     'cell_uvp': 'Cell UVP',
@@ -213,6 +232,83 @@ def decode_settings(frame: bytes) -> Dict[str, Union[float, bool]]:
     return out
 
 
+def _writable(name: str) -> Setting:
+    s = SETTINGS.get(name)
+    if s is None:
+        raise SettingError('unknown setting %r' % name)
+    if s.read is None:
+        raise SettingError('%s cannot be read back from the settings frame, so it is not writable' % name)
+    if name in UNVERIFIED_WRITE:
+        raise SettingError('%s write format is not verified on hardware, so it is not writable' % name)
+    return s
+
+
+def encode_setting(name: str, value: Union[float, bool]) -> Tuple[int, List[int]]:
+    """Encode a settings write as (register, value_bytes)."""
+    s = _writable(name)
+
+    if s.kind == 'switch':
+        if not isinstance(value, bool):
+            raise SettingError('%s expects a bool, got %r' % (name, value))
+        return s.register, [1 if value else 0, 0, 0, 0]
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SettingError('%s expects a number, got %r' % (name, value))
+    if not math.isfinite(value):
+        raise SettingError('%s expects a finite number, got %r' % (name, value))
+
+    exact = value * s.factor
+    raw = round(exact)
+    if abs(raw - exact) > 1e-6 * s.factor:
+        raise SettingError('%s %s%s is not a multiple of %s%s'
+                           % (name, _fmt(value), s.unit or '', _fmt(s.step), s.unit or ''))
+    if raw < round(s.min * s.factor) or raw > round(s.max * s.factor):
+        raise SettingError('%s %s%s is out of range %s..%s%s'
+                           % (name, _fmt(value), s.unit or '', _fmt(s.min), _fmt(s.max), s.unit or ''))
+    try:
+        data = raw.to_bytes(s.length, 'little', signed=s.signed)
+    except OverflowError:
+        raise SettingError('%s %s%s does not fit in %d byte(s)' % (name, _fmt(value), s.unit or '', s.length))
+    return s.register, list(data)
+
+
+def parse_write_option(text: Optional[str]) -> FrozenSet[str]:
+    """Parse the per-device `settings_write` option: comma-separated names and/or `all`.
+
+    `all` means every writable setting except CRITICAL ones; critical settings must be
+    named explicitly. Unknown or non-writable names raise SettingError.
+    """
+    out = set()
+    for item in (text or '').split(','):
+        item = item.strip().lower()
+        if not item:
+            continue
+        if item == 'all':
+            out |= {n for n, s in SETTINGS.items()
+                    if s.read is not None and n not in CRITICAL and n not in UNVERIFIED_WRITE}
+        else:
+            _writable(item)
+            out.add(item)
+    return frozenset(out)
+
+
+# (low, high, strict): low < high (strict) or low <= high
+_RULES = [
+    ('cell_uvp', 'cell_uvpr', True),
+    ('cell_ovpr', 'cell_ovp', True),
+    ('charge_utp', 'charge_utpr', True),
+    ('charge_otpr', 'charge_otp', True),
+    ('discharge_otpr', 'discharge_otp', True),
+    ('mosfet_otpr', 'mosfet_otp', True),
+    ('discharge_utp', 'discharge_utpr', True),
+    ('power_off_voltage', 'cell_uvp', True),
+    ('cell_soc0_voltage', 'cell_soc100_voltage', True),
+    ('cell_soc100_voltage', 'cell_rcv', False),
+    ('cell_rcv', 'cell_ovp', True),
+    ('cell_rfv', 'cell_rcv', True),
+]
+
+
 def _fmt(v) -> str:
     v = round(float(v), 6)
     if v == int(v):
@@ -231,3 +327,35 @@ def format_value(name: str, value) -> str:
         return _fmt(value)
     except (TypeError, ValueError, OverflowError):
         return str(value)
+
+
+def format_changes(changes: dict) -> str:
+    """{name: (old, new)} -> 'charge_utpr 5 -> 3°C, display_always_on OFF -> ON' (sorted by name)."""
+    return ', '.join('%s %s -> %s%s' % (n, format_value(n, old), format_value(n, new),
+                                        (SETTINGS[n].unit if n in SETTINGS else None) or '')
+                     for n, (old, new) in sorted(changes.items()))
+
+
+def validate_change(name: str, value, current: dict) -> None:
+    """Check that setting `name` to `value` keeps related settings consistent.
+
+    Only rules that involve `name` are checked, and only when the other value is
+    known, so an unrelated inconsistent pair never blocks a change.
+    """
+    if name not in SETTINGS:
+        raise SettingError('unknown setting %r' % name)
+    merged = {**current, name: value}
+    for low, high, strict in _RULES:
+        if name not in (low, high) or low not in merged or high not in merged:
+            continue
+        lv, hv = round(float(merged[low]), 6), round(float(merged[high]), 6)
+        if lv < hv or (not strict and lv == hv):
+            continue
+        if name == low:
+            other, rel = high, 'below' if strict else 'at or below'
+        else:
+            other, rel = low, 'above' if strict else 'at or above'
+        unit = SETTINGS[name].unit or ''
+        raise SettingError('%s %s%s must be %s %s (%s%s); change %s first'
+                           % (name, _fmt(merged[name]), unit, rel, other,
+                              _fmt(merged[other]), SETTINGS[other].unit or '', other))
