@@ -174,6 +174,8 @@ For verbose logs of particular BMS add `debug: true`.
   MOSFET temperature, as a `Pack Temp (RC est.)` sensor. `pack_temp_room_topic` / `pack_temp_outdoor_topic` are MQTT
   topics carrying ambient temperatures (e.g. from HA's `mqtt_statestream`); both are optional, without them the
   estimate follows the MOSFET temperature, damped. See [bmslib/PACK_TEMP_RC_INTEGRATION.md](bmslib/PACK_TEMP_RC_INTEGRATION.md).
+* `jk_settings` (off by default) reads the settings of JK BMSes (BLE, firmware ≥ 11) and shows them in Home Assistant,
+  read-only. See [doc/JK-Settings.md](doc/JK-Settings.md).
 * `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
   after it exits)
 * For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
