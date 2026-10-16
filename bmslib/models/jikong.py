@@ -19,12 +19,27 @@ fix connection abort:
 import asyncio
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import List, Callable, Dict, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms, enumerate_services
-from bmslib.models.jk_settings import decode_settings
+from bmslib.models.jk_settings import SETTINGS, decode_settings, encode_setting, format_changes
 from bmslib.util import to_hex_str
+
+
+@dataclass
+class WriteResult:
+    """Outcome of JKBt.write_setting: `ok` only if the settings frame read back
+    after the write holds the requested value and no other setting changed."""
+    ok: bool
+    name: str
+    before: object
+    requested: object
+    after: object
+    reason: str = ''
+    # other settings that changed with the write: {name: (before, after)}
+    others: dict = field(default_factory=dict)
 
 
 def calc_crc(message_bytes):
@@ -134,6 +149,12 @@ class JKBt(BtBms):
     # real disconnect is captured and hammers I/O. Collapse to one line / window.
     JUNK_LOG_PERIOD = 30
 
+    # Settings writes (write_setting). The BMS silently drops a write that arrives while it is
+    # still answering a 0x96 settings query, although it acknowledges it (AA 55 90 EB C8 01 01);
+    # seen on a JK-B2A8S30P fw 15.26: a write 1 s after the query applied, an immediate one not.
+    WRITE_SETTLE_S = 1.0  # min. seconds between the last 0x96 query and a settings write
+    READBACK_DELAY_S = 1.0  # seconds between the write and the read-back query
+
     def __init__(self, address, keep_alive=True, **kwargs):
         super().__init__(address, keep_alive=keep_alive, **kwargs)
         if kwargs.get('pin'):
@@ -159,6 +180,8 @@ class JKBt(BtBms):
         self._has_float_charger = None # used for the `float_charge` switch
         self.settings: Optional[dict] = None  # decoded 0x01 settings frame, see refresh_settings()
         self.settings_raw: Optional[bytes] = None
+        # time.monotonic() of the last 0x96 settings query: set when it is sent and again when answered
+        self._settings_query_t: Optional[float] = None
 
     def _notification_handler(self, _sender, data):
         data = bytes(data)
@@ -347,8 +370,14 @@ class JKBt(BtBms):
         with await self._fetch_futures.acquire_timeout(resp, timeout=self.TIMEOUT / 2):
             frame = _jk_command(cmd, [])
             self.logger.debug("write %s", frame)
+            if cmd == 0x96:
+                # also when the answer never comes (timeout): the BMS may be busy with it anyway
+                self._settings_query_t = time.monotonic()
             await self.client.write_gatt_char(self.char_handle_write, data=frame)
-            return await self._fetch_futures.wait_for(resp, self.TIMEOUT)
+            res = await self._fetch_futures.wait_for(resp, self.TIMEOUT)
+            if cmd == 0x96:
+                self._settings_query_t = time.monotonic()
+            return res
 
     async def _write(self, address, value):
         frame = _jk_command(address, value)
@@ -543,6 +572,50 @@ class JKBt(BtBms):
         self.settings_raw = raw
         self.settings = settings
         return settings
+
+    async def write_setting(self, name: str, value) -> WriteResult:
+        """Write one setting, then read the whole settings frame back to verify it.
+
+        No cross-setting consistency checks here (validate_change is the caller's job);
+        encode_setting checks range and step and raises SettingError. BLE errors propagate.
+        The write fails (ok=False) when the target does not read back as requested, or
+        when any other setting changed with it (the register meant something else).
+        """
+        register, data = encode_setting(name, value)
+        if self.settings is None:
+            await self.refresh_settings()
+        before_all = dict(self.settings)
+        before = before_all.get(name)
+
+        # a write arriving while the BMS still answers the settings query is dropped (see WRITE_SETTLE_S)
+        if self._settings_query_t is not None:
+            wait = self.WRITE_SETTLE_S - (time.monotonic() - self._settings_query_t)
+            if wait > 0:
+                await asyncio.sleep(wait)
+        await self._write(register, data)
+        await asyncio.sleep(self.READBACK_DELAY_S)  # give the BMS time to apply before reading back
+        after_all = await self.refresh_settings()
+        after = after_all.get(name)
+
+        s = SETTINGS[name]
+        if after is None:
+            ok = False
+        elif s.kind == 'switch':
+            ok = bool(after) == bool(value)
+        else:
+            ok = abs(after - value) <= s.step / 2
+        reasons = [] if ok else ['read-back %s != requested %s' % (after, value)]
+
+        others = {n: (before_all.get(n), v) for n, v in after_all.items()
+                  if n != name and before_all.get(n) != v}
+        if others:
+            ok = False
+            reasons.append('also changed: ' + format_changes(others))
+        reason = '; '.join(reasons)
+        if not ok:
+            self.logger.warning('%s write %s=%s not applied as requested: %s', self.name, name, value, reason)
+        return WriteResult(ok=ok, name=name, before=before, requested=value, after=after, reason=reason,
+                           others=others)
 
     def debug_data(self):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)

@@ -176,7 +176,7 @@ class JkPbUart(JKBt):
         return False
 
     def supports_settings(self) -> bool:
-        return False  # settings are read over BLE only, not implemented over RS485
+        return False  # _write is not implemented over RS485
 
     def debug_data(self):
         return dict(resp=self._resp_table, bus_addr=self.bus_addr, pending=self._pending,
