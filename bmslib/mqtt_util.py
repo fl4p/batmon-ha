@@ -16,6 +16,7 @@ import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
 from bmslib.bt import BtBms
+from bmslib.models.jk_settings import LABELS, SETTINGS, format_value
 from bmslib.util import get_logger
 from bmslib.wire.fields import (round_to_n, capitalize_words, is_none_or_nan,
                                 balancing_cells_str, sample_desc, meter_desc, cell_stats)  # noqa: F401
@@ -226,6 +227,18 @@ def publish_qmax(client, device_topic, res: dict):
         mqtt_single_out(client, f"{device_topic}/soh_est", round_to_n(res['soh'], 4))
 
 
+def hass_device_json(device_topic, device_info: DeviceInfo = None) -> dict:
+    """The HA `device` block shared by all entities of one BMS."""
+    return {
+        "identifiers": [(device_info and device_info.sn) or device_topic],
+        "manufacturer": (device_info and device_info.mnf) or None,
+        "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
+        "model": (device_info and device_info.model) or None,
+        "sw_version": (device_info and device_info.sw_version) or None,
+        "hw_version": (device_info and device_info.hw_version) or None,
+    }
+
+
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
                            device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
@@ -236,14 +249,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     # any '/' in the alias. State topics below keep the original slashes.
     node_id = device_topic.replace('/', '_')
 
-    device_json = {
-        "identifiers": [(device_info and device_info.sn) or device_topic],
-        "manufacturer": (device_info and device_info.mnf) or None,
-        "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
-        "model": (device_info and device_info.model) or None,
-        "sw_version": (device_info and device_info.sw_version) or None,
-        "hw_version": (device_info and device_info.hw_version) or None,
-    }
+    device_json = hass_device_json(device_topic, device_info)
 
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
                         precision=None, expire_after=None, json_attributes_topic=None):
@@ -439,6 +445,109 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         j = json.dumps(data)
         logger.debug('discovery msg %s: %s', topic, j)
         mqtt_single_out(client, topic, j)
+
+
+# ------------------------------------------------------------------ JK settings (jk_settings option)
+
+# Settings states come with the settings refresh (JkSettingsService.refresh_period,
+# 5 min), not with every sample: the read-only sensors need a longer expiry than
+# the sample values.
+SETTINGS_EXPIRE_MIN_S = 2 * 3600
+# settings states are sent again this long after a settings discovery (see resend_after_discovery)
+SETTINGS_RESEND_AFTER_DISCOVERY_S = 2.0
+
+
+def _readable_settings(exclude=()):
+    return [s for s in SETTINGS.values() if s.read is not None and s.name not in exclude]
+
+
+def publish_jk_settings_discovery(client, device_topic, device_json, expire_after_seconds: int, exclude=()):
+    """HA entities for the JK settings that can be read from the settings frame, as
+    diagnostic `sensor`/`binary_sensor`. `exclude`: names to leave out (JK-PB float
+    switch, already exposed as the `float_charge` sample switch)."""
+    node_id = device_topic.replace('/', '_')
+    device_json = dict(device_json)
+    remove_none_values(device_json)
+    discovery_msg = {}
+
+    for s in _readable_settings(exclude):
+        is_switch = s.kind == 'switch'
+        dm = {
+            "unique_id": f"{device_topic}__setting_{s.name}",
+            "name": LABELS.get(s.name, s.name),
+            "state_topic": f"{device_topic}/settings/{s.name}",
+            "device": device_json,
+        }
+        if is_switch:
+            dm.update(payload_on="ON", payload_off="OFF")
+        else:
+            dm["unit_of_measurement"] = s.unit
+        component = 'binary_sensor' if is_switch else 'sensor'
+        dm["entity_category"] = "diagnostic"
+        dm["expire_after"] = max(expire_after_seconds, SETTINGS_EXPIRE_MIN_S)
+        remove_none_values(dm)
+        discovery_msg[f"homeassistant/{component}/{node_id}/setting_{s.name}/config"] = dm
+
+    for topic, data in discovery_msg.items():
+        mqtt_single_out(client, topic, json.dumps(data))
+
+
+class MqttSettingsPublisher:
+    """The JkSettingsService publish protocol (states) on MQTT.
+
+    With `discover`, it also owns the settings HA discovery: sent before the first states and
+    again whenever the entity set (`exclude`) changed, so HA never gets states for entities it
+    does not know yet (they would show "unavailable" until the next refresh).
+    `device_json`: callable returning the HA device block (default: from the device topic)."""
+
+    def __init__(self, client, device_topic, exclude=(), discover=False, expire_after_seconds=0, device_json=None):
+        self.client = client
+        self.device_topic = device_topic
+        self.exclude = frozenset(exclude)
+        self.discover = discover
+        self.expire_after_seconds = expire_after_seconds
+        self.device_json = device_json
+        self._discovered = None  # exclude of the last discovery
+        self._force_states = False  # next states() goes past the dedup (after a discovery)
+        self._resend_at = None  # time.time() for the one-time re-send after a discovery
+
+    def discovery(self):
+        """Publish the settings discovery now; the next states() is forced."""
+        if not self.discover:
+            return
+        dj = self.device_json() if self.device_json else hass_device_json(self.device_topic)
+        publish_jk_settings_discovery(self.client, self.device_topic, dj,
+                                      self.expire_after_seconds, exclude=self.exclude)
+        self._discovered = frozenset(self.exclude)
+        self._force_states = True
+        self._resend_at = time.time() + SETTINGS_RESEND_AFTER_DISCOVERY_S
+
+    def resend_after_discovery(self, settings: dict):
+        """Called every sample: states sent right behind the configs can reach the broker before
+        HA subscribed to the new entities' state topics (not retained, so lost); send them once
+        more a moment after each discovery."""
+        if self._resend_at is None or not settings or time.time() < self._resend_at:
+            return
+        self._resend_at = None
+        self.states(settings, force=True)
+
+    def _ensure_discovery(self):
+        if self.discover and self._discovered != frozenset(self.exclude):
+            self.discovery()
+
+    def states(self, settings: dict, force=False):
+        """Numbers plain (2.65), switches ON/OFF, not retained. Unchanged values are
+        deduplicated like other states unless `force` or right after a discovery."""
+        self._ensure_discovery()
+        if self._force_states:
+            force, self._force_states = True, False
+        for name, value in (settings or {}).items():
+            if name in self.exclude or value is None:
+                continue
+            topic = f"{self.device_topic}/settings/{name}"
+            if force:
+                _last_values.pop(topic, None)
+            mqtt_single_out(self.client, topic, format_value(name, value))
 
 
 _switch_callbacks = {}

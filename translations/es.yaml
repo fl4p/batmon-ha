@@ -211,6 +211,11 @@ configuration:
       minutos o más cerca de vacía y cerca de llena, así que pueden pasar
       semanas, o nunca, hasta tener un valor. Se desactiva sola en baterías
       que no son LiFePO4.
+  jk_settings:
+    name: Ajustes JK
+    description: >-
+      Lee los ajustes de los BMS JK (Bluetooth, firmware 11 o posterior) y
+      los muestra en Home Assistant (solo lectura). Ver doc/JK-Settings.md.
   pack_temp_estimator:
     name: Estimar la temperatura de la batería (experimental)
     description: >-

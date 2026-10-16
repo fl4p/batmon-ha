@@ -200,6 +200,11 @@ configuration:
       Ruhephasen von 90 Minuten und mehr nahe leer und nahe voll; bis zu
       einem Wert können Wochen vergehen, oder es kommt nie einer. Schaltet
       sich bei Akkus ab, die nicht LiFePO4 sind.
+  jk_settings:
+    name: JK-Einstellungen
+    description: >-
+      Liest die Einstellungen von JK-BMS (Bluetooth, Firmware 11 und neuer)
+      und zeigt sie in Home Assistant (nur lesend). Siehe doc/JK-Settings.md.
   pack_temp_estimator:
     name: Akkutemperatur schätzen (experimentell)
     description: >-

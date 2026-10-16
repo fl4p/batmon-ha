@@ -190,6 +190,11 @@ configuration:
       in Ah and "SoH (est.)" in %. Needs rests of 90 minutes and more near
       empty and near full, so it may take weeks to never before a value
       appears. Turns itself off for packs that are not LiFePO4.
+  jk_settings:
+    name: JK settings
+    description: >-
+      Read the settings of JK BMSes (Bluetooth, firmware 11 and newer) and
+      show them in Home Assistant (read-only). See doc/JK-Settings.md.
   pack_temp_estimator:
     name: Pack temperature estimator (experimental)
     description: >-

@@ -28,5 +28,6 @@
   "watchdog": true,
   "concurrent_sampling": false,
   "verbose_log": false,
-  "impedance_estimator": false
+  "impedance_estimator": false,
+  "jk_settings": false
 }

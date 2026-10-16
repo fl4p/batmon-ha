@@ -191,6 +191,10 @@ schema:
   # how rarely that gives a value.
   soh_estimator: "bool?"
 
+  # Read the settings of JK BMSes (BLE, JK02_32S protocol, firmware >= 11) and
+  # show them in HA (read-only). See doc/JK-Settings.md.
+  jk_settings: "bool?"
+
   # Experimental: estimate the cell temperature of packs whose BMS only reports
   # a MOSFET temperature, as a `pack_temp_est` sensor. Room/outdoor topics are
   # MQTT state topics (e.g. from HA's mqtt_statestream); either may be left
