@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.25]
 
 * Fix (`_ble` types): only the mean of the BMS's temperature probes was published. Now every probe has its own `temperatures/<n>`, and the MOSFET probe is `mosfet_status/temperature` (#417).
 * New wired type `felicity_uart` for Felicity 48 V packs: the BLE `felicity` needs bonding and loses the link to scan contention. Voltronic protocol, decoded against captures only (#415).
