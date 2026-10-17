@@ -713,3 +713,76 @@ def test_jbd_refused_write_reaches_the_waiter_not_a_timeout():
     bms.client = Client()
     with pytest.raises(ValueError, match="failed with status 0x80"):
         asyncio.run(bms._w(0xE1, bytes.fromhex("0002"), timeout=0.5))
+
+
+def test_jbd_failed_write_is_retried_at_once():
+    bms, writes = _switch_bms([(False, True, 0)])
+    calls = []
+
+    async def failing_enter(command, data, timeout=None):
+        calls.append(command)
+        if command == 0x00:
+            raise asyncio.TimeoutError()
+
+    bms._w = failing_enter
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.set_switch("charge", True))
+    assert "charge" not in bms._written
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.set_switch("charge", True))
+    assert calls == [0x00, 0x00]
+
+
+def test_jbd_command_changed_elsewhere_without_protection_is_written_again():
+    # HA turned charge on, then the vendor app turned it off: a new "on" from
+    # HA within SWITCH_REWRITE_S must still be written
+    bms, writes = _switch_bms([(False, True, 0), (True, True, 0), (False, True, 0), (True, True, 0)])
+    asyncio.run(bms.set_switch("charge", True))
+    asyncio.run(bms.set_switch("charge", True))
+    assert [w[0] for w in writes] == [0x00, 0xE1, 0x01] * 2
+
+
+def test_jbd_command_queued_when_the_sampler_disconnected_meanwhile():
+    bms, writes = _switch_bms([(False, True, 0), (True, True, 0)])
+
+    async def run():
+        async with bms._io_lock:  # the sampler's __aexit__ holds the lock ...
+            task = asyncio.create_task(bms.set_switch("charge", True))
+            await asyncio.sleep(0)
+            bms.client.is_connected = False  # ... and disconnects
+            bms._connect_complete = False
+        await task
+
+    asyncio.run(run())
+    assert writes == [] and bms._pending_switches == {"charge": True}
+
+
+def test_jbd_periodic_reconnect_waits_for_a_switch_write_in_flight():
+    bms, writes = _switch_bms([(False, False, 0), (True, False, 0)])
+    events = []
+    gate = asyncio.Event()
+
+    async def slow_w(command, data, timeout=None):
+        writes.append((command, data))
+        if command == 0x00:
+            await gate.wait()
+
+    async def fake_force_disconnect(timeout=None):
+        events.append(len(writes))
+
+    bms._w = slow_w
+    bms._force_disconnect = fake_force_disconnect
+
+    async def run():
+        task = asyncio.create_task(bms.set_switch("charge", True))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        cut = asyncio.create_task(bms.force_disconnect())
+        await asyncio.sleep(0.01)
+        assert events == []
+        gate.set()
+        await task
+        await cut
+
+    asyncio.run(run())
+    assert events == [3]

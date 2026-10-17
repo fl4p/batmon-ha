@@ -265,6 +265,12 @@ class JbdBt(BtBms):
         async with self._io_lock:
             await super().__aexit__(*args)
 
+    async def force_disconnect(self):
+        # the periodic reconnect too: cut between 56 78 and the exit, the BMS
+        # would stay in factory mode
+        async with self._io_lock:
+            await super().force_disconnect()
+
     async def fetch(self) -> BmsSample:
         async with self._io_lock:
             sample = await self._fetch()
@@ -439,13 +445,15 @@ class JbdBt(BtBms):
     async def set_switch(self, switch: str, state: bool):
         assert switch in {"charge", "discharge"}
         self._commanded[switch] = state
-        if not (self.client.is_connected and getattr(self, '_connect_complete', False)):
-            # connecting here would race the sampler's own connect and
-            # disconnect; the next poll applies it inside its connection
-            self._pending_switches[switch] = state
-            self.logger.info("JBD %s: %s MOS %s queued for the next poll", self.name, switch, state)
-            return
         async with self._io_lock:
+            # checked under the lock: the sampler may have disconnected while
+            # this waited for it
+            if not (self.client.is_connected and getattr(self, '_connect_complete', False)):
+                # connecting here would race the sampler's own connect and
+                # disconnect; the next poll applies it inside its connection
+                self._pending_switches[switch] = state
+                self.logger.info("JBD %s: %s MOS %s queued for the next poll", self.name, switch, state)
+                return
             await self._apply_switch(switch, state, await self._fetch())
 
     async def _apply_switch(self, switch: str, state: bool, sample: BmsSample) -> BmsSample:
@@ -453,13 +461,17 @@ class JbdBt(BtBms):
         the sample after the write. Raises if the BMS does not report it."""
         actual = sample.switches[switch]
         written = self._written.get(switch)
-        if (actual == state and not sample.problem_code) or (
-                written and written[0] == state and (
-                actual == state or time.time() - written[1] < self.SWITCH_REWRITE_S)):
-            # already in that state with no protection forcing it (a retained
-            # MQTT command), or written moments ago and held by a protection.
-            # A protection holding the asked-for state still gets the write, so
-            # the FET stays there after the protection clears.
+        was_written = written is not None and written[0] == state
+        protected = bool(sample.problem_code)
+        if actual == state:
+            # A retained MQTT command for the current state is not written. One
+            # a protection is forcing is, once, so the FET stays there after the
+            # protection clears.
+            skip = not protected or was_written
+        else:
+            # held against the write by a protection: not again every sample
+            skip = protected and was_written and time.time() - written[1] < self.SWITCH_REWRITE_S
+        if skip:
             self.logger.info("JBD %s: %s MOS %s already written, not rewritten", self.name, switch, state)
             return sample
 
@@ -471,10 +483,10 @@ class JbdBt(BtBms):
 
         # E1 inside factory mode, left with save: the sequence that re-enabled
         # charging after an undervoltage cut-off on firmware 3.2 (#418).
-        self._written[switch] = (state, time.time())
         await self._w(0x00, bytes([0x56, 0x78]))
         try:
             await self._w(0xE1, bytes([0x00, tc]))
+            self._written[switch] = (state, time.time())
         finally:
             await self._exit_factory_mode(save=True)
 
