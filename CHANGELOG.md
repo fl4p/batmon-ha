@@ -1,10 +1,11 @@
 ## [unreleased]
 
 * JBD: use the complete factory-mode transaction for charge/discharge MOS commands, preserve the other MOS state, and
-  verify the result. This also reconnects for commands when `keep_alive` is disabled and ignores retained commands
-  when the requested state is already active. On supported firmware, this can re-enable charging when an undervoltage
-  event has left the charge MOS disabled, including states where standard app controls are unavailable; active
-  protection conditions are not bypassed.
+  verify the reported result.
+* JBD: reconnect for switch commands when `keep_alive` is disabled, and ignore retained commands when the requested
+  state is already active.
+* On supported JBD firmware, this can re-enable charging when undervoltage leaves the charge MOS disabled, including
+  when standard app controls are unavailable; active protections remain enforced.
 * JBD: publish read-only identity, firmware, capacity, protection, balance, voltage-curve, and configuration registers
   through Home Assistant MQTT discovery.
 * Add per-device `display_name` and comma-separated `temperature_names` labels without changing MQTT topics or unique
