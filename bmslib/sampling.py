@@ -608,7 +608,11 @@ class BmsSampler:
                         val = res.switches[swk]
                         if val is not None:
                             logger.info('%s algo set %s switch -> %s', bms.name, swk, val)
-                            await self.bms.set_switch(swk, val)
+                            try:
+                                await self.bms.set_switch(swk, val)
+                            except Exception as e:
+                                # a refused write must not cost the sample
+                                logger.error('%s algo set %s switch failed: %s', bms.name, swk, summarize_exc(e))
 
             if self.num_samples == 0 and sample.switches and mqtt_client:
                 logger.info("%s subscribing for %s switch change", bms.name, sample.switches)

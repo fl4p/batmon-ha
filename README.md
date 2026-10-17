@@ -134,7 +134,9 @@ factory mode, which batmon leaves without saving, so no setting is changed.
 
 `jbd` charge and discharge switches write the MOS register inside factory mode, keep the other MOSFET's state, and
 read the state back, so a refused change is logged as an error. On firmware 3.2 this re-enabled charging after an
-undervoltage cut-off. It does not override an active protection.
+undervoltage cut-off. It does not override an active protection; a state a protection holds is not rewritten for
+10 minutes, since each write saves to the BMS's EEPROM. With `keep_alive: false` a switch command waits for the next
+poll.
 
 If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with the device's PIN). This is the
 case for the Victron SmartShunt and for newer JBD firmware (Liontron and other packs whose app asks for a 6-digit

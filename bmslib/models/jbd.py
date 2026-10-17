@@ -14,6 +14,7 @@ https://github.com/tgalarneau/bms
 """
 import asyncio
 import datetime
+import time
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
@@ -31,6 +32,10 @@ def _jbd_write_command(command: int, data: bytes):
         + checksum.to_bytes(2, byteorder='big')
         + bytes([0x77])
     )
+
+
+class JbdStatusError(ValueError):
+    """An intact JBD reply whose status byte reports the command refused."""
 
 
 def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
@@ -61,8 +66,6 @@ def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
         )
     if frame[-1] != 0x77:
         raise ValueError("JBD response has an invalid terminator")
-    if frame[2] != 0:
-        raise ValueError(f"JBD command 0x{command:02x} failed with status 0x{frame[2]:02x}")
 
     received_checksum = int.from_bytes(frame[-3:-1], "big")
     calculated_checksum = (0x10000 - sum(frame[2:-3])) & 0xFFFF
@@ -71,6 +74,9 @@ def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
             f"JBD response checksum mismatch: expected 0x{calculated_checksum:04x}, "
             f"got 0x{received_checksum:04x}"
         )
+    # after the checksum, so a corrupted status byte is not taken for a refusal
+    if frame[2] != 0:
+        raise JbdStatusError(f"JBD command 0x{command:02x} failed with status 0x{frame[2]:02x}")
 
     return frame[4:-3]
 
@@ -170,6 +176,10 @@ class JbdBt(BtBms):
     SETTING_REGISTERS = list(range(0x10, 0x40)) + list(range(0x42, 0x48)) + [0xA0, 0xA1, 0xA2]
     SETTING_TIMEOUT = 2
     SETTING_MAX_MISSES = 3
+    #: a repeated request for a MOS state already written is not written again
+    #: before this [s]: a protection holding the FET keeps the algorithm asking
+    #: every sample, and each write saves to EEPROM
+    SWITCH_REWRITE_S = 600
 
     def __init__(self, address, **kwargs):
         # newer JBD firmware gates the protocol behind a passkey pairing (#217)
@@ -178,6 +188,12 @@ class JbdBt(BtBms):
         self._buffer = bytearray()
         self._switches = None
         self._last_response = None
+        # serializes register traffic with switch writes, which arrive from the
+        # MQTT loop concurrently with the sampler
+        self._io_lock = asyncio.Lock()
+        self._pending_switches = {}
+        self._commanded = {}  # last requested state per MOS
+        self._written = {}  # switch -> (state, time) of the last write
 
     def _notification_handler(self, sender, data):
         self._buffer += data
@@ -203,6 +219,10 @@ class JbdBt(BtBms):
             del self._buffer[:frame_length]
             try:
                 _validate_jbd_response(frame)
+            except JbdStatusError as exc:
+                # hand a refusal to the waiter, which re-validates and raises,
+                # instead of letting it run into a timeout
+                self.logger.debug("%s", exc)
             except ValueError as exc:
                 self.logger.warning("discarding invalid JBD response: %s", exc)
                 continue
@@ -230,17 +250,34 @@ class JbdBt(BtBms):
             await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
             return await self._fetch_futures.wait_for(cmd, timeout or self.TIMEOUT)
 
-    async def _w(self, cmd: int, data: bytes):
+    async def _w(self, cmd: int, data: bytes, timeout=None):
         """Write a JBD register and require its command acknowledgement."""
         message = _jbd_write_command(cmd, data)
         with self._fetch_futures.acquire(cmd):
             self.logger.debug("send JBD write 0x%02x: %s", cmd, message.hex(' '))
             await self.client.write_gatt_char(self.UUID_TX, data=message)
-            frame = await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+            frame = await self._fetch_futures.wait_for(cmd, timeout or self.TIMEOUT)
         _validate_jbd_response(frame, expected_command=cmd)
         return frame
 
+    async def __aexit__(self, *args):
+        # the sampler's disconnect waits for a switch write in flight
+        async with self._io_lock:
+            await super().__aexit__(*args)
+
     async def fetch(self) -> BmsSample:
+        async with self._io_lock:
+            sample = await self._fetch()
+            # switch commands that arrived while disconnected (keep_alive off)
+            pending, self._pending_switches = self._pending_switches, {}
+            for switch, state in pending.items():
+                try:
+                    sample = await self._apply_switch(switch, state, sample)
+                except Exception as exc:
+                    self.logger.error("JBD %s: %s", self.name, exc)
+            return sample
+
+    async def _fetch(self) -> BmsSample:
         # binary reading
         #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
 
@@ -328,12 +365,18 @@ class JbdBt(BtBms):
         A BMS that refuses factory mode, or stops answering, still gets its
         basic info, so the sampler doesn't retry this every discovery period.
         """
+        async with self._io_lock:
+            return await self._fetch_device_info()
+
+    async def _fetch_device_info(self) -> DeviceInfo:
         values = {}
         desc = {}
         try:
-            await self._w(0x00, bytes([0x56, 0x78]))
+            await self._w(0x00, bytes([0x56, 0x78]), timeout=self.SETTING_TIMEOUT)
         except Exception as exc:
             self.logger.info("JBD %s: no factory mode, settings not read: %s", self.name, exc)
+            # the ack may be lost while the BMS did enter; 00 00 is harmless
+            await self._exit_factory_mode(save=False)
         else:
             try:
                 misses = 0
@@ -359,10 +402,7 @@ class JbdBt(BtBms):
                         values["jbd/" + name] = value
                         desc["jbd/" + name] = _jbd_setting_desc(command, name)
             finally:
-                try:
-                    await self._w(0x01, bytes([0x00, 0x00]))
-                except Exception as exc:
-                    self.logger.warning("JBD %s: exiting factory mode failed: %s", self.name, exc)
+                await self._exit_factory_mode(save=False)
 
         basic = _validate_jbd_response(await self._q(0x03), expected_command=0x03)
         sw_version = f"{basic[18] >> 4}.{basic[18] & 0x0f}" if len(basic) > 18 else None
@@ -378,7 +418,18 @@ class JbdBt(BtBms):
             value_desc=desc,
         )
 
+    async def _exit_factory_mode(self, save: bool):
+        # 28 28 exits and saves to EEPROM, 00 00 exits and discards
+        try:
+            await self._w(0x01, bytes([0x28, 0x28]) if save else bytes([0x00, 0x00]), timeout=self.SETTING_TIMEOUT)
+        except Exception as exc:
+            self.logger.warning("JBD %s: exiting factory mode failed: %s", self.name, exc)
+
     async def fetch_voltages(self):
+        async with self._io_lock:
+            return await self._fetch_voltages()
+
+    async def _fetch_voltages(self):
         frame = await self._q(cmd=0x04)
         payload = _validate_jbd_response(frame, expected_command=0x04)
         if len(payload) % 2:
@@ -386,59 +437,54 @@ class JbdBt(BtBms):
         return [int.from_bytes(payload[i:i + 2], 'big') for i in range(0, len(payload), 2)]
 
     async def set_switch(self, switch: str, state: bool):
-
         assert switch in {"charge", "discharge"}
+        self._commanded[switch] = state
+        if not (self.client.is_connected and getattr(self, '_connect_complete', False)):
+            # connecting here would race the sampler's own connect and
+            # disconnect; the next poll applies it inside its connection
+            self._pending_switches[switch] = state
+            self.logger.info("JBD %s: %s MOS %s queued for the next poll", self.name, switch, state)
+            return
+        async with self._io_lock:
+            await self._apply_switch(switch, state, await self._fetch())
 
-        connected_here = not self.client.is_connected
-        if connected_here:
-            await self.connect()
+    async def _apply_switch(self, switch: str, state: bool, sample: BmsSample) -> BmsSample:
+        """Write one MOS state inside factory mode and read it back. Returns
+        the sample after the write. Raises if the BMS does not report it."""
+        actual = sample.switches[switch]
+        written = self._written.get(switch)
+        if (actual == state and not sample.problem_code) or (
+                written and written[0] == state and (
+                actual == state or time.time() - written[1] < self.SWITCH_REWRITE_S)):
+            # already in that state with no protection forcing it (a retained
+            # MQTT command), or written moments ago and held by a protection.
+            # A protection holding the asked-for state still gets the write, so
+            # the FET stays there after the protection clears.
+            self.logger.info("JBD %s: %s MOS %s already written, not rewritten", self.name, switch, state)
+            return sample
 
+        other = "discharge" if switch == "charge" else "charge"
+        # the other FET keeps what was asked for, not what a protection made it
+        want = {switch: state, other: self._commanded.get(other, sample.switches[other])}
+        tc = (0 if want["charge"] else 0x01) | (0 if want["discharge"] else 0x02)
+        self.logger.info("JBD %s: setting %s MOS %s (E1 %02x)", self.name, switch, "on" if state else "off", tc)
+
+        # E1 inside factory mode, left with save: the sequence that re-enabled
+        # charging after an undervoltage cut-off on firmware 3.2 (#418).
+        self._written[switch] = (state, time.time())
+        await self._w(0x00, bytes([0x56, 0x78]))
         try:
-            # Refresh after a new connection. Apart from preserving the peer
-            # MOS state, this makes retained MQTT commands harmless when the
-            # BMS already reports the requested state.
-            if connected_here or not self._switches:
-                await self.fetch()
-            if self._switches[switch] == state:
-                self.logger.info("JBD %s: %s MOS already %s", self.name, switch, state)
-                return
-
-            new_switches = {**self._switches, switch: state}
-            switches_sum = sum(new_switches.values())
-            if switches_sum == 2:
-                tc = 0x00  # all on
-            elif switches_sum == 0:
-                tc = 0x03  # all off
-            elif (switch == "charge" and not state) or (switch == "discharge" and state):
-                tc = 0x01  # charge off
-            else:
-                tc = 0x02  # charge on, discharge off
-
-            self.logger.info(
-                "JBD %s: setting %s MOS %s with write-mode sequence",
-                self.name, switch, "on" if state else "off"
-            )
-
-            # Use the complete JBD factory-mode transaction around the MOS
-            # register write, then read the reported state back below.
-            await self._w(0x00, bytes([0x56, 0x78]))
-            try:
-                await self._w(0xE1, bytes([0x00, tc]))
-            finally:
-                await self._w(0x01, bytes([0x28, 0x28]))
-
-            sample = await self.fetch()
-            actual = sample.switches[switch]
-            if actual != state:
-                raise RuntimeError(
-                    f"JBD {self.name}: {switch} MOS verification failed "
-                    f"(requested={state}, reported={actual}, "
-                    f"problem_code={sample.problem_code})"
-                )
-            self.logger.info("JBD %s: %s MOS verified %s", self.name, switch, actual)
+            await self._w(0xE1, bytes([0x00, tc]))
         finally:
-            if connected_here:
-                await self.disconnect()
+            await self._exit_factory_mode(save=True)
+
+        sample = await self._fetch()
+        if sample.switches[switch] != state:
+            raise RuntimeError(
+                f"{switch} MOS still {sample.switches[switch]} after writing {state} "
+                f"(problem_code={sample.problem_code}, a protection may hold it)")
+        self.logger.info("JBD %s: %s MOS verified %s", self.name, switch, state)
+        return sample
 
     def debug_data(self):
         return self._last_response

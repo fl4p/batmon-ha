@@ -3,6 +3,7 @@
 * Fix (`_ble` types): only the mean of the BMS's temperature probes was published. Now every probe has its own `temperatures/<n>`, and the MOSFET probe is `mosfet_status/temperature` (#417).
 * New wired type `felicity_uart` for Felicity 48 V packs: the BLE `felicity` needs bonding and loses the link to scan contention. Voltronic protocol, decoded against captures only (#415).
 * `jbd` switches now write inside factory mode, keep the other MOSFET's state and read the result back. This re-enabled charging after an undervoltage cut-off (#418, thanks @tednv).
+* Fix: a refused algorithm switch write (e.g. held by a BMS protection) no longer drops the sample.
 * `jbd` publishes its identity and settings registers under `jbd/` (read once per start, factory mode left without saving) (#418).
 * New device options `display_name` and `temperature_names` rename the HA device and temperature probes; topics and unique IDs stay (#418).
 * Fix (`soh_estimator`): a withdrawn Qmax/SoH was cleared by one MQTT publish; a failed one or a Home Assistant restart brought the old value back. Now retried and repeated hourly.
