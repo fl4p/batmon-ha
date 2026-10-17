@@ -101,6 +101,7 @@ Several packs share one bus, each with its own DIP address (1, 2, 3, ...); add o
 device per pack on the same adapter. Default address 1. 9600 8N1.
 Untested on hardware.
 """
+import math
 import time
 from typing import List, Optional, Tuple
 
@@ -278,8 +279,9 @@ def decode_status_block(data: bytes) -> dict:
     n_temps = u16_be(data, 0)
     if not 0 <= n_temps <= MAX_TEMPS:
         raise ValueError(f"felicity: implausible temperature sensor count {n_temps}")
-    temps = [_temperature(raw) for raw in
-             (u16_be(data, 2 + 2 * i) for i in range(n_temps)) if raw]
+    # a 0 is a probe without data: NaN keeps the later probes on their index
+    temps = [_temperature(raw) if raw else math.nan for raw in
+             (u16_be(data, 2 + 2 * i) for i in range(n_temps))]
     i_charge = u16_be(data, 22) / 10
     i_discharge = abs(u16_be(data, 24, signed=True)) / 10
     v_raw = u16_be(data, 26)

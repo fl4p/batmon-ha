@@ -19,6 +19,7 @@ The interesting part of the protocol is the response header: a 16-bit REGISTER
 count where Modbus has an 8-bit byte count.
 """
 import asyncio
+import math
 
 import pytest
 
@@ -191,6 +192,14 @@ def test_status_block_matches_the_worked_example():
     assert [round(t, 2) for t in s['temps']] == [28.05, 28.05, 28.05, 27.05]
     assert round(sum(s['temps'][:3]) / 3, 1) == 28.1     # their pack temperature
     assert round(s['current'] * s['voltage']) == 101     # their -101 W
+
+
+def test_status_block_keeps_probe_indexes_when_one_reads_0():
+    data = bytearray(_payload(fx.STATUS_1_DOC_EXAMPLE))
+    data[4:6] = b"\x00\x00"         # probe 2 without data
+    t = fu.decode_status_block(bytes(data))['temps']
+    assert len(t) == 4 and math.isnan(t[1])
+    assert [round(x, 2) for x in (t[0], t[2], t[3])] == [28.05, 28.05, 27.05]
 
 
 def test_status_block_charging_pack():
