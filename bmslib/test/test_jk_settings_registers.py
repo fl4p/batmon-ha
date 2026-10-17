@@ -11,7 +11,9 @@ from bmslib.models.jk_settings import SETTINGS
 
 PINNED = {
     # name: (register, length, factor)
-    'smart_sleep_voltage': (0x01, 1, 1000),
+    # Deliberately deviates from syssi (length 1): 4 bytes verified on a JK-B2A8S30P fw 15.26
+    # and matches the JK app capture in syssi/esphome-jk-bms#421.
+    'smart_sleep_voltage': (0x01, 4, 1000),
     'cell_uvp': (0x02, 4, 1000),
     'cell_uvpr': (0x03, 4, 1000),
     'cell_ovp': (0x04, 4, 1000),

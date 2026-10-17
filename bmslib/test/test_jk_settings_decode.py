@@ -163,7 +163,7 @@ def test_table_shape():
     })
     assert CRITICAL == frozenset(n for n, s in SETTINGS.items() if s.danger == "critical")
     assert UNVERIFIED_WRITE == {
-        "smart_sleep_voltage", "heating_start_temp", "heating_stop_temp",
+        "heating_start_temp", "heating_stop_temp",
         "discharge_utp", "discharge_utpr", "precharge_time",
     }
     for name, s in SETTINGS.items():

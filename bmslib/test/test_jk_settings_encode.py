@@ -40,6 +40,12 @@ def test_encode_one_byte():
     assert encode_setting("smart_sleep_delay", 24) == (0x39, [24])
 
 
+def test_encode_smart_sleep_voltage_four_bytes():
+    # Verified on a JK-B2A8S30P fw 15.26 (2026-10-17) and in the JK app capture of
+    # syssi/esphome-jk-bms#421: register 0x01 takes 4 bytes, mV.
+    assert encode_setting("smart_sleep_voltage", 3.286) == (0x01, [0xD6, 0x0C, 0x00, 0x00])
+
+
 def test_encode_switch():
     assert encode_setting("display_always_on", True) == (0x2B, [1, 0, 0, 0])
     assert encode_setting("display_always_on", False) == (0x2B, [0, 0, 0, 0])
@@ -58,7 +64,7 @@ def test_encode_switch():
     ("display_always_on", "on"),
     ("voltage_calibration", 13.2),
     ("rcv_time", 1.0),
-    ("smart_sleep_voltage", 3.3),
+    ("smart_sleep_voltage", 3.7),  # above max
     ("heating_start_temp", 10),
     ("heating_stop_temp", 20),
     ("discharge_utp", -10),
@@ -106,6 +112,7 @@ def test_parse_write_option():
 
     everything = parse_write_option("all")
     assert "charge_utp" in everything
+    assert "smart_sleep_voltage" in everything
     assert not everything & CRITICAL
     assert not everything & UNVERIFIED_WRITE
     assert everything == frozenset(WRITABLE) - CRITICAL
@@ -114,7 +121,7 @@ def test_parse_write_option():
     assert "cell_count" in parse_write_option("all,cell_count")
     assert parse_write_option("charge_utp, charge_utpr") == {"charge_utp", "charge_utpr"}
 
-    for bad in ("nope", "all,nope", "smart_sleep_voltage", "rcv_time"):
+    for bad in ("nope", "all,nope", "heating_start_temp", "rcv_time"):
         with pytest.raises(SettingError):
             parse_write_option(bad)
 

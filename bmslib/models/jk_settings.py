@@ -63,7 +63,9 @@ F, T = False, True
 
 _TABLE = [
     # name, register, read (offset, width, signed), factor, unit, danger, min, max[, write length]
-    _num('smart_sleep_voltage', 0x01, (6, 4, F), 1000, 'V', 'low', 0.003, 3.65, length=1),
+    # 4 bytes, not syssi's 1: verified on a JK-B2A8S30P fw 15.26 (2026-10-17, 3.286 V written and
+    # read back, nothing else changed) and matches the JK app capture in syssi/esphome-jk-bms#421.
+    _num('smart_sleep_voltage', 0x01, (6, 4, F), 1000, 'V', 'low', 0.003, 3.65),
     _num('cell_uvp', 0x02, (10, 4, F), 1000, 'V', 'high', 1.2, 4.35),
     _num('cell_uvpr', 0x03, (14, 4, F), 1000, 'V', 'high', 1.2, 4.35),
     _num('cell_ovp', 0x04, (18, 4, F), 1000, 'V', 'high', 1.2, 4.35),
@@ -133,13 +135,10 @@ CRITICAL = frozenset({
 })
 
 # Readable, but not writable until verified on hardware:
-# - smart_sleep_voltage: syssi writes 0x01 with length 1 but factor 1000, which cannot
-#   hold e.g. 3.285 V.
 # - heating_start/stop_temp, discharge_utp/utpr, precharge_time: their read offsets could
 #   not be checked against a value shown in the app (heating reads start 60 > stop 50,
 #   discharge_utp/utpr both 0, which looks wrong).
 UNVERIFIED_WRITE = frozenset({
-    'smart_sleep_voltage',
     'heating_start_temp', 'heating_stop_temp',
     'discharge_utp', 'discharge_utpr',
     'precharge_time',

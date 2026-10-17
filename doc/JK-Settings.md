@@ -88,7 +88,7 @@ so a write could not be verified; not shown and not writable. Risk is a rough gu
 
 | Name | Label in HA | Range, step | Risk | Write |
 |---|---|---|---|---|
-| `smart_sleep_voltage` | Smart sleep voltage | 0.003 … 3.65 V, step 0.001 | low | no (unverified) |
+| `smart_sleep_voltage` | Smart sleep voltage | 0.003 … 3.65 V, step 0.001 | low | `all` |
 | `cell_uvp` | Cell UVP | 1.2 … 4.35 V, step 0.001 | high | `all` |
 | `cell_uvpr` | Cell UVPR | 1.2 … 4.35 V, step 0.001 | high | `all` |
 | `cell_ovp` | Cell OVP | 1.2 … 4.35 V, step 0.001 | high | `all` |
