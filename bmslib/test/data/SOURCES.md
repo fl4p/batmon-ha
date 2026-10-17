@@ -119,6 +119,26 @@ request-builder address byte and the BLE connect/notify glue change.
 
 ---
 
+## Felicity Solar RS485 (Voltronic "LIB", 16-bit register count) — `felicity_uart_fixtures.py`
+
+| Fixture | Type | Source |
+|---|---|---|
+| `STATUS_*`, `CELLS_*`, `LIMITS_*`, `TRUNCATED_*`, `REQ_*` | harvested | [`KrzysztofHajdamowicz/felicity-battery-modbus` — `captures/2026-10-10-rs485-bus.log`](https://github.com/KrzysztofHajdamowicz/felicity-battery-modbus/blob/main/captures/2026-10-10-rs485-bus.log) (MIT). Live RS485 traffic of three FLB48314TG1 packs at DIP addresses 1-3, 9600 8N1; each fixture carries the capture timestamp of its frame. `STATUS_1_DOC_EXAMPLE` is the 13:03:34 frame that the project's `docs/protocol.md` §5 works through by hand (53.41 V, −1.9 A, −101 W, SOC 95 %, 350.0 Ah, 28.1 °C), which is the test's independent ground truth. The two `TRUNCATED_*` frames are the reporter's USB-RS485 adapter losing the CRC high byte and the slave address. |
+| version block, limits/status blocks with distinct words per register, the echo / noise / foreign-frame / exception cases in `test_felicity_uart_decode.py` | synthesized | None of these are in the capture. The version block (registers 1-6) was never polled on the wire; `docs/protocol.md` reports it answered by firmware 1.1 via `felicityd`, and the fixture follows the documented layout. The all-distinct-register blocks exist because the real frames repeat values (480 in both registers 113 and 114, `0x0001_0001` for both version words, 3012 across the probes), which hides an off-by-one register. The alarm registers 55-60 are not decoded at all, so there is no alarm fixture — see the note in `bmslib/models/felicity_uart.py`. |
+
+All 101 CRC-valid responses in that capture were replayed through
+`bmslib/models/felicity_uart.py` while writing it: every one decodes (cells
+3338-3344 mV, 53.40-53.49 V, 27.05/28.05 °C, SOC 95-96 %, 350.0 Ah), and the 10
+damaged frames are rejected — the same 101/10 split the upstream decoder reports.
+
+Protocol references:
+[`docs/protocol.md`](https://github.com/KrzysztofHajdamowicz/felicity-battery-modbus/blob/main/docs/protocol.md),
+[`tools/felicity_decoder.py`](https://github.com/KrzysztofHajdamowicz/felicity-battery-modbus/blob/main/tools/felicity_decoder.py),
+and the vendor document Voltronic Power, *Inverter and BMS 485 communication
+Protocol*, 2020-03-25.
+
+---
+
 ## ANT BMS — `ant_fixtures.py`
 
 | Fixture | Type | Source |

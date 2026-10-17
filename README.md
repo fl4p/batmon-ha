@@ -41,6 +41,7 @@ batmon device connectors:
 * JBD / Xiaoxiang / LLT BMS (`jbd` over BLE, `jbd_uart` over TTL UART or RS485)
 * Seplos V2 BMS, 48 V rack packs (`seplos_ble`, `seplos_v2_ble` over BLE, `seplos_uart` over RS485)
 * Renogy smart lithium batteries (`renogy_ble` over BLE via the BT-2 dongle, `renogy_uart` over RS485)
+* Felicity Solar 48 V LiFePo4 packs (FLB48314TG1, FLB48100, LPBF48/LPBA48; `felicity` over BLE, `felicity_uart` over RS485)
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant`)
 * Supervolt BMS (`supervolt`)
@@ -111,7 +112,7 @@ find a list of visible Bluetooth devices in the add-on log. Alternatively you ca
 displayed in the discovery list.
 
 `type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
+`pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
 For a mock BMS use `dummy`.
 
 `type: auto` (Bluetooth only) asks the device at every start which protocol it speaks and logs the `type:` to put in
@@ -222,9 +223,17 @@ Supported types (baud rate in parentheses):
 * `renogy_uart` (9600) — Renogy smart lithium (RBT100LFP12, RBT200LFP12S, ...)
   Modbus RTU; `renogy_uart:<id>` for the slave id (default `0x30`; the
   RBT100LFP12SH-G1 uses `0xF7`).
+* `felicity_uart` (9600) — Felicity Solar 48 V packs (FLB48314TG1, FLB48100,
+  LPBF48/LPBA48) on the RS485 pins 5/6 of their RJ45 port: the Voltronic "LIB"
+  protocol, Modbus RTU function 0x03 with a 16-bit register count in place of
+  Modbus's byte count. `felicity_uart:<addr>` for the DIP-switch address
+  (default 1); several packs share one adapter, one device entry each. An
+  alternative to the BLE `felicity` for setups troubled by bonding or adapter
+  scan contention ([#415](https://github.com/fl4p/batmon-ha/issues/415)); it has
+  not been run on hardware yet, so no claim that it is the more reliable path.
 
 `pace_uart`, `basen_uart`, `jbd_uart`, `jk_pb_uart`, `seplos_uart`,
-`braunpwr_uart` and `renogy_uart` decoders are unit-tested against captured or
+`braunpwr_uart`, `renogy_uart` and `felicity_uart` decoders are unit-tested against captured or
 reference frames but not yet confirmed on live hardware — feedback welcome. The
 protocols were ported from dbus-serialbattery, aiobmsble and the syssi ESPHome
 components; see the module docstrings for the exact sources.
