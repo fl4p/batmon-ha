@@ -18,6 +18,26 @@ logger = get_logger()
 PSK_MAX_ATTEMPTS = 3
 
 
+def split_temperatures(sample: dict) -> Tuple[list, float]:
+    """(temperatures, mos_temperature) from an aiobmsble sample (#417).
+
+    `temperature` is only the mean of `temp_values`; publish every probe the
+    way the native drivers do: the first MOSFET probe as mos_temperature, all
+    others in BMS order. Since 0.27 each value is a TempSensor (float() gives
+    the value, .type the source); older releases give plain numbers.
+    """
+    temps, mos = [], math.nan
+    for t in sample.get('temp_values') or []:
+        kind = getattr(getattr(t, 'type', None), 'name', None)
+        if kind == 'MOSFET' and math.isnan(mos):
+            mos = float(t)
+        else:
+            temps.append(float(t))
+    if not temps and math.isnan(mos) and sample.get('temperature') is not None:
+        temps = [sample['temperature']]
+    return temps, mos
+
+
 def _bms_config_kwargs(*, keep_alive: bool) -> dict:
     """Constructor kwargs for a BaseBMS, across the aiobmsble 0.26 API break.
 
@@ -398,6 +418,7 @@ class BMS():
             # enum class to be importable.
             mode = sample.get('battery_mode')
             battery_mode = mode.name if mode is not None and hasattr(mode, 'name') else None
+            temperatures, mos_temperature = split_temperatures(sample)
             return BmsSample(
                 soc=sample.get('battery_level', math.nan),
                 soh=sample.get('battery_health', math.nan),
@@ -409,7 +430,8 @@ class BMS():
                 total_charge_throughput=sample.get('cycle_capacity', math.nan),
                 num_cycles=sample.get('cycles', math.nan),
                 balance_current=sample.get('balance_current', math.nan),
-                temperatures=[sample.get('temperature')],
+                temperatures=temperatures,
+                mos_temperature=mos_temperature,
                 switches=switches or None,
                 problem=problem,
                 problem_code=problem_code,

@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix (`_ble` types): only the mean of the BMS's temperature probes was published. Now every probe has its own `temperatures/<n>`, and the MOSFET probe is `mosfet_status/temperature` (#417).
 * New wired type `felicity_uart` for Felicity 48 V packs: the BLE `felicity` needs bonding and loses the link to scan contention. Voltronic protocol, decoded against captures only (#415).
 * Fix (`soh_estimator`): a withdrawn Qmax/SoH was cleared by one MQTT publish; a failed one or a Home Assistant restart brought the old value back. Now retried and repeated hourly.
 * Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V, a probe at 15 °C or more) anchors SoC 100 % (doc/SoH.md).
