@@ -105,6 +105,8 @@ Add an entry for each device, such as:
   adapter: "hci0"            # switch the bluetooth hw adapter (optional)
   debug: true                # verbose log for this device only (optional)
   current_calibration: 1.0   # current [I] correction factor (optional)
+  display_name: House battery # HA device display name; alias/topic stays stable (optional)
+  temperature_names: Case,MOSFET # comma-separated HA temperature names (optional)
 ```
 
 `address` is the MAC address of the Bluetooth device. If you don't know the MAC address start the add-on, and you'll
@@ -122,6 +124,18 @@ with an error, never guessed. Any other BMS still needs its `type:` set by hand.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
 Otherwise, the name as found in Bluetooth discovery is used.
+
+For JBD devices, `display_name` changes the Home Assistant device label without changing the MQTT topic or discovery
+unique IDs, so existing entity history is retained. `temperature_names` assigns comma-separated display names to the
+temperature probes in order. Batmon also publishes the JBD manufacturer, model, firmware version, manufacture date,
+capacity, protection thresholds, balance configuration, voltage curve, and other supported settings as read-only
+diagnostic entities. Settings and identity registers are not written.
+
+JBD charge and discharge control uses the protocol's complete factory-mode enter/write/exit sequence. The other MOS
+state is preserved and the result is read back after every command, so a rejected or unapplied change is reported
+instead of being treated as successful. On supported JBD firmware, this can re-enable charging when an undervoltage
+event has left the charge MOS disabled, including states where standard app controls are unavailable. It does not
+bypass an active protection condition.
 
 If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with the device's PIN). This is the
 case for the Victron SmartShunt and for newer JBD firmware (Liontron and other packs whose app asks for a 6-digit

@@ -2,6 +2,16 @@
 
 * Fix (`_ble` types): only the mean of the BMS's temperature probes was published. Now every probe has its own `temperatures/<n>`, and the MOSFET probe is `mosfet_status/temperature` (#417).
 * New wired type `felicity_uart` for Felicity 48 V packs: the BLE `felicity` needs bonding and loses the link to scan contention. Voltronic protocol, decoded against captures only (#415).
+* JBD: use the complete factory-mode transaction for charge/discharge MOS commands, preserve the other MOS state, and
+  verify the reported result.
+* JBD: reconnect for switch commands when `keep_alive` is disabled, and ignore retained commands when the requested
+  state is already active.
+* On supported JBD firmware, this can re-enable charging when undervoltage leaves the charge MOS disabled, including
+  when standard app controls are unavailable; active protections remain enforced.
+* JBD: publish read-only identity, firmware, capacity, protection, balance, voltage-curve, and configuration registers
+  through Home Assistant MQTT discovery.
+* Add per-device `display_name` and comma-separated `temperature_names` labels without changing MQTT topics or unique
+  IDs.
 * Fix (`soh_estimator`): a withdrawn Qmax/SoH was cleared by one MQTT publish; a failed one or a Home Assistant restart brought the old value back. Now retried and repeated hourly.
 * Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V, a probe at 15 °C or more) anchors SoC 100 % (doc/SoH.md).
 * `soh_estimator` with `capacity:` set now fetches cell voltages every 10 s while charging. Qmax reads up to a few % low when the charger's absorption voltage is low.

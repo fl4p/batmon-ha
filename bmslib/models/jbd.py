@@ -13,13 +13,24 @@ https://github.com/tgalarneau/bms
 
 """
 import asyncio
+import datetime
 
-from bmslib.bms import BmsSample
+from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
 
 
 def _jbd_command(command: int):
     return bytes([0xDD, 0xA5, command, 0x00, 0xFF, 0xFF - (command - 1), 0x77])
+
+
+def _jbd_write_command(command: int, data: bytes):
+    checksum = (0x10000 - sum(data + bytes([len(data), command]))) & 0xFFFF
+    return (
+        bytes([0xDD, 0x5A, command, len(data)])
+        + data
+        + checksum.to_bytes(2, byteorder='big')
+        + bytes([0x77])
+    )
 
 
 def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
@@ -62,6 +73,94 @@ def _validate_jbd_response(frame: bytes, expected_command: int = None) -> bytes:
         )
 
     return frame[4:-3]
+
+
+def _decode_jbd_date(raw: int) -> str:
+    """Decode JBD's packed (year since 2000, month, day) date."""
+    year, month, day = 2000 + (raw >> 9), (raw >> 5) & 0x0F, raw & 0x1F
+    return datetime.date(year, month, day).isoformat()
+
+
+def _length_prefixed_text(payload: bytes) -> str:
+    if not payload:
+        return ""
+    return payload[1:1 + payload[0]].decode("utf-8", errors="replace").strip("\x00 ")
+
+
+_JBD_SETTING_NAMES = {
+    0x10: "design_capacity", 0x11: "cycle_capacity", 0x12: "cell_full_voltage",
+    0x13: "cell_empty_voltage", 0x14: "cell_self_discharge_rate",
+    0x15: "manufacture_date", 0x16: "serial_number", 0x17: "configured_cycle_count",
+    0x18: "charge_over_temperature", 0x19: "charge_over_temperature_recovery",
+    0x1A: "charge_under_temperature", 0x1B: "charge_under_temperature_recovery",
+    0x1C: "discharge_over_temperature", 0x1D: "discharge_over_temperature_recovery",
+    0x1E: "discharge_under_temperature", 0x1F: "discharge_under_temperature_recovery",
+    0x20: "pack_over_voltage", 0x21: "pack_over_voltage_recovery",
+    0x22: "pack_under_voltage", 0x23: "pack_under_voltage_recovery",
+    0x24: "cell_over_voltage", 0x25: "cell_over_voltage_recovery",
+    0x26: "cell_under_voltage", 0x27: "cell_under_voltage_recovery",
+    0x28: "charge_over_current", 0x29: "discharge_over_current",
+    0x2A: "balance_start_voltage", 0x2B: "balance_start_delta",
+    0x2C: "shunt_resistance", 0x2D: "function_config_raw", 0x2E: "temperature_sensor_mask",
+    0x2F: "configured_cell_count", 0x30: "fet_control_time", 0x31: "led_display_time",
+    0x32: "cell_80_percent_voltage", 0x33: "cell_60_percent_voltage",
+    0x34: "cell_40_percent_voltage", 0x35: "cell_20_percent_voltage",
+    0x36: "hardware_cell_over_voltage", 0x37: "hardware_cell_under_voltage",
+    0x38: "hardware_over_current_config_raw", 0x39: "hardware_delay_config_raw",
+    0x3A: "charge_temperature_delays_raw", 0x3B: "discharge_temperature_delays_raw",
+    0x3C: "pack_voltage_delays_raw", 0x3D: "cell_voltage_delays_raw",
+    0x3E: "charge_over_current_delays_raw", 0x3F: "discharge_over_current_delays_raw",
+    0x42: "cell_90_percent_voltage", 0x43: "cell_70_percent_voltage",
+    0x44: "cell_50_percent_voltage", 0x45: "cell_30_percent_voltage",
+    0x46: "cell_10_percent_voltage", 0x47: "cell_100_percent_voltage",
+    0xA0: "manufacturer_name", 0xA1: "model_name", 0xA2: "barcode",
+}
+
+
+def _decode_jbd_setting(command: int, payload: bytes):
+    if command in (0xA0, 0xA1, 0xA2):
+        return _length_prefixed_text(payload)
+    if len(payload) != 2:
+        raise ValueError(f"JBD register 0x{command:02x} returned {len(payload)} bytes")
+    raw = int.from_bytes(payload, "big", signed=False)
+    if command == 0x15:
+        return _decode_jbd_date(raw)
+    if command in (0x10, 0x11):
+        return raw / 100
+    if command == 0x14:
+        return raw / 10
+    if 0x18 <= command <= 0x1F:
+        return (raw - 2731) / 10
+    if command in (0x20, 0x21, 0x22, 0x23):
+        return raw / 100
+    if command in (0x12, 0x13, 0x24, 0x25, 0x26, 0x27, 0x2A, 0x2B,
+                   0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+                   0x42, 0x43, 0x44, 0x45, 0x46, 0x47):
+        return raw / 1000
+    if command in (0x28, 0x29):
+        return abs(int.from_bytes(payload, "big", signed=True)) / 100
+    return raw
+
+
+def _jbd_setting_desc(command: int, name: str) -> dict:
+    desc = {"name": name.replace("_", " ").title(), "long_expiry": True}
+    if command in (0x10, 0x11):
+        desc.update(unit="Ah", icon="battery")
+    elif command == 0x14:
+        desc.update(unit="%", icon="battery-arrow-down", precision=1)
+    elif 0x18 <= command <= 0x1F:
+        desc.update(unit="°C", device_class="temperature", precision=1)
+    elif command in (0x20, 0x21, 0x22, 0x23, 0x12, 0x13, 0x24, 0x25, 0x26, 0x27,
+                     0x2A, 0x2B, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+                     0x42, 0x43, 0x44, 0x45, 0x46, 0x47):
+        desc.update(unit="V", device_class="voltage", precision=3)
+    elif command in (0x28, 0x29):
+        desc.update(unit="A", device_class="current", precision=1)
+    elif command == 0x2C:
+        desc.update(unit="mΩ")
+    else:
+        desc.update(entity_category="diagnostic")
+    return desc
 
 
 class JbdBt(BtBms):
@@ -128,6 +227,16 @@ class JbdBt(BtBms):
             await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
             return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
 
+    async def _w(self, cmd: int, data: bytes):
+        """Write a JBD register and require its command acknowledgement."""
+        message = _jbd_write_command(cmd, data)
+        with self._fetch_futures.acquire(cmd):
+            self.logger.debug("send JBD write 0x%02x: %s", cmd, message.hex(' '))
+            await self.client.write_gatt_char(self.UUID_TX, data=message)
+            frame = await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+        _validate_jbd_response(frame, expected_command=cmd)
+        return frame
+
     async def fetch(self) -> BmsSample:
         # binary reading
         #  https://github.com/NeariX67/SmartBMSUtility/blob/main/Smart%20BMS%20Utility/Smart%20BMS%20Utility/BMSData.swift
@@ -166,6 +275,10 @@ class JbdBt(BtBms):
         # `runtime` (estimated seconds-to-empty) is derived centrally by the
         # sampler from charge / smoothed discharge current, see
         # BtBms.estimate_runtime().
+        temp_names = getattr(self, "temperature_names", [])
+        entity_names = {
+            f"temperatures/{i + 1}": name for i, name in enumerate(temp_names)
+        }
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
             current=current,
@@ -186,6 +299,14 @@ class JbdBt(BtBms):
             problem_code=problem_code,
             balancing_cells=balancing_cells,
 
+            extra_values={
+                "balancing_cell_count": balancing_cells.bit_count(),
+            },
+            extra_desc={
+                "balancing_cell_count": {"name": "Balancing Cell Count", "icon": "scale-balance"},
+            },
+            entity_names=entity_names,
+
             # charge_enabled
             # discharge_enabled
         )
@@ -201,6 +322,44 @@ class JbdBt(BtBms):
 
         return sample
 
+    async def fetch_device_info(self) -> DeviceInfo:
+        """Read the JBD identity and settings registers without changing them."""
+        values = {}
+        desc = {}
+        await self._w(0x00, bytes([0x56, 0x78]))
+        try:
+            commands = list(range(0x10, 0x40)) + list(range(0x42, 0x48)) + [0xA0, 0xA1, 0xA2]
+            for command in commands:
+                try:
+                    frame = await self._q(command)
+                    payload = _validate_jbd_response(frame, expected_command=command)
+                    name = _JBD_SETTING_NAMES[command]
+                    value = _decode_jbd_setting(command, payload)
+                    if value != "":
+                        values[name] = value
+                        desc[name] = _jbd_setting_desc(command, name)
+                except Exception as exc:
+                    self.logger.debug("JBD register 0x%02x unavailable: %s", command, exc)
+        finally:
+            await self._w(0x01, bytes([0x28, 0x28]))
+
+        basic = _validate_jbd_response(await self._q(0x03), expected_command=0x03)
+        sw_version = f"{basic[18] >> 4}.{basic[18] & 0x0f}" if len(basic) > 18 else None
+        manufacturer = values.get("manufacturer_name") or "JBD"
+        model = values.get("model_name") or "JBD BMS"
+        serial = str(values.get("serial_number")) if values.get("serial_number") else None
+        display_name = getattr(self, "display_name", None) or model or self.name
+        return DeviceInfo(
+            mnf=manufacturer,
+            model=model,
+            hw_version=None,
+            sw_version=sw_version,
+            name=display_name,
+            sn=serial,
+            values=values,
+            value_desc=desc,
+        )
+
     async def fetch_voltages(self):
         frame = await self._q(cmd=0x04)
         payload = _validate_jbd_response(frame, expected_command=0x04)
@@ -212,34 +371,56 @@ class JbdBt(BtBms):
 
         assert switch in {"charge", "discharge"}
 
-        # see https://wiki.jmehan.com/download/attachments/59114595/JBD%20Protocol%20English%20version.pdf?version=1&modificationDate=1650716897000&api=v2
-        #
-        def jbd_checksum(cmd, data):
-            crc = 0x10000
-            for i in (data + bytes([len(data), cmd])):
-                crc = crc - int(i)
-            return crc.to_bytes(2, byteorder='big')
+        connected_here = not self.client.is_connected
+        if connected_here:
+            await self.connect()
 
-        def jbd_message(status_bit, cmd, data):
-            return bytes([0xDD, status_bit, cmd, len(data)]) + data + jbd_checksum(cmd, data) + bytes([0x77])
+        try:
+            # Refresh after a new connection. Apart from preserving the peer
+            # MOS state, this makes retained MQTT commands harmless when the
+            # BMS already reports the requested state.
+            if connected_here or not self._switches:
+                await self.fetch()
+            if self._switches[switch] == state:
+                self.logger.info("JBD %s: %s MOS already %s", self.name, switch, state)
+                return
 
-        if not self._switches:
-            await self.fetch()
+            new_switches = {**self._switches, switch: state}
+            switches_sum = sum(new_switches.values())
+            if switches_sum == 2:
+                tc = 0x00  # all on
+            elif switches_sum == 0:
+                tc = 0x03  # all off
+            elif (switch == "charge" and not state) or (switch == "discharge" and state):
+                tc = 0x01  # charge off
+            else:
+                tc = 0x02  # charge on, discharge off
 
-        new_switches = {**self._switches, switch: state}
-        switches_sum = sum(new_switches.values())
-        if switches_sum == 2:
-            tc = 0x00  # all on
-        elif switches_sum == 0:
-            tc = 0x03  # all off
-        elif (switch == "charge" and not state) or (switch == "discharge" and state):
-            tc = 0x01  # charge off
-        else:
-            tc = 0x02  # charge on, discharge off
+            self.logger.info(
+                "JBD %s: setting %s MOS %s with write-mode sequence",
+                self.name, switch, "on" if state else "off"
+            )
 
-        data = jbd_message(status_bit=0x5A, cmd=0xE1, data=bytes([0x00, tc]))  # all off
-        self.logger.info("send switch msg: %s", data)
-        await self.client.write_gatt_char(self.UUID_TX, data=data)
+            # Use the complete JBD factory-mode transaction around the MOS
+            # register write, then read the reported state back below.
+            await self._w(0x00, bytes([0x56, 0x78]))
+            try:
+                await self._w(0xE1, bytes([0x00, tc]))
+            finally:
+                await self._w(0x01, bytes([0x28, 0x28]))
+
+            sample = await self.fetch()
+            actual = sample.switches[switch]
+            if actual != state:
+                raise RuntimeError(
+                    f"JBD {self.name}: {switch} MOS verification failed "
+                    f"(requested={state}, reported={actual}, "
+                    f"problem_code={sample.problem_code})"
+                )
+            self.logger.info("JBD %s: %s MOS verified %s", self.name, switch, actual)
+        finally:
+            if connected_here:
+                await self.disconnect()
 
     def debug_data(self):
         return self._last_response

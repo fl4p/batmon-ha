@@ -106,6 +106,10 @@ schema:
       # needs to publish anything (the BMS-reported capacity is never used)
       capacity: "float?"
       note: "str?"
+      display_name: "str?"
+      # Comma-separated HA display names, e.g. "Battery case,MOSFET".
+      # MQTT topics and unique IDs stay stable when these labels change.
+      temperature_names: "str?"
 
   mqtt_user: "str?"
   mqtt_password: "str?"

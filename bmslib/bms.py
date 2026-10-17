@@ -8,13 +8,16 @@ MIN_VALUE_EXPIRY = 20
 
 class DeviceInfo:
     def __init__(self, mnf: str, model: str, hw_version: Optional[str], sw_version: Optional[str], name: Optional[str],
-                 sn: Optional[str] = None):
+                 sn: Optional[str] = None, values: Optional[Dict] = None,
+                 value_desc: Optional[Dict] = None):
         self.mnf = mnf
         self.model = model
         self.hw_version = hw_version
         self.sw_version = sw_version
         self.name = name
         self.sn = sn
+        self.values = values or {}
+        self.value_desc = value_desc or {}
 
     def __str__(self):
         s = f'DeviceInfo({self.model},hw-{self.hw_version},sw-{self.sw_version}'
@@ -75,7 +78,10 @@ class BmsSample:
                  total_charge_net: float = math.nan,
                  balancing_cells: Optional[int] = None,
                  uptime=math.nan, timestamp: Optional[float] = None,
-                 alarms: Optional[Dict[str, bool]] = None):
+                 alarms: Optional[Dict[str, bool]] = None,
+                 extra_values: Optional[Dict] = None,
+                 extra_desc: Optional[Dict] = None,
+                 entity_names: Optional[Dict[str, str]] = None):
         """
 
         :param voltage:
@@ -148,6 +154,9 @@ class BmsSample:
         self.alarms = alarms
         self.uptime = uptime
         self.timestamp = timestamp or time.time()
+        self.extra_values = extra_values or {}
+        self.extra_desc = extra_desc or {}
+        self.entity_names = entity_names or {}
 
         self.num_samples = 0
 
