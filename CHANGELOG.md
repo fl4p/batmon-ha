@@ -1,5 +1,14 @@
 ## [unreleased]
 
+* JBD: use the complete factory-mode transaction for charge/discharge MOS commands, preserve the other MOS state, and
+  verify the result. This also reconnects for commands when `keep_alive` is disabled and ignores retained commands
+  when the requested state is already active. On supported firmware, this can re-enable charging when an undervoltage
+  event has left the charge MOS disabled, including states where standard app controls are unavailable; active
+  protection conditions are not bypassed.
+* JBD: publish read-only identity, firmware, capacity, protection, balance, voltage-curve, and configuration registers
+  through Home Assistant MQTT discovery.
+* Add per-device `display_name` and comma-separated `temperature_names` labels without changing MQTT topics or unique
+  IDs.
 * Fix (`soh_estimator`): a withdrawn Qmax/SoH was cleared by one MQTT publish; a failed one or a Home Assistant restart brought the old value back. Now retried and repeated hourly.
 * Experimental `soh_estimator` can now publish: a charge end (CV tail or BMS cut, every cell at 3.40 V, a probe at 15 °C or more) anchors SoC 100 % (doc/SoH.md).
 * `soh_estimator` with `capacity:` set now fetches cell voltages every 10 s while charging. Qmax reads up to a few % low when the charger's absorption voltage is low.

@@ -7,7 +7,12 @@ import types
 import pytest
 
 import bmslib.bt as bt_module
-from bmslib.models.jbd import JbdBt
+from bmslib.models.jbd import (
+    JbdBt,
+    _decode_jbd_date,
+    _decode_jbd_setting,
+    _jbd_write_command,
+)
 from bmslib.test._decode_helpers import run_fetch_with_response
 from bmslib.test.data import jbd_fixtures
 
@@ -117,6 +122,79 @@ def test_jbd_notification_waits_for_declared_frame_length_even_if_fragment_ends_
 
     assert bytes(bms._buffer) == fragment
     assert bms._last_response is None
+
+
+def test_jbd_factory_mode_write_frames():
+    assert _jbd_write_command(0x00, bytes.fromhex("5678")) == bytes.fromhex(
+        "dd5a00025678ff3077"
+    )
+
+
+def test_jbd_extended_settings_decode():
+    assert _decode_jbd_setting(0x10, bytes.fromhex("0514")) == 13.0
+    assert _decode_jbd_setting(0x11, bytes.fromhex("04b0")) == 12.0
+    assert _decode_jbd_setting(0x12, bytes.fromhex("1036")) == 4.15
+    assert _decode_jbd_setting(0x20, bytes.fromhex("1554")) == 54.6
+    assert _decode_jbd_setting(0x2A, bytes.fromhex("0f3c")) == 3.9
+    assert _decode_jbd_setting(0xA0, bytes.fromhex("0656656e646f72")) == "Vendor"
+    assert _decode_jbd_setting(0xA1, bytes.fromhex("074d6f64656c2031")) == "Model 1"
+
+
+def test_jbd_manufacture_date_and_write_frames():
+    assert _decode_jbd_date(0x3021) == "2024-01-01"
+    assert _jbd_write_command(0xE1, bytes.fromhex("0002")) == bytes.fromhex(
+        "dd5ae1020002ff1b77"
+    )
+    assert _jbd_write_command(0x01, bytes.fromhex("2828")) == bytes.fromhex(
+        "dd5a01022828ffad77"
+    )
+
+
+def test_jbd_charge_on_uses_write_mode_and_preserves_discharge_off():
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    bms.client = types.SimpleNamespace(is_connected=True)
+    bms._switches = {"charge": False, "discharge": False}
+    writes = []
+
+    async def fake_w(command, data):
+        writes.append((command, data))
+
+    async def fake_fetch():
+        return types.SimpleNamespace(
+            switches={"charge": True, "discharge": False},
+            problem_code=0,
+        )
+
+    bms._w = fake_w
+    bms.fetch = fake_fetch
+    asyncio.run(bms.set_switch("charge", True))
+
+    assert writes == [
+        (0x00, bytes.fromhex("5678")),
+        (0xE1, bytes.fromhex("0002")),
+        (0x01, bytes.fromhex("2828")),
+    ]
+
+
+def test_jbd_switch_verification_reports_rejected_write():
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    bms.client = types.SimpleNamespace(is_connected=True)
+    bms._switches = {"charge": False, "discharge": False}
+
+    async def fake_w(command, data):
+        pass
+
+    async def fake_fetch():
+        return types.SimpleNamespace(
+            switches={"charge": False, "discharge": False},
+            problem_code=4096,
+        )
+
+    bms._w = fake_w
+    bms.fetch = fake_fetch
+
+    with pytest.raises(RuntimeError, match="problem_code=4096"):
+        asyncio.run(bms.set_switch("charge", True))
 
 
 def _fetch(bms, frame):

@@ -186,4 +186,12 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
         logger.exception('Cannot construct %s device %s, skipping it', slug, name)
         return None
 
+    # Display-only names. They deliberately do not change the alias, MQTT
+    # topic, or discovery unique_id, so renaming does not discard HA history.
+    bms.display_name = dev.get('display_name')
+    bms.temperature_names = [
+        value.strip() for value in (dev.get('temperature_names') or '').split(',')
+        if value.strip()
+    ]
+
     return bms

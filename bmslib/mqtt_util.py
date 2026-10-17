@@ -137,6 +137,10 @@ def publish_sample(client, device_topic, sample: BmsSample):
     if sample.battery_mode is not None:
         mqtt_single_out(client, f"{device_topic}/battery_mode", sample.battery_mode)
 
+    for key, value in sample.extra_values.items():
+        if not is_none_or_nan(value):
+            mqtt_single_out(client, f"{device_topic}/jbd/{key}", value)
+
 
 def publish_cell_voltages(client, device_topic, voltages):
     # "highest_voltage": parts[0] / 1000,
@@ -245,8 +249,13 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         "hw_version": (device_info and device_info.hw_version) or None,
     }
 
+    if device_info:
+        for key, value in device_info.values.items():
+            if not is_none_or_nan(value):
+                mqtt_single_out(client, f"{device_topic}/jbd/{key}", value)
+
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
-                        precision=None, expire_after=None, json_attributes_topic=None):
+                        precision=None, expire_after=None, json_attributes_topic=None, entity_category=None):
         dm = {
             "unique_id": f"{device_topic}__{k.replace('/', '_')}",
             "name": name or capitalize_words(k.replace('/', ' ')),
@@ -261,6 +270,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
             "expire_after": expire_after or (max(expire_after_seconds, 3600 * 2) if long_expiry else expire_after_seconds),
             "device": device_json,
             "json_attributes_topic": json_attributes_topic,
+            "entity_category": entity_category,
         }
         if icon:
             dm['icon'] = 'mdi:' + icon
@@ -277,6 +287,27 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                             name=capitalize_words(d["field"]),
                             precision=d.get("precision", None)
                             )
+
+    def _extra_discovery(key, value, desc):
+        if is_none_or_nan(value):
+            return
+        _hass_discovery(
+            f"jbd/{key}",
+            desc.get("device_class"),
+            desc.get("unit", ""),
+            state_class=desc.get("state_class"),
+            icon=desc.get("icon"),
+            name=desc.get("name", capitalize_words(key.replace('_', ' '))),
+            long_expiry=desc.get("long_expiry", True),
+            precision=desc.get("precision"),
+            entity_category=desc.get("entity_category"),
+        )
+
+    for key, value in sample.extra_values.items():
+        _extra_discovery(key, value, sample.extra_desc.get(key, {}))
+    if device_info:
+        for key, value in device_info.values.items():
+            _extra_discovery(key, value, device_info.value_desc.get(key, {}))
 
     for i in range(0, num_cells):
         k = 'cell_voltages/%d' % (i + 1)
@@ -297,7 +328,9 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, len(temperatures or [])):
         k = 'temperatures/%d' % (i + 1)
         if not is_none_or_nan(temperatures[i]):
-            _hass_discovery(k, "temperature", state_class="measurement", unit="°C", precision=1)
+            custom_name = sample.entity_names.get(k)
+            _hass_discovery(k, "temperature", state_class="measurement", unit="°C", precision=1,
+                            name=custom_name)
 
     for name, m in meter_desc.items():
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
