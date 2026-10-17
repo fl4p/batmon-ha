@@ -167,6 +167,9 @@ class JbdBt(BtBms):
     UUID_RX = '0000ff01-0000-1000-8000-00805f9b34fb'
     UUID_TX = '0000ff02-0000-1000-8000-00805f9b34fb'
     TIMEOUT = 16
+    SETTING_REGISTERS = list(range(0x10, 0x40)) + list(range(0x42, 0x48)) + [0xA0, 0xA1, 0xA2]
+    SETTING_TIMEOUT = 2
+    SETTING_MAX_MISSES = 3
 
     def __init__(self, address, **kwargs):
         # newer JBD firmware gates the protocol behind a passkey pairing (#217)
@@ -222,10 +225,10 @@ class JbdBt(BtBms):
         await self.stop_notify(self.UUID_RX)
         await super().disconnect()
 
-    async def _q(self, cmd):
+    async def _q(self, cmd, timeout=None):
         with self._fetch_futures.acquire(cmd):
             await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
-            return await self._fetch_futures.wait_for(cmd, self.TIMEOUT)
+            return await self._fetch_futures.wait_for(cmd, timeout or self.TIMEOUT)
 
     async def _w(self, cmd: int, data: bytes):
         """Write a JBD register and require its command acknowledgement."""
@@ -275,10 +278,6 @@ class JbdBt(BtBms):
         # `runtime` (estimated seconds-to-empty) is derived centrally by the
         # sampler from charge / smoothed discharge current, see
         # BtBms.estimate_runtime().
-        temp_names = getattr(self, "temperature_names", [])
-        entity_names = {
-            f"temperatures/{i + 1}": name for i, name in enumerate(temp_names)
-        }
         sample = BmsSample(
             voltage=int.from_bytes(buf[0:2], byteorder='big', signed=False) / 100,
             current=current,
@@ -300,12 +299,11 @@ class JbdBt(BtBms):
             balancing_cells=balancing_cells,
 
             extra_values={
-                "balancing_cell_count": balancing_cells.bit_count(),
+                "jbd/balancing_cell_count": balancing_cells.bit_count(),
             },
             extra_desc={
-                "balancing_cell_count": {"name": "Balancing Cell Count", "icon": "scale-balance"},
+                "jbd/balancing_cell_count": {"name": "Balancing Cell Count", "icon": "scale-balance"},
             },
-            entity_names=entity_names,
 
             # charge_enabled
             # discharge_enabled
@@ -323,39 +321,59 @@ class JbdBt(BtBms):
         return sample
 
     async def fetch_device_info(self) -> DeviceInfo:
-        """Read the JBD identity and settings registers without changing them."""
+        """Read the JBD identity and settings registers without changing them.
+
+        The settings registers need factory mode. It is left with 00 00, which
+        discards; 28 28 would also save to EEPROM (dbus-serialbattery lltjbd).
+        A BMS that refuses factory mode, or stops answering, still gets its
+        basic info, so the sampler doesn't retry this every discovery period.
+        """
         values = {}
         desc = {}
-        await self._w(0x00, bytes([0x56, 0x78]))
         try:
-            commands = list(range(0x10, 0x40)) + list(range(0x42, 0x48)) + [0xA0, 0xA1, 0xA2]
-            for command in commands:
-                try:
-                    frame = await self._q(command)
-                    payload = _validate_jbd_response(frame, expected_command=command)
-                    name = _JBD_SETTING_NAMES[command]
-                    value = _decode_jbd_setting(command, payload)
+            await self._w(0x00, bytes([0x56, 0x78]))
+        except Exception as exc:
+            self.logger.info("JBD %s: no factory mode, settings not read: %s", self.name, exc)
+        else:
+            try:
+                misses = 0
+                for command in self.SETTING_REGISTERS:
+                    try:
+                        frame = await self._q(command, timeout=self.SETTING_TIMEOUT)
+                        payload = _validate_jbd_response(frame, expected_command=command)
+                        value = _decode_jbd_setting(command, payload)
+                        misses = 0
+                    except asyncio.TimeoutError:
+                        self.logger.debug("JBD register 0x%02x: no answer", command)
+                        misses += 1
+                        if misses >= self.SETTING_MAX_MISSES:
+                            self.logger.info("JBD %s: %d registers unanswered in a row, settings read stopped",
+                                             self.name, misses)
+                            break
+                        continue
+                    except Exception as exc:
+                        self.logger.debug("JBD register 0x%02x unavailable: %s", command, exc)
+                        continue
                     if value != "":
-                        values[name] = value
-                        desc[name] = _jbd_setting_desc(command, name)
+                        name = _JBD_SETTING_NAMES[command]
+                        values["jbd/" + name] = value
+                        desc["jbd/" + name] = _jbd_setting_desc(command, name)
+            finally:
+                try:
+                    await self._w(0x01, bytes([0x00, 0x00]))
                 except Exception as exc:
-                    self.logger.debug("JBD register 0x%02x unavailable: %s", command, exc)
-        finally:
-            await self._w(0x01, bytes([0x28, 0x28]))
+                    self.logger.warning("JBD %s: exiting factory mode failed: %s", self.name, exc)
 
         basic = _validate_jbd_response(await self._q(0x03), expected_command=0x03)
         sw_version = f"{basic[18] >> 4}.{basic[18] & 0x0f}" if len(basic) > 18 else None
-        manufacturer = values.get("manufacturer_name") or "JBD"
-        model = values.get("model_name") or "JBD BMS"
-        serial = str(values.get("serial_number")) if values.get("serial_number") else None
-        display_name = getattr(self, "display_name", None) or model or self.name
+        # The serial register is not used as the HA device identifier: clones
+        # share factory defaults, which would merge packs into one HA device.
         return DeviceInfo(
-            mnf=manufacturer,
-            model=model,
+            mnf=values.get("jbd/manufacturer_name") or "JBD",
+            model=values.get("jbd/model_name") or "JBD BMS",
             hw_version=None,
             sw_version=sw_version,
-            name=display_name,
-            sn=serial,
+            name=None,
             values=values,
             value_desc=desc,
         )

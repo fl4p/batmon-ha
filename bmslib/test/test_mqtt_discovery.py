@@ -67,3 +67,29 @@ def test_alarm_states_are_published_as_read_only_binary_sensors():
     assert discovery[topic]["entity_category"] == "diagnostic"
     assert discovery[topic]["state_topic"] == "test/alarms/alarm/ocd"
     assert "command_topic" not in discovery[topic]
+
+
+def test_display_and_temperature_names_keep_topics_and_ids():
+    published = {}
+
+    class Result:
+        rc = paho.MQTT_ERR_SUCCESS
+
+    class Client:
+        def publish(self, topic, payload, retain=False):
+            published[topic] = json.loads(payload)
+            return Result()
+
+    sample = BmsSample(voltage=13.2, current=0, temperatures=[20.0, 21.0],
+                       extra_values={"jbd/balancing_cell_count": 2},
+                       extra_desc={"jbd/balancing_cell_count": {"name": "Balancing Cell Count"}})
+    publish_hass_discovery(Client(), "test/names", 300, sample, 4, sample.temperatures,
+                           display_name="House", temperature_names=["Front"])
+
+    t1 = published["homeassistant/sensor/test_names/_temperatures_1/config"]
+    t2 = published["homeassistant/sensor/test_names/_temperatures_2/config"]
+    assert t1["name"] == "Front" and t1["unique_id"] == "test/names__temperatures_1"
+    assert t2["name"] == "Temperatures 2"
+    assert t1["device"]["name"] == "House (test/names)"
+    extra = published["homeassistant/sensor/test_names/_jbd_balancing_cell_count/config"]
+    assert extra["state_topic"] == "test/names/jbd/balancing_cell_count"

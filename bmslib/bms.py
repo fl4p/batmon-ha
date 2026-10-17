@@ -80,8 +80,7 @@ class BmsSample:
                  uptime=math.nan, timestamp: Optional[float] = None,
                  alarms: Optional[Dict[str, bool]] = None,
                  extra_values: Optional[Dict] = None,
-                 extra_desc: Optional[Dict] = None,
-                 entity_names: Optional[Dict[str, str]] = None):
+                 extra_desc: Optional[Dict] = None):
         """
 
         :param voltage:
@@ -156,7 +155,6 @@ class BmsSample:
         self.timestamp = timestamp or time.time()
         self.extra_values = extra_values or {}
         self.extra_desc = extra_desc or {}
-        self.entity_names = entity_names or {}
 
         self.num_samples = 0
 

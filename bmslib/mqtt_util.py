@@ -139,7 +139,7 @@ def publish_sample(client, device_topic, sample: BmsSample):
 
     for key, value in sample.extra_values.items():
         if not is_none_or_nan(value):
-            mqtt_single_out(client, f"{device_topic}/jbd/{key}", value)
+            mqtt_single_out(client, f"{device_topic}/{key}", value)
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -233,7 +233,7 @@ def publish_qmax(client, device_topic, res: dict):
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
                            device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
-                           pack_temp_est=False, soh_est=False):
+                           pack_temp_est=False, soh_est=False, display_name=None, temperature_names=None):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -243,7 +243,8 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     device_json = {
         "identifiers": [(device_info and device_info.sn) or device_topic],
         "manufacturer": (device_info and device_info.mnf) or None,
-        "name": f"{device_info.name} ({device_topic})" if (device_info and device_info.name) else device_topic,
+        "name": f"{display_name or device_info.name} ({device_topic})"
+        if (display_name or (device_info and device_info.name)) else device_topic,
         "model": (device_info and device_info.model) or None,
         "sw_version": (device_info and device_info.sw_version) or None,
         "hw_version": (device_info and device_info.hw_version) or None,
@@ -252,7 +253,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     if device_info:
         for key, value in device_info.values.items():
             if not is_none_or_nan(value):
-                mqtt_single_out(client, f"{device_topic}/jbd/{key}", value)
+                mqtt_single_out(client, f"{device_topic}/{key}", value)
 
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
                         precision=None, expire_after=None, json_attributes_topic=None, entity_category=None):
@@ -292,12 +293,12 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         if is_none_or_nan(value):
             return
         _hass_discovery(
-            f"jbd/{key}",
+            key,
             desc.get("device_class"),
             desc.get("unit", ""),
             state_class=desc.get("state_class"),
             icon=desc.get("icon"),
-            name=desc.get("name", capitalize_words(key.replace('_', ' '))),
+            name=desc.get("name", capitalize_words(key.split('/')[-1].replace('_', ' '))),
             long_expiry=desc.get("long_expiry", True),
             precision=desc.get("precision"),
             entity_category=desc.get("entity_category"),
@@ -328,7 +329,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     for i in range(0, len(temperatures or [])):
         k = 'temperatures/%d' % (i + 1)
         if not is_none_or_nan(temperatures[i]):
-            custom_name = sample.entity_names.get(k)
+            custom_name = temperature_names[i] if i < len(temperature_names or []) else None
             _hass_discovery(k, "temperature", state_class="measurement", unit="°C", precision=1,
                             name=custom_name)
 

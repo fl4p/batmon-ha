@@ -564,3 +564,60 @@ def test_jbd_backward_wall_clock_step_does_not_disturb_the_filter(fake_clock):
     assert bms._runtime_current_ewma.value == pytest.approx(blend2, rel=0.001), \
         "backward clock step spuriously reset the filter one poll later"
     assert s.runtime == pytest.approx(100.0 / blend2 * 3600, rel=0.01)
+
+
+def _reply(cmd: int, payload: bytes) -> bytes:
+    body = bytes([0x00, len(payload)]) + payload
+    return bytes([0xDD, cmd]) + body + ((0x10000 - sum(body)) & 0xFFFF).to_bytes(2, 'big') + b"\x77"
+
+
+def _device_info_bms(answers, enter_ok=True):
+    """JbdBt whose _q answers from `answers` (cmd -> payload) and times out otherwise."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    writes, queries = [], []
+
+    async def fake_w(command, data):
+        writes.append((command, data))
+        if command == 0x00 and not enter_ok:
+            raise asyncio.TimeoutError()
+
+    async def fake_q(command, timeout=None):
+        queries.append(command)
+        if command == 0x03:
+            return jbd_fixtures.SYSSI_3CELL["raw"]
+        if command in answers:
+            return _reply(command, answers[command])
+        raise asyncio.TimeoutError()
+
+    bms._w = fake_w
+    bms._q = fake_q
+    return bms, writes, queries
+
+
+def test_jbd_device_info_leaves_factory_mode_without_saving():
+    bms, writes, _ = _device_info_bms({0x10: bytes.fromhex("0514"), 0x16: bytes.fromhex("0001"),
+                                       0xA1: bytes.fromhex("074d6f64656c2031")})
+    bms.SETTING_REGISTERS = [0x10, 0x16, 0xA1]
+    di = asyncio.run(bms.fetch_device_info())
+    # 28 28 would save to EEPROM; a read must exit with 00 00
+    assert writes == [(0x00, bytes.fromhex("5678")), (0x01, bytes.fromhex("0000"))]
+    assert di.values["jbd/design_capacity"] == 13.0
+    assert di.model == "Model 1"
+    # clones share factory serials: never the HA device identifier
+    assert di.sn is None
+
+
+def test_jbd_device_info_stops_after_unanswered_registers():
+    bms, writes, queries = _device_info_bms({})
+    di = asyncio.run(bms.fetch_device_info())
+    assert queries == bms.SETTING_REGISTERS[:bms.SETTING_MAX_MISSES] + [0x03]
+    assert writes[-1] == (0x01, bytes.fromhex("0000"))
+    assert di.values == {}
+
+
+def test_jbd_device_info_without_factory_mode_still_returns_basic_info():
+    bms, writes, queries = _device_info_bms({}, enter_ok=False)
+    di = asyncio.run(bms.fetch_device_info())
+    assert queries == [0x03]
+    assert writes == [(0x00, bytes.fromhex("5678"))]
+    assert di.sw_version == "8.0"

@@ -746,6 +746,8 @@ class BmsSampler:
                     cell_resistance=self.impedance is not None and self.impedance.enabled,
                     pack_temp_est=self._pack_temp_publisher is not None,
                     soh_est=self.qmax is not None and self.qmax.enabled,
+                    display_name=getattr(bms, 'display_name', None),
+                    temperature_names=getattr(bms, 'temperature_names', None),
                 )
 
                 # publish sample again after discovery
