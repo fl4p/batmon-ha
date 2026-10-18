@@ -277,6 +277,67 @@ def test_jbd_pending_switch_survives_two_timed_out_status_reads():
     assert bms._pending_switches == {"charge": True}
 
 
+def _with_mos(frame, mos):
+    """`frame` (a _jbd_frame) with its MOS byte set and the checksum redone."""
+    frame = bytearray(frame[:-3])
+    frame[4 + 20] = mos
+    checksum = (0x10000 - sum(frame[2:])) & 0xFFFF
+    return bytes(frame) + checksum.to_bytes(2, 'big') + bytes([0x77])
+
+
+def _wire_bms(basic_replies, connected=False):
+    """JbdBt behind a fake GATT client: each 0x03 request is answered by the
+    next chunk list of `basic_replies` (the last repeating) through the real
+    notification handler; writes are acked. Returns (bms, 0x03 request count)."""
+    bms = JbdBt("00:11:22:33:44:55", name="jbd")
+    bms.TIMEOUT = 0.05
+    requests = [0]
+    replies = iter(basic_replies)
+    last = [basic_replies[0]]
+
+    async def write_gatt_char(uuid, data):
+        command = data[2]
+        if data[1] == 0x5A:  # register write: ack
+            chunks = [bytes([0xDD, command, 0x00, 0x00, 0x00, 0x00, 0x77])]
+        else:
+            requests[0] += 1
+            last[0] = next(replies, last[0])
+            chunks = last[0]
+        for chunk in chunks:
+            bms._notification_handler(None, chunk)
+
+    bms.client = types.SimpleNamespace(is_connected=connected, write_gatt_char=write_gatt_char)
+    bms._connect_complete = connected
+    return bms, requests
+
+
+def test_jbd_retry_after_a_lost_fragment_is_not_swallowed_by_it():
+    off, on = _with_mos(_jbd_frame(0), 0x02), _with_mos(_jbd_frame(0), 0x03)
+    # the first reply loses its tail: its head must not swallow the retry's
+    bms, requests = _wire_bms([[off[:20]], [off], [on]])
+    asyncio.run(bms.set_switch("charge", True))
+    sample = asyncio.run(bms.fetch())
+    assert requests[0] == 3  # timed out, retried, verified after the write
+    assert sample.switches["charge"] is True
+    assert bms._pending_switches == {}
+
+
+def test_jbd_timed_out_status_read_without_pending_switch_is_not_retried():
+    bms, requests = _wire_bms([[]])
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+    assert requests[0] == 1
+
+
+def test_jbd_pending_switch_status_read_is_retried_only_once():
+    bms, requests = _wire_bms([[]])
+    asyncio.run(bms.set_switch("charge", True))
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+    assert requests[0] == 2
+    assert bms._pending_switches == {"charge": True}
+
+
 def _fetch(bms, frame):
     """fetch() then the sampler's runtime derivation, mirroring BmsSampler.
 

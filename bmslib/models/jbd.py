@@ -245,8 +245,16 @@ class JbdBt(BtBms):
         await self.stop_notify(self.UUID_RX)
         await super().disconnect()
 
+    def _discard_partial_frame(self):
+        # a fragment left by a timed-out reply would swallow the head of the
+        # next reply, which then fails its checksum and times out too
+        if self._buffer:
+            self.logger.debug("discarding %d bytes of an incomplete JBD frame", len(self._buffer))
+            self._buffer.clear()
+
     async def _q(self, cmd, timeout=None):
         with self._fetch_futures.acquire(cmd):
+            self._discard_partial_frame()
             await self.client.write_gatt_char(self.UUID_TX, data=_jbd_command(cmd))
             return await self._fetch_futures.wait_for(cmd, timeout or self.TIMEOUT)
 
@@ -255,6 +263,7 @@ class JbdBt(BtBms):
         message = _jbd_write_command(cmd, data)
         with self._fetch_futures.acquire(cmd):
             self.logger.debug("send JBD write 0x%02x: %s", cmd, message.hex(' '))
+            self._discard_partial_frame()
             await self.client.write_gatt_char(self.UUID_TX, data=message)
             frame = await self._fetch_futures.wait_for(cmd, timeout or self.TIMEOUT)
         _validate_jbd_response(frame, expected_command=cmd)
