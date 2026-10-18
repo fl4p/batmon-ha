@@ -240,6 +240,43 @@ def test_jbd_switch_while_disconnected_is_applied_by_the_next_fetch():
     assert sample.switches["charge"] is True
 
 
+def test_jbd_pending_switch_retries_one_timed_out_status_read():
+    bms, writes = _switch_bms([(False, False, 0), (True, False, 0)], connected=False)
+    real_fetch = bms._fetch
+    calls = 0
+
+    async def flaky_fetch():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncio.TimeoutError()
+        return await real_fetch()
+
+    bms._fetch = flaky_fetch
+    asyncio.run(bms.set_switch("charge", True))
+    sample = asyncio.run(bms.fetch())
+
+    assert calls == 3  # timed-out status, retry, then post-write verification
+    assert writes == SEQ_CHARGE_ON_DISCHARGE_OFF
+    assert sample.switches["charge"] is True
+    assert bms._pending_switches == {}
+
+
+def test_jbd_pending_switch_survives_two_timed_out_status_reads():
+    bms, writes = _switch_bms([(False, False, 0)], connected=False)
+
+    async def timed_out_fetch():
+        raise asyncio.TimeoutError()
+
+    bms._fetch = timed_out_fetch
+    asyncio.run(bms.set_switch("charge", True))
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+
+    assert writes == []
+    assert bms._pending_switches == {"charge": True}
+
+
 def _fetch(bms, frame):
     """fetch() then the sampler's runtime derivation, mirroring BmsSampler.
 
