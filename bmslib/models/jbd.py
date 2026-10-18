@@ -273,7 +273,21 @@ class JbdBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         async with self._io_lock:
-            sample = await self._fetch()
+            try:
+                sample = await self._fetch()
+            except asyncio.TimeoutError:
+                # With keep_alive off a switch command waits for this poll.
+                # A single lost basic-info response would otherwise postpone
+                # the command for a full sample period. Retry only while a
+                # command is pending; ordinary sampling keeps its established
+                # timeout behavior.
+                if not self._pending_switches:
+                    raise
+                self.logger.warning(
+                    "JBD %s: status read timed out with a MOS command pending; retrying once",
+                    self.name,
+                )
+                sample = await self._fetch()
             # switch commands that arrived while disconnected (keep_alive off)
             pending, self._pending_switches = self._pending_switches, {}
             for switch, state in pending.items():
