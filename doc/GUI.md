@@ -5,10 +5,9 @@ packs are grouped — the topology they form.
 
 ## Home Assistant
 
-The add-on registers an ingress panel, so it appears in the sidebar as **Batmon**.
-Nothing to configure. Ingress works even though the add-on runs with
-`host_network: true`: the Supervisor builds the destination from the add-on's
-`ip_address`, and a host-network add-on reports the Docker network gateway.
+The GUI is unfinished, so the add-on registers no ingress panel and `gui` defaults to
+`false` (#425). With `gui: true` it listens on port 8099 of the host, refusing every
+non-loopback connection unless `gui_allow_direct: true` is also set.
 
 ## Standalone / Docker
 
@@ -22,7 +21,7 @@ docker run ... -p 8099:8099 ghcr.io/fl4p/batmon-ha
 
 | option | default | meaning |
 |---|---|---|
-| `gui` | `true` | serve the UI at all |
+| `gui` | `false` under HA, `true` standalone | serve the UI at all |
 | `gui_port` | `8099` | standalone port. **Ignored under Home Assistant**, where the Supervisor proxies to `ingress_port` in `config.yaml` — changing only `gui_port` there would break ingress. The effective port is logged at startup. |
 | `gui_push_period` | `publish_period` | seconds between WebSocket pushes |
 | `gui_allow_direct` | `false` under HA, `true` standalone | allow non-ingress connections |

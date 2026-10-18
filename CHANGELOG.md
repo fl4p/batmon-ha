@@ -2,6 +2,7 @@
 
 * Wired BMSes can use a network serial server: `adapter: tcp://host:port` (or `rfc2217://`). Before, the URL was cut at its last colon and `8880` opened as a file (#422).
 * Fix (wired): a port that failed to open at start (adapter unplugged, gateway down) was never reopened after a later dropout; only a restart helped (#422).
+* The unfinished web GUI is off under Home Assistant again: its ingress panel only answered 403 `direct access disabled`. Opt in with `gui: true` (#425).
 * Fix (`jbd`): a switch command queued with `keep_alive: false` waited a full sample period after one lost status reply. The read is now retried once (#423, thanks @tednv).
 
 ## [2.25]

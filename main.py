@@ -473,7 +473,8 @@ async def main():
     # GUI state sink. Lazily imported and guarded: a broken GUI must degrade to
     # "no GUI", never to a dead add-on (same shape as the InfluxDB sink above).
     gui_state = None
-    if user_config.get('gui', True):
+    # Off by default under HA: the GUI is unfinished and the ingress panel is disabled (#425).
+    if user_config.get('gui', os.environ.get('SUPERVISOR_TOKEN') is None):
         try:
             from bmslib.gui.state import GuiState, GuiStateSink
             gui_state = GuiState(app_version=ver, runtime=_runtime_kind())
