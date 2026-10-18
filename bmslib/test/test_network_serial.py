@@ -7,6 +7,7 @@ open a file named after the TCP port ("could not open port 8880").
 import asyncio
 import socket
 import threading
+import time
 
 import pytest
 
@@ -49,9 +50,10 @@ def test_url_is_a_port_for_the_global_adapter():
 class _EchoServer:
     """Answers every request with b'reply:' + request, like a BMS behind a gateway."""
 
-    def __init__(self):
+    def __init__(self, port=0):
         self.sock = socket.socket()
-        self.sock.bind(('127.0.0.1', 0))
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(('127.0.0.1', port))
         self.sock.listen()
         self.port = self.sock.getsockname()[1]
         self.received = []
@@ -88,6 +90,33 @@ class _EchoServer:
         self.sock.close()
 
 
+def _free_port():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _wrapper(port, **kw):
+    return wired.SerialBleakClientWrapper('tcp://127.0.0.1:%d' % port, baudrate=9600,
+                                          eol=None, timeout=0.2, **kw)
+
+
+async def _wait_reader_dead(w):
+    for _ in range(200):
+        if w.rx_thread_error is not None:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError('reader never gave up')
+
+
+@pytest.fixture
+def fast_giveup(monkeypatch):
+    monkeypatch.setattr(wired._SharedSerialPort, 'RX_MAX_ERRORS', 2)
+    monkeypatch.setattr(wired._SharedSerialPort, 'RX_ERROR_SLEEP', 0.01)
+
+
 async def _roundtrip(w, payload):
     """Raw mode hands over whatever is buffered, so a reply can arrive in pieces."""
     want = len(b'reply:' + payload)
@@ -108,9 +137,7 @@ async def _roundtrip(w, payload):
         await w.stop_notify('rx')
 
 
-def test_tcp_adapter_roundtrip_and_reconnect(monkeypatch):
-    monkeypatch.setattr(wired._SharedSerialPort, 'RX_MAX_ERRORS', 2)
-    monkeypatch.setattr(wired._SharedSerialPort, 'RX_ERROR_SLEEP', 0.01)
+def test_tcp_adapter_roundtrip_and_reconnect(fast_giveup):
     srv = _EchoServer()
 
     async def run():
@@ -136,3 +163,125 @@ def test_tcp_adapter_roundtrip_and_reconnect(monkeypatch):
         asyncio.run(run())
     finally:
         srv.close()
+
+
+def test_long_reply_arrives_at_once():
+    """pyserial's socket:// in_waiting is 0 or 1. Reading it once per reader pass
+    took 31 s for 300 bytes (one byte per 100 ms pass), so every raw-mode model
+    (daly_uart, jbd_uart, jk_pb_uart, ...) timed out over tcp://."""
+    srv = _EchoServer()
+
+    async def run():
+        w = _wrapper(srv.port)
+        await w.connect()
+        payload = bytes(range(256)) + bytes(44)
+        t0 = time.monotonic()
+        assert await _roundtrip(w, payload) == b'reply:' + payload
+        assert time.monotonic() - t0 < 1
+        await w.disconnect()
+
+    try:
+        asyncio.run(run())
+    finally:
+        srv.close()
+
+
+def test_gateway_down_at_start_then_reboot_recovers(fast_giveup):
+    """A failed first connect leaked a port reference, so the port never closed
+    again and reconnects after a later gateway reboot reused the dead socket."""
+    port = _free_port()
+
+    async def run():
+        w = _wrapper(port)
+        with pytest.raises(Exception):
+            await w.connect()           # nothing listening yet
+        assert w.port.users == 0
+        assert not w.is_connected
+
+        srv = _EchoServer(port)
+        try:
+            await w.connect()
+            assert w.port.users == 1
+            assert await _roundtrip(w, b'one') == b'reply:one'
+
+            srv.drop_clients()          # gateway reboots
+            await _wait_reader_dead(w)
+            await w.disconnect()
+            await w.connect()
+            assert await _roundtrip(w, b'two') == b'reply:two'
+            await w.disconnect()
+        finally:
+            srv.close()
+
+    asyncio.run(run())
+
+
+def test_dead_reader_closes_port_so_shared_handles_reconnect(fast_giveup):
+    """Two BMS on one gateway: after a drop neither must keep reporting a dead
+    tcp:// socket as connected, and connect() alone must bring both back."""
+    srv = _EchoServer()
+
+    async def run():
+        a = _wrapper(srv.port)
+        b = _wrapper(srv.port)
+        assert a.port is b.port
+        await a.connect()
+        await b.connect()
+
+        srv.drop_clients()
+        await _wait_reader_dead(a)
+        assert not a.is_connected and not b.is_connected
+
+        await a.connect()
+        await b.connect()
+        assert a.is_connected and b.is_connected
+        assert await _roundtrip(b, b'back') == b'reply:back'
+        await a.disconnect()
+        await b.disconnect()
+
+    try:
+        asyncio.run(run())
+    finally:
+        srv.close()
+
+
+def test_connect_does_not_block_the_event_loop(monkeypatch):
+    """An unreachable gateway takes pyserial 5 s to give up; on the loop thread
+    that stalled every other BMS and MQTT."""
+    import serial
+
+    def slow_unreachable(*a, **kw):
+        time.sleep(0.5)
+        raise serial.SerialException('timed out')
+
+    monkeypatch.setattr(serial, 'serial_for_url', slow_unreachable)
+
+    async def run():
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        t = asyncio.create_task(ticker())
+        with pytest.raises(serial.SerialException):
+            await _wrapper(1).connect()
+        t.cancel()
+        assert ticks >= 10
+
+    asyncio.run(run())
+
+
+def test_url_spellings_share_one_connection():
+    a = wired.SerialBleakClientWrapper('tcp://gw:8880', baudrate=9600)
+    b = wired.SerialBleakClientWrapper('socket://gw:8880', baudrate=9600)
+    c = wired.SerialBleakClientWrapper('TCP://gw:8880', baudrate=9600)
+    assert a.port is b.port is c.port
+
+
+def test_unsupported_scheme_skips_only_that_device():
+    from bmslib.models import construct_bms
+    dev = dict(address='serial', type='jbd_uart', alias='gw', adapter='udp://gw:8880')
+    assert construct_bms(dev, False, []) is None

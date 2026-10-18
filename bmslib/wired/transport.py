@@ -12,6 +12,13 @@ logger = get_logger()
 # is what Zigbee2MQTT and those gateways document; pyserial calls it `socket://`.
 _URL_SCHEMES = {'tcp': 'socket', 'socket': 'socket', 'rfc2217': 'rfc2217'}
 
+# A raw-mode read drains at most this much before handing it over.
+_RAW_READ_MAX = 4096
+
+# Without one, a write to a gateway that stopped reading blocks forever, on the
+# event loop thread (write_gatt_char).
+_URL_WRITE_TIMEOUT = 2
+
 
 def serial_url(port: str) -> Optional[str]:
     """The pyserial URL for a network port (`tcp://host:port`), None for a device path."""
@@ -64,7 +71,8 @@ class SerialTransport(Transport):
             # Raw TCP has no line settings: the baud rate is set on the server.
             logger.info('opening network serial port %s @ %s baud (eol=%s, timeout=%s)',
                         url, self.baudrate, self.eol, self.timeout)
-            self.ser = serial.serial_for_url(url, baudrate=self.baudrate, timeout=self.timeout)
+            self.ser = serial.serial_for_url(url, baudrate=self.baudrate, timeout=self.timeout,
+                                             write_timeout=_URL_WRITE_TIMEOUT)
             return
         if '*' in port:
             files = glob.glob(port)
@@ -94,10 +102,19 @@ class SerialTransport(Transport):
         if self.ser.is_open and self.ser.readable():
             # eol=None: raw mode for length-framed binary protocols (e.g. basen),
             # where the terminator byte (0x0D) also occurs inside the payload, so
-            # read_until would fragment a single frame into many pieces. Return
-            # whatever is buffered now, falling back to a 1-byte timed read.
+            # read_until would fragment a single frame into many pieces. Wait
+            # for one byte, then drain whatever is buffered.
             if self.eol is None:
-                data = self.ser.read(self.ser.in_waiting or 1)
+                data = self.ser.read(1)
+                # pyserial's socket:// in_waiting is only ever 0 or 1 (it asks
+                # select(), not the buffer), so drain until it says empty rather
+                # than reading in_waiting once: that delivered one byte per reader
+                # pass, ~10 B/s, and every reply timed out over tcp:// (#422).
+                while data and len(data) < _RAW_READ_MAX:
+                    n = self.ser.in_waiting
+                    if not n:
+                        break
+                    data += self.ser.read(min(n, _RAW_READ_MAX - len(data)))
             else:
                 # read_until(b'\n') is equivalent to readline(); a different `eol`
                 # (e.g. b'\r' for paceic) splits frames on that byte instead.

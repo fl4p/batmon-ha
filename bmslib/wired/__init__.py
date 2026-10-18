@@ -35,6 +35,7 @@ class _SharedSerialPort(object):
         # callback registry: key -> (owner handle, callback)
         self.callback = {}
         self._lock = threading.Lock()
+        self._open_lock = threading.Lock()
         self._open_refs = 0
         # Set when the reader thread has stopped for good. Anything waiting on a
         # response must be able to tell "nothing arrived yet" from "nothing will
@@ -93,18 +94,33 @@ class _SharedSerialPort(object):
                     errors = 0
                     self._dispatch(data)
             except Exception as e:
+                failed_ser = getattr(self.t, 'ser', None)
                 errors += 1
                 # Bounded retry: a transient read error (USB re-enumeration) is
                 # worth riding out, a permanent one must not spin the CPU or
                 # pretend the link is alive.
                 if errors >= self.RX_MAX_ERRORS:
-                    self.rx_thread_error = e
                     logger.error('serial reader thread giving up on %s after %d '
                                  'consecutive errors: %s', self.t.port, errors, e)
+                    # Close it, so is_connected turns False and the next connect()
+                    # reopens. A tcp:// port whose peer went away still reports
+                    # is_open, and reusing it after a gateway reboot reads nothing.
+                    # Only the connection that failed: a reconnect may already
+                    # have opened a fresh one.
+                    try:
+                        if failed_ser is not None:
+                            failed_ser.close()
+                        else:
+                            self.t.close()
+                    except Exception as ce:
+                        logger.debug('closing %s: %s', self.t.port, ce)
+                    self.rx_thread_error = e
                     return
                 logger.warning('serial read error on %s (%d): %s', self.t.port, errors, e)
                 self._stop.wait(self.RX_ERROR_SLEEP)
-            self._stop.wait(0.1) # todo block
+                continue
+            if not data:
+                self._stop.wait(0.1) # todo block
 
     def shutdown(self):
         """Stop the reader and close the port, regardless of refcount.
@@ -161,11 +177,36 @@ class _SharedSerialPort(object):
     # --- refcounted open/close --------------------------------------------
 
     def acquire(self):
-        """Open the port for one more user. Idempotent while others hold it."""
+        """Open the port for one more user. Idempotent while others hold it.
+
+        Blocking (a tcp:// connect waits up to 5 s): call it off the event loop.
+        """
         with self._lock:
             self._open_refs += 1
-        if not self.t.is_open:
-            self.t.open()
+        try:
+            self.ensure_open()
+        except BaseException:
+            # A failed open must not hold a reference: one leaked ref kept the
+            # port from ever closing, so after a gateway that was down at start
+            # rebooted, every reconnect reused the dead socket (#422).
+            with self._lock:
+                self._open_refs = max(0, self._open_refs - 1)
+            raise
+
+    def ensure_open(self):
+        """(Re)open the transport if it is closed, and make sure a reader runs.
+
+        The reader closes the transport when it gives up, while handles still
+        hold it; their next connect() comes through here."""
+        # A reader that has just given up may still be alive for a moment; then
+        # ensure_reader() would start no replacement.
+        t = self._rx_thread
+        if t is not None and t.is_alive() and self.rx_thread_error is not None:
+            t.join(timeout=2)
+        # Two handles' connect() can get here at once from executor threads.
+        with self._open_lock:
+            if not self.t.is_open:
+                self.t.open()
         self.ensure_reader()
 
     def release(self):
@@ -252,7 +293,8 @@ class SerialBleakClientWrapper(object):
         # the readline() default.
         serial_kwargs = {k: kwargs[k] for k in ('eol', 'timeout') if k in kwargs}
         # A URL keeps its colons; splitting it left only the TCP port (#422).
-        port = address if serial_url(address) else address.split(':')[-1]
+        # Normalized, so tcp:// and socket:// spellings share one connection.
+        port = serial_url(address) or address.split(':')[-1]
         self.port = _get_shared_port(port, baudrate, **serial_kwargs)
         self.services = []
         self._connected = False
@@ -295,10 +337,14 @@ class SerialBleakClientWrapper(object):
         # here (not at construction) because BtBms builds the client before the
         # loop exists.
         import asyncio
-        self.port.bind_loop(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        self.port.bind_loop(loop)
+        # Opening blocks (tcp:// waits up to 5 s for an unreachable gateway), and
+        # on the loop thread that stalled every other BMS and MQTT with it.
         if self._connected:
+            await loop.run_in_executor(None, self.port.ensure_open)
             return
-        self.port.acquire()
+        await loop.run_in_executor(None, self.port.acquire)
         self._connected = True
 
     async def disconnect(self):
@@ -308,7 +354,9 @@ class SerialBleakClientWrapper(object):
         if not self._connected:
             return
         self._connected = False
-        self.port.release()
+        # pyserial's socket close() sleeps 0.3 s
+        import asyncio
+        await asyncio.get_running_loop().run_in_executor(None, self.port.release)
 
     @property
     def is_connected(self):
