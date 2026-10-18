@@ -1,7 +1,7 @@
 ## [unreleased]
 
 * Wired BMSes can use a network serial server: `adapter: tcp://host:port` (or `rfc2217://`). Before, the URL was cut at its last colon and `8880` opened as a file (#422).
-* Fix (wired): a port that failed to open (adapter unplugged or gateway down at start) kept a reference, so after a later dropout the port was never reopened and only a restart helped. A reader that gives up now closes the port, so the next connect reopens it.
+* Fix (wired): a port that failed to open at start (adapter unplugged, gateway down) was never reopened after a later dropout; only a restart helped (#422).
 
 ## [2.25]
 
