@@ -2,7 +2,7 @@ import threading
 import time
 
 from bmslib.util import get_logger
-from bmslib.wired.transport import SerialTransport, StdioTransport
+from bmslib.wired.transport import SerialTransport, StdioTransport, serial_url
 
 logger = get_logger()
 
@@ -251,7 +251,9 @@ class SerialBleakClientWrapper(object):
         # its SERIAL_KWARGS; unknown kwargs are ignored so existing callers keep
         # the readline() default.
         serial_kwargs = {k: kwargs[k] for k in ('eol', 'timeout') if k in kwargs}
-        self.port = _get_shared_port(address.split(':')[-1], baudrate, **serial_kwargs)
+        # A URL keeps its colons; splitting it left only the TCP port (#422).
+        port = address if serial_url(address) else address.split(':')[-1]
+        self.port = _get_shared_port(port, baudrate, **serial_kwargs)
         self.services = []
         self._connected = False
         self._keys = set()

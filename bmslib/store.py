@@ -273,7 +273,7 @@ def _global_adapter_kind(adapter: str):
     """
     if _BT_ADAPTER_RE.match(adapter):
         return 'bt'
-    if adapter.startswith('/'):
+    if adapter.startswith('/') or '://' in adapter:
         return 'port'
     return None
 

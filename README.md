@@ -269,6 +269,10 @@ HCI index. As an HA add-on this works out of the box (the manifest sets
 the stable `/dev/serial/by-id/...` path so the port survives re-plugging.
 Running standalone on Linux, add your user to the `dialout` group.
 
+A serial adapter on a network serial server (ser2net, an ESP USB gateway, …) works
+as `adapter: tcp://192.168.1.108:8880` (raw TCP) or `rfc2217://host:port`. With raw
+TCP, set the baud rate on the server.
+
 ### Daly board number
 
 Daly puts the board number in the request, so a BMS whose board number isn't
@@ -407,8 +411,8 @@ adapter:
 | `bumble` | Same — pick one adapter (bumble will take it exclusively). | First available |
 | `esphome` | **Leave unset.** There's no local adapter; the proxy host stack picks the best-RSSI proxy automatically per connect. | n/a — auto-routed |
 
-(For `address: serial` / RS-485 BMSes, `adapter:` is the serial port path like `/dev/ttyUSB0`,
-independent of `ble_stack`.)
+(For `address: serial` / RS-485 BMSes, `adapter:` is the serial port path like `/dev/ttyUSB0`
+or a network port like `tcp://host:8880`, independent of `ble_stack`.)
 
 `adapter:` can also be set once at the top level of the configuration, next to `ble_stack:`. It
 is then the default for every device that doesn't carry its own, and the log says which devices

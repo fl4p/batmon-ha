@@ -8,6 +8,21 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
+# Network serial servers (#422): ser2net, ESP USB/RS485 gateways, ... `tcp://`
+# is what Zigbee2MQTT and those gateways document; pyserial calls it `socket://`.
+_URL_SCHEMES = {'tcp': 'socket', 'socket': 'socket', 'rfc2217': 'rfc2217'}
+
+
+def serial_url(port: str) -> Optional[str]:
+    """The pyserial URL for a network port (`tcp://host:port`), None for a device path."""
+    scheme, sep, rest = port.partition('://')
+    if not sep:
+        return None
+    if scheme.lower() not in _URL_SCHEMES:
+        raise ValueError('unsupported serial URL %r, use tcp://host:port or rfc2217://host:port'
+                         % port)
+    return _URL_SCHEMES[scheme.lower()] + '://' + rest
+
 
 class Transport(object):
 
@@ -44,6 +59,13 @@ class SerialTransport(Transport):
 
     def open(self):
         port = self.port
+        url = serial_url(port)
+        if url:
+            # Raw TCP has no line settings: the baud rate is set on the server.
+            logger.info('opening network serial port %s @ %s baud (eol=%s, timeout=%s)',
+                        url, self.baudrate, self.eol, self.timeout)
+            self.ser = serial.serial_for_url(url, baudrate=self.baudrate, timeout=self.timeout)
+            return
         if '*' in port:
             files = glob.glob(port)
             if not files:

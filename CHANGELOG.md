@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Wired BMSes can use a network serial server: `adapter: tcp://host:port` (or `rfc2217://`). Before, the URL was cut at its last colon and `8880` opened as a file (#422).
+
 ## [2.25]
 
 * Fix (`_ble` types): only the mean of the BMS's temperature probes was published. Now every probe has its own `temperatures/<n>`, and the MOSFET probe is `mosfet_status/temperature` (#417).
