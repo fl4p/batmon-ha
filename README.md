@@ -215,6 +215,12 @@ Supported types (baud rate in parentheses):
   BLE `basen`.
 * `jbd_uart` (9600) — JBD / Xiaoxiang / LLT, same `DD … 77` frames as the BLE
   `jbd` (the BLE module is a UART bridge); TTL UART header or RS485 port.
+* `jbd_hv_uart` (9600, unverified) — JBD / LWS high-voltage BMS (HVBMS, up to
+  200 cells): binary `3F 55 … 55 3F` replies to `01 A1 A5 B5`. Publishes cell
+  voltages, temperatures and pack voltage only; current and SOC are not decoded
+  yet. `jbd_hv_uart:<addr>` for the pack address (default 1),
+  `jbd_hv_uart:<addr>:<baud>` if 9600 is wrong
+  ([#424](https://github.com/fl4p/batmon-ha/issues/424)).
 * `jk_pb_uart` (115200) — JK-PB inverter BMS (PB1A16S, PB2A16S, ...) on its
   RS485-1 port: a Modbus FC16 trigger, answered with the JK02_32S frame the BLE
   driver decodes. `jk_pb_uart:<n>` selects the RS485 address set in the JK app
@@ -247,7 +253,7 @@ Supported types (baud rate in parentheses):
   scan contention ([#415](https://github.com/fl4p/batmon-ha/issues/415)); it has
   not been run on hardware yet, so no claim that it is the more reliable path.
 
-`pace_uart`, `basen_uart`, `jbd_uart`, `jk_pb_uart`, `seplos_uart`,
+`pace_uart`, `basen_uart`, `jbd_uart`, `jbd_hv_uart`, `jk_pb_uart`, `seplos_uart`,
 `braunpwr_uart`, `renogy_uart` and `felicity_uart` decoders are unit-tested against captured or
 reference frames but not yet confirmed on live hardware — feedback welcome. The
 protocols were ported from dbus-serialbattery, aiobmsble and the syssi ESPHome

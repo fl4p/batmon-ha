@@ -43,6 +43,7 @@ def get_bms_model_class(name: str):
         jk_uart='models.jikong_uart.JKUart',  # RS485/UART TLV protocol; use with address=serial
         daly_uart='models.daly_uart.DalyUart',  # RS485/USB-UART; same A5/04 frames as BLE
         jbd_uart='models.jbd_uart.JbdUart',  # JBD over TTL UART / RS485; same DD..77 frames as BLE
+        jbd_hv_uart='models.jbd_hv_uart.JbdHvUart',  # JBD / LWS high-voltage BMS (up to 200 cells), 3F 55 frames (#424)
         jk_pb_uart='models.jk_pb_uart.JkPbUart',  # JK-PB inverter BMS over RS485 (Modbus trigger, JK02_32S frame)
         seplos_uart='models.seplos_uart.SeplosUart',  # Seplos V2 ASCII protocol over RS485
         braunpwr_uart='models.braunpwr_uart.BraunPwrUart',  # BraunPWR / KS48100 rack BMS, YD/T 1363 over UART (#403)

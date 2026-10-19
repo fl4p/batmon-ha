@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* New wired type `jbd_hv_uart` for JBD / LWS high-voltage BMSes (up to 200 cells). Cells, temperatures and pack voltage only, decoded from the reporter's capture; current and SOC not yet (#424).
 * Wired BMSes can use a network serial server: `adapter: tcp://host:port` (or `rfc2217://`). Before, the URL was cut at its last colon and `8880` opened as a file (#422).
 * Fix (wired): a port that failed to open at start (adapter unplugged, gateway down) was never reopened after a later dropout; only a restart helped (#422).
 * The unfinished web GUI is off under Home Assistant again: its ingress panel only answered 403 `direct access disabled`. Opt in with `gui: true` (#425).
