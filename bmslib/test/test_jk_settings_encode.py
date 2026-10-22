@@ -212,3 +212,27 @@ def test_nmc_voltages_in_range():
     # syssi's 3.65 V cap is LiFePO4-only; an NMC pack needs RCV/SOC100 around 4.1 V
     assert encode_setting("cell_rcv", 4.1)[0] == 0x09
     assert encode_setting("cell_soc100_voltage", 4.1)[0] == 0x07
+
+
+def test_uv_group_stays_below_ov_group(jk1):
+    # review demo: UVPR then UVP raised above OVP, a pack in undervoltage at every voltage
+    with pytest.raises(SettingError, match="cell_uvpr 4.3V must be below cell_ovpr"):
+        validate_change("cell_uvpr", 4.3, jk1)
+    with pytest.raises(SettingError, match="cell_uvp 4.2V must be below cell_ovp"):
+        validate_change("cell_uvp", 4.2, {**jk1, "cell_uvpr": 4.3})
+    with pytest.raises(SettingError, match="must be below cell_ovp"):
+        validate_change("balance_start_voltage", 4.25, jk1)
+
+
+def test_encode_rejects_overflowing_number():
+    with pytest.raises(SettingError, match="out of range"):
+        encode_setting("cell_ovp", 1e306)  # value * factor is inf
+
+
+def test_implausible_settings(jk1):
+    from bmslib.models.jk_settings import implausible_settings
+    assert implausible_settings(jk1) is None
+    assert "cell count" in implausible_settings({**jk1, "cell_count": 0})
+    assert "cell_ovp" in implausible_settings({**jk1, "cell_ovp": 65.5})
+    assert "not in order" in implausible_settings({**jk1, "cell_ovpr": jk1["cell_ovp"] + 0.01})
+    assert "cell_uvp" in implausible_settings({k: v for k, v in jk1.items() if k != "cell_uvp"})

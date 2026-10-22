@@ -18,7 +18,7 @@ import time
 from typing import Optional
 
 from bmslib.models.jk_settings import (SETTINGS, SettingError, encode_setting, format_changes, format_value,
-                                       parse_write_option, validate_change)
+                                       implausible_settings, parse_write_option, validate_change)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -287,6 +287,10 @@ class JkSettingsService:
                 return _UNCHANGED
 
         encode_setting(name, value)  # type, finite, step and range checks
+        bad = implausible_settings(current)
+        if bad:
+            self._last_refresh = None  # read again on the next tick
+            raise _Rejected('settings read looks corrupt (%s), nothing written; send it again' % bad)
         validate_change(name, value, current)
         if self.locked:
             raise _Rejected('writes locked after a failed read-back; restart batmon')
@@ -336,6 +340,8 @@ def build_settings_service(bms, user_config, dev_cfg, workdir='.') -> Optional[J
     """
     from bmslib.models.jikong import JKBt
     if not (user_config or {}).get('jk_settings'):
+        if (dev_cfg or {}).get('settings_write'):
+            logger.warning('%s: settings_write is set but jk_settings is off; ignored', bms.name)
         return None
     if not isinstance(bms, JKBt):
         return None

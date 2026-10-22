@@ -665,3 +665,22 @@ def test_write_always_queries_a_fresh_frame(tmp_path):
     _tick(svc, bms, pub)
     assert len(queries) == 2  # validate against a fresh read, then the read-back
     assert pub.texts == ['OK charge_utp 2 -> 3°C']
+
+
+def test_corrupt_settings_read_is_not_used_to_validate(tmp_path):
+    """A spliced frame can pass the 8-bit CRC: never validate a write against it."""
+    bms, client = _make()
+    svc, pub = _service(tmp_path, writable={'charge_utp'}), FakePublish()
+    orig = bms.refresh_settings
+
+    async def corrupt():
+        settings = await orig()
+        settings['cell_ovp'] = 2.0  # below UVPR
+        return settings
+
+    bms.refresh_settings = corrupt
+    svc.enqueue('charge_utp', '3')
+    _tick(svc, bms, pub)
+    assert client.writes == []
+    assert pub.texts[-1].startswith('Rejected charge_utp 3: settings read looks corrupt')
+    assert not svc.locked

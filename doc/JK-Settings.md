@@ -167,6 +167,11 @@ how a failed write or read-back is handled is described below (read-back mismatc
    * `power_off_voltage` < `cell_uvp`
    * `cell_soc0_voltage` < `cell_soc100_voltage` ≤ `cell_rcv` < `cell_ovp`
    * `cell_rfv` < `cell_rcv`
+   * `cell_uvpr` < `cell_ovpr`, `cell_uvp` < `cell_ovp`, `balance_start_voltage` < `cell_ovp`
+
+   Before that, the values just read must look sane (cell count 1…24, UVP < UVPR < OVPR < OVP, all
+   between 1 and 4.5 V). A frame that fails this is taken as a corrupted read: the request is rejected and the
+   settings are read again on the next sample.
 5. **Lock**: no write while this BMS is locked (see below).
 6. **Backup** of all settings, once per batmon run, before the first write. If the backup cannot be written,
    nothing is written.

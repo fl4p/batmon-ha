@@ -260,6 +260,9 @@ def encode_setting(name: str, value: Union[float, bool]) -> Tuple[int, List[int]
         raise SettingError('%s expects a finite number, got %r' % (name, value))
 
     exact = value * s.factor
+    if not math.isfinite(exact):  # e.g. 1e306 * 1000
+        raise SettingError('%s %s%s is out of range %s..%s%s'
+                           % (name, _fmt(value), s.unit or '', _fmt(s.min), _fmt(s.max), s.unit or ''))
     raw = round(exact)
     if abs(raw - exact) > 1e-6 * s.factor:
         raise SettingError('%s %s%s is not a multiple of %s%s'
@@ -308,7 +311,28 @@ _RULES = [
     ('cell_soc100_voltage', 'cell_rcv', False),
     ('cell_rcv', 'cell_ovp', True),
     ('cell_rfv', 'cell_rcv', True),
+    # UV group below the OV group: without these, UVPR then UVP could be raised above OVP
+    ('cell_uvpr', 'cell_ovpr', True),
+    ('cell_uvp', 'cell_ovp', True),
+    ('balance_start_voltage', 'cell_ovp', True),
 ]
+
+
+def implausible_settings(settings: dict) -> Optional[str]:
+    """Sanity check of a decoded settings frame before it is used to validate a write.
+    The frame CRC is an 8-bit sum, so a spliced frame (cf. #391) can pass it; validating
+    against such garbage would let an inconsistent value through. Returns the reason, or None."""
+    n = settings.get('cell_count')
+    if n is None or not 1 <= n <= 24:
+        return 'cell count %s' % format_value('cell_count', n)
+    for name in ('cell_uvp', 'cell_uvpr', 'cell_ovpr', 'cell_ovp'):
+        v = settings.get(name)
+        if v is None or not 1.0 <= v <= 4.5:
+            return '%s %s V' % (name, format_value(name, v))
+    if not settings['cell_uvp'] < settings['cell_uvpr'] < settings['cell_ovpr'] < settings['cell_ovp']:
+        return 'UVP %s, UVPR %s, OVPR %s, OVP %s not in order' % tuple(
+            format_value(k, settings[k]) for k in ('cell_uvp', 'cell_uvpr', 'cell_ovpr', 'cell_ovp'))
+    return None
 
 
 def _fmt(v) -> str:

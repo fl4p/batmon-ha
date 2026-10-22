@@ -721,7 +721,9 @@ def resubscribe_commands(mqtt_client: paho.Client):
     """Subscribe every registered command topic again (switches, set SOC, JK settings).
     Call from on_connect: after a broker restart (clean session) the subscriptions
     made on the first sample are gone."""
-    for topic in list(_switch_callbacks) + list(_command_callbacks):
+    # dict.copy() is atomic under the GIL; iterating the live dicts on the paho thread raced
+    # with the first sample filling them (RuntimeError: dictionary changed size)
+    for topic in list(_switch_callbacks.copy()) + list(_command_callbacks.copy()):
         logger.debug("re-subscribe %s", topic)
         mqtt_client.subscribe(topic, qos=2)
 
