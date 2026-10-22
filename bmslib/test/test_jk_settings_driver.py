@@ -331,3 +331,20 @@ def test_switch_write_waits_for_a_running_settings_write():
     assert res.others == {}
     assert [reg for reg, _ in client.writes] == [0x18, 0x30]
     assert decode_settings(client.settings_frame)['charging_float_mode'] is (not float_before)
+
+
+def test_switch_write_before_a_settings_write_retakes_the_baseline():
+    """A float_charge toggle after the service's refresh (or a previous write's read-back) but
+    before write_setting takes the lock: the baseline must be read again, or the toggled bit
+    reads back as "also changed" and locks settings writes."""
+    bms, client = _make()
+    bms._has_float_charger = True
+
+    async def run():
+        float_before = (await bms.refresh_settings())['charging_float_mode']
+        await bms.set_switch('float_charge', not float_before)
+        return await bms.write_setting('charge_utp', 3.0)
+
+    res = asyncio.run(run())
+    assert res.ok, res.reason
+    assert res.others == {}

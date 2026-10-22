@@ -186,6 +186,10 @@ class JKBt(BtBms):
         # not land inside a write_setting (its settle window, or its read-back, where e.g. a
         # float_charge toggle would read as "also changed" and lock settings writes)
         self._write_lock = asyncio.Lock()
+        # bumped by every switch/SOC write; self.settings is only a valid write baseline while
+        # _settings_gen (the count when it was decoded) still equals it
+        self._switch_gen = 0
+        self._settings_gen = -1
 
     def _notification_handler(self, _sender, data):
         data = bytes(data)
@@ -553,6 +557,7 @@ class JKBt(BtBms):
 
         async with self._write_lock:
             await self._settle_after_query()
+            self._switch_gen += 1
             await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
             await asyncio.sleep(.2)  # wait a bit before triggering settings fetch
         self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
@@ -570,6 +575,7 @@ class JKBt(BtBms):
             raise ValueError("soc must be within 0..100, got %r" % (soc,))
         async with self._write_lock:
             await self._settle_after_query()
+            self._switch_gen += 1
             await self._write(0x6E, [int(round(soc))])  # 1-byte register, percent
             await asyncio.sleep(.2)
         self._resp_table.pop(0x01, None)  # settings frame is stale now
@@ -587,6 +593,7 @@ class JKBt(BtBms):
         settings = decode_settings(raw)
         self.settings_raw = raw
         self.settings = settings
+        self._settings_gen = self._switch_gen
         return settings
 
     def settings_from_recent_frame(self, max_age_s: float) -> Optional[dict]:
@@ -600,6 +607,7 @@ class JKBt(BtBms):
         settings = decode_settings(raw)
         self.settings_raw = raw
         self.settings = settings
+        self._settings_gen = self._switch_gen
         return settings
 
     async def write_setting(self, name: str, value) -> WriteResult:
@@ -615,7 +623,9 @@ class JKBt(BtBms):
             return await self._write_setting_locked(name, value, register, data)
 
     async def _write_setting_locked(self, name, value, register, data) -> WriteResult:
-        if self.settings is None:
+        # a switch write since the last read (e.g. float_charge, which is also a bit in the
+        # settings frame) would read back as "also changed": take the baseline again
+        if self.settings is None or self._settings_gen != self._switch_gen:
             await self.refresh_settings()
         before_all = dict(self.settings)
         before = before_all.get(name)
