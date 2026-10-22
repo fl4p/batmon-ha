@@ -619,3 +619,49 @@ def test_build_service_config_error(tmp_path, caplog):
     assert pub.texts[0].startswith('Config error: ') and 'bogus' in pub.texts[0]
     assert pub.texts[1].startswith('Rejected charge_utp 3:')
     assert client.writes == []
+
+
+def _count_queries(client):
+    """Count 0x96 settings queries the dummy receives."""
+    queries, orig = [], client.write_gatt_char
+
+    async def write_gatt_char(char, data, response=False):
+        if bytes(data).startswith(b'\xaaU\x90\xeb\x96'):
+            queries.append(data)
+        return await orig(char, data, response)
+
+    client.write_gatt_char = write_gatt_char
+    return queries
+
+
+def test_refresh_reuses_the_frame_connect_just_read(tmp_path):
+    """Without keep_alive every connect() already reads the settings frame: the periodic
+    refresh decodes that one instead of sending a second 0x96."""
+    bms, client = _make()
+    asyncio.run(bms._q(cmd=0x96, resp=0x01))  # what connect() does
+    queries = _count_queries(client)
+    svc, pub = _service(tmp_path), FakePublish()
+    _tick(svc, bms, pub)
+    assert queries == []
+    assert pub.states_calls[0]['charge_utp'] == 2.0
+
+
+def test_refresh_queries_when_the_frame_is_old(tmp_path):
+    bms, client = _make()
+    asyncio.run(bms._q(cmd=0x96, resp=0x01))
+    buf, t = bms._resp_table[0x01]
+    bms._resp_table[0x01] = buf, t - 31
+    queries = _count_queries(client)
+    _tick(_service(tmp_path), bms, FakePublish())
+    assert len(queries) == 1
+
+
+def test_write_always_queries_a_fresh_frame(tmp_path):
+    bms, client = _make()
+    asyncio.run(bms._q(cmd=0x96, resp=0x01))
+    queries = _count_queries(client)
+    svc, pub = _service(tmp_path, writable={'charge_utp'}), FakePublish()
+    svc.enqueue('charge_utp', '3')
+    _tick(svc, bms, pub)
+    assert len(queries) == 2  # validate against a fresh read, then the read-back
+    assert pub.texts == ['OK charge_utp 2 -> 3°C']

@@ -28,6 +28,9 @@ MAX_PENDING = 20
 # inside the sample: more writes wait for the next tick. Rejected/unchanged requests are instant
 # and do not count.
 MAX_WRITES_PER_TICK = 3
+# A settings frame this young (from connect() or fetch()) is used as is for a periodic or
+# post-reconnect refresh, instead of another 0x96 query. Before a write it is always queried.
+RECENT_FRAME_MAX_AGE_S = 30
 
 
 class NullSettingsPublisher:
@@ -114,7 +117,10 @@ class JkSettingsService:
                 return
             self._refresh_failed_at = now  # cleared on success; set before the await
             try:
-                await bms.refresh_settings()
+                reuse = getattr(bms, 'settings_from_recent_frame', None)
+                if has_pending or self._unconfirmed is not None or reuse is None \
+                        or reuse(RECENT_FRAME_MAX_AGE_S) is None:
+                    await bms.refresh_settings()
             except Exception as e:
                 # the sample was fetched fine: a settings read that fails must not drop it (nor count
                 # as a sampler error, which escalates to reconnects and a BT power cycle)

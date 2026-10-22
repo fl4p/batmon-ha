@@ -589,6 +589,19 @@ class JKBt(BtBms):
         self.settings = settings
         return settings
 
+    def settings_from_recent_frame(self, max_age_s: float) -> Optional[dict]:
+        """Decode the 0x01 frame connect()/fetch() already received if it is at most
+        `max_age_s` old, sparing a 0x96 query (without keep_alive every sample connects
+        and gets one). None when there is no such frame."""
+        entry = self._resp_table.get(0x01)
+        if entry is None or time.time() - entry[1] > max_age_s:
+            return None
+        raw = bytes(entry[0])
+        settings = decode_settings(raw)
+        self.settings_raw = raw
+        self.settings = settings
+        return settings
+
     async def write_setting(self, name: str, value) -> WriteResult:
         """Write one setting, then read the whole settings frame back to verify it.
 

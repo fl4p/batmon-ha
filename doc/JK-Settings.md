@@ -66,7 +66,8 @@ All entities belong to the BMS device in Home Assistant.
 Settings are read when batmon starts, every 5 minutes, before each change and right after it. With
 `keep_alive: true` also after every reconnect to the BMS. Without `keep_alive` batmon connects anew for every
 sample, so a reconnect does not trigger a read there (that would be a settings query every sample); the 5-minute
-read applies. If reading fails,
+read applies. A settings frame received in the last 30 s (e.g. when connecting) is used instead of a new
+query, except before a change. If reading fails,
 the next try is 60 seconds later; requests made meanwhile wait in a queue (at most 20 per BMS, more are rejected
 with `queue full`).
 
