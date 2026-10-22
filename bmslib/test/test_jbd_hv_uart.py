@@ -1,8 +1,11 @@
 """jbd_hv_uart (JBD / LWS high-voltage BMS, #424).
 
-REAL_FRAMES are replies from the reporter's 96-cell pack, copied from the
-vendor PC tool's syslog (2026-10-18), each pair answering `01 A1 A5 B5` then
-`01 A1 A2 A3`.
+REAL_FRAMES and LABELLED_FRAMES are replies from the reporter's 96-cell pack,
+copied from the vendor PC tool's syslogs (2026-10-18 and 2026-10-19), each pair
+answering `01 A1 A5 B5` then `01 A1 A2 A3`. The EXPECT_* values for the
+labelled ones come from the tool's own xlsx export of the same run (it shows
+current in whole amps, discharge negative) and the reporter's description
+("3.0 - 3.2 A discharging", "current was 9.1 A" charging).
 """
 import asyncio
 
@@ -81,6 +84,84 @@ REAL_FRAMES = [
     ),
 ]
 
+EXPECT_DISCHARGING = dict(current=-3.573, short_current=-3.7, export_current=-3, soc=97.8, voltage=319.7)
+EXPECT_IDLE = dict(current=0.0, short_current=0.0, export_current=0, soc=97.6, voltage=319.9)
+EXPECT_CHARGING = dict(current=9.189, short_current=9.3, export_current=9, soc=92.3, voltage=320.7)
+
+# 2026-10-19 captures, each with the vendor tool's exported values for that
+# moment: (full reply, short reply, expected), current in A, charge positive
+LABELLED_FRAMES = [
+    # discharging, 19-27-44 / 19-27-44
+    (
+        bytes.fromhex(
+            '3f55850cfe0d040d060d030d030d050d080d070d040d0b0d080d080d080d070d060d070d080d010d010d010d000d000d'
+            '020d000d010d020cff0d020d020d020d040cfa0d000d000d020d020d000cff0d030cfd0d010cff0d010cff0d030d010d'
+            '000cff0cfc0d010d020d020d020d020d020d040d020d000d030d020d030d030d040d020d010d020d010d020d030d030d'
+            '020d020cfe0d010d020d010d020d020d020d020d040d090d070d080d000d070d080d090d010d090d060d090d080cfc0d'
+            '080d06000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000035343534353433333636363535353535333433343434343430313031282828282828282828'
+            '282828282828282828282828282828282828282828fffff20b10b700002710000027103e4c0000000000000000211185'
+            '553f'
+        ),
+        bytes.fromhex(
+            '3f55680cfe0d040d060d030d030d050d080d070d040d0b0d080d080d080d070d060d0700000000000000000000000000'
+            '000000000000000000000000000000353435344c3e000000000000000000802503d2090c7d000000000d0b010cfa0236'
+            '01300100880000004a0c340c01021a020901cf03c2195f184a03e801010000010cbc68553f'
+        ),
+        EXPECT_DISCHARGING,
+    ),
+    # idle, 19-40-54 / 19-40-54
+    (
+        bytes.fromhex(
+            '3f55850d020d070d080d050d0a0d0a0d0b0d0b0d0b0d0b0d0b0d0a0d0a0d0a0d090d090d0a0d0c0d040d050d050d050d'
+            '040d050d040d050d040d050d050d050d060d020d030d040d050d040d030d040d050d030d050d040d040d050d050d050d'
+            '040d020d000d020d040d040d040d050d050d050d030d040d040d050d060d050d060d040d040d040d040d030d040d050d'
+            '050d040d010d040d040d030d040d040d040d040d020d040d050d060d010d050d050d070d010d060d040d060d060cfd0d'
+            '060d04000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000035343534343433333636363535353534333433343434343430313031282828282828282828'
+            '2828282828282828282828282828282828282828280000000010b700002710000027103e4c000000000000000014f985'
+            '553f'
+        ),
+        bytes.fromhex(
+            '3f55680d020d070d080d050d0a0d0a0d0b0d0b0d0b0d0b0d0b0d0a0d0a0d0a0d090d0900000000000000000000000000'
+            '000000000000000000000000000000353435344c3e000000000000000000000003d0090c7f000000000d0c010cfd0236'
+            '01300100800000004a0c340bfa021a020901cf03c2195f184a03e801010000010c4068553f'
+        ),
+        EXPECT_IDLE,
+    ),
+    # charging, 19-49-50 / 19-49-50
+    (
+        bytes.fromhex(
+            '3f55850d0a0d0e0d100d0e0d180d190d170d180d1e0d110d160d150d140d180d170d110d120d300d0e0d0d0d0f0d110d'
+            '0b0d0e0d0c0d0b0d110d0a0d0c0d0b0d0b0d110d0a0d100d0c0d0b0d0a0d110d0b0d1a0d0f0d0d0d0e0d130d0c0d110d'
+            '0c0d090d080d080d090d0c0d0b0d0d0d0c0d0b0d090d0f0d0c0d0d0d0e0d0e0d0c0d0a0d0e0d0b0d0a0d0a0d0b0d0b0d'
+            '0d0d090d0b0d0c0d0a0d090d0a0d0c0d0b0d0a0d020d040d050d060d010d050d050d070d010d060d040d060d060cfd0d'
+            '060d04000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+            '000000000000000000000035343534353433333636363535353534333433343434343430313031282828282828282828'
+            '282828282828282828282828282828282828282828000023e510b700002710000027103e4c000000000000000018df85'
+            '553f'
+        ),
+        bytes.fromhex(
+            '3f55680d0b0d0e0d100d0e0d180d190d170d180d1e0d110d160d150d140d180d180d1100000000000000000000000000'
+            '000000000000000000000000000000353435344c3e000000000000000000005d039b090c87000000000d2c010cfd0236'
+            '01300100840000004a0c340b53021a020901cf03c3195f184a03e801010000010ca368553f'
+        ),
+        EXPECT_CHARGING,
+    ),
+]
+
 
 class _NullWrapper:
     def __init__(self, address, **kwargs):
@@ -127,7 +208,12 @@ def test_real_frames_check_and_cross_check():
         assert [int.from_bytes(short[3 + 2 * i:5 + 2 * i], 'big') for i in range(16)] == pytest.approx(f['cell_mv'][:16], abs=5)
         assert list(short[63:67]) == pytest.approx(list(full[443:447]), abs=1)
         assert len(f['temps']) == 28 and all(8 <= t <= 14 for t in f['temps'])
-        assert sorted(f['extra_temps']) == [20, 36]
+        assert (f['ambient'], f['mos']) == (20, 36)
+        assert f['output_voltage'] == pytest.approx(423.2, abs=0.6)
+        assert f['insulation_pos'] == f['insulation_neg'] == 10000
+        # charging at ~2 A then: both current fields agree
+        assert 0.7 < f['current'] < 2.1 and f['current'] == pytest.approx(s['current'], abs=1.2)
+        assert s['soc'] == pytest.approx(99.2)
         # global cell max/min in the short view (sampled a moment later)
         assert int.from_bytes(short[89:91], 'big') == pytest.approx(max(f['cell_mv']), abs=2)
         assert int.from_bytes(short[92:94], 'big') == pytest.approx(min(f['cell_mv']), abs=2)
@@ -198,9 +284,44 @@ def test_fetch_sample(serial_stub):
     assert bms.client.written == [bytes.fromhex('01a1a5b5'), bytes.fromhex('01a1a2a3')]
     assert len(volts) == 96 and sum(volts) == 322903
     assert sample.voltage == pytest.approx(322.9)
-    assert sample.current != sample.current  # NaN: not decoded yet
-    assert len(sample.temperatures) == 30
-    assert sample.temperatures[-2:] == [20, 36]
+    assert sample.current == pytest.approx(-1.914)  # charging -> negative in batmon
+    assert sample.soc == pytest.approx(99.2)
+    assert sample.mos_temperature == 36
+    assert len(sample.temperatures) == 29 and sample.temperatures[0] == 20  # ambient first
+    assert sample.extra_values == {'jbd_hv/output_voltage': pytest.approx(423.2),
+                                   'jbd_hv/insulation_pos': 10000, 'jbd_hv/insulation_neg': 10000}
+
+
+def test_labelled_frames_match_the_vendor_export():
+    for full, short, exp in LABELLED_FRAMES:
+        assert check_frame(full) == 0x85 and check_frame(short) == 0x68
+        f, s = decode_full(full), decode_short(short)
+        assert f['current'] == pytest.approx(exp['current'])
+        assert s['current'] == pytest.approx(exp['short_current'])
+        assert round(s['current']) == pytest.approx(exp['export_current'], abs=1)
+        assert s['soc'] == pytest.approx(exp['soc'])
+        assert s['voltage'] == pytest.approx(exp['voltage'])
+        assert f['output_voltage'] == pytest.approx(427.9)
+        assert f['insulation_pos'] == f['insulation_neg'] == 10000
+        assert (f['ambient'], f['mos']) == (22, 36)  # export: Environment Temp 22, MOS Temp 36
+        assert len(f['cell_mv']) == 96
+        assert s['voltage'] == pytest.approx(sum(f['cell_mv']) / 1000, abs=0.3)
+
+
+def test_short_view_current_is_sign_magnitude():
+    full, short, _ = LABELLED_FRAMES[0]
+    assert short[78:80] == b'\x80\x25'  # -3.7 A, not two's complement (-3275.1 A)
+    assert decode_short(short)['current'] == pytest.approx(-3.7)
+
+
+@pytest.mark.parametrize('i', range(3))
+def test_fetch_labelled(serial_stub, i):
+    full, short, exp = LABELLED_FRAMES[i]
+    bms = JbdHvUart('serial', name='hv', adapter='/dev/ttyUSB0')
+    sample, _ = _fetch(bms, [full, short])
+    assert sample.current == pytest.approx(-exp['current'])  # batmon: discharge positive
+    assert sample.soc == pytest.approx(exp['soc'])
+    assert sample.voltage == pytest.approx(exp['voltage'])
 
 
 def test_corrupt_reply_is_not_delivered(serial_stub):
@@ -220,8 +341,8 @@ def test_probe_count_is_sticky(serial_stub):
     s1, _ = _fetch(bms, [full, short])
     bms._last_cells = []
     s2, _ = _fetch(bms, [_with_checksum(b), short])
-    assert len(s1.temperatures) == len(s2.temperatures) == 30
-    assert s2.temperatures[27] == 0
+    assert len(s1.temperatures) == len(s2.temperatures) == 29
+    assert s2.temperatures[28] == 0
 
 
 def test_type_spec_and_registry(serial_stub):

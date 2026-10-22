@@ -215,11 +215,12 @@ Supported types (baud rate in parentheses):
   BLE `basen`.
 * `jbd_uart` (9600) — JBD / Xiaoxiang / LLT, same `DD … 77` frames as the BLE
   `jbd` (the BLE module is a UART bridge); TTL UART header or RS485 port.
-* `jbd_hv_uart` (9600, unverified) — JBD / LWS high-voltage BMS (HVBMS, up to
-  200 cells): binary `3F 55 … 55 3F` replies to `01 A1 A5 B5`. Publishes cell
-  voltages, temperatures and pack voltage only; current and SOC are not decoded
-  yet. `jbd_hv_uart:<addr>` for the pack address (default 1),
-  `jbd_hv_uart:<addr>:<baud>` if 9600 is wrong
+* `jbd_hv_uart` (9600) — JBD / LWS high-voltage BMS (HVBMS, up to 200 cells)
+  on its RS485 port: binary `3F 55 … 55 3F` replies to `01 A1 A5 B5`, the
+  protocol of the vendor PC tool (not the supplier's Modbus document). Cell
+  voltages and temperatures, current, SOC, pack and P+/P- voltage, MOS and
+  ambient temperature, insulation resistance. `jbd_hv_uart:<addr>` for the pack
+  address (default 1)
   ([#424](https://github.com/fl4p/batmon-ha/issues/424)).
 * `jk_pb_uart` (115200) — JK-PB inverter BMS (PB1A16S, PB2A16S, ...) on its
   RS485-1 port: a Modbus FC16 trigger, answered with the JK02_32S frame the BLE

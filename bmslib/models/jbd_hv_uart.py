@@ -1,16 +1,22 @@
-"""JBD / LWS high-voltage BMS ("HVBMS", up to 200 cells) over its wired port (#424).
+"""JBD / LWS high-voltage BMS ("HVBMS", up to 200 cells) over RS485 (#424).
 
-Source: the vendor PC tool's syslog from the reporter's 96-cell pack
-(2026-10-18), 9 request/reply pairs per command, kept as REAL_FRAMES in
-bmslib/test/test_jbd_hv_uart.py. No protocol document. Only fields that
-cross-check in those frames are decoded. The driver has not run against the
-hardware, and the baud rate is unknown (the reporter's port sniffer log holds no
-traffic): 9600 is a guess.
+Sources, all from the reporter's 96-cell pack (#424):
+  - the vendor PC tool's syslogs (2026-10-18 idle-ish, 2026-10-19 discharging
+    ~3.5 A, idle, charging ~9.1 A): raw request/reply pairs, kept as
+    REAL_FRAMES in bmslib/test/test_jbd_hv_uart.py;
+  - the tool's own data exports of the 2026-10-19 runs (xlsx), which label the
+    fields: current, SOC, total voltage, P+/P- voltage, insulation resistance,
+    ambient and MOS temperature. Every field decoded here matches them.
+  - port settings from the reporter: 9600 8N1, RS485 (FT232 adapter).
+No protocol document covers these frames. The "JBD HVV1 Lithium Battery Modbus
+Communication Protocol" V1.36 he got from the supplier is Modbus RTU (function
+0x04, slave address 51..65), not what the vendor tool speaks; whether the BMS
+also answers it is untested. The driver has not run against the hardware.
 
 Requests are 4 bytes, `<addr> A1 <sel>`, sent exactly as the vendor tool does:
 
-  01 A1 A5 B5   full view: up to 200 cells (the reporter: "A5 B5 = 200 cells")
-  01 A1 A2 A3   short view: 30 cells, pack voltage, cell min/max
+  01 A1 A5 B5   full view: up to 200 cells, all probes, current in mA
+  01 A1 A2 A3   short view: 30 cells, SOC, pack voltage, cell min/max
 
 The tool finds packs by polling addresses 1..16 ("Batt Group"). Replies carry
 no address, so packs sharing a bus are told apart only by taking turns.
@@ -21,28 +27,26 @@ every byte before it, from the leading 3F. Fixed lengths per type:
   type 0x85 (A5 B5), 530 bytes:
     3    cell mV, u16 BE x 220 slots (96 used here, then zeros)
     443  cell probe temperature, u8 - 40 C, x 58 (28 used; unused read 0x28 = 0 C)
-    501  u16 x 7, not decoded: 0000, a value that moves with load (1914, 2042,
-         765, ...; current?), 0x1088, 0000, 0x2710, 0000, 0x2710 (SOC/SOH 100.00?)
-    515  two temperatures, u8 - 40 C (20 C, 36 C; probably ambient and MOS)
+    501  current, s32 BE, mA, charge positive (+9189 charging, -3573 discharging)
+    505  P+/P- (output terminal) voltage, u16 BE, 0.1 V
+    507  insulation resistance B+~PE, then B-~PE, u32 BE, kOhm
+    515  ambient temperature, then MOS temperature, u8 - 40 C
   type 0x68 (A2 A3), 133 bytes:
     3    cell mV, u16 BE x 30 slots (= the first 30 of the full view)
-    63   4 probe temperatures (= the full view's first 4), then the two at 515
-    79   a byte that moves with the full view's load value (current?), not decoded
+    63   4 probe temperatures (= the full view's first 4), MOS, ambient
+    78   current, 0.1 A, sign-magnitude (bit 15 set = discharge: 0x801C = -2.8 A)
+    80   SOC, u16 BE, 0.1 %
     83   pack voltage, u16 BE, 0.1 V: 322.9 V where the 96 cells sum to 322.90 V
     89   max cell mV u16 + 1 byte, 92 min cell mV u16 + 1 byte (the byte is not
          the cell number)
-
-Current and SOC are not published (NaN) until a capture with the tool's
-displayed values pins down their offset, scale and sign.
 
 Configure with:
     address: serial
     adapter: /dev/ttyUSB0
     type:    jbd_hv_uart            # or jbd_hv_uart:2 for pack address 2
 
-``jbd_hv_uart:<addr>:<baud>`` overrides the 9600 baud guess.
+``jbd_hv_uart:<addr>:<baud>`` overrides the 9600 baud default.
 """
-import math
 from typing import List
 
 from bmslib.bms import BmsSample
@@ -60,7 +64,12 @@ FRAME_LEN = {TYPE_FULL: 530, TYPE_SHORT: 133}
 
 FULL_CELLS, FULL_CELL_SLOTS = 3, 220
 FULL_TEMPS, FULL_TEMP_SLOTS = 443, 58
-FULL_EXTRA_TEMPS = 515
+FULL_CURRENT = 501
+FULL_OUTPUT_VOLTAGE = 505
+FULL_INSULATION = 507
+FULL_AMBIENT, FULL_MOS = 515, 516
+SHORT_CURRENT = 78
+SHORT_SOC = 80
 SHORT_VOLTAGE = 83
 
 TEMP_OFFSET = 40
@@ -107,12 +116,27 @@ def decode_full(frame: bytes) -> dict:
     # exactly 0 C at the end of the list is dropped with them (see fetch()).
     n_t = max((i + 1 for i, v in enumerate(probes) if v != TEMP_UNUSED), default=0)
     temps = [v - TEMP_OFFSET for v in probes[:n_t]]
-    extra = [v - TEMP_OFFSET for v in frame[FULL_EXTRA_TEMPS:FULL_EXTRA_TEMPS + 2]]
-    return dict(cell_mv=cells, temps=temps, extra_temps=extra)
+    return dict(
+        cell_mv=cells, temps=temps,
+        current=int.from_bytes(frame[FULL_CURRENT:FULL_CURRENT + 4], 'big', signed=True) / 1000,
+        output_voltage=int.from_bytes(frame[FULL_OUTPUT_VOLTAGE:FULL_OUTPUT_VOLTAGE + 2], 'big') / 10,
+        insulation_pos=int.from_bytes(frame[FULL_INSULATION:FULL_INSULATION + 4], 'big'),
+        insulation_neg=int.from_bytes(frame[FULL_INSULATION + 4:FULL_INSULATION + 8], 'big'),
+        ambient=frame[FULL_AMBIENT] - TEMP_OFFSET,
+        mos=frame[FULL_MOS] - TEMP_OFFSET,
+    )
 
 
 def decode_short(frame: bytes) -> dict:
-    return dict(voltage=int.from_bytes(frame[SHORT_VOLTAGE:SHORT_VOLTAGE + 2], 'big') / 10)
+    cur = int.from_bytes(frame[SHORT_CURRENT:SHORT_CURRENT + 2], 'big')
+    soc = int.from_bytes(frame[SHORT_SOC:SHORT_SOC + 2], 'big') / 10
+    if soc > 100:
+        raise ValueError(f"jbd_hv: implausible SOC {soc}")
+    return dict(
+        voltage=int.from_bytes(frame[SHORT_VOLTAGE:SHORT_VOLTAGE + 2], 'big') / 10,
+        soc=soc,
+        current=(-(cur & 0x7FFF) if cur & 0x8000 else cur) / 10,
+    )
 
 
 class JbdHvUart(BtBms):
@@ -200,17 +224,18 @@ class JbdHvUart(BtBms):
             self.logger.warning(msg, *args)
 
     async def fetch(self) -> BmsSample:
-        full = await self._q(CMD_FULL, TYPE_FULL)
-        f = decode_full(full)
-        voltage = decode_short(await self._q(CMD_SHORT, TYPE_SHORT))['voltage']
+        f = decode_full(await self._q(CMD_FULL, TYPE_FULL))
+        short = decode_short(await self._q(CMD_SHORT, TYPE_SHORT))
+        voltage = short['voltage']
 
         cell_sum = sum(f['cell_mv']) / 1000
         if abs(cell_sum - voltage) > max(1.0, 0.02 * voltage):
             self._warn_once('vsum', "%s jbd_hv: pack voltage %.1f V but cells sum to %.2f V",
                             self.name, voltage, cell_sum)
-
-        # Undecoded fields, for the log until a capture identifies them.
-        self.logger.debug("%s jbd_hv full[501:515]=%s", self.name, full[501:515].hex(' '))
+        # Both views carry the current, read about a second apart.
+        if abs(f['current']) > 1 and abs(short['current']) > 1 and (f['current'] > 0) != (short['current'] > 0):
+            self._warn_once('isign', "%s jbd_hv: current %.2f A (full view) and %.1f A (short view) disagree in sign",
+                            self.name, f['current'], short['current'])
 
         # Hold the probe count at its session maximum, so a last probe reading
         # exactly 0 C does not drop its topic.
@@ -219,12 +244,26 @@ class JbdHvUart(BtBms):
         temps = temps + [0.0] * (self._n_temps - len(temps))
 
         self._last_cells = f['cell_mv']
-        # Which of the two extra probes is MOS is unknown, so both go in the list.
-        self._last_temps = temps + f['extra_temps']
+        self._last_temps = [f['ambient']] + temps
         return BmsSample(
             voltage=voltage,
-            current=math.nan,  # not decoded yet (#424)
+            current=-f['current'],  # BMS: charge positive; batmon: discharge positive
+            soc=short['soc'],
             temperatures=self._last_temps,
+            mos_temperature=f['mos'],
+            extra_values={
+                'jbd_hv/output_voltage': f['output_voltage'],
+                'jbd_hv/insulation_pos': f['insulation_pos'],
+                'jbd_hv/insulation_neg': f['insulation_neg'],
+            },
+            extra_desc={
+                'jbd_hv/output_voltage': {"name": "P+/P- Voltage", "device_class": "voltage", "unit": "V",
+                                          "state_class": "measurement"},
+                'jbd_hv/insulation_pos': {"name": "Insulation Resistance B+ to PE", "unit": "kΩ",
+                                          "state_class": "measurement", "icon": "omega"},
+                'jbd_hv/insulation_neg': {"name": "Insulation Resistance B- to PE", "unit": "kΩ",
+                                          "state_class": "measurement", "icon": "omega"},
+            },
         )
 
     async def fetch_voltages(self) -> List[int]:
