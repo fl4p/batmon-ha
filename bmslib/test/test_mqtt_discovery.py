@@ -527,3 +527,21 @@ def test_sampler_resends_settings_states_after_discovery(_no_sleep, monkeypatch)
     clock[0] += 5
     asyncio.run(s())
     assert [t for t, _, _ in c.log].count('jk_fake/settings/cell_ovp') == n + 1
+
+
+def test_removals_only_when_the_entity_set_changes(monkeypatch):
+    c = _Recorder()
+    pub = MqttSettingsPublisher(c, DEV, writable={'cell_ovp'})
+    removals = lambda: [t for t, p, _ in c.log if p == '']
+
+    pub.discovery()
+    assert f"homeassistant/sensor/{NODE}/setting_cell_ovp/config" in removals()
+    c.log.clear()
+    monkeypatch.setattr(mqtt_util, '_last_values', {})  # past the dedup, like the periodic discovery
+    pub.discovery()
+    assert removals() == []
+    assert c.config(f"homeassistant/number/{NODE}/setting_cell_ovp/config")["unique_id"]
+
+    pub.exclude = frozenset({'charging_float_mode'})  # entity set changed: removals again
+    pub.discovery()
+    assert removals()

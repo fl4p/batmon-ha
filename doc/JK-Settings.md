@@ -213,7 +213,8 @@ trying again.
 
 Where they are stored:
 
-* Home Assistant add-on: in the add-on's data directory `/data` (part of the add-on's backup).
+* Home Assistant add-on: in the add-on's data directory `/data` (part of the add-on's backup). The file editor
+  and the Samba/SSH add-ons do not show it; download a backup of the batmon add-on to get the files.
 * Standalone (e.g. a systemd service): in batmon's **working directory**, usually the batmon install (git
   checkout) directory. Both are in `.gitignore`. **Copy them somewhere else before you replace or delete the
   install directory** (e.g. when reinstalling batmon or restoring a backup copy of it).

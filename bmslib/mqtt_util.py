@@ -503,16 +503,17 @@ def _readable_settings(exclude=()):
 
 
 def publish_jk_settings_discovery(client, device_topic, device_json, writable, expire_after_seconds: int,
-                                  exclude=()):
+                                  exclude=(), removals=True):
     """HA entities for the JK settings that can be read from the settings frame: writable
     ones as config `number`/`switch`, the rest as diagnostic `sensor`/`binary_sensor`;
     plus the `settings_last_change` sensor. `exclude`: names to leave out (JK-PB float
-    switch, already exposed as the `float_charge` sample switch)."""
+    switch, already exposed as the `float_charge` sample switch). `removals`: also send the
+    empty configs that remove each setting's entity under the other component."""
     node_id = device_topic.replace('/', '_')
     device_json = dict(device_json)
     remove_none_values(device_json)
     discovery_msg = {}
-    removals = {}
+    remove_msg = {}
 
     for s in _readable_settings(exclude):
         is_switch = s.kind == 'switch'
@@ -543,7 +544,7 @@ def publish_jk_settings_discovery(client, device_topic, device_json, writable, e
         remove_none_values(dm)
         # same unique_id under the other component when `settings_write` changed: an empty config
         # makes HA remove that (now stale) entity; sent before the new config
-        removals[f"homeassistant/{other}/{node_id}/setting_{s.name}/config"] = ''
+        remove_msg[f"homeassistant/{other}/{node_id}/setting_{s.name}/config"] = ''
         discovery_msg[f"homeassistant/{component}/{node_id}/setting_{s.name}/config"] = dm
 
     discovery_msg[f"homeassistant/sensor/{node_id}/settings_last_change/config"] = {
@@ -555,7 +556,7 @@ def publish_jk_settings_discovery(client, device_topic, device_json, writable, e
         "device": device_json,
     }
 
-    for topic, data in removals.items():
+    for topic, data in (remove_msg.items() if removals else ()):
         mqtt_single_out(client, topic, data)
     for topic, data in discovery_msg.items():
         mqtt_single_out(client, topic, json.dumps(data))
@@ -585,9 +586,12 @@ class MqttSettingsPublisher:
         if self.writable is None:
             return
         dj = self.device_json() if self.device_json else hass_device_json(self.device_topic)
+        entity_set = (frozenset(self.exclude), self.writable)
+        # removals only when the entity set is new or changed, not with every periodic discovery
         publish_jk_settings_discovery(self.client, self.device_topic, dj, self.writable,
-                                      self.expire_after_seconds, exclude=self.exclude)
-        self._discovered = (frozenset(self.exclude), self.writable)
+                                      self.expire_after_seconds, exclude=self.exclude,
+                                      removals=self._discovered != entity_set)
+        self._discovered = entity_set
         self._force_states = True
         self._resend_at = time.time() + SETTINGS_RESEND_AFTER_DISCOVERY_S
 
