@@ -140,7 +140,7 @@ def decode_short(frame: bytes) -> dict:
 
 
 class JbdHvUart(BtBms):
-    BAUDRATE = 9600  # unverified guess, see module docstring
+    BAUDRATE = 9600  # 8N1, per the reporter and the supplier's Modbus document
     SERIAL_KWARGS = dict(eol=None, timeout=1)  # binary frames, may contain 0x0A
     TIMEOUT = 5  # the vendor tool gets its replies within ~1 s
 
@@ -157,6 +157,7 @@ class JbdHvUart(BtBms):
         self._last_cells: List[int] = []
         self._last_temps: List[float] = []
         self._n_temps = 0
+        self._sign_mismatches = 0
         self._warned = set()
 
     def _notification_handler(self, sender, data):
@@ -209,6 +210,10 @@ class JbdHvUart(BtBms):
 
         async def exchange():
             with self._fetch_futures.acquire(reply_type):
+                # Half duplex: anything still buffered is a stale or broken
+                # reply. A false 3F 55 85 in it would hold back the next
+                # short reply until it had collected 530 bytes.
+                self._buffer.clear()
                 await self.client.write_gatt_char(self.UUID_TX, data=req)
                 return await self._fetch_futures.wait_for(reply_type, self.TIMEOUT)
 
@@ -232,10 +237,15 @@ class JbdHvUart(BtBms):
         if abs(cell_sum - voltage) > max(1.0, 0.02 * voltage):
             self._warn_once('vsum', "%s jbd_hv: pack voltage %.1f V but cells sum to %.2f V",
                             self.name, voltage, cell_sum)
-        # Both views carry the current, read about a second apart.
+        # Both views carry the current, read about a second apart, so a load
+        # step can flip one sign once; only a lasting disagreement is reported.
         if abs(f['current']) > 1 and abs(short['current']) > 1 and (f['current'] > 0) != (short['current'] > 0):
-            self._warn_once('isign', "%s jbd_hv: current %.2f A (full view) and %.1f A (short view) disagree in sign",
-                            self.name, f['current'], short['current'])
+            self._sign_mismatches += 1
+            if self._sign_mismatches == 3:
+                self.logger.warning("%s jbd_hv: current %.2f A (full view) and %.1f A (short view) disagree in sign "
+                                    "in 3 samples running", self.name, f['current'], short['current'])
+        else:
+            self._sign_mismatches = 0
 
         # Hold the probe count at its session maximum, so a last probe reading
         # exactly 0 C does not drop its topic.

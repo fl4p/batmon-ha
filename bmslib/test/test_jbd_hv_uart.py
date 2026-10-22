@@ -298,7 +298,7 @@ def test_labelled_frames_match_the_vendor_export():
         f, s = decode_full(full), decode_short(short)
         assert f['current'] == pytest.approx(exp['current'])
         assert s['current'] == pytest.approx(exp['short_current'])
-        assert round(s['current']) == pytest.approx(exp['export_current'], abs=1)
+        assert int(s['current']) == exp['export_current']  # the export truncates to whole amps
         assert s['soc'] == pytest.approx(exp['soc'])
         assert s['voltage'] == pytest.approx(exp['voltage'])
         assert f['output_voltage'] == pytest.approx(427.9)
@@ -354,3 +354,39 @@ def test_type_spec_and_registry(serial_stub):
     assert bms.pack_addr == 1 and JbdHvUart.BAUDRATE == 9600
     with pytest.raises(ValueError):
         JbdHvUart('serial', name='hv', adapter='/dev/ttyUSB0', type_spec='256')
+
+
+def test_stale_false_header_does_not_stall_the_next_reply(serial_stub):
+    full, short = REAL_FRAMES[0]
+    bms = JbdHvUart('serial', name='hv', adapter='/dev/ttyUSB0')
+
+    async def run():
+        await bms.connect()
+        bms.TIMEOUT = 0.2
+        queue = [full, short]
+
+        async def write(char, data):
+            fr = queue.pop(0)
+            bms._notification_handler(None, fr)
+            if fr is full:
+                bms._notification_handler(None, b'\x3f\x55\x85' + bytes(40))  # noise after the reply
+
+        bms.client.write_gatt_char = write
+        return await bms.fetch()
+
+    assert asyncio.run(run()).soc == pytest.approx(99.2)
+
+
+def test_sign_warning_needs_a_lasting_mismatch(serial_stub, caplog):
+    full, short, _ = LABELLED_FRAMES[2]  # charging: +9.19 A / +9.3 A
+    bad = bytearray(short)
+    bad[78] |= 0x80  # short view now says -9.3 A
+    bad = _with_checksum(bad)
+    bms = JbdHvUart('serial', name='hv', adapter='/dev/ttyUSB0')
+    _fetch(bms, [full, bad])
+    _fetch(bms, [full, short])  # agreement resets the count
+    _fetch(bms, [full, bad])
+    _fetch(bms, [full, bad])
+    assert 'disagree in sign' not in caplog.text
+    _fetch(bms, [full, bad])
+    assert 'disagree in sign' in caplog.text
