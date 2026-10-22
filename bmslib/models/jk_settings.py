@@ -71,10 +71,12 @@ _TABLE = [
     _num('cell_ovp', 0x04, (18, 4, F), 1000, 'V', 'high', 1.2, 4.35),
     _num('cell_ovpr', 0x05, (22, 4, F), 1000, 'V', 'high', 1.2, 4.35),
     _num('balance_trigger_voltage', 0x06, (26, 4, F), 1000, 'V', 'med', 0.003, 1.0),
-    _num('cell_soc100_voltage', 0x07, (30, 4, F), 1000, 'V', 'med', 0.003, 3.65),
-    _num('cell_soc0_voltage', 0x08, (34, 4, F), 1000, 'V', 'med', 0.003, 3.65),
-    _num('cell_rcv', 0x09, (38, 4, F), 1000, 'V', 'med', 0.003, 3.65),
-    _num('cell_rfv', 0x0A, (42, 4, F), 1000, 'V', 'med', 0.003, 3.65),
+    # syssi caps these at 3.65 V (LiFePO4); up to the OVP range here so NMC/LTO packs can set
+    # them too. validate_change keeps SOC0 < SOC100 <= RCV < OVP and RFV < RCV.
+    _num('cell_soc100_voltage', 0x07, (30, 4, F), 1000, 'V', 'med', 0.003, 4.35),
+    _num('cell_soc0_voltage', 0x08, (34, 4, F), 1000, 'V', 'med', 0.003, 4.35),
+    _num('cell_rcv', 0x09, (38, 4, F), 1000, 'V', 'med', 0.003, 4.35),
+    _num('cell_rfv', 0x0A, (42, 4, F), 1000, 'V', 'med', 0.003, 4.35),
     _num('power_off_voltage', 0x0B, (46, 4, F), 1000, 'V', 'high', 1.2, 4.35),
     _num('max_charge_current', 0x0C, (50, 4, F), 1000, 'A', 'high', 1.0, 600.1),
     _num('charge_ocp_delay', 0x0D, (54, 4, F), 1, 's', 'med', 2, 600),
@@ -92,7 +94,8 @@ _TABLE = [
     _num('charge_utpr', 0x19, (102, 4, T), 10, '°C', 'high', -45, 20),
     _num('mosfet_otp', 0x1A, (106, 4, T), 10, '°C', 'high', 50, 110),
     _num('mosfet_otpr', 0x1B, (110, 4, T), 10, '°C', 'high', 50, 110),
-    _num('cell_count', 0x1C, (114, 1, F), 1, None, 'critical', 2, 32),
+    # JKBt.connect() rejects num_cells > 24: a larger count would lock batmon out of the BMS
+    _num('cell_count', 0x1C, (114, 1, F), 1, None, 'critical', 2, 24),
     _num('total_capacity', 0x20, (130, 4, F), 1000, 'Ah', 'high', 2, 20000),
     _num('scp_delay', 0x21, (134, 4, F), 1, 'µs', 'high', 0, 1000000),
     _num('balance_start_voltage', 0x22, (138, 4, F), 1000, 'V', 'med', 1.2, 4.25),

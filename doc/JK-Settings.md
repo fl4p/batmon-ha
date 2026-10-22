@@ -95,10 +95,10 @@ so a write could not be verified; not shown and not writable. Risk is a rough gu
 | `cell_ovp` | Cell OVP | 1.2 … 4.35 V, step 0.001 | high | `all` |
 | `cell_ovpr` | Cell OVPR | 1.2 … 4.35 V, step 0.001 | high | `all` |
 | `balance_trigger_voltage` | Balance trigger voltage | 0.003 … 1 V, step 0.001 | med | `all` |
-| `cell_soc100_voltage` | SOC 100% voltage | 0.003 … 3.65 V, step 0.001 | med | `all` |
-| `cell_soc0_voltage` | SOC 0% voltage | 0.003 … 3.65 V, step 0.001 | med | `all` |
-| `cell_rcv` | Cell RCV | 0.003 … 3.65 V, step 0.001 | med | `all` |
-| `cell_rfv` | Cell RFV | 0.003 … 3.65 V, step 0.001 | med | `all` |
+| `cell_soc100_voltage` | SOC 100% voltage | 0.003 … 4.35 V, step 0.001 | med | `all` |
+| `cell_soc0_voltage` | SOC 0% voltage | 0.003 … 4.35 V, step 0.001 | med | `all` |
+| `cell_rcv` | Cell RCV | 0.003 … 4.35 V, step 0.001 | med | `all` |
+| `cell_rfv` | Cell RFV | 0.003 … 4.35 V, step 0.001 | med | `all` |
 | `power_off_voltage` | Power off voltage | 1.2 … 4.35 V, step 0.001 | high | `all` |
 | `max_charge_current` | Max charge current | 1 … 600.1 A, step 0.001 | high | `all` |
 | `charge_ocp_delay` | Charge OCP delay | 2 … 600 s, step 1 | med | `all` |
@@ -116,7 +116,7 @@ so a write could not be verified; not shown and not writable. Risk is a rough gu
 | `charge_utpr` | Charge UTPR | -45 … 20 °C, step 0.1 | high | `all` |
 | `mosfet_otp` | MOSFET OTP | 50 … 110 °C, step 0.1 | high | `all` |
 | `mosfet_otpr` | MOSFET OTPR | 50 … 110 °C, step 0.1 | high | `all` |
-| `cell_count` | Cell count | 2 … 32, step 1 | critical | by name |
+| `cell_count` | Cell count | 2 … 24, step 1 | critical | by name |
 | `total_capacity` | Total capacity | 2 … 20000 Ah, step 0.001 | high | `all` |
 | `scp_delay` | SCP delay | 0 … 1000000 µs, step 1 | high | `all` |
 | `balance_start_voltage` | Balance start voltage | 1.2 … 4.25 V, step 0.001 | med | `all` |

@@ -65,6 +65,7 @@ def test_encode_switch():
     ("voltage_calibration", 13.2),
     ("rcv_time", 1.0),
     ("smart_sleep_voltage", 3.7),  # above max
+    ("cell_count", 25),  # JKBt.connect() rejects more than 24 cells
     ("heating_start_temp", 10),
     ("heating_stop_temp", 20),
     ("discharge_utp", -10),
@@ -205,3 +206,9 @@ def test_current_calibration_range_allows_negative_and_stays_read_only():
         encode_setting('current_calibration', -0.493)
     with pytest.raises(SettingError):
         parse_write_option('current_calibration')
+
+
+def test_nmc_voltages_in_range():
+    # syssi's 3.65 V cap is LiFePO4-only; an NMC pack needs RCV/SOC100 around 4.1 V
+    assert encode_setting("cell_rcv", 4.1)[0] == 0x09
+    assert encode_setting("cell_soc100_voltage", 4.1)[0] == 0x07
