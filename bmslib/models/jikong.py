@@ -182,6 +182,10 @@ class JKBt(BtBms):
         self.settings_raw: Optional[bytes] = None
         # time.monotonic() of the last 0x96 settings query: set when it is sent and again when answered
         self._settings_query_t: Optional[float] = None
+        # serialises register writes: set_switch/set_soc come from the MQTT action loop and must
+        # not land inside a write_setting (its settle window, or its read-back, where e.g. a
+        # float_charge toggle would read as "also changed" and lock settings writes)
+        self._write_lock = asyncio.Lock()
 
     def _notification_handler(self, _sender, data):
         data = bytes(data)
@@ -384,6 +388,14 @@ class JKBt(BtBms):
         self.logger.debug("write> %s", frame)
         await self.client.write_gatt_char(self.char_handle_write, data=frame)
 
+    async def _settle_after_query(self):
+        """A write arriving while the BMS still answers a 0x96 query is acked but dropped
+        (see WRITE_SETTLE_S): wait until the last query is that long ago."""
+        if self._settings_query_t is not None:
+            wait = self.WRITE_SETTLE_S - (time.monotonic() - self._settings_query_t)
+            if wait > 0:
+                await asyncio.sleep(wait)
+
     async def fetch_device_info(self):
         # https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jkabstractprotocol.py
         # https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L1152
@@ -539,8 +551,10 @@ class JKBt(BtBms):
         if await self.has_float_charger():
             addresses['float_charge'] = 0x30
 
-        await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
-        await asyncio.sleep(.2)  # wait a bit before triggering settings fetch
+        async with self._write_lock:
+            await self._settle_after_query()
+            await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
+            await asyncio.sleep(.2)  # wait a bit before triggering settings fetch
         self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
         # await asyncio.sleep(0.2)  # not sure if this is needed
 
@@ -554,8 +568,10 @@ class JKBt(BtBms):
             raise NotImplementedError("JK SOC calibration needs the 32s protocol (firmware >= 11)")
         if not (0 <= soc <= 100):
             raise ValueError("soc must be within 0..100, got %r" % (soc,))
-        await self._write(0x6E, [int(round(soc))])  # 1-byte register, percent
-        await asyncio.sleep(.2)
+        async with self._write_lock:
+            await self._settle_after_query()
+            await self._write(0x6E, [int(round(soc))])  # 1-byte register, percent
+            await asyncio.sleep(.2)
         self._resp_table.pop(0x01, None)  # settings frame is stale now
 
     def supports_settings(self) -> bool:
@@ -582,16 +598,16 @@ class JKBt(BtBms):
         when any other setting changed with it (the register meant something else).
         """
         register, data = encode_setting(name, value)
+        async with self._write_lock:
+            return await self._write_setting_locked(name, value, register, data)
+
+    async def _write_setting_locked(self, name, value, register, data) -> WriteResult:
         if self.settings is None:
             await self.refresh_settings()
         before_all = dict(self.settings)
         before = before_all.get(name)
 
-        # a write arriving while the BMS still answers the settings query is dropped (see WRITE_SETTLE_S)
-        if self._settings_query_t is not None:
-            wait = self.WRITE_SETTLE_S - (time.monotonic() - self._settings_query_t)
-            if wait > 0:
-                await asyncio.sleep(wait)
+        await self._settle_after_query()
         await self._write(register, data)
         await asyncio.sleep(self.READBACK_DELAY_S)  # give the BMS time to apply before reading back
         after_all = await self.refresh_settings()

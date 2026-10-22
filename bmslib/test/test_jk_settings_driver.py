@@ -311,3 +311,23 @@ def test_write_applied_despite_busy_bms():
     assert res.ok is False
     assert 'read-back' in res.reason
     assert [reg for reg, _ in client.writes] == [0x18]  # it arrived, it was dropped
+
+
+def test_switch_write_waits_for_a_running_settings_write():
+    """set_switch comes from the MQTT action loop: inside write_setting's read-back window a
+    float_charge toggle would read back as "also changed" and lock settings writes."""
+    bms, client = _make(readback=0.2)
+    bms._has_float_charger = True
+    float_before = asyncio.run(bms.refresh_settings())['charging_float_mode']
+
+    async def run():
+        write = asyncio.create_task(bms.write_setting('charge_utp', 3.0))
+        await asyncio.sleep(0.05)  # 0x18 sent, read-back pending
+        await bms.set_switch('float_charge', not float_before)
+        return await write
+
+    res = asyncio.run(run())
+    assert res.ok, res.reason
+    assert res.others == {}
+    assert [reg for reg, _ in client.writes] == [0x18, 0x30]
+    assert decode_settings(client.settings_frame)['charging_float_mode'] is (not float_before)
