@@ -458,10 +458,7 @@ def test_reread_after_ble_error_respects_the_backoff(tmp_path):
 
     bms.refresh_settings = broken
     now[0] += 1
-    try:
-        _tick(svc, bms, pub)
-    except TimeoutError:
-        pass
+    _tick(svc, bms, pub)
     now[0] += 30
     _tick(svc, bms, pub)  # inside the backoff: no attempt
     assert len(calls) == 1
@@ -538,11 +535,7 @@ def test_refresh_failure_backs_off(tmp_path):
 
     bms.refresh_settings = broken
     svc.enqueue('charge_utp', '3')
-    try:
-        _tick(svc, bms, pub)
-        assert False, 'refresh error must propagate'
-    except TimeoutError:
-        pass
+    _tick(svc, bms, pub)  # logged, not raised: the sample it runs in must survive
     assert len(calls) == 1
 
     now[0] += 59  # inside the backoff window: no refresh, no raise, request stays queued
@@ -551,12 +544,9 @@ def test_refresh_failure_backs_off(tmp_path):
     assert pub.calls == [] and client.writes == []
 
     now[0] += 1  # window over: tries again
-    try:
-        _tick(svc, bms, pub)
-        assert False, 'refresh error must propagate'
-    except TimeoutError:
-        pass
+    _tick(svc, bms, pub)
     assert len(calls) == 2
+    assert pub.calls == [] and client.writes == []
 
     bms.refresh_settings = orig  # link recovers: the queued request is handled
     now[0] += 60

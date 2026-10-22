@@ -110,10 +110,17 @@ class JkSettingsService:
                 or now - self._last_refresh >= self.refresh_period):
             if self._refresh_failed_at is not None and now - self._refresh_failed_at < self.refresh_retry_s:
                 # back off after a failed refresh, so a settings read that keeps failing does not
-                # fail every sample; pending requests stay queued (no stale/missing settings)
+                # cost every sample a 0x96 timeout; pending requests stay queued (no stale/missing settings)
                 return
             self._refresh_failed_at = now  # cleared on success; set before the await
-            await bms.refresh_settings()
+            try:
+                await bms.refresh_settings()
+            except Exception as e:
+                # the sample was fetched fine: a settings read that fails must not drop it (nor count
+                # as a sampler error, which escalates to reconnects and a BT power cycle)
+                logger.warning('%s settings read failed, retrying in %.0fs: %s', self.alias,
+                               self.refresh_retry_s, str(e) or type(e).__name__)
+                return
             self._refresh_failed_at = None
             self._last_refresh = now
             publish.states(bms.settings)
