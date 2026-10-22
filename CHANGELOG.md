@@ -5,6 +5,9 @@
 * Fix (wired): a port that failed to open at start (adapter unplugged, gateway down) was never reopened after a later dropout; only a restart helped (#422).
 * The unfinished web GUI is off under Home Assistant again: its ingress panel only answered 403 `direct access disabled`. Opt in with `gui: true` (#425).
 * Fix (`jbd`): a switch command queued with `keep_alive: false` waited a full sample period after one lost status reply. The read is now retried once (#423, thanks @tednv).
+* JK BLE (fw ≥ 11): `jk_settings: true` shows the BMS settings (protection voltages, currents, temperatures, switches) in Home Assistant as diagnostic entities (doc/JK-Settings.md, #420, thanks @sayezz).
+* JK BLE: per-device `settings_write` makes JK settings changeable from Home Assistant, with range and cross-field checks, backup, read-back verification and an audit log (doc/JK-Settings.md, #421, thanks @sayezz).
+* Fix: switches and set SOC stopped reacting after an MQTT broker restart, because their command subscriptions were lost. They are now re-subscribed (#420).
 
 ## [2.25]
 

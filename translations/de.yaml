@@ -55,6 +55,14 @@ configuration:
       um mehr als das 1,5-Fache voneinander ab, veröffentlicht er nichts.
       Der Zellwiderstands-Schätzer verwirft damit (sonst mit der Kapazität
       des BMS) Ströme über 5C, die kein Akku führen kann.
+  settings_write:
+    name: JK-Einstellungen änderbar
+    description: >-
+      JK-BMS-Einstellungen, die aus Home Assistant geändert werden dürfen
+      (braucht "JK-Einstellungen"): "all" und/oder eine kommagetrennte Liste
+      von Namen. "all" heißt alle änderbaren außer den kritischen, die
+      einzeln genannt werden müssen. Ein ungültiger Name lässt das Gerät
+      nur lesbar. Siehe doc/JK-Settings.md.
 
   concurrent_sampling:
     name: Parallele Abtastung
@@ -200,6 +208,13 @@ configuration:
       Ruhephasen von 90 Minuten und mehr nahe leer und nahe voll; bis zu
       einem Wert können Wochen vergehen, oder es kommt nie einer. Schaltet
       sich bei Akkus ab, die nicht LiFePO4 sind.
+  jk_settings:
+    name: JK-Einstellungen
+    description: >-
+      Liest die Einstellungen von JK-BMS (Bluetooth, Firmware 11 und neuer)
+      und zeigt sie in Home Assistant. Nur lesend, außer ein Gerät setzt
+      "JK-Einstellungen änderbar". Beim Ändern die JK-App schließen. Siehe
+      doc/JK-Settings.md.
   pack_temp_estimator:
     name: Akkutemperatur schätzen (experimentell)
     description: >-

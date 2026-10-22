@@ -117,8 +117,27 @@ class BleakDummyClient:
 class JKDummy:
     DEVICE_INFO = b'U\xaa\xeb\x90\x03\x15JK-B2A24S20P\x00\x00\x00\x0010.X-W\x00\x0010.02\x00\x00\x00\xdc\xc6/\x00\x06\x00\x00\x00JK pw123456\x00\x00\x00\x00\x001234\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00220606\x00\x001120303218\x000000\x00Input Userdata\x00\x00123456\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc5\xaaU\x90\xeb\xc8\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00D'
 
-    def __init__(self, is_new_11x=False):
+    def __init__(self, is_new_11x=False, settings_frame: Union[bytes, None] = None,
+                 ignore_writes: bool = False, stream: bool = True, misroute: Union[dict, None] = None,
+                 drop_writes_within_s: float = 0):
+        """
+        :param settings_frame: 300-byte 0x01 frame to answer with (default: the one in MSGS[0])
+        :param ignore_writes: accept settings writes but don't apply them (a BMS that rejects)
+        :param stream: on 0x96, also start the background thread that sends MSGS every second
+        :param misroute: {register: setting name}: a write to `register` lands on that other
+            setting instead (a register that means something else on this BMS)
+        :param drop_writes_within_s: silently ignore a settings write that arrives less than this
+            many seconds after the last 0x96 query answered (the real BMS does that while it is
+            still busy answering the query, although it acknowledges the write)
+        """
         self._callbacks = {}
+        self.ignore_writes = ignore_writes
+        self.misroute = dict(misroute or {})
+        self.drop_writes_within_s = drop_writes_within_s
+        self._last_query_t = None  # time.monotonic() of the last 0x96 answered
+        self.stream = stream
+        self._streaming = False
+        self.writes = []  # (register, value bytes) of every settings write received
         self.logger = get_logger()
         self.MSGS = [
             # settings 0x01:
@@ -130,6 +149,8 @@ class JKDummy:
             #b"U\xaa\xeb\x90\x02S\x07\r\x07\r\x07\r\x08\r\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0f\x00\x00\x00\x07\r\x01\x00\x00\x02'\x00'\x00&\x00&\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe8\x00\x00\x00\x00\x00\x1c4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc7\x00\xc5\x00\x00\x00\x00\x00\x00\x00\x00a\x02%\x04\x00\xc0E\x04\x00\x05\x00\x00\x00J\x04\x18\x00d\x00\x00\x00K\x8c'\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\x00\x01\x00\x00\x00\x9d\x03\x00\x00\x00\x00:\xccA@\x00\x00\x00\x006\x05\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00Z\x03\n\x00\x00\x00\x00\x00\xe8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xfe\xff\x7f\xdc/\x01\x01\x01\x00\x00\x00\x00J"
             b'U\xaa\xeb\x90\x02f\x13\r\x12\r\x12\r\x0f\r\x12\r\x14\r\x13\r\x12\r\x12\r\x12\r\x15\r\x13\r\x15\r\x14\r\x13\r\x13\r\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x00\x00\x12\r\x05\x00\x05\x0f>\x005\x005\x005\x005\x006\x003\x003\x003\x003\x003\x003\x003\x004\x004\x003\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xb0\x00\x00\x00\x00\x00%\xd1\x00\x00\x0b\x94\x03\x00\x1c\x11\x00\x00\xaa\x00\xaa\x00\x00\x00\x00\x00\x00\x00\x00D\xa8(\x03\x00\x80\xa3\x04\x00:\x00\x00\x00\x14\x95\x0f\x01d\x00\x00\x00%\xe8\xe1\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\x00\x01\x00\x00\x00\x13\x04\x15\x00\x00\x00\x8d\xfd@@\x00\x00\x00\x00\xea\x14\x00\x00\x00\x01\x00\x01\x00\x05\x00\x00u\xcb0\x00\x00\x00\x00\x00\xb0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xfe\xff\x7f\xdc/\x01\x01\x01\x00\x00\x00\x00\x8f'
         ]
+        # MSGS[0] is the 300-byte settings frame followed by a 20-byte command echo
+        self._settings = bytearray(settings_frame if settings_frame is not None else self.MSGS[0][:300])
 
         from bmslib.models.jikong import JKBt
         self.services = [
@@ -148,22 +169,67 @@ class JKDummy:
         from bmslib.models.jikong import calc_crc
         assert calc_crc(data) == crc
 
+        notify = lambda msg: self._callbacks['0000ffe1-0000-1000-8000-00805f9b34fb'](self, bytes(msg))
+
         if data.startswith(b'\xaaU\x90\xeb\x97'):
             # device info
             self.logger.info('dummy query device info')
-            self._callbacks['0000ffe1-0000-1000-8000-00805f9b34fb'](self, bytes(self.DEVICE_INFO))
+            notify(self.DEVICE_INFO)
         elif data.startswith(b'\xaaU\x90\xeb\x96'):
             self.logger.info('dummy subscribe')
+            notify(self._settings)  # answer with the current (possibly patched) settings frame
+            self._last_query_t = time.monotonic()
 
-            def send_data():
-                while True:
-                    time.sleep(1)
-                    for msg in self.MSGS:
-                        self._callbacks['0000ffe1-0000-1000-8000-00805f9b34fb'](self, bytes(msg))
+            if self.stream and not self._streaming:
+                self._streaming = True
 
-            Thread(target=send_data, daemon=True).start()
+                def send_data():
+                    while True:
+                        time.sleep(1)
+                        notify(bytes(self._settings) + self.MSGS[0][300:])  # keep the echo tail
+                        for msg in self.MSGS[1:]:
+                            notify(msg)
+
+                Thread(target=send_data, daemon=True).start()
+        elif data.startswith(b'\xaaU\x90\xeb') and data[4] in self._settings_by_register():
+            self._apply_write(self._settings_by_register()[data[4]], data[6:19])
         else:
             raise Exception("JK dummy received unrecognized msg %s" % data)
+
+    @property
+    def settings_frame(self) -> bytes:
+        return bytes(self._settings)
+
+    @staticmethod
+    def _settings_by_register():
+        from bmslib.models.jk_settings import SETTINGS
+        return {s.register: s for s in SETTINGS.values()}
+
+    def _apply_write(self, setting, payload: bytes):
+        from bmslib.models.jikong import calc_crc
+        value = bytes(payload[:setting.length])
+        self.writes.append((setting.register, value))
+        self.logger.info('dummy write %s (0x%02x) = %s', setting.name, setting.register, value.hex())
+        if (self.drop_writes_within_s and self._last_query_t is not None
+                and time.monotonic() - self._last_query_t < self.drop_writes_within_s):
+            self.logger.info('dummy busy answering a settings query: write dropped')
+            return
+        if setting.register in self.misroute:
+            from bmslib.models.jk_settings import SETTINGS
+            setting = SETTINGS[self.misroute[setting.register]]
+        if self.ignore_writes or setting.read is None:
+            return
+        if setting.kind == 'switch':
+            offset, mask = setting.read
+            if value[0]:
+                self._settings[offset] |= mask
+            else:
+                self._settings[offset] &= ~mask & 0xFF
+        else:
+            offset, width, signed = setting.read
+            raw = int.from_bytes(value, 'little', signed=setting.signed)
+            self._settings[offset:offset + width] = raw.to_bytes(width, 'little', signed=signed)
+        self._settings[-1] = calc_crc(self._settings[:-1])
 
 
 class JBDDummy:

@@ -175,6 +175,9 @@ class JkPbUart(JKBt):
     def supports_set_soc(self) -> bool:
         return False
 
+    def supports_settings(self) -> bool:
+        return False  # _write is not implemented over RS485
+
     def debug_data(self):
         return dict(resp=self._resp_table, bus_addr=self.bus_addr, pending=self._pending,
                     buffered=len(self._buffer))

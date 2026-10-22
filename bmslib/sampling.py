@@ -18,9 +18,10 @@ from bmslib.algorithm import create_algorithm
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
+from bmslib.jk_settings_service import NullSettingsPublisher
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
-    QMAX_CLEAR_REPEAT_S
+    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -165,14 +166,28 @@ class BmsSampler:
                  soh_estimator=False,
                  soh_state=None,
                  design_capacity=None,
+                 settings_service=None,
                  ):
 
         self.bms = bms
+        # JK settings read/write (jk_settings option), drained after each fetch
+        self.settings_service = settings_service
+        self.settings_publisher = None  # set to the MQTT settings publisher; None -> no-op
+        self._settings_exclude = None  # settings without own entity, decided on the first tick
+        self._settings_subscribed = False
         self.mqtt_topic_prefix = re.sub(r'[^\w_.-/]', '_', bms.name)
         self.mqtt_client = mqtt_client
         self.invert_current = invert_current
         self.expire_after_seconds = expire_after_seconds
         self.device_info: Optional[DeviceInfo] = None
+        if mqtt_client is not None and settings_service is not None:
+            # it sends the settings discovery itself before the first states (and when the entity
+            # set changes); the periodic discovery below repeats it
+            self.settings_publisher = MqttSettingsPublisher(
+                mqtt_client, self.mqtt_topic_prefix, exclude=self._settings_excluded,
+                writable=settings_service.writable, expire_after_seconds=expire_after_seconds,
+                device_json=lambda: hass_device_json(self.mqtt_topic_prefix, self.device_info,
+                                                     getattr(bms, 'display_name', None)))
         self.num_samples = 0
         self.bms_group = bms_group  # group, virtual, parent
         self.current_calibration_factor = current_calibration_factor
@@ -519,11 +534,22 @@ class BmsSampler:
             t_fetch = time.time()
 
             sample = await bms.fetch()
+            # the expiry check below is about the fetch, not about the settings writes after it
+            t_fetched = time.time()
+
+            if self.settings_service is not None:
+                if self._settings_exclude is None:
+                    self._settings_exclude = await self._jk_settings_exclude(bms)
+                if self.settings_publisher is not None:
+                    self.settings_publisher.exclude = self._settings_excluded
+                await self.settings_service.tick(bms, self.settings_publisher or NullSettingsPublisher())
+                if self.settings_publisher is not None:
+                    self.settings_publisher.resend_after_discovery(getattr(bms, 'settings', None))
 
             t_now = time.time()
             t_hour = t_now * (1 / 3600)
 
-            if sample.timestamp < t_now - max(self.expire_after_seconds, MIN_VALUE_EXPIRY):
+            if sample.timestamp < t_fetched - max(self.expire_after_seconds, MIN_VALUE_EXPIRY):
                 raise SampleExpiredError("sample %s expired" % sample.timestamp)
                 # logger.warning('%s expired sample', bms.name)
                 # return
@@ -620,6 +646,11 @@ class BmsSampler:
                                    switches=sample.switches.keys())
             if self.num_samples == 0 and mqtt_client and getattr(bms, 'supports_set_soc', lambda: False)():
                 subscribe_set_soc(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms)
+            if (mqtt_client and self.settings_service is not None and not self._settings_subscribed
+                    and self._settings_exclude is not None and getattr(bms, 'settings', None) is not None):
+                subscribe_jk_settings(mqtt_client, self.mqtt_topic_prefix, self.settings_service,
+                                      exclude=self._settings_excluded)
+                self._settings_subscribed = True
 
             for sink in self.sinks:
                 try:
@@ -754,10 +785,20 @@ class BmsSampler:
                     temperature_names=getattr(bms, 'temperature_names', None),
                 )
 
+                settings = getattr(bms, 'settings', None)
+                settings_discovered = self.settings_publisher is not None and settings is not None
+                if settings_discovered:
+                    self.settings_publisher.exclude = self._settings_excluded
+                    self.settings_publisher.discovery()
+
                 # publish sample again after discovery
                 if self.period_pub.period > 2:
                     await asyncio.sleep(1)
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
+                if settings_discovered:
+                    # settings states are not retained and only come with a refresh (5 min):
+                    # send them again so entities HA just created show a value now
+                    self.settings_publisher.states(settings, force=True)
 
         self.num_samples += 1
         t_disc = time.time()
@@ -858,6 +899,25 @@ class BmsSampler:
                 except Exception as e:
                     logger.error('sink %s publish_meters failed: %s',
                                  type(sink).__name__, summarize_exc(e))
+
+    async def _jk_settings_exclude(self, bms) -> Optional[frozenset]:
+        """Settings that get no entity of their own: on JK-PB the float charge bit is
+        already the `float_charge` sample switch. None (retry next sample) when
+        that cannot be told yet; the float setting stays out meanwhile."""
+        has_float = getattr(bms, 'has_float_charger', None)
+        if has_float is None:
+            return frozenset()
+        try:
+            return frozenset({'charging_float_mode'}) if await has_float() else frozenset()
+        except Exception as e:
+            logger.warning('%s: cannot tell whether the BMS has a float charger: %s', bms.name, summarize_exc(e))
+            return None
+
+    @property
+    def _settings_excluded(self) -> frozenset:
+        if self._settings_exclude is None:
+            return frozenset({'charging_float_mode'})  # not known yet: no possible duplicate
+        return self._settings_exclude
 
     async def _try_fetch_device_info(self):
         try:
