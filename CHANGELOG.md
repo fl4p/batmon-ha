@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.26]
 
 * New wired type `jbd_hv_uart` for JBD / LWS high-voltage BMSes (up to 200 cells) on RS485. Decoded from the reporter's captures and checked against the vendor tool's export (#424).
 * Wired BMSes can use a network serial server: `adapter: tcp://host:port` (or `rfc2217://`). Before, the URL was cut at its last colon and `8880` opened as a file (#422).
