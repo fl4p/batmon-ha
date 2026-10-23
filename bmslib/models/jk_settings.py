@@ -97,7 +97,7 @@ _TABLE = [
     # JKBt.connect() rejects num_cells > 24: a larger count would lock batmon out of the BMS
     _num('cell_count', 0x1C, (114, 1, F), 1, None, 'critical', 2, 24),
     _num('total_capacity', 0x20, (130, 4, F), 1000, 'Ah', 'high', 2, 20000),
-    _num('scp_delay', 0x21, (134, 4, F), 1, 'µs', 'high', 0, 1000000),
+    _num('scp_delay', 0x21, (134, 4, F), 1, 'µs', 'critical', 0, 1000000),
     _num('balance_start_voltage', 0x22, (138, 4, F), 1000, 'V', 'med', 1.2, 4.25),
     _num('precharge_time', 0x25, (274, 1, F), 1, 's', 'med', 0, 255),
     _num('heating_start_temp', 0x37, (284, 1, T), 1, '°C', 'med', -40, 100, length=1),
@@ -132,8 +132,9 @@ _TABLE = [
 
 SETTINGS: Dict[str, Setting] = {s.name: s for s in _TABLE}
 
+# never in `all`, only when named. scp_delay: up to 1 s of short circuit before the BMS cuts.
 CRITICAL = frozenset({
-    'cell_count', 'voltage_calibration', 'current_calibration',
+    'cell_count', 'scp_delay', 'voltage_calibration', 'current_calibration',
     'disable_temperature_sensors', 'gps_locked_charging', 'gps_locked_discharging',
 })
 

@@ -158,7 +158,7 @@ def test_read_offset_is_not_register():
 
 def test_table_shape():
     assert CRITICAL == frozenset({
-        "cell_count", "voltage_calibration", "current_calibration",
+        "cell_count", "scp_delay", "voltage_calibration", "current_calibration",
         "disable_temperature_sensors", "gps_locked_charging", "gps_locked_discharging",
     })
     assert CRITICAL == frozenset(n for n, s in SETTINGS.items() if s.danger == "critical")

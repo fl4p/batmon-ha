@@ -236,3 +236,8 @@ def test_implausible_settings(jk1):
     assert "cell_ovp" in implausible_settings({**jk1, "cell_ovp": 65.5})
     assert "not in order" in implausible_settings({**jk1, "cell_ovpr": jk1["cell_ovp"] + 0.01})
     assert "cell_uvp" in implausible_settings({k: v for k, v in jk1.items() if k != "cell_uvp"})
+
+
+def test_scp_delay_only_when_named():
+    assert "scp_delay" not in parse_write_option("all")
+    assert "scp_delay" in parse_write_option("all, scp_delay")

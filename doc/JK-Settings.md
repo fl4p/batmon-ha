@@ -28,7 +28,7 @@ devices:
 `all, cell_count` or `cell_ovp, cell_ovpr, charge_utp, charge_utpr`.
 
 * `all` means every writable setting **except the critical ones**. Critical settings that can be written must be
-  named explicitly: `cell_count`, `disable_temperature_sensors`, `gps_locked_charging`, `gps_locked_discharging`.
+  named explicitly: `cell_count`, `scp_delay`, `disable_temperature_sensors`, `gps_locked_charging`, `gps_locked_discharging`.
   A wrong value there can stop the BMS from protecting the pack, or lock charging/discharging.
 * A name that is unknown or not writable (see the table below) is a configuration error: batmon logs it, the
   device stays **read-only** (nothing is writable) and the error is shown in the `Settings last change` sensor.
@@ -118,7 +118,7 @@ so a write could not be verified; not shown and not writable. Risk is a rough gu
 | `mosfet_otpr` | MOSFET OTPR | 50 … 110 °C, step 0.1 | high | `all` |
 | `cell_count` | Cell count | 2 … 24, step 1 | critical | by name |
 | `total_capacity` | Total capacity | 2 … 20000 Ah, step 0.001 | high | `all` |
-| `scp_delay` | SCP delay | 0 … 1000000 µs, step 1 | high | `all` |
+| `scp_delay` | SCP delay | 0 … 1000000 µs, step 1 | critical | by name |
 | `balance_start_voltage` | Balance start voltage | 1.2 … 4.25 V, step 0.001 | med | `all` |
 | `precharge_time` | Precharge time | 0 … 255 s, step 1 | med | no (unverified) |
 | `heating_start_temp` | Heating start temp | -40 … 100 °C, step 1 | med | no (unverified) |
