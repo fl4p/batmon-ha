@@ -8,7 +8,7 @@
 * JK BLE (fw ≥ 11): `jk_settings: true` shows the BMS settings (protection voltages, currents, temperatures, switches) in Home Assistant as diagnostic entities (doc/JK-Settings.md, #420, thanks @sayezz).
 * JK BLE: per-device `settings_write` makes JK settings changeable from Home Assistant, with range and cross-field checks, backup, read-back verification and an audit log (doc/JK-Settings.md, #421, thanks @sayezz).
 * Fix: switches and set SOC stopped reacting after an MQTT broker restart, because their command subscriptions were lost. They are now re-subscribed (#420).
-* Fix (`jk`): a switch or set-SOC command sent right after a settings read could be acknowledged by the BMS and then ignored. It now waits 1 s after the read (#421).
+* Fix (`jk`): a switch or set-SOC command sent right after a settings read could be acknowledged by the BMS and then ignored. It waits 1 s after the read (#421).
 
 ## [2.25]
 
