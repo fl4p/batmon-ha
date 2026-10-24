@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix: the web GUI still started under Home Assistant in 2.26 (unreachable, as its ingress panel was removed), because the add-on's default options set `gui: true` (#425).
+
 ## [2.26]
 
 * New wired type `jbd_hv_uart` for JBD / LWS high-voltage BMSes (up to 200 cells) on RS485. Decoded from the reporter's captures and checked against the vendor tool's export (#424).

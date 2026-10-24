@@ -75,7 +75,8 @@ options:
   bt_power_cycle: false
   bt_power_cycle_on_error: false
   ble_stack: bleak
-  gui: true
+  # no `gui: true` default here: the Supervisor fills options from these defaults, which
+  # turned the unfinished GUI on under HA again (#425). Opt in with `gui: true`.
   gui_port: 8099
   # sample_period/publish_period/expire_values_after are kept here (and required
   # in the schema) so they render as normal, always-visible fields. They must NOT
