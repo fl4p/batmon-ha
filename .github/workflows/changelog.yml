@@ -1,6 +1,6 @@
 name: Changelog
 
-# Every CHANGELOG.md entry is at most 30 words (bmslib/test/test_changelog.py).
+# Every CHANGELOG.md entry is at most 36 words (bmslib/test/test_changelog.py).
 # The test needs nothing but pytest, so this runs on any change to either file.
 
 on:

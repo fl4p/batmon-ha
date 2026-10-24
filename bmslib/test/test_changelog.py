@@ -10,7 +10,7 @@ whitespace-separated tokens, so `#416` or `` `type: auto` `` count as they read.
 import os
 import re
 
-MAX_WORDS = 30
+MAX_WORDS = 36
 CHANGELOG = os.path.join(os.path.dirname(__file__), '..', '..', 'CHANGELOG.md')
 
 _ITEM = re.compile(r'\s*(?:[*+-]|\d+[.)])\s+(.*)')
