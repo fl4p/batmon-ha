@@ -207,8 +207,10 @@ configuration:
     description: >-
       Estima la resistencia interna por celda de baterías LiFePO4 a partir de
       la corriente y las tensiones de celda, como sensor "Cell Resistance" en
-      mOhm. Necesita saltos de corriente grandes (8 A o más), por lo que una
-      batería pequeña puede no obtener nunca un valor. Se desactiva sola en
+      mOhm, normalizada a 25 °C. Necesita saltos de corriente grandes (8 A o
+      más), por lo que una batería pequeña puede no obtener nunca un valor, y
+      una temperatura de celda: una sonda del BMS, o pack_temp_estimator si el
+      BMS solo informa la temperatura del MOSFET. Se desactiva sola en
       baterías que no son LiFePO4.
   soh_estimator:
     name: Estimar capacidad / SoH (experimental)

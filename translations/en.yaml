@@ -187,8 +187,10 @@ configuration:
     description: >-
       Estimate the internal resistance per cell of LiFePO4 packs from the
       sampled current and cell voltages, as a "Cell Resistance" sensor in
-      mOhm. Needs large current steps (8 A or more), so small packs may never
-      get a value. Turns itself off for packs that are not LiFePO4.
+      mOhm, normalised to 25 °C. Needs large current steps (8 A or more), so
+      small packs may never get a value, and a cell temperature: a BMS probe,
+      or pack_temp_estimator if the BMS only reports a MOSFET temperature.
+      Turns itself off for packs that are not LiFePO4.
   soh_estimator:
     name: Capacity / SoH estimator (experimental)
     description: >-

@@ -191,7 +191,7 @@ schema:
 
   # Experimental: estimate the per-cell resistance of LiFePO4 packs from the
   # sampled current and cell voltages, published as a `cell_resistance` sensor
-  # (mOhm). See doc/Cell Resistance.md.
+  # (mOhm, normalised to 25 degC). See doc/Cell Resistance.md.
   impedance_estimator: "bool?"
 
   # Experimental: estimate the present capacity (Qmax) of LiFePO4 packs from

@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* `impedance_estimator`: Cell Resistance is now normalised to 25 °C (−2.5 %/°C) by a BMS probe or the warmed-up `pack_temp_estimator`; MOSFET-only packs get none. Saved windows are discarded once.
 * Fix: the web GUI still started under Home Assistant in 2.26 (unreachable, as its ingress panel was removed), because the add-on's default options set `gui: true` (#425).
 
 ## [2.26]
