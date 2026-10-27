@@ -10,6 +10,7 @@ import math
 import queue
 import time
 import traceback
+from typing import Optional
 from unittest.mock import patch
 
 import paho.mqtt.client as paho
@@ -182,8 +183,13 @@ def publish_temperatures(client, device_topic, temperatures):
 CELL_RESISTANCE_EXPIRE_S = 24 * 3600
 
 
-def publish_cell_resistance(client, device_topic, value_mohm: float):
-    mqtt_single_out(client, f"{device_topic}/cell_resistance", round_to_n(value_mohm, 3))
+def publish_cell_resistance(client, device_topic, value_mohm: Optional[float], attributes: Optional[dict] = None):
+    """value_mohm: the resistance normalised to 25 degC, None when there is none
+    (the attributes then say why); attributes: CellResistanceEstimator.attributes()."""
+    if attributes is not None:
+        mqtt_single_out(client, f"{device_topic}/cell_resistance/attributes", json.dumps(attributes))
+    if value_mohm is not None:
+        mqtt_single_out(client, f"{device_topic}/cell_resistance", round_to_n(value_mohm, 3))
 
 
 # Qmax/SoH (bmslib/qmax.py) is published once per accepted segment -- weeks
@@ -343,9 +349,11 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
 
     if cell_resistance:
-        # experimental, see bmslib/impedance.py: median per-cell resistance [mOhm]
+        # experimental, see bmslib/impedance.py: median per-cell resistance,
+        # normalised to 25 degC [mOhm]; the attributes say how
         _hass_discovery('cell_resistance', None, "mΩ", state_class="measurement", icon="resistor",
-                        name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S)
+                        name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S,
+                        json_attributes_topic=f"{device_topic}/cell_resistance/attributes")
 
     if soh_est:
         # experimental, see bmslib/qmax.py: capacity of the limiting cell [Ah], and

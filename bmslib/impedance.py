@@ -52,8 +52,15 @@ prototype produced a plausible wrong number without it:
    no pair: it never reaches a bin, a window or the learnt quantisation.
 
 Each accepted window is tagged with DOD, the median BMS temperature probe
-(`temp`) and, when pack_temp_estimator runs, the median RC pack-temperature
-estimate (`pack_temp`). Both temperatures are None when unknown.
+(`temp`), the median RC pack-temperature estimate (`pack_temp`, only from
+samples where pack_temp_estimator had run for PACK_TEMP_WARMUP_S) and the
+median MOSFET temperature (`mos_temp`). Each is None when unknown.
+
+The published value is R normalised to R_REF_C (25 degC): each window by its
+own cell temperature (window_temperature), then the median of the normalised
+windows. A window without a usable cell temperature stays in the rolling
+buffer with its raw R, but never enters the published median, and it is
+counted in the provenance (attributes()). See the comment at R_TEMP_K.
 
 Chemistry: the gates only hold for LFP. A sample with any cell outside
 LFP_MV_LO..LFP_MV_HI is dropped (a BLE decode glitch, a runner cell at the
@@ -148,8 +155,87 @@ PUBLISH_MIN_WINDOWS = 5  # publish nothing before this many windows were accepte
 MAX_WINDOW_AGE_S = 7 * 86400.0
 SUMMARY_PERIOD_S = 3600.0  # info-level summary of what the gates did
 
+# --- temperature normalisation (the published value) ---
+# LFP resistance falls as the cells warm, so a raw R reads ~30 % higher on a
+# pack 10 degC colder in winter, which looks like ageing. Every accepted window
+# is normalised to R_REF_C by its own cell temperature T:
+#
+#     R25 = R(T) * exp(R_TEMP_K * (T - R_REF_C))
+#
+# Form: exponential, i.e. a constant d ln R / dT. That is the quantity the
+# evidence measured (log R regressed on T); it keeps R25 > 0 for any T; and it
+# is the local form of Arrhenius (R_TEMP_K = 0.025 is Ea ~ 18 kJ/mol at 298 K,
+# whose 1/T^2 dependence changes the slope by only -9..+11 % across 10..40 degC,
+# inside the slope's own uncertainty).
+# Coefficient: d ln R / dT = -2.5 %/degC, one FIXED value for every pack:
+#  * fleet telemetry (bat-impedance q4b_step.py, report/telemetry_calibration_
+#    2026-10.md "Q4b", "Q4b review"): within-pack slope of the 15 s step R
+#    -3.1 %/degC (C/10 run, 25/25 packs negative) unadjusted, but partly SoC
+#    (T and SoC correlate within a pack, median r 0.48): adjusted -2.34 %/degC
+#    pooled, per-pack median -2.78 (22/25 negative); gate variants -2.3..-3.7.
+#    Per-pack slopes (-0.33 to -9.25) are too noisy to fit per pack.
+#  * the prototype's own 150 s windowed-Deming R on the van Daly pack
+#    (bat-impedance r_dod_t.py, report/daly_R_estimates.parquet, 1615 windows,
+#    BMS probe 10-33 degC): window medians 1.37-1.66 mOhm at 10-15 degC,
+#    1.08-1.11 at 20-25, 0.97-1.00 at 27.5-35; log-slope -2.0 %/degC over
+#    10-33 degC (-1.9 with DOD bins), -2.5 over 10-25, -1.4 over 20-33.
+#    With -2.5 %/degC its 5 degC bins come within -7..+14 % of the 20-25 degC
+#    bin (raw: a factor 1.5 between 10-15 and 30-35 degC).
+# Uncertainty: about +/-0.5 %/degC, so a window 10 degC from 25 carries about
+# +/-5 % from the coefficient alone (+/-7.5 % at the range ends).
+R_REF_C = 25.0
+R_TEMP_K = 0.025  # 1/degC, = -d ln R / dT
+# Range a window can be normalised in. The evidence spans 10-33 degC (van) and
+# 13-44 degC (fleet steps, p1-p99; p5-p95 15-31). Below 10 degC there is no
+# data and LFP resistance rises faster than any fixed slope (the van's
+# 10-12.5 degC bin already reads 21 % above 12.5-15); above 40 degC there is
+# little data and the van's slope flattens. Outside the range a window is not
+# normalised: extrapolating the fixed slope is a guess, not a correction.
+R_NORM_T_LO, R_NORM_T_HI = 10.0, 40.0
+# The RC pack-temperature estimate (pack_temp_rc) starts at its inputs' weighted
+# mean -- with no ambient topic that is the MOSFET reading itself -- and settles
+# with a time constant of 1/a_mos = 588 min (MOS only) or 313 min (with room and
+# outdoor). Until it has run about one time constant (it restarts after an
+# add-on restart or a gap over an hour) it is still largely the MOSFET reading,
+# which is refused as a cell temperature (window_temperature).
+PACK_TEMP_WARMUP_S = 10 * 3600.0
+
 # --- persistence (get_state / restore) ---
 STATE_VERSION = 1
+
+
+def window_temperature(w) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    """(cell temperature [degC], source, None) that window `w` is normalised
+    at, or (None, source or None, why not). Sources in order of preference:
+
+     * 'probe': the median BMS temperature probe, a direct reading at the cells;
+     * 'pack_temp': the RC pack-temperature estimate (warmed up, see
+       PACK_TEMP_WARMUP_S), a model, RMSE 1.4 degC on the pack it was fit on.
+
+    The MOSFET temperature is never used: a window needs an 8 A current swing,
+    and under load the MOSFET reads several K above the cells (up to ~70 degC
+    spikes on ANT), which would over-correct R by ~2.5 % per K. A pack with
+    only a MOSFET reading gets 'mos_only'. A preferred source that is out of
+    range does not fall back to the next one: that would let a worse source
+    pass where the better one refused."""
+    for src in ('temp', 'pack_temp'):
+        T = w.get(src)
+        if T is not None:
+            if not _finite(T):
+                return None, None, 'no_temp'
+            name = 'probe' if src == 'temp' else src
+            if not R_NORM_T_LO <= T <= R_NORM_T_HI:
+                return None, name, 'out_of_range'
+            return float(T), name, None
+    return None, None, 'mos_only' if _finite(w.get('mos_temp')) else 'no_temp'
+
+
+def normalised_r(w) -> Optional[float]:
+    """Window R normalised to R_REF_C [mOhm], None when it cannot be."""
+    T, _, _ = window_temperature(w)
+    if T is None:
+        return None
+    return w['r'] * math.exp(R_TEMP_K * (T - R_REF_C))
 
 
 def noise_std(xs: Sequence[float]) -> Optional[float]:
@@ -409,7 +495,7 @@ def fit_cell(i_seq: Sequence[float], u_seq: Sequence[float], di=None, q_i=None, 
 def evaluate_window(rows, cell_reasons: Optional[Counter] = None, q_i=None,
                     q_u=None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Evaluate one window. `rows` are bins (t, i_charge, soc, voltages, temp[,
-    pack_temp]) in time order; i_charge/soc/temps may be NaN/None, voltages a
+    pack_temp[, mos_temp]]) in time order; i_charge/soc/temps may be NaN/None, voltages a
     tuple (NaN for a missing cell) or None. q_i is the current's quantisation
     step, q_u a per-cell list (None: unknown). Returns (window result, None) or
     (None, reason)."""
@@ -465,6 +551,7 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None, q_i=None,
         return None, 'cells'
     temps = [r[4] for r in rows if _finite(r[4])]
     pack_temps = [r[5] for r in rows if len(r) > 5 and _finite(r[5])]
+    mos_temps = [r[6] for r in rows if len(r) > 6 and _finite(r[6])]
     return dict(
         t=rows[-1][0],
         r=median(accepted),
@@ -474,13 +561,14 @@ def evaluate_window(rows, cell_reasons: Optional[Counter] = None, q_i=None,
         dod=100.0 - median(socs),
         temp=median(temps) if temps else None,
         pack_temp=median(pack_temps) if pack_temps else None,
+        mos_temp=median(mos_temps) if mos_temps else None,
         i_range=max(ir) - min(ir),
     ), None
 
 
 class _Bin:
     """Accumulates the real pairs of one BIN_S interval."""
-    __slots__ = ('idx', 'n', 'st', 'si', 'su', 'nu', 'soc', 'soc_ok', 'temp', 'ptemp')
+    __slots__ = ('idx', 'n', 'st', 'si', 'su', 'nu', 'soc', 'soc_ok', 'temp', 'ptemp', 'mtemp')
 
     def __init__(self, idx, n_cells):
         self.idx = idx
@@ -492,8 +580,9 @@ class _Bin:
         self.soc_ok = True
         self.temp = []
         self.ptemp = []
+        self.mtemp = []
 
-    def add(self, t, i, soc, vt, temp, ptemp):
+    def add(self, t, i, soc, vt, temp, ptemp, mtemp):
         self.n += 1
         self.st += t
         self.si += i
@@ -512,13 +601,16 @@ class _Bin:
             self.temp.append(temp)
         if ptemp is not None:
             self.ptemp.append(ptemp)
+        if mtemp is not None:
+            self.mtemp.append(mtemp)
 
     def row(self):
         n = self.n
         volts = tuple(s / k if k else math.nan for s, k in zip(self.su, self.nu))
         return (self.st / n, self.si / n, self.soc / n if self.soc_ok else math.nan, volts,
                 sum(self.temp) / len(self.temp) if self.temp else None,
-                sum(self.ptemp) / len(self.ptemp) if self.ptemp else None)
+                sum(self.ptemp) / len(self.ptemp) if self.ptemp else None,
+                sum(self.mtemp) / len(self.mtemp) if self.mtemp else None)
 
 
 class CellResistanceEstimator:
@@ -546,18 +638,65 @@ class CellResistanceEstimator:
         self.cell_reasons = Counter()
         self.n_dropped = 0  # samples with a cell outside the LFP band, since the last summary
         self.n_i_rejected = 0  # samples with an impossible current, since the last summary
+        self.raw_reasons = Counter()  # accepted windows not normalised, by why, since the last summary
+        self._attrs_due = False  # a window was accepted since take_attributes()
         self._t_summary: Optional[float] = None
         self._announced = False
         self._disable_persistent = False  # only a chemistry verdict survives a restart
 
     @property
     def value(self) -> Optional[float]:
-        """Median over the accepted windows kept (last ROLLING_WINDOWS, none
-        older than MAX_WINDOW_AGE_S) [mOhm per cell], or None with fewer than
-        PUBLISH_MIN_WINDOWS."""
+        """The published value: median over the kept windows (last
+        ROLLING_WINDOWS, none older than MAX_WINDOW_AGE_S) that could be
+        normalised to R_REF_C [mOhm per cell], or None with fewer than
+        PUBLISH_MIN_WINDOWS of those. Windows that could not be normalised
+        are left out, never mixed in raw."""
+        rs = [r for r in map(normalised_r, self.windows) if r is not None]
+        if len(rs) < PUBLISH_MIN_WINDOWS:
+            return None
+        return median(rs)
+
+    @property
+    def raw_value(self) -> Optional[float]:
+        """Median raw R (at whatever temperature) over all kept windows, or
+        None with fewer than PUBLISH_MIN_WINDOWS. Provenance only."""
         if len(self.windows) < PUBLISH_MIN_WINDOWS:
             return None
         return median([w['r'] for w in self.windows])
+
+    def attributes(self) -> Dict[str, Any]:
+        """What the published value is and what went into it (HA attributes)."""
+        src, why, temps = Counter(), Counter(), []
+        for w in self.windows:
+            T, s, y = window_temperature(w)
+            if T is None:
+                why[y] += 1
+            else:
+                src[s] += 1
+                temps.append(T)
+        raw = self.raw_value
+        return dict(
+            reference_temp_c=R_REF_C,
+            temp_coeff_pct_per_c=-100.0 * R_TEMP_K,  # d ln R / dT
+            temp_range_c=[R_NORM_T_LO, R_NORM_T_HI],
+            windows=len(self.windows),
+            normalised=len(temps),
+            from_probe=src['probe'],
+            from_pack_temp_est=src['pack_temp'],
+            not_normalised=dict(sorted(why.items())),
+            median_temp_c=round(median(temps), 1) if temps else None,
+            raw_median_mohm=round(raw, 3) if raw is not None else None,
+        )
+
+    @locked
+    def take_attributes(self) -> Optional[Dict[str, Any]]:
+        """attributes() once per accepted window(s), from PUBLISH_MIN_WINDOWS
+        kept windows on, normalised or not -- so a pack whose windows cannot
+        be normalised still shows why and its raw median -- else None."""
+        if not self._attrs_due or len(self.windows) < PUBLISH_MIN_WINDOWS:
+            return None
+        self._attrs_due = False
+        return self.attributes()
 
     @locked
     def disable(self, reason: str, persistent: bool = True):
@@ -571,6 +710,7 @@ class CellResistanceEstimator:
         self._rows.clear()
         self._bin = None
         self.windows.clear()
+        self._attrs_due = False
 
     # ------------------------------------------------------------ persistence
 
@@ -591,13 +731,14 @@ class CellResistanceEstimator:
             b = self._bin
             st.update(
                 last_t=self._last_t, next_end=self._next_end,
-                rows=[[r[0], r[1], r[2], list(r[3]), r[4], r[5]] for r in self._rows],
+                rows=[[r[0], r[1], r[2], list(r[3]), r[4], r[5], r[6]] for r in self._rows],
                 bin=None if b is None else {k: (list(v) if isinstance(v, list) else v)
                                             for k in _Bin.__slots__ for v in (getattr(b, k),)},
                 prev_i=self._prev_i, prev_u=None if self._prev_u is None else list(self._prev_u),
                 oob_since=self._oob_since, oob_n=self._oob_n,
                 counts=dict(self.counts), cell_reasons=dict(self.cell_reasons), n_dropped=self.n_dropped,
-                n_i_rejected=self.n_i_rejected, t_summary=self._t_summary, announced=self._announced,
+                n_i_rejected=self.n_i_rejected, raw_reasons=dict(self.raw_reasons), attrs_due=self._attrs_due,
+                t_summary=self._t_summary, announced=self._announced,
             )
         return st
 
@@ -659,6 +800,12 @@ class CellResistanceEstimator:
             fin(w.get('t'), 'window t')
             if not R_MOHM_LO < fin(w.get('r'), 'window r') < R_MOHM_HI:
                 raise ValueError('window r %r outside %.1f..%.1f mOhm' % (w['r'], R_MOHM_LO, R_MOHM_HI))
+            # the temperature tags decide normalisation: each must be there,
+            # unknown (None) or a finite number -- never guessed
+            for k in ('temp', 'pack_temp', 'mos_temp'):
+                if k not in w:
+                    raise ValueError('window without %s' % k)
+                opt_fin(w[k], 'window ' + k)
             windows.append(dict(w))
         if any(a['t'] > b['t'] for a, b in zip(windows, windows[1:])):
             raise ValueError('windows not in time order')
@@ -669,10 +816,11 @@ class CellResistanceEstimator:
             self._next_end = opt_fin(st.get('next_end'), 'next_end')
             rows = []
             for r in st.get('rows') or []:
-                if not isinstance(r, list) or len(r) != 6 or not isinstance(r[3], list):
+                if not isinstance(r, list) or len(r) != 7 or not isinstance(r[3], list):
                     raise ValueError('row %r' % (r,))
                 rows.append((fin(r[0], 'row t'), fin(r[1], 'row i'), float(r[2]),
-                             tuple(float(v) for v in r[3]), opt_fin(r[4], 'row temp'), opt_fin(r[5], 'row ptemp')))
+                             tuple(float(v) for v in r[3]), opt_fin(r[4], 'row temp'), opt_fin(r[5], 'row ptemp'),
+                             opt_fin(r[6], 'row mtemp')))
             if any(a[0] > b[0] for a, b in zip(rows, rows[1:])) or \
                     (rows and (self._last_t is None or rows[-1][0] > self._last_t)):
                 raise ValueError('rows not in time order')
@@ -689,6 +837,8 @@ class CellResistanceEstimator:
                 fin(nb.st, 'bin st'), fin(nb.si, 'bin si')
                 nb.su = [fin(v, 'bin su') for v in nb.su]
                 nb.nu = [int(k) for k in nb.nu]
+                for k in ('temp', 'ptemp', 'mtemp'):
+                    setattr(nb, k, [fin(v, 'bin ' + k) for v in getattr(nb, k)])
                 self._bin = nb
             self._prev_i = opt_fin(st.get('prev_i'), 'prev_i')
             pu = st.get('prev_u')
@@ -699,15 +849,16 @@ class CellResistanceEstimator:
             self.cell_reasons.update({str(k): int(v) for k, v in (st.get('cell_reasons') or {}).items()})
             self.n_dropped = int(st.get('n_dropped') or 0)
             self.n_i_rejected = int(st.get('n_i_rejected') or 0)
+            self.raw_reasons.update({str(k): int(v) for k, v in (st.get('raw_reasons') or {}).items()})
+            self._attrs_due = bool(st.get('attrs_due'))
             self._t_summary = opt_fin(st.get('t_summary'), 't_summary')
-        self._announced = bool(st.get('announced')) or len(self.windows) >= PUBLISH_MIN_WINDOWS
+        self._announced = bool(st.get('announced')) or self.value is not None
 
         v = self.value
         logger.info('%s: cell resistance state restored: %d windows%s, estimate %s (published with the next '
                     'accepted window)', self.name, len(self.windows),
                     (', newest from %s' % _fmt_t(self.windows[-1]['t'])) if self.windows else '',
-                    ('%.3f mOhm' % v) if v is not None else
-                    'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS))
+                    self._estimate_text(v))
 
     def _restart(self):
         self._rows.clear()
@@ -753,19 +904,24 @@ class CellResistanceEstimator:
     @locked
     def add(self, t: float, current: float, voltages: Optional[List[float]],
             soc: Optional[float] = None, temp: Optional[float] = None,
-            pack_temp: Optional[float] = None, capacity: Optional[float] = None) -> Optional[float]:
+            pack_temp: Optional[float] = None, capacity: Optional[float] = None,
+            pack_temp_age: Optional[float] = None, mos_temp: Optional[float] = None) -> Optional[float]:
         """Feed one sampler iteration.
 
         t: sample timestamp [s]; current: [A], BmsSample sign (positive =
         discharging) before invert_current; voltages: cell voltages [mV] from
         the same iteration, or None if they could not be fetched; soc [%],
-        temp (BMS probes) and pack_temp (RC estimate) [degC] may be None/NaN
-        when unknown; capacity [Ah] (the option, else the BMS's) only bounds
-        the plausible current, None/NaN when unknown.
+        temp (median BMS probe), pack_temp (RC estimate) and mos_temp (MOSFET)
+        [degC] may be None/NaN when unknown; pack_temp_age [s]: how long the
+        RC estimate has run since it (re)started -- pack_temp is only used from
+        PACK_TEMP_WARMUP_S on, and an unknown age is not warmed up; capacity
+        [Ah] (the option, else the BMS's) only bounds the plausible current,
+        None/NaN when unknown.
 
-        Returns the new rolling value when this call accepted a window and at
-        least PUBLISH_MIN_WINDOWS are in, else None -- so a caller that
-        publishes the return value only ever publishes a fresh result."""
+        Returns the new published (normalised) value when this call accepted a
+        window and at least PUBLISH_MIN_WINDOWS normalised windows are in, else
+        None -- so a caller that publishes the return value only ever
+        publishes a fresh result. take_attributes() has the provenance."""
         if not self.enabled or not _finite(t):
             return None
 
@@ -823,15 +979,22 @@ class CellResistanceEstimator:
                 while self.windows[0]['t'] < res_t - MAX_WINDOW_AGE_S:
                     self.windows.popleft()
                 self._drop_windows_after(res_t)
-                logger.debug('%s: cell resistance window R=%.3f mOhm (%d/%d cells, dod=%.0f, temp=%s, '
-                             'pack_temp=%s)', self.name, res['r'], res['n_accepted'], res['n_cells'], res['dod'],
-                             res['temp'], res['pack_temp'])
+                self._attrs_due = True
+                r25 = normalised_r(res)
+                if r25 is None:
+                    self.raw_reasons[window_temperature(res)[2]] += 1
+                logger.debug('%s: cell resistance window R=%.3f mOhm, at %.0f C %s (%d/%d cells, dod=%.0f, temp=%s, '
+                             'pack_temp=%s, mos_temp=%s)', self.name, res['r'], R_REF_C,
+                             ('%.3f mOhm' % r25) if r25 is not None else 'n/a (%s)' % window_temperature(res)[2],
+                             res['n_accepted'], res['n_cells'], res['dod'], res['temp'], res['pack_temp'],
+                             res['mos_temp'])
                 v = self.value
                 if v is not None:
                     if not self._announced:
                         self._announced = True
-                        logger.info('%s: first cell resistance estimate %.3f mOhm per cell (from %d windows)',
-                                    self.name, v, len(self.windows))
+                        logger.info('%s: first cell resistance estimate %.3f mOhm per cell at %.0f C (from %d '
+                                    'normalised windows)', self.name, v, R_REF_C,
+                                    self.attributes()['normalised'])
                     new_value = v
             self._next_end += HOP_S
             while self._rows and self._rows[0][0] < self._next_end - WINDOW_S:
@@ -842,8 +1005,10 @@ class CellResistanceEstimator:
                 self._bin = _Bin(idx, len(vt))
             s = float(soc) if _finite(soc) else math.nan
             tc = float(temp) if _finite(temp) else None
-            tp = float(pack_temp) if _finite(pack_temp) else None
-            self._bin.add(t, i_chg, s, vt, tc, tp)
+            warm = _finite(pack_temp_age) and pack_temp_age >= PACK_TEMP_WARMUP_S
+            tp = float(pack_temp) if warm and _finite(pack_temp) else None
+            tm = float(mos_temp) if _finite(mos_temp) else None
+            self._bin.add(t, i_chg, s, vt, tc, tp, tm)
         return new_value
 
     def _drop_windows_after(self, t):
@@ -859,23 +1024,37 @@ class CellResistanceEstimator:
             logger.info('%s: cell resistance: %d window(s) timed after %s dropped (the clock stepped back)',
                         self.name, n - len(self.windows), _fmt_t(t))
 
+    def _estimate_text(self, v):
+        if v is not None:
+            return '%.3f mOhm at %.0f C' % (v, R_REF_C)
+        a = self.attributes()
+        if len(self.windows) < PUBLISH_MIN_WINDOWS:
+            return 'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS)
+        why = a['not_normalised']
+        return 'none: %d/%d windows normalised to %.0f C (%s), raw median %.3f mOhm%s' % (
+            a['normalised'], PUBLISH_MIN_WINDOWS, R_REF_C, ', '.join('%s=%d' % kv for kv in why.items()),
+            a['raw_median_mohm'],
+            '; this BMS reports only a MOSFET temperature, which is not used: pack_temp_estimator gives a cell '
+            'temperature after %.0f h' % (PACK_TEMP_WARMUP_S / 3600) if why.get('mos_only') else '')
+
     def _log_summary(self):
         n = sum(self.counts.values())
         if n or self.n_dropped or self.n_i_rejected:
             rej = ', '.join('%s=%d' % kv for kv in sorted(self.counts.items()) if kv[0] != 'accepted')
             cells = ', '.join('%s=%d' % kv for kv in self.cell_reasons.most_common(3))
-            v = self.value
-            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s)%s%s, estimate %s',
+            raw = ', '.join('%s=%d' % kv for kv in sorted(self.raw_reasons.items()))
+            logger.info('%s: cell resistance: %d windows, %d accepted (%s%s)%s%s%s, estimate %s',
                         self.name, n, self.counts['accepted'], rej or 'none rejected',
                         ('; cells: ' + cells) if cells else '',
+                        ('; not normalised: ' + raw) if raw else '',
                         ('; %d samples dropped with a cell outside %.0f..%.0f mV'
                          % (self.n_dropped, LFP_MV_LO, LFP_MV_HI)) if self.n_dropped else '',
                         ('; %d samples dropped with an impossible current' % self.n_i_rejected)
                         if self.n_i_rejected else '',
-                        ('%.3f mOhm' % v) if v is not None else
-                        'none yet (%d/%d windows)' % (len(self.windows), PUBLISH_MIN_WINDOWS))
+                        self._estimate_text(self.value))
         self.counts.clear()
         self.cell_reasons.clear()
+        self.raw_reasons.clear()
         self.n_dropped = 0
         self.n_i_rejected = 0
 

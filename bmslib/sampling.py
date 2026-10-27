@@ -704,7 +704,7 @@ class BmsSampler:
                 # needs this iteration's cell voltages next to its current, so
                 # fetch them even when no sink asked for them
                 voltages = await cached_fetch_voltages(optional=True)
-                self._feed_impedance(sample, current_native, voltages)
+                await self._feed_impedance(sample, current_native, voltages)
 
             if self.qmax is not None and self.qmax.enabled:
                 # cell voltages are only needed near rest, and at most every
@@ -820,20 +820,31 @@ class BmsSampler:
         # pass "light" errors to the caller to trigger a re-connect after too many
         return sample if not err else None
 
-    def _feed_impedance(self, sample: BmsSample, current: float, voltages):
-        temps = [t for t in (sample.temperatures or []) if isinstance(t, (int, float)) and -40 < t < 100]
+    async def _feed_impedance(self, sample: BmsSample, current: float, voltages):
+        # sample.temperatures is only filled by drivers whose fetch() reads the
+        # probes, or when a sink or a group wanted them (Daly, the wired types:
+        # neither, under MQTT alone); the fetch is cached for 30 s
+        temps = sample.temperatures or await self._fetch_temperatures_cached() or []
+        temps = [t for t in temps if isinstance(t, (int, float)) and -40 < t < 100]
         temp = sorted(temps)[len(temps) // 2] if temps else None  # BMS probes; None if none, never a default
+        pt = self._pack_temp_publisher
+        since = pt.estimator.state.since_s if pt is not None and self._pack_temp is not None else None
         try:
-            r = self.impedance.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp,
-                                   pack_temp=self._pack_temp, capacity=self._design_capacity or sample.capacity)
+            est = self.impedance
+            r = est.add(sample.timestamp, current, voltages, soc=sample.soc, temp=temp,
+                        pack_temp=self._pack_temp, capacity=self._design_capacity or sample.capacity,
+                        pack_temp_age=sample.timestamp - since if since is not None else None,
+                        mos_temp=sample.mos_temperature)
+            attrs = est.take_attributes()
         except Exception as e:
             # an estimator bug must neither kill sampling nor keep publishing
             logger.error('%s: cell resistance estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
                          exc_info=True)
             self.impedance.disable('internal error', persistent=False)
             return
-        if r is not None:
-            publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r)
+        if r is not None or attrs is not None:
+            publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r,
+                                    attributes=attrs)
 
     async def _qmax_temperature(self, sample: BmsSample):
         """(best cell temperature known or None, whether it is the MOSFET's):

@@ -72,6 +72,9 @@ class PackTempState:
     last_update_s: Optional[float] = None
     samples_seen: int = 0
     inputs_last: dict = field(default_factory=dict)
+    # when the state was last (re)initialised from the inputs: until it has run
+    # for about one time constant it is still mostly that initial guess
+    since_s: Optional[float] = None
 
 
 class PackTempRCEstimator:
@@ -137,6 +140,7 @@ class PackTempRCEstimator:
                 or t < prev_t):
             self._state.t_pack_c = self._initial(mos_c, room_c, outdoor_c)
             self._state.last_update_s = t
+            self._state.since_s = t
             self._state.samples_seen += 1
             self._state.inputs_last = dict(mos=mos_c, room=room_c, outdoor=outdoor_c)
             return self._state.t_pack_c

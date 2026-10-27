@@ -212,7 +212,14 @@ def _impedance_rows(s):
 
 
 @pytest.mark.parametrize('bad_mos', [math.nan, 1648.0, float('inf')])
-def test_impedance_rows_carry_the_pack_temp_tag_or_none(bad_mos):
+def test_impedance_rows_carry_the_pack_temp_tag_or_none(bad_mos, monkeypatch):
+    import bmslib.impedance as imp
+    s = _sampler(_Bms(mos=(40.0, 40.0, bad_mos)), ambient_cache=AmbientCache(), impedance_estimator=True)
+    for _ in range(3):
+        asyncio.run(s())
+    # a just (re)started RC estimate is still the MOSFET reading: no tag yet
+    assert [r[5] for r in _impedance_rows(s)] == [None] * 3
+    monkeypatch.setattr(imp, 'PACK_TEMP_WARMUP_S', 0.0)
     s = _sampler(_Bms(mos=(40.0, 40.0, bad_mos)), ambient_cache=AmbientCache(), impedance_estimator=True)
     for _ in range(3):
         asyncio.run(s())

@@ -58,11 +58,16 @@ def trace(n=1800, dt=1.0, r=CELL_R, sig_i=0.5, sig_u=0.8, seed=1, soc=60.0, leve
     return rows
 
 
-def run(rows, est=None):
+# The probe temperature the helpers feed: at the reference temperature the
+# normalisation is exactly x1, so the tests of the fit see the raw R.
+TEMP = 25.0
+
+
+def run(rows, est=None, temp=TEMP):
     est = est or imp.CellResistanceEstimator('test')
     published = []
     for t, i, v, soc in rows:
-        x = est.add(t, i, v, soc)
+        x = est.add(t, i, v, soc, temp)
         if x is not None:
             published.append(x)
     return est, published
@@ -81,7 +86,7 @@ def test_recovers_r_within_5_percent():
     assert published and published[-1] == est.value
     assert all(w['r'] == pytest.approx(R_MEDIAN, rel=0.05) for w in est.windows)
     assert all(w['dod'] == pytest.approx(40.0) for w in est.windows)
-    assert all(w['temp'] is None for w in est.windows)  # none given: unknown, not 25
+    assert all(w['temp'] == TEMP and w['pack_temp'] is None and w['mos_temp'] is None for w in est.windows)
 
 
 def test_recovers_r_through_a_sampling_lag():
@@ -485,7 +490,7 @@ def test_nothing_is_published_before_the_minimum_window_count():
     n_published = 0
     for t, i, v, soc in trace():
         last = est.windows[-1] if est.windows else None
-        x = est.add(t, i, v, soc)
+        x = est.add(t, i, v, soc, TEMP)
         new_window = bool(est.windows) and est.windows[-1] is not last
         n_accepted += new_window
         if n_accepted < imp.PUBLISH_MIN_WINDOWS:
@@ -589,6 +594,268 @@ def test_temperature_tag_is_the_median_of_known_values_only():
     assert est.windows and all(w['temp'] == pytest.approx(21.0, abs=1) for w in est.windows)
 
 
+# ------------------------------------------------------------ temperature normalisation
+
+# The physics the test packs follow: R(T) = R25 * exp(TRUE_K * (25 - T)), the
+# evidence's -2.5 %/degC. A literal, not imp.R_TEMP_K: a coefficient changed in
+# the code must not move the test packs with it.
+TRUE_K = 0.025
+
+
+def r_at(temp, r25=CELL_R):
+    return tuple(x * math.exp(TRUE_K * (25.0 - temp)) for x in r25)
+
+
+def run_t(rows, est=None, **kw):
+    """run() with per-sample keyword arguments: kw values are constants or
+    callables of the sample index."""
+    est = est or imp.CellResistanceEstimator('test')
+    published = []
+    for k, (t, i, v, soc) in enumerate(rows):
+        x = est.add(t, i, v, soc, **{n: (f(k) if callable(f) else f) for n, f in kw.items()})
+        if x is not None:
+            published.append(x)
+    return est, published
+
+
+def test_a_cold_and_a_warm_pack_publish_the_same_value():
+    """The same pack at 12 and at 32 degC: raw R differs by 65 %, the published
+    value by no more than the fit's own scatter. Fails without the
+    normalisation and with its sign flipped."""
+    cold, pub_cold = run(trace(r=r_at(12.0)), temp=12.0)
+    warm, pub_warm = run(trace(r=r_at(32.0)), temp=32.0)
+    assert cold.raw_value / warm.raw_value > 1.5
+    assert pub_cold and pub_warm
+    assert cold.value == pytest.approx(R_MEDIAN, rel=0.05)
+    assert warm.value == pytest.approx(R_MEDIAN, rel=0.05)
+    assert cold.value == pytest.approx(warm.value, rel=0.05)
+    for est, temp in ((cold, 12.0), (warm, 32.0)):
+        assert [imp.normalised_r(w) for w in est.windows] == \
+            [w['r'] * math.exp(imp.R_TEMP_K * (temp - 25.0)) for w in est.windows]
+        assert est.value == imp.median([imp.normalised_r(w) for w in est.windows])
+
+
+def test_calibration_without_normalisation_or_with_its_sign_flipped_cold_and_warm_differ(monkeypatch):
+    for k in (0.0, -imp.R_TEMP_K):
+        monkeypatch.setattr(imp, 'R_TEMP_K', k)
+        cold, _ = run(trace(r=r_at(12.0)), temp=12.0)
+        warm, _ = run(trace(r=r_at(32.0)), temp=32.0)
+        assert cold.value / warm.value > 1.4, k
+
+
+@pytest.mark.parametrize('temp', [9.9, 5.0, -30.0, 40.1, 45.0, 90.0])
+def test_a_window_outside_the_range_is_not_normalised(temp, caplog):
+    est, published = run(trace(r=r_at(min(max(temp, 0.0), 45.0))), temp=temp)
+    assert len(est.windows) >= imp.PUBLISH_MIN_WINDOWS and est.raw_value is not None
+    assert published == [] and est.value is None
+    a = est.take_attributes()
+    assert a['normalised'] == 0 and a['not_normalised'] == {'out_of_range': len(est.windows)}
+    assert a['raw_median_mohm'] == pytest.approx(est.raw_value, rel=1e-3)
+    with caplog.at_level('INFO'):
+        est._log_summary()
+    assert 'not normalised: out_of_range=' in caplog.text and 'none: 0/5 windows normalised' in caplog.text
+
+
+def test_normalisation_verdict_is_monotonic_in_temperature():
+    """Walking out of the range from 25 degC in either direction, a window that
+    could not be normalised never becomes normalisable again."""
+    base = dict(r=1.2, temp=None, pack_temp=None, mos_temp=None)
+    for temps in ([25.0 - 0.5 * k for k in range(200)], [25.0 + 0.5 * k for k in range(200)]):
+        ok = [imp.normalised_r(dict(base, temp=T)) is not None for T in temps]
+        assert ok[0] and not ok[-1]
+        assert ok == sorted(ok, reverse=True), 'flipped back to normalisable further out'
+    assert imp.normalised_r(dict(base, temp=imp.R_NORM_T_LO)) is not None
+    assert imp.normalised_r(dict(base, temp=imp.R_NORM_T_HI)) is not None
+
+
+def test_the_minimum_counts_normalised_windows_only():
+    """Ten windows, of which only the last three or four had a probe: 5 windows
+    are in, but not 5 normalised ones, so nothing is published."""
+    rows = trace(n=900)
+    est, published = run_t(rows, temp=lambda k: TEMP if k >= 600 else None)
+    n_norm = est.attributes()['normalised']
+    assert len(est.windows) >= 2 * imp.PUBLISH_MIN_WINDOWS and 1 <= n_norm < imp.PUBLISH_MIN_WINDOWS
+    assert published == [] and est.value is None
+
+
+def test_a_pack_without_any_temperature_publishes_nothing():
+    est, published = run(trace(), temp=None)
+    assert all(w['temp'] is None and w['pack_temp'] is None and w['mos_temp'] is None for w in est.windows)
+    assert len(est.windows) >= imp.PUBLISH_MIN_WINDOWS and published == [] and est.value is None
+    assert est.take_attributes()['not_normalised'] == {'no_temp': len(est.windows)}
+
+
+def _probe_then_none():
+    """A pack at 12 degC: 20 windows with its probe, then the probe is lost for
+    15 windows (an unplugged sensor). Raw R is 1.59, R25 1.15."""
+    rows = trace(n=2700, r=r_at(12.0))
+    cut = 1600
+    return rows, (lambda k: 12.0 if k < cut else None)
+
+
+def test_windows_without_a_temperature_never_enter_the_published_median():
+    rows, temp = _probe_then_none()
+    est, published = run_t(rows, temp=temp)
+    n_raw = sum(w['temp'] is None for w in est.windows)
+    assert n_raw >= 10 and len(est.windows) - n_raw >= imp.PUBLISH_MIN_WINDOWS  # a mixed buffer
+    assert est.value == pytest.approx(R_MEDIAN, rel=0.05)
+    assert est.value == imp.median([imp.normalised_r(w) for w in est.windows if w['temp'] is not None])
+    assert all(x == pytest.approx(R_MEDIAN, rel=0.05) for x in published)
+    a = est.take_attributes()
+    assert a['normalised'] == len(est.windows) - n_raw and a['not_normalised'] == {'no_temp': n_raw}
+    assert a['raw_median_mohm'] == pytest.approx(R_MEDIAN * math.exp(TRUE_K * 13), rel=0.05)
+
+
+def test_calibration_raw_windows_counted_as_if_normalised_pull_the_value_up(monkeypatch):
+    """Known-bad: a window without a temperature taken as normalised (at 25 degC,
+    i.e. its raw R) -- the published value moves towards the raw 1.59."""
+    orig = imp.window_temperature
+    monkeypatch.setattr(imp, 'window_temperature',
+                        lambda w: orig(w) if w['temp'] is not None else (imp.R_REF_C, 'probe', None))
+    rows, temp = _probe_then_none()
+    est, published = run_t(rows, temp=temp)
+    assert est.value > 1.15 * R_MEDIAN
+
+
+# A pack whose cells sit at 20 degC while its MOSFET reads 35 under load (ANT).
+CELLS_C, MOS_C = 20.0, 35.0
+
+
+def test_a_mosfet_only_pack_publishes_no_value_but_says_why(caplog):
+    est, published = run_t(trace(r=r_at(CELLS_C)), mos_temp=MOS_C)
+    assert all(w['mos_temp'] == MOS_C and w['temp'] is None for w in est.windows)
+    assert published == [] and est.value is None
+    a = est.take_attributes()
+    assert a['not_normalised'] == {'mos_only': len(est.windows)} and a['normalised'] == 0
+    assert a['raw_median_mohm'] == pytest.approx(R_MEDIAN * math.exp(TRUE_K * 5), rel=0.05)
+    with caplog.at_level('INFO'):
+        est._log_summary()
+    assert 'only a MOSFET temperature' in caplog.text and 'pack_temp_estimator' in caplog.text
+
+
+def test_calibration_the_mosfet_as_cell_temperature_over_corrects(monkeypatch):
+    """Known-bad: the MOSFET's 35 degC taken for the cells' 20 overstates R25
+    by exp(0.025 * 15) - 1 = 45 %, which reads like an aged pack."""
+    monkeypatch.setattr(imp, 'window_temperature', lambda w: (w['mos_temp'], 'mos', None))
+    est, published = run_t(trace(r=r_at(CELLS_C)), mos_temp=MOS_C)
+    assert published and est.value > 1.35 * R_MEDIAN
+
+
+def test_the_pack_temperature_estimate_counts_only_once_warmed_up():
+    rows = trace(r=r_at(CELLS_C))
+    warm = imp.PACK_TEMP_WARMUP_S
+    est, published = run_t(rows, pack_temp=CELLS_C, pack_temp_age=warm, mos_temp=MOS_C)
+    assert est.value == pytest.approx(R_MEDIAN, rel=0.05) and published
+    a = est.take_attributes()
+    assert a['from_pack_temp_est'] == len(est.windows) and a['from_probe'] == 0
+    for age in (None, math.nan, 0.0, warm - 1):  # unknown age is not warmed up
+        est, published = run_t(rows, pack_temp=CELLS_C, pack_temp_age=age, mos_temp=MOS_C)
+        assert published == [] and est.value is None, age
+        assert all(w['pack_temp'] is None for w in est.windows)
+        assert est.take_attributes()['not_normalised'] == {'mos_only': len(est.windows)}
+
+
+def test_calibration_without_the_warm_up_a_cold_started_estimate_is_the_mosfet(monkeypatch):
+    """Known-bad: right after a restart under load the RC estimate starts at
+    the MOSFET reading; without the warm-up it normalises like the MOSFET."""
+    monkeypatch.setattr(imp, 'PACK_TEMP_WARMUP_S', 0.0)
+    est, published = run_t(trace(r=r_at(CELLS_C)), pack_temp=MOS_C, pack_temp_age=60.0, mos_temp=MOS_C)
+    assert published and est.value > 1.35 * R_MEDIAN
+
+
+def test_the_probe_is_preferred_and_an_out_of_range_probe_does_not_fall_back():
+    rows = trace(r=r_at(CELLS_C))
+    est, _ = run_t(rows, temp=CELLS_C, pack_temp=30.0, pack_temp_age=imp.PACK_TEMP_WARMUP_S)
+    assert est.value == pytest.approx(R_MEDIAN, rel=0.05)
+    assert est.take_attributes()['from_probe'] == len(est.windows)
+    est, published = run_t(rows, temp=5.0, pack_temp=CELLS_C, pack_temp_age=imp.PACK_TEMP_WARMUP_S)
+    assert published == [] and est.take_attributes()['not_normalised'] == {'out_of_range': len(est.windows)}
+
+
+def test_provenance_attributes():
+    est = imp.CellResistanceEstimator('a')
+    seen = []
+    for k, (t, i, v, soc) in enumerate(trace(r=r_at(15.0))):
+        est.add(t, i, v, soc, 15.0)
+        a = est.take_attributes()
+        if a is not None:
+            seen.append((len(est.windows), a))
+        assert est.take_attributes() is None  # once per accepted window
+    assert seen and seen[0][0] == imp.PUBLISH_MIN_WINDOWS  # nothing before the minimum
+    a = seen[-1][1]
+    assert json.loads(json.dumps(a)) == a
+    assert a == dict(reference_temp_c=25.0, temp_coeff_pct_per_c=-2.5, temp_range_c=[10.0, 40.0],
+                     windows=len(est.windows), normalised=len(est.windows), from_probe=len(est.windows),
+                     from_pack_temp_est=0, not_normalised={}, median_temp_c=15.0,
+                     raw_median_mohm=round(est.raw_value, 3))
+    assert a['raw_median_mohm'] == pytest.approx(R_MEDIAN * math.exp(TRUE_K * 10), rel=0.05)
+
+
+MIXED_N = 1800
+
+
+def _mixed_kw(k):
+    """Temperature arguments of sample k: MOSFET only, nothing, out of range,
+    probe, warmed pack_temp -- the last 20 windows hold each kind."""
+    return [dict(mos_temp=MOS_C), dict(), dict(temp=5.0), dict(temp=CELLS_C),
+            dict(pack_temp=CELLS_C, pack_temp_age=imp.PACK_TEMP_WARMUP_S)][min(k // (MIXED_N // 5), 4)]
+
+
+def _mixed_tags_run():
+    rows = trace(n=MIXED_N, r=r_at(CELLS_C))
+    est = imp.CellResistanceEstimator('m')
+    pub = []
+    for k, (t, i, v, soc) in enumerate(rows):
+        x = est.add(t, i, v, soc, **_mixed_kw(k))
+        if x is not None:
+            pub.append(x)
+    return est, pub, rows
+
+
+def test_restore_keeps_the_temperature_tags_and_the_normalised_value():
+    est, _, _ = _mixed_tags_run()
+    a = est.attributes()
+    assert a['from_probe'] and a['from_pack_temp_est'] and set(a['not_normalised']) == {'mos_only', 'no_temp',
+                                                                                         'out_of_range'}
+    assert est.value == pytest.approx(R_MEDIAN, rel=0.05)
+    for full in (True, False):
+        restored = imp.CellResistanceEstimator('m')
+        assert restored.restore(_via_json(est.get_state(full=full)))
+        assert list(restored.windows) == list(est.windows)  # None stays None: tri-state survives JSON
+        assert restored.value == est.value and restored.attributes() == a
+
+
+def test_a_split_run_with_temperature_tags_equals_the_whole_one():
+    whole, pub_whole, rows = _mixed_tags_run()
+    # same run, saved and restored into a fresh estimator inside it
+    est, pub = imp.CellResistanceEstimator('m'), []
+    for a, b in ((0, 555), (555, 1234), (1234, len(rows))):
+        for k in range(a, b):
+            t, i, v, soc = rows[k]
+            x = est.add(t, i, v, soc, **_mixed_kw(k))
+            if x is not None:
+                pub.append(x)
+        st = _via_json(est.get_state(full=True))
+        est = imp.CellResistanceEstimator('m')
+        assert est.restore(st)
+    assert pub == pub_whole and _attrs(est) == _attrs(whole)
+
+
+def test_the_fingerprint_covers_the_normalisation():
+    from bmslib import estimator_common
+    base = estimator_common.code_fingerprint(vars(imp), vars(estimator_common))
+    assert base == imp.CODE_FINGERPRINT
+    for name, val in (('R_TEMP_K', 0.03), ('R_REF_C', 20.0), ('R_NORM_T_LO', 5.0), ('R_NORM_T_HI', 45.0),
+                      ('PACK_TEMP_WARMUP_S', 3600.0)):
+        assert estimator_common.code_fingerprint({**vars(imp), name: val}, vars(estimator_common)) != base, name
+
+    def window_temperature(w):  # same name, other code
+        return 25.0, 'probe', None
+
+    assert estimator_common.code_fingerprint({**vars(imp), 'window_temperature': window_temperature},
+                                             vars(estimator_common)) != base
+
+
 # ------------------------------------------------------------ MQTT discovery
 
 class _Client:
@@ -621,6 +888,7 @@ def test_discovery_declares_cell_resistance_only_when_enabled():
     assert d['unique_id'] == 'test/imp__cell_resistance'
     assert d['expire_after'] >= 3600  # published per accepted window, not per sample
     assert 'device_class' not in d
+    assert d['json_attributes_topic'] == 'test/imp/cell_resistance/attributes'
 
 
 # ------------------------------------------------------------ sampler wiring
@@ -695,6 +963,80 @@ def test_sampler_passes_the_capacity_that_bounds_the_current():
         s.impedance.add = lambda *a, **k: (seen.append(k.get('capacity')), orig(*a, **k))[1]
         asyncio.run(s())
         assert seen[-1] == want or (want is None and math.isnan(seen[-1]))  # the fake BMS reports none
+
+
+class _DalyLikeBms(_Bms):
+    """fetch() reads no probes (Daly, the wired types): they come from
+    fetch_temperatures(). The MOSFET reads 31 degC."""
+
+    def __init__(self):
+        super().__init__()
+        self.n_temp_fetches = 0
+
+    async def fetch(self):
+        self.k += 1
+        return BmsSample(voltage=53.0, current=10.0, soc=60.0, timestamp=self.t0 + self.k, mos_temperature=31.0)
+
+    async def fetch_temperatures(self):
+        self.n_temp_fetches += 1
+        return [18.0, 19.0, 50.0]
+
+
+def _spy_add(s, calls):
+    orig = s.impedance.add
+    s.impedance.add = lambda *a, **k: (calls.append(k), orig(*a, **k))[1]
+
+
+def test_sampler_passes_probe_mosfet_and_pack_temperature_with_its_age():
+    """Precondition of the normalisation: the real call path hands over the
+    probes even when only the estimator wants them (no sink, no group), the
+    MOSFET reading, and the RC estimate with how long it has run."""
+    from bmslib.ambient_cache import AmbientCache
+    for ambient in (None, AmbientCache(max_age_s=600)):
+        bms = _DalyLikeBms()
+        s = BmsSampler(bms, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, publish_period=3600,
+                       impedance_estimator=True, ambient_cache=ambient)
+        s.num_samples = 1
+        s._last_power = 530
+        calls = []
+        _spy_add(s, calls)
+        for _ in range(3):
+            asyncio.run(s())
+        assert len(calls) == 3
+        assert all(c['temp'] == 19.0 and c['mos_temp'] == 31.0 for c in calls)
+        assert bms.n_temp_fetches >= 1
+        if ambient is None:
+            assert all(c['pack_temp'] is None and c['pack_temp_age'] is None for c in calls)
+        else:
+            # the RC estimate starts at the MOSFET reading (no ambient topic) and its age counts from there
+            assert calls[0]['pack_temp'] == pytest.approx(31.0) and calls[0]['pack_temp_age'] == 0.0
+            assert calls[2]['pack_temp_age'] == pytest.approx(2.0)
+
+
+def test_sampler_publishes_the_attributes_also_without_a_value(monkeypatch):
+    import bmslib.sampling as sampling
+    out = []
+    monkeypatch.setattr(sampling, 'publish_cell_resistance', lambda c, device_topic, value_mohm, attributes:
+                        out.append((value_mohm, attributes)))
+    s, _ = _run_sampler(1, impedance_estimator=True)
+    s.impedance.add = lambda *a, **k: None
+    s.impedance.take_attributes = lambda: {'normalised': 0}
+    asyncio.run(s())
+    assert out == [(None, {'normalised': 0})]
+    s.impedance.take_attributes = lambda: None
+    asyncio.run(s())
+    assert len(out) == 1  # nothing new, nothing sent
+
+
+def test_publish_cell_resistance_sends_attributes_first_and_no_none_state():
+    from bmslib.mqtt_util import publish_cell_resistance
+    c = _Client()
+    publish_cell_resistance(c, 'test/imp', None, {'normalised': 0, 'not_normalised': {'mos_only': 6}})
+    assert list(c.published) == ['test/imp/cell_resistance/attributes']
+    assert json.loads(c.published['test/imp/cell_resistance/attributes'])['not_normalised'] == {'mos_only': 6}
+    c = _Client()
+    publish_cell_resistance(c, 'test/imp2', 1.23456, {'normalised': 6})
+    assert list(c.published) == ['test/imp2/cell_resistance/attributes', 'test/imp2/cell_resistance']
 
 
 def test_sampler_skips_virtual_bms():
@@ -901,10 +1243,10 @@ def test_a_restart_after_a_gap_keeps_the_windows_and_skips_the_warm_up():
     assert restored.restore(_via_json(est.get_state(full=False)))
     assert restored.value == est.value
     first_pub_restored = next(k for k, (t, i, v, soc) in enumerate(later)
-                              if restored.add(t, i, v, soc) is not None)
+                              if restored.add(t, i, v, soc, TEMP) is not None)
 
     fresh = imp.CellResistanceEstimator('p')
-    first_pub_fresh = next(k for k, (t, i, v, soc) in enumerate(later) if fresh.add(t, i, v, soc) is not None)
+    first_pub_fresh = next(k for k, (t, i, v, soc) in enumerate(later) if fresh.add(t, i, v, soc, TEMP) is not None)
     # restored: the first accepted window publishes; fresh: it waits for 5
     assert first_pub_restored < first_pub_fresh
 
@@ -988,6 +1330,11 @@ BAD_STATES = [
     ('row garbage', lambda s: s['rows'].append('x')),
     ('row after last_t', lambda s: s.update(last_t=s['rows'][0][0] - 1)),
     ('bin missing a field', lambda s: _drop(s['bin'], 'su')),
+    ('window temp NaN', lambda s: s['windows'][0].update(temp=float('nan'))),
+    ('window temp missing', lambda s: _drop(s['windows'][0], 'temp')),
+    ('window mos_temp a string', lambda s: s['windows'][0].update(mos_temp='31')),
+    ('row without mos_temp', lambda s: _drop(s['rows'][0])),
+    ('bin temp NaN', lambda s: s['bin']['temp'].append(float('nan'))),
 ]
 
 
