@@ -971,17 +971,23 @@ def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
     assert not restored.windows
 
 
+def _drop(container, key=-1):
+    """Remove an item and return None: a mutation that returned the popped
+    value would replace the whole state with it (and fail for that reason)."""
+    container.pop(key)
+
+
 BAD_STATES = [
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
     ('implausible R', lambda s: s['windows'][0].update(r=50.0)),
     ('R is NaN', lambda s: s['windows'][0].update(r=float('nan'))),
-    ('t missing', lambda s: s['windows'][0].pop('t')),
+    ('t missing', lambda s: _drop(s['windows'][0], 't')),
     ('windows out of order', lambda s: s['windows'].reverse()),
     ('negative step', lambda s: s.update(q_i=-0.1)),
     ('row garbage', lambda s: s['rows'].append('x')),
     ('row after last_t', lambda s: s.update(last_t=s['rows'][0][0] - 1)),
-    ('bin missing a field', lambda s: s['bin'].pop('su')),
+    ('bin missing a field', lambda s: _drop(s['bin'], 'su')),
 ]
 
 
@@ -991,6 +997,7 @@ def test_a_state_that_does_not_validate_starts_fresh(caplog, what, mutate):
     state = _via_json(est.get_state())
     assert len(state['windows']) >= 2 and state['rows'] and state['bin']
     state = mutate(state) or state
+    assert isinstance(state, dict) or what == 'not a dict'
     est = imp.CellResistanceEstimator('p')
     with caplog.at_level('WARNING'):
         assert est.restore(state) is False
