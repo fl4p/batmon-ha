@@ -179,6 +179,31 @@ def test_validate_chain(jk1):
         validate_change("cell_rcv", 3.30, jk1)  # below rfv 3.35
 
 
+def test_validate_rcv_not_implemented(jk1):
+    # HW 11A / FW 11.54 reads RCV and RFV as 0 (#426)
+    old = {**jk1, "cell_rcv": 0.0, "cell_rfv": 0.0}
+    validate_change("cell_soc100_voltage", 3.61, old)
+    with pytest.raises(SettingError) as e:
+        validate_change("cell_soc100_voltage", old["cell_ovp"], old)
+    assert "cell_ovp" in str(e.value)
+    with pytest.raises(SettingError):
+        validate_change("cell_soc0_voltage", 3.5, old)  # SOC0 < SOC100 still enforced
+    with pytest.raises(SettingError):
+        validate_change("cell_soc100_voltage", 3.61, {**jk1, "cell_rcv": 0.001})  # not 0: a value
+    # only RCV/RFV may be missing: a 0 elsewhere is still checked (corrupt frame, #391)
+    with pytest.raises(SettingError):
+        validate_change("cell_soc0_voltage", 3.0, {**jk1, "cell_soc100_voltage": 0.0})
+    with pytest.raises(SettingError):
+        validate_change("charge_otpr", 70.0, {**jk1, "charge_otp": 0.0})
+    with pytest.raises(SettingError):
+        validate_change("charge_utp", 6.0, {**jk1, "charge_utpr": 0.0})
+
+
+def test_validate_rfv_below_ovp(jk1):
+    with pytest.raises(SettingError):
+        validate_change("cell_rfv", 4.35, {**jk1, "cell_rcv": 0.0})
+
+
 def test_validate_missing_other_value_passes():
     validate_change("charge_utp", 6.0, {})
     validate_change("charge_utp", 6.0, {"charge_otp": 50.0})

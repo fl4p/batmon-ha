@@ -148,6 +148,16 @@ UNVERIFIED_WRITE = frozenset({
     'precharge_time',
 })
 
+# Not implemented by older firmware (HW 11A, FW 11.54, #426), which reads them as 0. Elsewhere 0
+# is outside their range, so a 0 here means unsupported rather than a value.
+NOT_ON_ALL_FIRMWARE = frozenset({'cell_rcv', 'cell_rfv'})
+
+
+def unsupported(settings: dict, name: str) -> bool:
+    """True if the decoded settings show `name` as not implemented by this firmware."""
+    return name in NOT_ON_ALL_FIRMWARE and settings.get(name) == 0
+
+
 LABELS: Dict[str, str] = {
     'smart_sleep_voltage': 'Smart sleep voltage',
     'cell_uvp': 'Cell UVP',
@@ -310,8 +320,11 @@ _RULES = [
     ('power_off_voltage', 'cell_uvp', True),
     ('cell_soc0_voltage', 'cell_soc100_voltage', True),
     ('cell_soc100_voltage', 'cell_rcv', False),
+    # implied by SOC100 <= RCV < OVP, but needed where RCV is not implemented (#426)
+    ('cell_soc100_voltage', 'cell_ovp', True),
     ('cell_rcv', 'cell_ovp', True),
     ('cell_rfv', 'cell_rcv', True),
+    ('cell_rfv', 'cell_ovp', True),
     # UV group below the OV group: without these, UVPR then UVP could be raised above OVP
     ('cell_uvpr', 'cell_ovpr', True),
     ('cell_uvp', 'cell_ovp', True),
@@ -367,7 +380,8 @@ def validate_change(name: str, value, current: dict) -> None:
     """Check that setting `name` to `value` keeps related settings consistent.
 
     Only rules that involve `name` are checked, and only when the other value is
-    known, so an unrelated inconsistent pair never blocks a change.
+    known, so an unrelated inconsistent pair never blocks a change. A setting this
+    firmware does not implement (see `unsupported`) counts as unknown.
     """
     if name not in SETTINGS:
         raise SettingError('unknown setting %r' % name)
@@ -375,13 +389,16 @@ def validate_change(name: str, value, current: dict) -> None:
     for low, high, strict in _RULES:
         if name not in (low, high) or low not in merged or high not in merged:
             continue
+        other = high if name == low else low
+        if unsupported(current, other):
+            continue
         lv, hv = round(float(merged[low]), 6), round(float(merged[high]), 6)
         if lv < hv or (not strict and lv == hv):
             continue
         if name == low:
-            other, rel = high, 'below' if strict else 'at or below'
+            rel = 'below' if strict else 'at or below'
         else:
-            other, rel = low, 'above' if strict else 'at or above'
+            rel = 'above' if strict else 'at or above'
         unit = SETTINGS[name].unit or ''
         raise SettingError('%s %s%s must be %s %s (%s%s); change %s first'
                            % (name, _fmt(merged[name]), unit, rel, other,

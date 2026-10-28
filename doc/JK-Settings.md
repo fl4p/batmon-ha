@@ -165,8 +165,11 @@ how a failed write or read-back is handled is described below (read-back mismatc
    * `charge_utp` < `charge_utpr`, `discharge_utp` < `discharge_utpr`
    * `charge_otpr` < `charge_otp`, `discharge_otpr` < `discharge_otp`, `mosfet_otpr` < `mosfet_otp`
    * `power_off_voltage` < `cell_uvp`
-   * `cell_soc0_voltage` < `cell_soc100_voltage` ≤ `cell_rcv` < `cell_ovp`
-   * `cell_rfv` < `cell_rcv`
+   * `cell_soc0_voltage` < `cell_soc100_voltage` ≤ `cell_rcv` < `cell_ovp`, `cell_soc100_voltage` < `cell_ovp`
+   * `cell_rfv` < `cell_rcv`, `cell_rfv` < `cell_ovp`
+
+   Older firmware (HW 11A, FW 11.54) has no `cell_rcv`/`cell_rfv` and reads them as 0 V (Home Assistant shows
+   `unknown`). Rules against them are then skipped, and writing them is rejected as not supported (#426).
    * `cell_uvpr` < `cell_ovpr`, `cell_uvp` < `cell_ovp`, `balance_start_voltage` < `cell_ovp`
 
    Before that, the values just read must look sane (cell count 1…24, UVP < UVPR < OVPR < OVP, all

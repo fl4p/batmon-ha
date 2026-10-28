@@ -370,7 +370,11 @@ class JKBt(BtBms):
         self.connect_count += 1
 
     async def disconnect(self):
-        await self.client.stop_notify(self.char_handle_notify)
+        try:
+            await self.client.stop_notify(self.char_handle_notify)
+        except Exception as e:
+            # link already gone (#391): still run the base disconnect
+            self.logger.debug('%s stop_notify failed: %s', self.name, e)
         await super().disconnect()
 
     async def _q(self, cmd, resp):

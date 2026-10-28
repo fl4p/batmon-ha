@@ -387,12 +387,13 @@ Batmon can talk to your BMS through one of four Bluetooth backends. Pick one wit
   (typically a cheap ESP32 flashed with the upstream
   [bluetooth-proxies](https://github.com/esphome/bluetooth-proxies) firmware). The add-on
   doesn't touch any local Bluetooth adapter — you can extend BLE reach to wherever your BMSes
-  physically live (other rooms, outdoors) just by powering an ESP32 there. **A proxy serves BLE to
-  one client only**: its advertisements and the data of every BLE connection go to whichever API
-  client subscribed last (ESPHome ≥ 2026.7; before that, the first). If Home Assistant also uses the
-  proxy, an HA restart or a WiFi reconnect silently takes it away from the add-on, and every BMS on it
-  stops until the add-on restarts. Use proxies dedicated to the add-on: remove them from HA's ESPHome
-  integration or leave them out of HA. Each proxy has 3 BLE connection slots by default (see
+  physically live (other rooms, outdoors) just by powering an ESP32 there. **An ESPHome proxy serves
+  BLE to one client only**: its advertisements and the data of every BLE connection go to whichever
+  API client subscribed last (ESPHome ≥ 2026.7; before that, the first). If Home Assistant also uses
+  the proxy, whichever of HA and the add-on reconnects last takes it over, and the other silently gets
+  nothing: an HA restart stops every BMS on the proxy until the add-on reconnects, and the add-on
+  winning cuts off HA's own BLE devices there. Use proxies dedicated to the add-on: remove them from
+  HA's ESPHome integration or leave them out of HA. Each proxy has 3 BLE connection slots by default (see
   [esphome_proxy/README.md](bmslib/esphome_proxy/README.md)). Configure the proxies under the
   `bluetooth_proxies:` add-on option:
 

@@ -18,7 +18,7 @@ import time
 from typing import Optional
 
 from bmslib.models.jk_settings import (SETTINGS, SettingError, encode_setting, format_changes, format_value,
-                                       implausible_settings, parse_write_option, validate_change)
+                                       implausible_settings, parse_write_option, unsupported, validate_change)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -262,6 +262,9 @@ class JkSettingsService:
             raise _Rejected('unknown setting')
         if name not in self.writable:
             raise _Rejected('not writable (not in settings_write)')
+        if unsupported(bms.settings or {}, name):
+            # the read-back would stay 0, fail and lock all writes
+            raise _Rejected('not supported by this firmware (reads 0)')
 
         text = payload.strip()
         if s.kind == 'switch':

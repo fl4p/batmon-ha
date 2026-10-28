@@ -17,10 +17,20 @@ def _fixture():
         return f.read()
 
 
-def _make(ignore_writes=False):
+def _fixture_without_rcv_rfv():
+    # HW 11A / FW 11.54 (#426): RCV (offset 38) and RFV (42) read 0, writes to them do nothing
+    from bmslib.models.jikong import calc_crc
+    frame = bytearray(_fixture())
+    frame[38:46] = bytes(8)
+    frame[-1] = calc_crc(frame[:-1])
+    return bytes(frame)
+
+
+def _make(ignore_writes=False, frame=None):
     bms = JKBt("00:11:22:33:44:55", name="jk1")
     bms.WRITE_SETTLE_S = bms.READBACK_DELAY_S = 0  # write timing is covered in test_jk_settings_driver
-    client = JKDummy(is_new_11x=True, settings_frame=_fixture(), ignore_writes=ignore_writes, stream=False)
+    client = JKDummy(is_new_11x=True, settings_frame=frame or _fixture(), ignore_writes=ignore_writes,
+                     stream=False)
     bms.client = client
     bms.char_handle_write = JKBt.CHAR_UUID
     bms.is_new_11fw_32s = True
@@ -152,6 +162,21 @@ def test_cross_field_rejected_message(tmp_path):
     text = pub.texts[-1]
     assert text.startswith('Rejected charge_utp 6: ')
     assert 'charge_utpr' in text and text.endswith('first')
+
+
+def test_firmware_without_rcv(tmp_path):
+    bms, client = _make(ignore_writes=True, frame=_fixture_without_rcv_rfv())
+    svc, pub = _service(tmp_path, writable={'cell_rcv', 'cell_rfv', 'cell_soc100_voltage'}), FakePublish()
+    svc.enqueue('cell_rcv', '3.55')
+    svc.enqueue('cell_rfv', '3.4')
+    _tick(svc, bms, pub)
+    assert client.writes == []
+    assert pub.texts == ['Rejected cell_rcv 3.55: not supported by this firmware (reads 0)',
+                         'Rejected cell_rfv 3.4: not supported by this firmware (reads 0)']
+    assert not svc.locked
+    svc.enqueue('cell_soc100_voltage', '3.5')  # was rejected against RCV 0 V
+    _tick(svc, bms, pub)
+    assert len(client.writes) == 1 and client.writes[0][0] == 0x07
 
 
 def test_out_of_range_rejected(tmp_path):
