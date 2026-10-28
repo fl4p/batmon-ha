@@ -639,7 +639,11 @@ async def main():
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
         for t in tasks:
             if isinstance(t, BmsSampler):
-                await t.bms.disconnect()
+                try:
+                    await t.bms.disconnect()
+                except Exception as e:
+                    # an already dropped link must not skip store_states(final=True) below (#391)
+                    logger.info('Disconnecting %s failed: %s', t.bms, e)
 
     logger.debug('All fetch loops ended. shutdown is already %s', shutdown)
 
