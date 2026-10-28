@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.27]
 
 * Fix (JK settings): on firmware without Cell RCV/RFV (HW 11A, FW 11.54), read as 0 V, every SOC 100% write was rejected. Writes to RCV/RFV themselves are now refused instead of locking all writes (#426).
 * `impedance_estimator`: Cell Resistance is now normalised to 25 °C (−2.5 %/°C) by a BMS probe or the warmed-up `pack_temp_estimator`; MOSFET-only packs get none. Saved windows are discarded once.
