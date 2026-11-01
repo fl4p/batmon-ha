@@ -39,7 +39,7 @@ ALL_STATUS = [STATUS_DSG_ON, STATUS_DSG_OFF]
 
 
 # States (cmd 0x94) — from in-source comments at daly.py:285.
-# Format ">b b ? ? b h x": num_cells, num_temps, charging, discharging,
+# Format ">b b ? ? B h x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles, pad.
 STATES_8CELL = dict(
     name="daly_states_8cell_2temp",
@@ -55,7 +55,24 @@ STATES_8CELL = dict(
     ),
 )
 
-ALL_STATES = [STATES_8CELL]
+STATES_4CELL_AA_FLAGS = dict(
+    name="daly_states_4cell_aa_flags",
+    cmd=0x94,
+    # Real frame from a DALY R24TK (#429): the 0xAA request fill is reflected
+    # into the flags byte, so it arrives as 0xAA instead of 0x00.
+    raw=b"\x04\x02\x00\x00\xaa\x00\x01\x40",
+    expected=dict(
+        num_cells=4,
+        num_temps=2,
+        charging=False,
+        discharging=False,
+        num_cycles=1,
+        states={"DI1": False, "DI2": True, "DI3": False, "DI4": True,
+                "DO1": False, "DO2": True, "DO3": False, "DO4": True},
+    ),
+)
+
+ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS]
 
 
 # SOC (cmd 0x90) — synthesized per protocol doc (4× signed BE 16-bit fields:
@@ -74,3 +91,16 @@ SOC_SYNTHETIC_265V_5A = dict(
 )
 
 ALL_SOC = [SOC_SYNTHETIC_265V_5A]
+
+
+# Temperatures (cmd 0x96) — format ">b 7B": probe index, then temp+40 per probe.
+# The value bytes are unsigned: a probe above 87 °C (raw > 127) must not wrap
+# negative.
+TEMPS_ONE_ABOVE_127 = dict(
+    name="daly_temps_neg16_130",
+    cmd=0x96,
+    raw=b"\x01\x18\xaa\xff\xff\xff\xff\x00",
+    expected=dict(temperatures=[-16, 130]),
+)
+
+ALL_TEMPERATURES = [TEMPS_ONE_ABOVE_127]

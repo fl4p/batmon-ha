@@ -54,7 +54,7 @@ STATUS_CHARGING = dict(
 
 
 # === States (cmd 0x94) ======================================================
-# Format ">b b ? ? b h x": num_cells, num_temps, charging, discharging,
+# Format ">b b ? ? B h x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles_BE, pad
 STATES_8S = dict(
     name="daly_uart_states_8cell_1temp",
@@ -67,6 +67,23 @@ STATES_8S = dict(
         discharging=False,
         num_cycles=0x35,
         states={"DI2": True},
+    ),
+)
+
+# Captured from a DALY R24TK (#429): the 0xAA request fill is reflected into the
+# flags byte, which crashed fetch_states() when that byte was unpacked signed.
+STATES_4S_AA_FLAGS = dict(
+    name="daly_uart_states_4cell_aa_flags",
+    cmd=0x94,
+    frame=bytes.fromhex("a501940804020000aa00014033"),
+    expected=dict(
+        num_cells=4,
+        num_temps=2,
+        charging=False,
+        discharging=False,
+        num_cycles=1,
+        states={"DI1": False, "DI2": True, "DI3": False, "DI4": True,
+                "DO1": False, "DO2": True, "DO3": False, "DO4": True},
     ),
 )
 
@@ -111,4 +128,4 @@ REQUEST_FRAMES_BOARD = {
 }
 
 
-ALL_RESPONSES = [SOC_26V4, STATUS_CHARGING, STATES_8S]
+ALL_RESPONSES = [SOC_26V4, STATUS_CHARGING, STATES_8S, STATES_4S_AA_FLAGS]

@@ -427,17 +427,10 @@ class DalyBt(BtBms):
 
         response_data = await self._q(0x94)
 
-        parts = struct.unpack('>b b ? ? b h x', response_data)
+        parts = struct.unpack('>b b ? ? B h x', response_data)
 
-        state_bits = bin(parts[4])[2:]
         state_names = ["DI1", "DI2", "DI3", "DI4", "DO1", "DO2", "DO3", "DO4"]
-        states = {}
-        state_index = 0
-        for bit in reversed(state_bits):
-            if len(state_bits) == state_index:
-                break
-            states[state_names[state_index]] = bool(int(bit))
-            state_index += 1
+        states = {name: bool(parts[4] >> i & 1) for i, name in enumerate(state_names)}
 
         # dshOFF
         # bytearray(b'\x08\x01\x00\x00\x02\x005\xdc')
@@ -484,7 +477,7 @@ class DalyBt(BtBms):
         if n_resp == 1:
             resp = [resp]
         for i in range(n_resp):
-            v = struct.unpack(">b 7b", resp[i])
+            v = struct.unpack(">b 7B", resp[i])
             assert v[0] == i + 1, "out-of-order frame %s != #%s" % (v, i + 1)
             temperatures += v[1:]
         return [t - 40 for t in temperatures[:num_sensors]]

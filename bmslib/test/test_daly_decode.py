@@ -54,6 +54,19 @@ def test_daly_states(fx):
         assert data["states"].get(pin) is val
 
 
+@pytest.mark.parametrize("fx", daly_fixtures.ALL_TEMPERATURES, ids=lambda fx: fx["name"])
+def test_daly_temperatures(fx):
+    """Probe values are unsigned byte temp+40; >127 raw must not wrap negative."""
+    bms = _make_daly()
+
+    async def fake_q(cmd, num_responses=1):
+        return fx["raw"]
+
+    bms._q = fake_q
+    temperatures = asyncio.run(bms.fetch_temperatures(num_sensors=2))
+    assert temperatures == fx["expected"]["temperatures"]
+
+
 @pytest.mark.parametrize("fx", daly_fixtures.ALL_SOC, ids=lambda fx: fx["name"])
 def test_daly_soc(fx):
     bms = _make_daly()

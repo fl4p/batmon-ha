@@ -1,4 +1,5 @@
 """Daly UART/RS485 decoder + framing regression tests."""
+import asyncio
 import struct
 
 import pytest
@@ -198,6 +199,22 @@ def test_feed_buffer_drops_bad_crc_frame_and_resyncs():
     assert out == good  # bad one silently dropped
 
 
+def test_fetch_states_flags_byte_with_high_bit(uart_bms):
+    """A flags byte >= 0x80 (here the reflected 0xAA request fill) must decode,
+    not raise on bin(-86) (#429)."""
+    bms = uart_bms()
+
+    async def fake_q(cmd, num_responses=1):
+        return fx.STATES_4S_AA_FLAGS["frame"][4:-1]
+
+    bms._q = fake_q
+    data = asyncio.run(bms.fetch_states())
+    assert data["num_cells"] == 4
+    assert data["num_cycles"] == 1
+    for pin, val in fx.STATES_4S_AA_FLAGS["expected"]["states"].items():
+        assert data["states"][pin] is val, pin
+
+
 # === Payload decoders (re-use DalyBt decode logic on UART payloads) ========
 
 def _payload_of(frame):
@@ -227,7 +244,7 @@ def test_payload_matches_ble_decoder_expectations(fixture):
         assert mah / 1000 == pytest.approx(exp["capacity_ah"], abs=0.005)
     elif cmd == 0x94:
         n_cells, n_temps, charging, discharging, _bits, cycles = struct.unpack(
-            ">b b ? ? b h x", payload
+            ">b b ? ? B h x", payload
         )
         assert n_cells == exp["num_cells"]
         assert n_temps == exp["num_temps"]

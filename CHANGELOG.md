@@ -1,6 +1,8 @@
 ## [unreleased]
 
 * Fix (`litime`): the BMS's own SoC is now published instead of one derived from the charge counter, which can run past `capacity` and gave 109 % while the vendor app showed 99 % (#428).
+* Fix (`daly`): the `0x94` DI/DO flags byte was unpacked signed, so a bit at `0x80` or above (the `0xAA` request fill is reflected into it) raised and left the BMS unavailable (#429, thanks @Vittaly76).
+* Fix (`daly`): temperatures above 87 °C decoded negative because probe values were unpacked signed; they are unsigned bytes offset by 40 (#429).
 
 ## [2.27]
 
