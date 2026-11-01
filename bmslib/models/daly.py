@@ -427,7 +427,7 @@ class DalyBt(BtBms):
 
         response_data = await self._q(0x94)
 
-        parts = struct.unpack('>b b ? ? B H x', response_data)
+        parts = struct.unpack('>B B ? ? B H x', response_data)
 
         state_names = ["DI1", "DI2", "DI3", "DI4", "DO1", "DO2", "DO3", "DO4"]
         states = {name: bool(parts[4] >> i & 1) for i, name in enumerate(state_names)}

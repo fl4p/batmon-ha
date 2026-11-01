@@ -23,9 +23,9 @@ def _wrap_response(cmd: int, payload: bytes) -> bytes:
 
 
 # === SOC (cmd 0x90) =========================================================
-# 4× signed 16-bit BE fields: voltage*10, x_voltage*10, current+30000 (centred,
-# scaled ×10), soc*10. Same payload as daly_fixtures.SOC_SYNTHETIC_265V_5A but
-# wrapped for the wire format.
+# BE 16-bit fields: voltage*10 signed, x_voltage*10 signed, current+30000
+# (centred, scaled ×10, unsigned), soc*10 signed. Same payload as
+# daly_fixtures.SOC_SYNTHETIC_265V_5A but wrapped for the wire format.
 SOC_26V4 = dict(
     name="daly_uart_soc_26v4_pos5a_78p5",
     cmd=0x90,
@@ -34,6 +34,19 @@ SOC_26V4 = dict(
         voltage=26.4,
         current=5.0,
         soc=78.5,
+    ),
+)
+
+# current+30000 = 0x80E8 (+300.0 A); a signed current word decoded roughly
+# -6254 A. Same payload as daly_fixtures.SOC_HIGH_CURRENT, wrapped.
+SOC_HIGH_CURRENT = dict(
+    name="daly_uart_soc_53v2_pos300a_50",
+    cmd=0x90,
+    frame=bytes.fromhex("a50190080214000080e801f4b1"),
+    expected=dict(
+        voltage=53.2,
+        current=300.0,
+        soc=50.0,
     ),
 )
 
@@ -128,4 +141,5 @@ REQUEST_FRAMES_BOARD = {
 }
 
 
-ALL_RESPONSES = [SOC_26V4, STATUS_CHARGING, STATES_8S, STATES_4S_AA_FLAGS]
+ALL_RESPONSES = [SOC_26V4, SOC_HIGH_CURRENT, STATUS_CHARGING, STATES_8S,
+                  STATES_4S_AA_FLAGS]

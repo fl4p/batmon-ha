@@ -39,7 +39,7 @@ ALL_STATUS = [STATUS_DSG_ON, STATUS_DSG_OFF]
 
 
 # States (cmd 0x94) — from in-source comments at daly.py:435-441.
-# Format ">b b ? ? B H x": num_cells, num_temps, charging, discharging,
+# Format ">B B ? ? B H x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles, pad.
 STATES_8CELL = dict(
     name="daly_states_8cell_2temp",
@@ -87,11 +87,28 @@ STATES_8CELL_HIGH_CYCLES = dict(
     ),
 )
 
-ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS, STATES_8CELL_HIGH_CYCLES]
+STATES_HIGH_COUNTS = dict(
+    name="daly_states_high_counts",
+    cmd=0x94,
+    # Raw 0x80/0x81 for cells/temps; signed 'b' would decode -128/-127.
+    raw=b"\x80\x81\x00\x00\x00\x00\x00\x00",
+    expected=dict(
+        num_cells=128,
+        num_temps=129,
+        charging=False,
+        discharging=False,
+        num_cycles=0,
+        states={},
+    ),
+)
+
+ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS, STATES_8CELL_HIGH_CYCLES,
+              STATES_HIGH_COUNTS]
 
 
-# SOC (cmd 0x90) — synthesized per protocol doc (4× signed BE 16-bit fields:
-# voltage*10, x_voltage*10, current+30000 (centred *10), soc*10).
+# SOC (cmd 0x90) — synthesized per protocol doc (BE 16-bit fields:
+# voltage*10 signed, x_voltage*10 signed, current+30000 (centred, unsigned)
+# *10, soc*10 signed).
 # Source: agent web-search round-trip-verified against dreadnought/python-daly-bms.
 SOC_SYNTHETIC_265V_5A = dict(
     name="daly_soc_synth_26v5_neg5a_78p5",

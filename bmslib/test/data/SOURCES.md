@@ -84,6 +84,7 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 | `STATES_8CELL` | inline | `bmslib/models/daly.py:436` — comment in `fetch_states`. cmd 0x94 response for an 8-cell, 1-temp pack. |
 | `STATES_4CELL_AA_FLAGS` | captured payload | DALY R24TK via [#429](https://github.com/fl4p/batmon-ha/issues/429), payload of the UART reply below. Its flags byte is the reflected 0xAA *wired-request* fill (the BLE path fills 0x00); the four set bits 1,3,5,7 decode as DI2, DI4, DO2, DO4. |
 | `STATES_8CELL_HIGH_CYCLES` | synthesized | cmd 0x94 layout. Pins the cycle counter as unsigned: raw 0x8000 is 32768, which a signed `h` decoded as −32768. |
+| `STATES_HIGH_COUNTS` | synthesized | cmd 0x94 layout. Pins the cell/temp counts as unsigned: raw 0x80/0x81 are 128/129, which signed `b` decoded as −128/−127. |
 | `TEMPS_ONE_ABOVE_127` | synthesized | cmd 0x96 layout (`>b 7B`: probe index, then temp+40). Pins the value bytes as unsigned: raw 0xAA is 130 °C, which a signed `b` decoded as −126 °C. |
 | `VOLTAGES_3CELL_HIGH` | synthesized | cmd 0x95 layout (`>b 3H x`). Pins cell voltages as unsigned mV: raw 0x8000 is 32768 mV, which a signed `h` decoded as −32768. Also covers the single-response wrap for packs of three or fewer cells. |
 | `VOLTAGES_4CELL` | synthesized | cmd 0x95 layout, two back-to-back frames as a 4-cell pack gets them; covers the multi-response list path. |
@@ -96,7 +97,7 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 
 | Fixture | Type | Source |
 |---|---|---|
-| `SOC_26V4`, `STATUS_CHARGING`, `STATES_8S` | wrapped-inline | Same 8-byte payloads as the BLE fixtures (`STATUS_DSG_ON`, `STATES_8CELL`, `SOC_SYNTHETIC_…`), wrapped in the full 13-byte ``A5 01 cmd 08 <payload> <crc>`` envelope the BMS sends on the wire. The wire format is identical between BLE and UART. |
+| `SOC_26V4`, `SOC_HIGH_CURRENT`, `STATUS_CHARGING`, `STATES_8S` | wrapped-inline | Same 8-byte payloads as the BLE fixtures (`STATUS_DSG_ON`, `STATES_8CELL`, `SOC_SYNTHETIC_…`, `SOC_HIGH_CURRENT`), wrapped in the full 13-byte ``A5 01 cmd 08 <payload> <crc>`` envelope the BMS sends on the wire. The wire format is identical between BLE and UART. |
 | `STATES_4S_AA_FLAGS` | captured frame | The [#429](https://github.com/fl4p/batmon-ha/issues/429) DALY R24TK cmd 0x94 reply in its `A5 01 …` envelope; `STATES_4CELL_AA_FLAGS` is this frame's payload, CRC recomputed independently (`0x33`). |
 | `REQUEST_FRAMES` | derived | The four 13-byte read commands (`0x90`, `0x93`, `0x94`, `0x95`) produced by ``daly_command_message(cmd, address=4)``. |
 | `REQUEST_FRAMES_ZERO_FILL` | derived | The same read commands with the pre-2.15 0x00 payload fill, kept to distinguish the two encodings ([#398](https://github.com/fl4p/batmon-ha/issues/398)). |

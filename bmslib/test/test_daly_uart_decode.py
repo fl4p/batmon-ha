@@ -232,7 +232,7 @@ def test_payload_matches_ble_decoder_expectations(fixture):
     exp = fixture["expected"]
 
     if cmd == 0x90:
-        v, _x, i, soc = struct.unpack(">h h h h", payload)
+        v, _x, i, soc = struct.unpack(">h h H h", payload)
         assert v / 10 == pytest.approx(exp["voltage"], abs=0.05)
         assert (i - 30000) / 10 == pytest.approx(exp["current"], abs=0.05)
         assert soc / 10 == pytest.approx(exp["soc"], abs=0.05)
