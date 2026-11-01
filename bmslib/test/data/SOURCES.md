@@ -99,11 +99,12 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 |---|---|---|
 | `SOC_26V4`, `SOC_HIGH_CURRENT`, `STATUS_CHARGING`, `STATES_8S` | wrapped-inline | Same 8-byte payloads as the BLE fixtures (`STATUS_DSG_ON`, `STATES_8CELL`, `SOC_SYNTHETIC_…`, `SOC_HIGH_CURRENT`), wrapped in the full 13-byte ``A5 01 cmd 08 <payload> <crc>`` envelope the BMS sends on the wire. The wire format is identical between BLE and UART. |
 | `STATES_4S_AA_FLAGS` | captured frame | The [#429](https://github.com/fl4p/batmon-ha/issues/429) DALY R24TK cmd 0x94 reply in its `A5 01 …` envelope; `STATES_4CELL_AA_FLAGS` is this frame's payload, CRC recomputed independently (`0x33`). |
-| `REQUEST_FRAMES` | derived | The four 13-byte read commands (`0x90`, `0x93`, `0x94`, `0x95`) produced by ``daly_command_message(cmd, address=4)``. |
+| `REQUEST_FRAMES` | derived | The four 13-byte read commands (`0x90`, `0x93`, `0x94`, `0x95`) produced by ``daly_uart.build_command(cmd)`` for board 1, i.e. ``daly_command_message(cmd, addr_byte=0x40, fill=0xAA)``. |
 | `REQUEST_FRAMES_ZERO_FILL` | derived | The same read commands with the pre-2.15 0x00 payload fill, kept to distinguish the two encodings ([#398](https://github.com/fl4p/batmon-ha/issues/398)). |
 
-The decisive on-wire difference between BLE and UART is the host-address
-byte at frame position 1 — **4** for USB / RS485, **8** for BLE. Verified
+Requests differ from BLE in the host-address byte at frame position 1 — **4**
+for USB / RS485, **8** for BLE — and in the fill of the 8 don't-care payload
+bytes (**0xAA** wired, **0x00** BLE). Responses are byte-identical. Verified
 in four independent references:
 - [`maland16/daly-bms-uart`](https://github.com/maland16/daly-bms-uart) — Arduino library; init sets ``my_txBuffer[1] = 0x40`` (host=4) and runs the link at ``9600 8N1`` (this is also where the baud rate comes from — `DalyUart.BAUDRATE = 9600`).
 - [`dreadnought/python-daly-bms`](https://github.com/dreadnought/python-daly-bms/blob/main/dalybms/daly_bms.py) (``"4 for RS485, 8 for UART/Bluetooth"``)
