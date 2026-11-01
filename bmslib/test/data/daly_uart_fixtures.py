@@ -2,9 +2,10 @@
 
 Reuses the 8-byte payloads from ``daly_fixtures.py`` but wraps them in the
 full 13-byte ``A5 01 <cmd> 08 <payload> <crc>`` envelope the BMS sends on
-the wire. The wire format is identical between BLE and UART — only the
-*request* address byte differs (4 = USB/RS485, 8 = BLE), which is why
-``DalyUart`` can reuse every ``DalyBt`` response decoder.
+the wire. Response framing and payloads are identical between BLE and UART,
+which is why ``DalyUart`` can reuse every ``DalyBt`` response decoder.
+Requests differ in the host address byte (4 = USB/RS485, 8 = BLE) and in the
+fill of the 8 don't-care payload bytes (0xAA wired, 0x00 BLE).
 
 Reference for the address-byte convention (4 = USB/RS485, 8 = BLE):
 - dreadnought/python-daly-bms ``dalybms/daly_bms.py`` —

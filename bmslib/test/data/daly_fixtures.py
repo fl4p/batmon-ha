@@ -58,8 +58,9 @@ STATES_8CELL = dict(
 STATES_4CELL_AA_FLAGS = dict(
     name="daly_states_4cell_aa_flags",
     cmd=0x94,
-    # Real frame from a DALY R24TK (#429): the 0xAA request fill is reflected
-    # into the flags byte, so it arrives as 0xAA instead of 0x00.
+    # Real frame from a DALY R24TK (#429): the 0xAA wired-request fill is
+    # reflected into the flags byte, so it arrives as 0xAA instead of 0x00.
+    # The old bin()/int() decode raised on it; shift/mask is sign-invariant.
     raw=b"\x04\x02\x00\x00\xaa\x00\x01\x40",
     expected=dict(
         num_cells=4,

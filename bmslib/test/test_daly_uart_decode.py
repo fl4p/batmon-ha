@@ -115,10 +115,10 @@ def test_set_switch_uses_the_wired_address(uart_bms):
     assert set(msg[5:12]) == {0xAA}
 
 
-def test_uart_and_ble_request_frames_differ_only_in_address_byte():
-    """The on-wire difference between UART and BLE is exactly one byte:
-    position 1 (the host-address nibble). Everything else — header, CRC
-    layout, payload zero-padding — is identical."""
+def test_base_builders_differ_only_in_address_byte():
+    """With the same zero fill, the base builder's UART and BLE requests differ
+    in exactly one byte: position 1 (the host address). The real wired builder
+    also uses the 0xAA fill, covered by test_uart_requests_are_aa_filled."""
     for cmd in (0x90, 0x93, 0x94, 0x95):
         uart = bytes(daly_command_message(cmd, address=4))
         ble = bytes(daly_command_message(cmd, address=8))

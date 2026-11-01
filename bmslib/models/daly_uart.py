@@ -3,9 +3,12 @@
 Same wire protocol as the BLE one (``bmslib.models.daly``): 13-byte fixed
 request/response frames, ``A5 <addr> <cmd> 08 <8 bytes data> <crc>``.
 
-The only on-wire difference is the *host* address byte in REQUESTS:
-  - 8 = Bluetooth (used by ``DalyBt``)
-  - 4 = USB / RS485 (used by ``DalyUart``)
+Requests differ in two ways: the *host* address byte and the payload fill:
+  - 8 = Bluetooth (used by ``DalyBt``), payload filled with 0x00
+  - 4 = USB / RS485 (used by ``DalyUart``), payload filled with 0xAA
+    (``UART_FILL``; see ``build_command``)
+
+The response framing and every decoder are shared.
 
 Responses carry an address byte too (typically ``01`` = BMS) but the
 decoder ignores it — bytes [0:4] are stripped before parsing the 8-byte
