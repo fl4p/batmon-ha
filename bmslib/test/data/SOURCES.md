@@ -102,8 +102,9 @@ This is genuinely different from the JK BLE protocol (`55 AA EB 90 …` fixed
 | `REQUEST_FRAMES` | derived | The four 13-byte read commands (`0x90`, `0x93`, `0x94`, `0x95`) produced by ``daly_uart.build_command(cmd)`` for board 1, i.e. ``daly_command_message(cmd, addr_byte=0x40, fill=0xAA)``. |
 | `REQUEST_FRAMES_ZERO_FILL` | derived | The same read commands with the pre-2.15 0x00 payload fill, kept to distinguish the two encodings ([#398](https://github.com/fl4p/batmon-ha/issues/398)). |
 
-Requests differ from BLE in the host-address byte at frame position 1 — **4**
-for USB / RS485, **8** for BLE — and in the fill of the 8 don't-care payload
+Requests differ from BLE in the host-address field at frame position 1 — host
+nibble **4** for USB / RS485 (wire byte `0x40`..`0x4F`, boards 1..16) or
+**8** for BLE (byte `0x80`) — and in the fill of the 8 don't-care payload
 bytes (**0xAA** wired, **0x00** BLE). Responses are byte-identical. Verified
 in four independent references:
 - [`maland16/daly-bms-uart`](https://github.com/maland16/daly-bms-uart) — Arduino library; init sets ``my_txBuffer[1] = 0x40`` (host=4) and runs the link at ``9600 8N1`` (this is also where the baud rate comes from — `DalyUart.BAUDRATE = 9600`).
