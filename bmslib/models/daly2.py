@@ -86,10 +86,21 @@ class Daly2Bt(BtBms):
         self._last_block = None
         self.UUID_RX = None
         self.UUID_TX = None
+        # Some modules (and a proxy that has only just brought the link up)
+        # drop the first request after connecting; daly.py's handshake re-asks
+        # for the same reason (#416). Retry that first request once.
+        self._first_reply_pending = False
 
     def _notification_handler(self, _sender, data):
         self.logger.debug("ble data frame %s", data)
         self._buffer += data
+
+        # A reply cut off by a timeout leaves a partial frame behind, and its
+        # tail arrives after the retry cleared the buffer: parsed as a frame
+        # head it can swallow the retry's own reply. Every reply starts with
+        # the slave address, so resync on that instead of trusting buffer[1].
+        while self._buffer and self._buffer[0] != MODBUS_ADDRESS:
+            del self._buffer[0]
 
         if len(self._buffer) < 3:
             return
@@ -143,6 +154,8 @@ class Daly2Bt(BtBms):
             await enumerate_services(self.client, self.logger)
             raise Exception("Notify characteristic (rx) not found")
 
+        self._first_reply_pending = True
+
     async def disconnect(self):
         if self.UUID_RX:
             await self.client.stop_notify(self.UUID_RX)
@@ -151,17 +164,26 @@ class Daly2Bt(BtBms):
 
     async def _q(self, request: bytes, timeout=None):
         func = request[1]
-        self._buffer.clear()
-        with self._fetch_futures.acquire(func):
-            self.logger.debug("daly2 send: %s", request.hex())
-            await self.client.write_gatt_char(self.UUID_TX, request, response=False)
-            try:
-                return await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
-            except asyncio.TimeoutError:
-                # J/T/A/U/W-series modules use the same fff0 GATT layout but only
-                # answer classic A5 frames, so they ignore every Modbus request (#416)
-                raise asyncio.TimeoutError("no Modbus reply to func 0x%02x; if this BMS never answers, "
-                                         "it may speak the classic protocol: try type: daly" % func)
+        attempts = 2 if self._first_reply_pending else 1
+        for attempt in range(attempts):
+            self._buffer.clear()
+            with self._fetch_futures.acquire(func):
+                self.logger.debug("daly2 send%s: %s", " (retry)" if attempt else "", request.hex())
+                await self.client.write_gatt_char(self.UUID_TX, request, response=False)
+                try:
+                    frame = await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
+                    self._first_reply_pending = False
+                    return frame
+                except asyncio.TimeoutError:
+                    if attempt + 1 < attempts:
+                        continue
+                    # the module is not answering at all; don't retry every
+                    # cycle from now on
+                    self._first_reply_pending = False
+                    # J/T/A/U/W-series modules use the same fff0 GATT layout but only
+                    # answer classic A5 frames, so they ignore every Modbus request (#416)
+                    raise asyncio.TimeoutError("no Modbus reply to func 0x%02x; if this BMS never answers, "
+                                             "it may speak the classic protocol: try type: daly" % func)
 
     async def fetch(self) -> BmsSample:
         # binary reading

@@ -31,9 +31,14 @@ class _FakeClient:
         self._response = response
         self._chunk = chunk
         self.written = None
+        self.writes = 0
 
     async def write_gatt_char(self, char, data, response=False):
+        self.writes += 1
         self.written = bytes(data)
+        self._deliver()
+
+    def _deliver(self):
         # deliver the response split across several notifications
         for i in range(0, len(self._response), self._chunk):
             self._bms._notification_handler(None, self._response[i:i + self._chunk])
@@ -132,3 +137,94 @@ def test_set_switch_unknown_raises():
     bms.client = _FakeClient(bms, b"")
     with pytest.raises(ValueError):
         asyncio.run(bms.set_switch("bogus", True))
+
+
+class _DropFirstWriteClient(_FakeClient):
+    """Ignores the first write, answers the second: the module that drops the
+    very first request after connecting (daly.py's handshake exists for it too)."""
+
+    async def write_gatt_char(self, char, data, response=False):
+        if self.writes:
+            await super().write_gatt_char(char, data, response=response)
+        else:
+            self.writes += 1
+
+
+def test_first_request_after_connect_is_retried_once():
+    fx = daly2_fixtures.AIOBMSBLE_4S
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.TIMEOUT = 0.05
+    bms.client = _DropFirstWriteClient(bms, fx["raw"])
+    bms._first_reply_pending = True  # what connect() sets after start_notify
+
+    sample = asyncio.run(bms.fetch())
+
+    assert bms.client.writes == 2
+    assert sample.voltage == pytest.approx(fx["expected"]["voltage"], abs=0.05)
+    assert bms._first_reply_pending is False
+
+
+def test_retry_is_not_used_after_the_first_reply():
+    fx = daly2_fixtures.AIOBMSBLE_4S
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.TIMEOUT = 0.05
+    bms.client = _DropFirstWriteClient(bms, fx["raw"])
+
+    with pytest.raises(asyncio.TimeoutError, match="try type: daly"):
+        asyncio.run(bms.fetch())
+    assert bms.client.writes == 1  # no first-reply flag -> no retry
+
+
+def test_failed_first_round_is_not_retried_every_cycle():
+    # a module that never answers Modbus (the `try type: daly` case) must not
+    # pay two timeouts per cycle forever
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.TIMEOUT = 0.02
+    bms.client = _FakeClient(bms, b"")
+    bms._first_reply_pending = True
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+    assert bms.client.writes == 2
+    assert bms._first_reply_pending is False
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+    assert bms.client.writes == 3  # one write this cycle, not two
+
+
+class _TailThenReplyClient(_FakeClient):
+    """Drops the first request, but the tail of its lost reply arrives just
+    after the retry cleared the buffer."""
+
+    def __init__(self, bms, response, tail):
+        super().__init__(bms, response)
+        self._tail = tail
+
+    async def write_gatt_char(self, char, data, response=False):
+        self.writes += 1
+        if self.writes == 1:
+            return
+        # without the address resync, this tail is parsed as a frame head with
+        # a length that swallows the retry's own reply
+        self._bms._notification_handler(None, self._tail)
+        self._deliver()
+
+
+def test_partial_frame_from_the_lost_request_does_not_swallow_the_retry():
+    fx = daly2_fixtures.AIOBMSBLE_4S
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.TIMEOUT = 0.05
+    # a tail that does not start with the slave address, but whose next bytes
+    # look like a 0x03 reply header expecting a full 124-byte payload
+    bms.client = _TailThenReplyClient(bms, fx["raw"], bytes([0x00, 0x03, 0x7C]))
+    bms._first_reply_pending = True
+
+    sample = asyncio.run(bms.fetch())
+
+    assert bms.client.writes == 2
+    assert sample.voltage == pytest.approx(fx["expected"]["voltage"], abs=0.05)
