@@ -228,3 +228,22 @@ def test_partial_frame_from_the_lost_request_does_not_swallow_the_retry():
 
     assert bms.client.writes == 2
     assert sample.voltage == pytest.approx(fx["expected"]["voltage"], abs=0.05)
+
+
+def test_modbus_exception_reply_is_surfaced_not_timed_out():
+    # an exception reply answers func|0x80; the waiter on the plain function
+    # must see it (regression: set_result used the 0x83 key, so it timed out)
+    body = bytes([0xD2, 0x83, 0x02])  # illegal data address
+    crc = _modbus_crc16(body)
+    frame = body + bytes([crc & 0xFF, crc >> 8])
+
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.TIMEOUT = 0.05
+    bms.client = _FakeClient(bms, frame)
+    bms._first_reply_pending = True  # an exception is a reply: no retry
+
+    with pytest.raises(IOError, match="Modbus exception 0x02"):
+        asyncio.run(bms.fetch())
+    assert bms.client.writes == 1
+    assert bms._first_reply_pending is False

@@ -134,7 +134,10 @@ class Daly2Bt(BtBms):
                                 crc_calc, crc_recv, frame.hex())
             return
 
-        self._fetch_futures.set_result(func, frame)
+        # An exception reply carries func|0x80 as its command byte but answers
+        # the request's function: deliver it under the request key, otherwise
+        # the waiter on the plain function never sees it.
+        self._fetch_futures.set_result(func & 0x7F if func & 0x80 else func, frame)
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
@@ -172,8 +175,6 @@ class Daly2Bt(BtBms):
                 await self.client.write_gatt_char(self.UUID_TX, request, response=False)
                 try:
                     frame = await self._fetch_futures.wait_for(func, timeout or self.TIMEOUT)
-                    self._first_reply_pending = False
-                    return frame
                 except asyncio.TimeoutError:
                     if attempt + 1 < attempts:
                         continue
@@ -184,6 +185,10 @@ class Daly2Bt(BtBms):
                     # answer classic A5 frames, so they ignore every Modbus request (#416)
                     raise asyncio.TimeoutError("no Modbus reply to func 0x%02x; if this BMS never answers, "
                                              "it may speak the classic protocol: try type: daly" % func)
+                self._first_reply_pending = False
+                if frame[1] & 0x80:
+                    raise IOError("Modbus exception 0x%02x for func 0x%02x" % (frame[2], func))
+                return frame
 
     async def fetch(self) -> BmsSample:
         # binary reading

@@ -5,6 +5,7 @@
 * Fix (`daly`): temperatures above 87 °C decoded negative because probe values were unpacked signed; they are unsigned bytes offset by 40 (#429).
 * Fix (`daly`): the cycle counter is decoded unsigned, so a pack past 32767 cycles no longer reports a negative count; cell voltages are likewise unsigned, though only a corrupt ≥ 32768 mV value would wrap (#429).
 * Fix (`daly2`): a module that drops the first request after connecting lost that sampling cycle to an 8 s timeout; the request is now re-sent once (#427).
+* Fix (`daly2`): a Modbus exception reply (func|0x80) timed out instead of reporting the exception code.
 
 ## [2.27]
 
