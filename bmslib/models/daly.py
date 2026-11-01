@@ -368,7 +368,7 @@ class DalyBt(BtBms):
         timestamp = time.time()
         resp = await self._q(0x90)
 
-        parts = struct.unpack('>h h h h', resp)
+        parts = struct.unpack('>h h H h', resp)
 
         # x_v =  parts[1] / 10,  # always 0 "x_voltage", acquisition
 
@@ -457,6 +457,8 @@ class DalyBt(BtBms):
 
         num_resp = math.ceil(num_cells / 3)  # bms sends tuples of 3 (ceil)
         resp = await self._q(0x95, num_responses=num_resp)
+        if num_resp == 1:
+            resp = [resp]
         voltages = []
         for i in range(num_resp):
             v = struct.unpack(">b 3H x", resp[i])

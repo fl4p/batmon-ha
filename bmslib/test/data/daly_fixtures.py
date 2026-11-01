@@ -8,7 +8,7 @@ fixtures below capture that 8-byte payload, which is what ``_q`` returns
 directly.
 """
 
-# Status (cmd 0x93) — from in-source comments in bmslib/models/daly.py:237-245.
+# Status (cmd 0x93) — from in-source comments in bmslib/models/daly.py:394-403.
 # The C-style format is ">b ? ? B l": mode, charging_mosfet, discharging_mosfet,
 # unused_byte, capacity_in_mAh (signed 32-bit BE).
 STATUS_DSG_ON = dict(
@@ -38,7 +38,7 @@ STATUS_DSG_OFF = dict(
 ALL_STATUS = [STATUS_DSG_ON, STATUS_DSG_OFF]
 
 
-# States (cmd 0x94) — from in-source comments at daly.py:285.
+# States (cmd 0x94) — from in-source comments at daly.py:435-441.
 # Format ">b b ? ? B H x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles, pad.
 STATES_8CELL = dict(
@@ -114,9 +114,30 @@ VOLTAGES_3CELL_HIGH = dict(
     expected=dict(voltages=[3300, 3350, 32768]),
 )
 
-ALL_VOLTAGES = [VOLTAGES_3CELL_HIGH]
+# Two frames as a 4-cell pack gets them (one response per three cells), for the
+# num_resp > 1 list path.
+VOLTAGES_4CELL = dict(
+    name="daly_voltages_4cell",
+    cmd=0x95,
+    raw=[b"\x01\x0c\xe4\x0d\x16\x0d\x0c\x00", b"\x02\x0d\x1b\x00\x00\x00\x00\x00"],
+    expected=dict(voltages=[3300, 3350, 3340, 3355]),
+)
 
-ALL_SOC = [SOC_SYNTHETIC_265V_5A]
+ALL_VOLTAGES = [VOLTAGES_3CELL_HIGH, VOLTAGES_4CELL]
+
+SOC_HIGH_CURRENT = dict(
+    name="daly_soc_53v2_pos300a_50",
+    cmd=0x90,
+    # voltage*10 = 532 (0x0214); current+30000 = 33000 (0x80E8); soc*10 = 500
+    raw=b"\x02\x14\x00\x00\x80\xe8\x01\xf4",
+    expected=dict(
+        voltage=53.2,
+        current=300.0,
+        soc=50.0,
+    ),
+)
+
+ALL_SOC = [SOC_SYNTHETIC_265V_5A, SOC_HIGH_CURRENT]
 
 
 # Temperatures (cmd 0x96) — format ">b 7B": probe index, then temp+40 per probe.

@@ -60,11 +60,12 @@ def test_daly_voltages(fx):
     bms = _make_daly()
 
     async def fake_q(cmd, num_responses=1):
-        return [fx["raw"]]
+        return fx["raw"]
 
     bms._q = fake_q
-    voltages = asyncio.run(bms.fetch_voltages(num_cells=3))
-    assert voltages == fx["expected"]["voltages"]
+    expected = fx["expected"]["voltages"]
+    voltages = asyncio.run(bms.fetch_voltages(num_cells=len(expected)))
+    assert voltages == expected
 
 
 @pytest.mark.parametrize("fx", daly_fixtures.ALL_TEMPERATURES, ids=lambda fx: fx["name"])
