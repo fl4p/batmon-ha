@@ -12,6 +12,7 @@
 * Fix (`daly2`): a module that drops the first request after connecting lost that sampling cycle to an 8 s timeout; the request is now re-sent once (#427).
 * Fix (`daly2`): a Modbus exception reply (func|0x80) timed out instead of reporting the exception code.
 * Fix (`daly2`): a switch write the BMS rejected no longer echoes the requested state to Home Assistant; the next sample publishes the register state.
+* Fix (`soh_estimator`): a set SOC or JK capacity write from batmon moved the charge counter unseen, so a restart soon after could keep a Qmax segment with charge missing. Saved Qmax history restarts once.
 
 ## [2.27]
 

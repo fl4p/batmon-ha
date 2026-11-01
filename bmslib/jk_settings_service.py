@@ -17,6 +17,7 @@ import threading
 import time
 from typing import Optional
 
+from bmslib.estimator_common import CounterWriteRefused
 from bmslib.models.jk_settings import (SETTINGS, SettingError, encode_setting, format_changes, format_value,
                                        implausible_settings, parse_write_option, unsupported, validate_change)
 from bmslib.util import get_logger
@@ -31,6 +32,11 @@ MAX_WRITES_PER_TICK = 3
 # A settings frame this young (from connect() or fetch()) is used as is for a periodic or
 # post-reconnect refresh, instead of another 0x96 query. Before a write it is always queried.
 RECENT_FRAME_MAX_AGE_S = 30
+# Settings whose write moves the BMS's charge counter with no charge flowing (it is
+# remaining charge against this capacity), so they go through counter_write. Not the
+# SOC 0/100 % voltages: they change when the BMS later snaps its counter, and such
+# snaps happen at its stops, which the estimator already takes as no evidence.
+COUNTER_SETTINGS = frozenset({'total_capacity'})
 
 
 class NullSettingsPublisher:
@@ -73,6 +79,10 @@ class JkSettingsService:
         # (name, before, requested, before_all), resolved by the next successful refresh
         self._unconfirmed = None
         self._seen_connect = None  # bms.connect_count at the last tick
+        # BmsSampler.counter_write when the Qmax/SoH estimator runs: a capacity
+        # write rescales the BMS's charge counter, which that estimator takes as
+        # evidence across a restart
+        self.counter_write = None
 
     # called from any thread (paho)
     def enqueue(self, name: str, payload: str) -> None:
@@ -185,7 +195,14 @@ class JkSettingsService:
             self._reject(publish, bms, name, shown, 'backup failed: %s' % e)
             return False
         try:
-            res = await bms.write_setting(name, value)
+            if name in COUNTER_SETTINGS and self.counter_write is not None:
+                res = await self.counter_write('%s write' % name, lambda: bms.write_setting(name, value),
+                                               capacity_change=True)
+            else:
+                res = await bms.write_setting(name, value)
+        except CounterWriteRefused as e:  # not sent
+            self._reject(publish, bms, name, shown, str(e))
+            return False
         except Exception as e:
             # the write may have reached the BMS before the link failed: unknown, not rejected
             reason = 'BLE error: %s' % e

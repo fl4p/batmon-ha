@@ -45,6 +45,12 @@ I_MAX_C_RATE = 5.0
 I_MAX_ABS_A = 1000.0
 
 
+class CounterWriteRefused(Exception):
+    """A write to the BMS's charge counter (set SOC, its capacity setting) was
+    not sent: the Qmax/SoH estimator's state could not be saved first
+    (BmsSampler.counter_write)."""
+
+
 def finite(x) -> TypeGuard[float]:
     return isinstance(x, (int, float)) and math.isfinite(x)
 

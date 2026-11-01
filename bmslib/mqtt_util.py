@@ -703,11 +703,16 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
             lambda msg, sn=switch_name: set_switch(sn, msg.lower() == "on")
 
 
-def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms):
+def subscribe_set_soc(mqtt_client: paho.Client, device_topic, bms: BtBms, counter_write=None):
+    """counter_write: BmsSampler.counter_write when the Qmax/SoH estimator runs
+    (the write moves the BMS's charge counter, which it takes as evidence)."""
     async def set_soc(payload: str):
         soc = float(payload)
         logger.info('Set %s SOC gauge to %.1f%%', bms.name, soc)
-        await bms.set_soc(soc)
+        if counter_write is None:
+            await bms.set_soc(soc)
+        else:
+            await counter_write('set SOC to %.1f%%' % soc, lambda: bms.set_soc(soc))
 
     node_id = device_topic.replace('/', '_')
     topic = f"homeassistant/number/{node_id}/set_soc/set"

@@ -709,3 +709,39 @@ def test_corrupt_settings_read_is_not_used_to_validate(tmp_path):
     assert client.writes == []
     assert pub.texts[-1].startswith('Rejected charge_utp 3: settings read looks corrupt')
     assert not svc.locked
+
+
+def test_a_capacity_write_goes_through_the_counter_write(tmp_path):
+    """It rescales the BMS's charge counter, which the Qmax/SoH estimator takes
+    as evidence across a restart (BmsSampler.counter_write); other settings
+    do not."""
+    bms, client = _make()
+    svc, pub = _service(tmp_path, writable={'total_capacity', 'charge_utp'}), FakePublish()
+    _tick(svc, bms, pub)
+    calls = []
+
+    async def counter_write(why, write, capacity_change=False):
+        calls.append((why, capacity_change))
+        return await write()
+    svc.counter_write = counter_write
+    cap = bms.settings['total_capacity']
+    svc.enqueue('total_capacity', str(cap + 10))
+    svc.enqueue('charge_utp', '4')  # below charge_utpr (5)
+    _tick(svc, bms, pub)
+    assert calls == [('total_capacity write', True)]
+    assert bms.settings['total_capacity'] == cap + 10 and len(client.writes) == 2
+
+
+def test_a_capacity_write_is_not_sent_when_the_counter_write_refuses(tmp_path):
+    from bmslib.estimator_common import CounterWriteRefused
+    bms, client = _make()
+    svc, pub = _service(tmp_path, writable={'total_capacity'}), FakePublish()
+    _tick(svc, bms, pub)
+
+    async def counter_write(why, write, capacity_change=False):
+        raise CounterWriteRefused('disk full')
+    svc.counter_write = counter_write
+    svc.enqueue('total_capacity', str(bms.settings['total_capacity'] + 10))
+    _tick(svc, bms, pub)
+    assert client.writes == [] and not svc.locked
+    assert pub.texts[-1].startswith('Rejected total_capacity') and 'disk full' in pub.texts[-1]

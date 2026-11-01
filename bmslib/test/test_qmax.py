@@ -4107,3 +4107,234 @@ def test_a_restart_through_the_sampler_continues_only_on_the_bms_counter():
         asyncio.run(s2())
         assert s2.qmax.counts['restart_unverified'] == verdict, jump
         assert s2.qmax.epoch == est.epoch + verdict
+
+
+# ================================================================ writes to the BMS's counter (set SOC)
+
+def _restart_after_write(write_ah, boundary, hidden_ah=3.0):
+    """_frozen_clock with one cycle and hidden_ah drawn while the host is off,
+    plus a set-SOC write of +write_ah (1 % of SoC per Ah on these 100 Ah) that
+    batmon sent right before it shut down: from the restart on, the BMS's
+    counter and SoC read write_ah higher. boundary: the write went through
+    counter_write_begin/_end before the state was saved."""
+    rows, cuts, charge, soc = _frozen_clock(hidden_ah=hidden_ah, n=1)
+    cut = cuts[0]
+    after = {r[0] for r in rows[cut:]}
+    charge = {t: round(c + write_ah, 3) if t in after else c for t, c in charge.items()}
+    soc = {t: min(100.0, round(s + write_ah, 1)) if t in after else s for t, s in soc.items()}
+    est = _fresh()
+    run(rows[:cut], est, charge=charge, soc=soc)
+    if boundary:
+        est.counter_write_begin('set SOC')
+        est.counter_write_end(rows[cut - 1][0])
+    st = _via_json(est.get_state(full=True))
+    est = _fresh()
+    assert est.restore(st)
+    run(rows[cut:], est, charge=charge, soc=soc)
+    return est
+
+
+def test_a_set_soc_write_before_a_restart_leaves_nothing_to_continue_the_segment_with():
+    """The write moved the counter by +1.5 Ah while 3 Ah went out unseen: -1.5
+    Ah against a bridge of 0.73 is inside RESUME_TOL_FRAC. With the write
+    reported, the saved state has no counter evidence and the restart ends the
+    open segment."""
+    est = _restart_after_write(1.5, boundary=True)
+    assert est.counts['restart_unverified'] == 1
+    assert not any(s['dq'] < 0 for s in est.segments)
+
+
+def test_calibration_an_unreported_write_hides_charge_across_a_restart():
+    est = _restart_after_write(1.5, boundary=False)
+    assert est.counts['restart_unverified'] == 0, 'scenario is harmless'
+    assert any(s['dq'] < 0 for s in est.segments)  # the discharge with 3 Ah missing went in
+    ref = _restart_after_write(0.0, boundary=False)  # without the write the check refuses it
+    assert ref.counts['restart_unverified'] == 1
+
+
+def _counter_rows(n=40, t0=T0, dt=10.0, i=20.0):
+    """n samples discharging at i: rows and a counter in 0.1 Ah steps."""
+    rows, charge, c = [], {}, 80.0
+    for k in range(n):
+        t = t0 + k * dt
+        c -= i * dt / 3600
+        rows.append((t, i, None, 25.0))
+        charge[t] = round(round(c / 0.1) * 0.1, 3)
+    return rows, charge
+
+
+def test_readings_near_a_write_are_no_evidence():
+    rows, charge = _counter_rows(60)
+    est, _ = run(rows[:20], charge=charge)
+    assert est.q_c == pytest.approx(0.1) and est._last_c is not None
+    est.counter_write_begin('set SOC')
+    assert est.q_c is None and est._c_q is None and est._c_max is None and est._last_c is None
+    # a reading from before the write that arrives late (a cached frame) jumps by 30 Ah: not learnt
+    est.add(rows[20][0], 20.0, None, temp=25.0, bms_charge=charge[rows[20][0]] + 30.0)
+    assert est.q_c is None and est._c_max is None and est._last_c is None
+    t_end = rows[20][0]
+    est.counter_write_end(t_end)
+    for t, i, v, temp in rows[21:]:
+        est.add(t, i, v, temp=temp, bms_charge=charge[t])
+        learnt = est._last_c is not None
+        assert learnt == (t >= t_end + q.COUNTER_WRITE_QUARANTINE_S), t
+    assert est.counts['counter_write'] == 1 and est.epoch == 0  # no restart in progress: the segment goes on
+
+
+def test_overlapping_writes_keep_the_readings_out_until_the_last_returns():
+    rows, charge = _counter_rows(60)
+    est, _ = run(rows[:10], charge=charge)
+    est.counter_write_begin('set SOC')
+    est.counter_write_begin('total_capacity write', capacity_change=True)
+    est.counter_write_end(rows[10][0])  # the first returned; the second is still out
+    for t, i, v, temp in rows[11:40]:  # 290 s, well past the quarantine of the first
+        est.add(t, i, v, temp=temp, bms_charge=charge[t])
+        assert est._last_c is None
+    est.counter_write_end(rows[39][0])
+    for t, i, v, temp in rows[40:]:
+        est.add(t, i, v, temp=temp, bms_charge=charge[t])
+    assert est._last_c is None or rows[-1][0] >= rows[39][0] + q.COUNTER_WRITE_QUARANTINE_S
+
+
+def test_a_write_keeps_the_segments_the_counter_never_entered():
+    """The counter is only evidence across a restart; segments come from the
+    current and the anchors. A write mid-run (counter shifted from there on)
+    changes no segment."""
+    p = full_cycles(n=2)
+    ref, _ = run(p.rows, **bms(p))
+    k = len(p.rows) // 3
+    after = {r[0] for r in p.rows[k:]}
+    charge = {t: round(c + 7.0, 3) if t in after else c for t, c in p.charge.items()}
+    est = _fresh()
+    run(p.rows[:k], est, charge=charge, soc=p.soc_bms)
+    est.counter_write_begin('set SOC')
+    est.counter_write_end(p.rows[k - 1][0])
+    run(p.rows[k:], est, charge=charge, soc=p.soc_bms)
+    assert seg_q(ref) and seg_q(est) == pytest.approx(seg_q(ref), rel=1e-9)
+    assert est.epoch == ref.epoch
+
+
+def test_a_write_while_a_restart_is_being_checked_ends_the_segment():
+    """Only the counter can confirm a restart (_audit_step); after a write it
+    cannot, and unconfirmed is not confirmed."""
+    p = Pack().rest()
+    p.run(50.0, 1800).run(50.0, 120, sample=False).run(50.0, 3600 * 88 / 50 - 1920).rest()
+    p.run(-50.0, 3600 * 88 / 50).rest()
+    rows = p.end().rows
+    cut = next(k for k, r in enumerate(rows) if k and r[0] - rows[k - 1][0] > 60)
+    est, _ = _split_run(rows[:cut + 1], [cut], **bms(p))
+    assert est._audit is not None and est.counts['restart_unverified'] == 0
+    epoch = est.epoch
+    est.counter_write_begin('set SOC')
+    est.counter_write_end(rows[cut][0])
+    run(rows[cut + 1:], est, **bms(p))
+    assert est.counts['counter_write_in_audit'] == 1 and est.epoch == epoch + 1
+    assert not any(s['dq'] < 0 for s in est.segments)  # the discharge across the restart is gone
+
+
+def test_a_capacity_write_forgets_the_capacity_check_history():
+    est = _fresh()
+    t = T0
+    for k in range(30):
+        est.add(t + k * 3600, 1.0, None, capacity=150.0)
+    assert est.bms_capacity() == 150.0 and est.capacity_mismatch() is not None
+    est.counter_write_begin('set SOC')
+    assert est.bms_capacity() == 150.0  # a SoC write leaves the capacity setting alone
+    est.counter_write_begin('total_capacity write', capacity_change=True)
+    assert est.bms_capacity() is None and est.capacity_mismatch() is None
+
+
+def test_the_state_after_a_write_round_trips():
+    rows, charge = _counter_rows(30)
+    est, _ = run(rows, charge=charge)
+    est.counter_write_begin('set SOC')
+    est2 = _fresh()
+    assert est2.restore(_via_json(est.get_state(full=True)))
+    assert est2.q_c is None and est2._last_c is None and est2.q_ah == pytest.approx(est.q_ah)
+    est.counter_write_end(rows[-1][0])
+    est3 = _fresh()
+    assert est3.restore(_via_json(est.get_state(full=False)))
+
+
+def test_the_sampler_saves_before_the_write_goes_out(monkeypatch):
+    import bmslib.store
+    s, bms = _run_sampler(3, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
+    assert s.qmax._last_c is not None
+    log = []
+    monkeypatch.setattr(bmslib.store, 'store_qmax_state', lambda name, st: log.append(('save', st['last_charge'])))
+
+    async def write():
+        log.append(('write', None))
+        return 'ok'
+
+    assert asyncio.run(s.counter_write('set SOC', write)) == 'ok'
+    assert log == [('save', None), ('write', None)]
+    assert s.qmax._quarantine_until is not None and s.qmax._writes_open == 0
+
+
+def test_the_sampler_refuses_the_write_when_the_state_cannot_be_saved(monkeypatch):
+    import bmslib.store
+    from bmslib.estimator_common import CounterWriteRefused
+    s, _ = _run_sampler(3, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
+
+    def fail(name, st):
+        raise OSError('disk full')
+    monkeypatch.setattr(bmslib.store, 'store_qmax_state', fail)
+    sent = []
+
+    async def write():
+        sent.append(1)
+    with pytest.raises(CounterWriteRefused):
+        asyncio.run(s.counter_write('set SOC', write))
+    assert not sent and s.qmax._writes_open == 0 and s.qmax._last_c is None  # still reset, not restored
+
+
+def test_a_periodic_save_taken_before_the_write_cannot_land_after_it(monkeypatch):
+    """rev3 review F1: the background thread's save took its snapshot before
+    the write's reset and committed after the write's own save, putting the
+    old counter evidence back on disk."""
+    import bmslib.store
+    s, _ = _run_sampler(3, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
+    s.qmax.add(s.qmax._last_t + 1, 10.0, None, bms_charge=s.qmax._last_c - 0.1)  # new, with a counter reading
+    assert s.qmax._last_c is not None
+    committed, in_store, release = [], threading.Event(), threading.Event()
+
+    def store(name, st):
+        if not committed and not in_store.is_set():
+            in_store.set()
+            release.wait(5)
+        committed.append(st['last_charge'])
+    monkeypatch.setattr(bmslib.store, 'store_qmax_state', store)
+    periodic = threading.Thread(target=s.store_qmax_state)
+    periodic.start()
+    assert in_store.wait(5)
+    threading.Timer(0.3, release.set).start()
+
+    async def write():
+        return None
+    asyncio.run(s.counter_write('set SOC', write))
+    periodic.join(5)
+    assert committed[0] is not None  # the periodic save's snapshot carried the counter
+    assert len(committed) == 2 and committed[-1] is None, committed
+
+
+def test_set_soc_over_mqtt_goes_through_the_counter_write(monkeypatch):
+    calls = []
+
+    class _C:
+        def subscribe(self, *a, **k):
+            pass
+
+    class _B:
+        name = 'b'
+
+        async def set_soc(self, soc):
+            calls.append(('set_soc', soc))
+
+    async def counter_write(why, write):
+        calls.append(('boundary', why))
+        return await write()
+    q_mqtt.subscribe_set_soc(_C(), 'dev/x', _B(), counter_write=counter_write)
+    cb = q_mqtt._switch_callbacks['homeassistant/number/dev_x/set_soc/set']
+    asyncio.run(cb('42'))
+    assert calls == [('boundary', 'set SOC to 42.0%'), ('set_soc', 42.0)]

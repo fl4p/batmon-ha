@@ -5,6 +5,7 @@ import math
 import random
 import re
 import sys
+import threading
 import time
 from collections import defaultdict
 from copy import copy
@@ -284,6 +285,13 @@ class BmsSampler:
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None
+        # store_qmax_state runs on the loop and on the background thread; a
+        # periodic save that took its snapshot before a counter write must not
+        # land after the write's own save (rev3 review, F1)
+        self._qmax_store_lock = threading.Lock()
+        self._counter_write_lock = asyncio.Lock()  # set SOC (MQTT task) and settings writes (sampler task)
+        if self.qmax is not None and self.settings_service is not None:
+            self.settings_service.counter_write = self.counter_write
         # A withdrawn estimate is kept cleared until a new one goes out: [why,
         # when the last clear went through or None] (_withdraw_qmax)
         self._qmax_clear: Optional[list] = None
@@ -363,13 +371,39 @@ class BmsSampler:
         written) every 30 s while current flows."""
         if self.qmax is None:
             return
-        state = self.qmax.get_state(full=final)
-        js = json.dumps(state, sort_keys=True)
-        if js == self._qmax_saved:
-            return
-        from bmslib.store import store_qmax_state
-        store_qmax_state(self.bms.name, state)
-        self._qmax_saved = js
+        with self._qmax_store_lock:  # snapshot to commit, as one
+            state = self.qmax.get_state(full=final)
+            js = json.dumps(state, sort_keys=True)
+            if js == self._qmax_saved:
+                return
+            from bmslib.store import store_qmax_state
+            store_qmax_state(self.bms.name, state)
+            self._qmax_saved = js
+
+    async def counter_write(self, why: str, write, capacity_change: bool = False):
+        """Run `write()` (a coroutine function) that moves the BMS's charge
+        counter without charge flowing (set SOC, its capacity setting), so that
+        the Qmax/SoH estimator never takes a reading from one side of it as
+        evidence for the other (QmaxEstimator.counter_write_begin). The reset
+        state is saved before the write goes out: a restart after it then
+        finds nothing to continue the open segment with. Without that save
+        the write is not sent (CounterWriteRefused)."""
+        est = self.qmax
+        if est is None:
+            return await write()
+        async with self._counter_write_lock:
+            est.counter_write_begin(why, capacity_change=capacity_change)
+            try:
+                try:
+                    self.store_qmax_state()
+                except Exception as e:
+                    from bmslib.estimator_common import CounterWriteRefused
+                    logger.error('%s: %s not sent: the Qmax/SoH state could not be saved first: %s', self.bms.name,
+                                 why, summarize_exc(e))
+                    raise CounterWriteRefused(str(e)) from e
+                return await write()
+            finally:
+                est.counter_write_end(time.time())
 
     def get_meter_state(self):
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
@@ -645,7 +679,8 @@ class BmsSampler:
                 subscribe_switches(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
                                    switches=sample.switches.keys())
             if self.num_samples == 0 and mqtt_client and getattr(bms, 'supports_set_soc', lambda: False)():
-                subscribe_set_soc(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms)
+                subscribe_set_soc(mqtt_client, device_topic=self.mqtt_topic_prefix, bms=bms,
+                                  counter_write=self.counter_write if self.qmax is not None else None)
             if (mqtt_client and self.settings_service is not None and not self._settings_subscribed
                     and self._settings_exclude is not None and getattr(bms, 'settings', None) is not None):
                 subscribe_jk_settings(mqtt_client, self.mqtt_topic_prefix, self.settings_service,

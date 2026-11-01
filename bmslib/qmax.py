@@ -296,6 +296,19 @@ RESUME_TOL_FRAC = 0.02
 # its stop is covered too. What it costs: a restart at the top of a charge (a
 # pack resting at 99-100 %) ends the open segment.
 COUNTER_STOP_PCT = 1.0
+# A write to the BMS's SoC gauge (set SOC) or to its capacity setting moves its
+# counter with no charge flowing, so a reading from before the write and one
+# from after it are not comparable: across a restart, a +1.5 Ah write and 3 Ah
+# drawn while the host was off read -1.5 Ah against a bridge of ~0, inside
+# RESUME_TOL_FRAC, and the restart went through with 3 Ah uncounted. So
+# counter_write_begin forgets what was learnt about the counter, and its
+# readings are no evidence until this long after the last write returned. Not
+# a count of fetches: Daly caches its status for 30 s, and a request already in
+# flight when the write invalidates that cache fills it again with the reading
+# from before (rev3 review, F4). 120 s: that 30 s plus request timeouts, with
+# margin. What it costs: a restart within 2 minutes of a write ends the open
+# segment, as does a write while a restart is still being checked (_audit).
+COUNTER_WRITE_QUARANTINE_S = 120.0
 # An impossible current reading is bridged over like a missing sample only
 # when no other one came within this long before it (module doc). One per load
 # is what the real 2^31 mA JK glitch looks like; ending the epoch on it threw
@@ -813,6 +826,12 @@ class QmaxEstimator:
         # the first sample after it and its counter reading, 'q', 'm': q_ah and
         # q_moved there, 'held': times of the anchors whose pairs across it wait}
         self._audit: Optional[Dict[str, Any]] = None
+        # Writes to the BMS's counter (counter_write_begin/_end): how many are
+        # in progress, and until when its readings stay no evidence. Not saved:
+        # what they reset is, and a restart cannot be confirmed without it.
+        self._writes_open = 0
+        self._quarantine_until: Optional[float] = None
+        self._write_ends_audit: Optional[Dict[str, Any]] = None  # the _audit open when a write came: the next sample ends the epoch
         self._bms_caps: deque = deque(maxlen=BMS_CAP_N)  # [t, capacity the BMS reported], one an hour
         self._cap_warned = False  # the mismatch was logged by this process
         self._t_glitch: Optional[float] = None  # the last impossible current reading
@@ -983,6 +1002,49 @@ class QmaxEstimator:
         self.anchors.clear()
         self.segments.clear()
 
+    @locked
+    def counter_write_begin(self, why: str, capacity_change: bool = False):
+        """A write that moves the BMS's charge counter or SoC without charge
+        flowing is about to go out (set SOC; capacity_change: its capacity
+        setting). What was learnt from the counter is forgotten, as one group
+        (restore() checks them together), and its readings are no evidence until
+        counter_write_end plus COUNTER_WRITE_QUARANTINE_S. The current is
+        still integrated: no charge flowed, so the open segment stays, unless a
+        restart is still being checked (_audit), which only the counter can
+        confirm. The caller saves the state before the write goes out, so that
+        a restart after it finds nothing to confirm it with."""
+        self._writes_open += 1
+        self._c_src, self.q_c, self._c_q, self._last_c, self._c_max = None, None, None, None, None
+        self._last_soc = self._last_soc_raw = self._last_cfull = self._last_aged = None
+        if self._audit is not None:
+            self._write_ends_audit = self._audit  # the next sample ends the epoch, closing the rest with _audit still there
+        if capacity_change:
+            # the capacity-mismatch check's history is of the old setting
+            self._bms_caps.clear()
+            self._cap_warned = False
+        self.counts['counter_write'] += 1
+        logger.info('%s: Qmax: %s: the BMS\'s charge counter is no evidence until %.0f s after the write%s',
+                    self.name, why, COUNTER_WRITE_QUARANTINE_S,
+                    '; a restart still being checked ends the open segment' if self._audit is not None else '')
+
+    @locked
+    def counter_write_end(self, t: float):
+        """The write returned at t (wall clock, as sample timestamps): applied,
+        refused or unknown alike -- a timeout may have reached the BMS."""
+        self._writes_open = max(0, self._writes_open - 1)
+        until = t + COUNTER_WRITE_QUARANTINE_S
+        self._quarantine_until = until if self._quarantine_until is None else max(self._quarantine_until, until)
+
+    def _counter_quarantined(self, t: float) -> bool:
+        if self._writes_open:
+            return True
+        if self._quarantine_until is None:
+            return False
+        if t < self._quarantine_until:
+            return True
+        self._quarantine_until = None
+        return False
+
     # ------------------------------------------------------------ streaming
 
     @locked
@@ -1058,6 +1120,8 @@ class QmaxEstimator:
         soc_raw = float(bms_soc_raw) if finite(bms_soc_raw) else None
         cfull = float(capacity) if finite(capacity) and capacity > 0 else None
         aged = float(aged_capacity) if finite(aged_capacity) and aged_capacity > 0 else None
+        if self._counter_quarantined(t):  # a write moved the counter: no reading near it is evidence
+            c = src = soc = soc_raw = cfull = aged = None
         new = None
         resumed = False  # this sample continues the open segment across a restart
         if self._last_t is not None:
@@ -1066,6 +1130,8 @@ class QmaxEstimator:
                 new = self._gap(t, 'gap')
             elif self._resumed and not self._resume_ok(t, i, dt, c, src, (soc, soc_raw, cfull, aged)):
                 new = self._gap(t, 'restart_unverified')
+            elif self._audit is not None and self._audit is self._write_ends_audit:
+                new = self._gap(t, 'counter_write_in_audit')
             else:
                 resumed = self._resumed
                 assert self._last_i is not None
