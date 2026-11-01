@@ -42,7 +42,7 @@ ALL_STATUS = [STATUS_DSG_ON, STATUS_DSG_OFF]
 # Format ">B B ? ? B H x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles, pad.
 STATES_8CELL = dict(
-    name="daly_states_8cell_2temp",
+    name="daly_states_8cell_1temp",
     cmd=0x94,
     raw=b"\x08\x01\x00\x00\x02\x00\x35\xdc",
     expected=dict(
@@ -112,7 +112,7 @@ ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS, STATES_8CELL_HIGH_CYCLES,
 # *10, soc*10 signed).
 # Source: agent web-search round-trip-verified against dreadnought/python-daly-bms.
 SOC_SYNTHETIC_265V_5A = dict(
-    name="daly_soc_synth_26v5_neg5a_78p5",
+    name="daly_soc_synth_26v4_pos5a_78p5",
     cmd=0x90,
     # 264 → 26.4V; 0 unused; 30050 → +5.0A; 785 → 78.5% SOC
     raw=b"\x01\x08\x00\x00\x75\x62\x03\x11",
