@@ -244,7 +244,7 @@ def test_payload_matches_ble_decoder_expectations(fixture):
         assert mah / 1000 == pytest.approx(exp["capacity_ah"], abs=0.005)
     elif cmd == 0x94:
         n_cells, n_temps, charging, discharging, _bits, cycles = struct.unpack(
-            ">b b ? ? B h x", payload
+            ">b b ? ? B H x", payload
         )
         assert n_cells == exp["num_cells"]
         assert n_temps == exp["num_temps"]

@@ -54,7 +54,7 @@ STATUS_CHARGING = dict(
 
 
 # === States (cmd 0x94) ======================================================
-# Format ">b b ? ? B h x": num_cells, num_temps, charging, discharging,
+# Format ">b b ? ? B H x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles_BE, pad
 STATES_8S = dict(
     name="daly_uart_states_8cell_1temp",

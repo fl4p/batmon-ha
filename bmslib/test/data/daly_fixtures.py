@@ -39,7 +39,7 @@ ALL_STATUS = [STATUS_DSG_ON, STATUS_DSG_OFF]
 
 
 # States (cmd 0x94) — from in-source comments at daly.py:285.
-# Format ">b b ? ? B h x": num_cells, num_temps, charging, discharging,
+# Format ">b b ? ? B H x": num_cells, num_temps, charging, discharging,
 # state_bits, num_cycles, pad.
 STATES_8CELL = dict(
     name="daly_states_8cell_2temp",
@@ -72,7 +72,22 @@ STATES_4CELL_AA_FLAGS = dict(
     ),
 )
 
-ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS]
+STATES_8CELL_HIGH_CYCLES = dict(
+    name="daly_states_8cell_high_cycles",
+    cmd=0x94,
+    # Raw u16 BE 0x8000 = 32768; a signed 'h' would decode it as -32768.
+    raw=b"\x08\x01\x00\x00\x00\x80\x00\x00",
+    expected=dict(
+        num_cells=8,
+        num_temps=1,
+        charging=False,
+        discharging=False,
+        num_cycles=32768,
+        states={},
+    ),
+)
+
+ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS, STATES_8CELL_HIGH_CYCLES]
 
 
 # SOC (cmd 0x90) — synthesized per protocol doc (4× signed BE 16-bit fields:
@@ -89,6 +104,17 @@ SOC_SYNTHETIC_265V_5A = dict(
         soc=78.5,
     ),
 )
+
+# Cell voltages (cmd 0x95) — format ">b 3H x": frame index, three cell mV.
+# Voltage bytes are unsigned; raw 0x8000 is 32768 mV rather than -32768.
+VOLTAGES_3CELL_HIGH = dict(
+    name="daly_voltages_3cell_high",
+    cmd=0x95,
+    raw=b"\x01\x0c\xe4\x0d\x16\x80\x00\x00",
+    expected=dict(voltages=[3300, 3350, 32768]),
+)
+
+ALL_VOLTAGES = [VOLTAGES_3CELL_HIGH]
 
 ALL_SOC = [SOC_SYNTHETIC_265V_5A]
 

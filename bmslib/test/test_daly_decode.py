@@ -54,6 +54,19 @@ def test_daly_states(fx):
         assert data["states"].get(pin) is val
 
 
+@pytest.mark.parametrize("fx", daly_fixtures.ALL_VOLTAGES, ids=lambda fx: fx["name"])
+def test_daly_voltages(fx):
+    """Cell voltages are unsigned mV; 0x8000 must decode as 32768, not -32768."""
+    bms = _make_daly()
+
+    async def fake_q(cmd, num_responses=1):
+        return [fx["raw"]]
+
+    bms._q = fake_q
+    voltages = asyncio.run(bms.fetch_voltages(num_cells=3))
+    assert voltages == fx["expected"]["voltages"]
+
+
 @pytest.mark.parametrize("fx", daly_fixtures.ALL_TEMPERATURES, ids=lambda fx: fx["name"])
 def test_daly_temperatures(fx):
     """Probe values are unsigned byte temp+40; >127 raw must not wrap negative."""

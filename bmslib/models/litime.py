@@ -57,6 +57,7 @@ class LitimeBt(BtBms):
         #self.logger.info('Data read:')
         #self.logger.info(buf)
         cels_temperature = int.from_bytes(buf[52:54], byteorder='little',signed=True)
+        soc_raw = int.from_bytes(buf[90:92], byteorder='little')
         #self.logger.info('Parsed Cell Temp:')
         #self.logger.info(cels_temperature)
         sample = BmsSample(
@@ -67,8 +68,9 @@ class LitimeBt(BtBms):
             # A float skips BmsSample's charge/capacity derivation on purpose:
             # the BMS's integer SoC is the reference one (the vendor app shows
             # it), while the remaining-charge counter can run past `capacity`
-            # and derive a SoC above 100 % (#428).
-            soc=float(int.from_bytes(buf[90:92], byteorder='little')),
+            # and derive a SoC above 100 % (#428). An implausible field (the
+            # frame carries no usable checksum) falls back to the derivation.
+            soc=float(soc_raw) if 0 <= soc_raw <= 100 else soc_raw,
             num_cycles=int.from_bytes(buf[96:100], byteorder='little'),
             temperatures= [cels_temperature],
             mos_temperature = int.from_bytes(buf[54:56], byteorder='little'),

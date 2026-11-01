@@ -315,7 +315,7 @@ more, or 1 % or less (as batmon shows it, or as the BMS reported it), reports no
 capacity the BMS reports, the aged capacity it reports, or the highest value this counter has been seen at. A BMS's
 counter stops at full while cells that hold 105–110 % of their nameplate keep taking charge, so it reads "moved 0"
 while the charger ran: with 3, 6 and 10 Ah going in unseen that way, 95.0, 91.7 and 87.3 Ah were published for a 98 Ah
-pack. Every one of those signs is needed: a driver that reports a whole-number SoC (supervolt, jbd, ant, litime, basen,
+pack. Every one of those signs is needed: a driver that reports a whole-number SoC (supervolt, jbd, ant, basen,
 legacy JK, most aiobmsble types) gets it replaced by remaining charge ÷ capacity, so on an aged pack whose counter tops
 out at its learnt full capacity, 0.97× the design capacity it reports, "100 %" showed as 97 % and the same numbers were
 published again. The price is that a restart at the top of a charge (or near empty) ends the segment, and so does one

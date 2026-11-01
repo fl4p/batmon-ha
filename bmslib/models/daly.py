@@ -427,7 +427,7 @@ class DalyBt(BtBms):
 
         response_data = await self._q(0x94)
 
-        parts = struct.unpack('>b b ? ? B h x', response_data)
+        parts = struct.unpack('>b b ? ? B H x', response_data)
 
         state_names = ["DI1", "DI2", "DI3", "DI4", "DO1", "DO2", "DO3", "DO4"]
         states = {name: bool(parts[4] >> i & 1) for i, name in enumerate(state_names)}
@@ -459,7 +459,7 @@ class DalyBt(BtBms):
         resp = await self._q(0x95, num_responses=num_resp)
         voltages = []
         for i in range(num_resp):
-            v = struct.unpack(">b 3h x", resp[i])
+            v = struct.unpack(">b 3H x", resp[i])
             if v[0] != i + 1:
 
                 raise ValueError("out-of-order frame %s != #%s" % (v, i + 1))

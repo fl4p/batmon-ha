@@ -1,8 +1,9 @@
 ## [unreleased]
 
-* Fix (`litime`): the BMS's own SoC is now published instead of one derived from the charge counter, which can run past `capacity` and gave 109 % while the vendor app showed 99 % (#428).
+* Fix (`litime`): publish the BMS's own SoC; deriving it from the charge counter, which can run past `capacity`, gave 109 % where the app shows 99 %. An implausible field falls back to the derivation (#428).
 * Fix (`daly`): the `0x94` DI/DO flags byte was unpacked signed, so a bit at `0x80` or above (the `0xAA` request fill is reflected into it) raised and left the BMS unavailable (#429, thanks @Vittaly76).
 * Fix (`daly`): temperatures above 87 °C decoded negative because probe values were unpacked signed; they are unsigned bytes offset by 40 (#429).
+* Fix (`daly`): the cycle counter is decoded unsigned, so a pack past 32767 cycles no longer reports a negative count; cell voltages are likewise unsigned, though only a corrupt ≥ 32768 mV value would wrap (#429).
 * Fix (`daly2`): a module that drops the first request after connecting lost that sampling cycle to an 8 s timeout; the request is now re-sent once (#427).
 
 ## [2.27]
