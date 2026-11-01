@@ -26,7 +26,7 @@ def _wrap_response(cmd: int, payload: bytes) -> bytes:
 # === SOC (cmd 0x90) =========================================================
 # BE 16-bit fields: voltage*10 signed, x_voltage*10 signed, current+30000
 # (centred, scaled ×10, unsigned), soc*10 signed. Same payload as
-# daly_fixtures.SOC_SYNTHETIC_265V_5A but wrapped for the wire format.
+# daly_fixtures.SOC_SYNTHETIC_26V4_5A but wrapped for the wire format.
 SOC_26V4 = dict(
     name="daly_uart_soc_26v4_pos5a_78p5",
     cmd=0x90,

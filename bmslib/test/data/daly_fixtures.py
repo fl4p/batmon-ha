@@ -111,7 +111,7 @@ ALL_STATES = [STATES_8CELL, STATES_4CELL_AA_FLAGS, STATES_8CELL_HIGH_CYCLES,
 # voltage*10 signed, x_voltage*10 signed, current+30000 (centred, unsigned)
 # *10, soc*10 signed).
 # Source: agent web-search round-trip-verified against dreadnought/python-daly-bms.
-SOC_SYNTHETIC_265V_5A = dict(
+SOC_SYNTHETIC_26V4_5A = dict(
     name="daly_soc_synth_26v4_pos5a_78p5",
     cmd=0x90,
     # 264 → 26.4V; 0 unused; 30050 → +5.0A; 785 → 78.5% SOC
@@ -155,7 +155,7 @@ SOC_HIGH_CURRENT = dict(
     ),
 )
 
-ALL_SOC = [SOC_SYNTHETIC_265V_5A, SOC_HIGH_CURRENT]
+ALL_SOC = [SOC_SYNTHETIC_26V4_5A, SOC_HIGH_CURRENT]
 
 
 # Temperatures (cmd 0x96) — format ">b 7B": probe index, then temp+40 per probe.
