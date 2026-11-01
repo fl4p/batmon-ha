@@ -201,3 +201,41 @@ def test_group_plumbing():
     grp.samples['b2'] = s2
     res = grp.fetch()
     assert res.voltage == 24.0
+
+
+class _Member:
+    def __init__(self, name, result=None, error=None):
+        self.name = name
+        self.result = result
+        self.error = error
+
+    async def set_switch(self, switch, state):
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def test_group_set_switch_reports_a_refused_member():
+    import asyncio
+    grp = VirtualGroupBms(address='a,b', name='grp')
+    grp.add_member(_Member('a'))
+    grp.add_member(_Member('b', result=False))
+
+    assert asyncio.run(grp.set_switch('charge', True)) is False
+
+
+def test_group_set_switch_success_keeps_the_echo():
+    import asyncio
+    grp = VirtualGroupBms(address='a,b', name='grp')
+    grp.add_member(_Member('a'))
+    grp.add_member(_Member('b'))
+
+    assert asyncio.run(grp.set_switch('charge', True)) is not False
+
+
+def test_group_set_switch_member_error_is_a_refusal():
+    import asyncio
+    grp = VirtualGroupBms(address='a', name='grp')
+    grp.add_member(_Member('a', error=RuntimeError('boom')))
+
+    assert asyncio.run(grp.set_switch('charge', True)) is False

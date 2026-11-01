@@ -255,6 +255,7 @@ class _TailThenReplyClient(_FakeClient):
 @pytest.mark.parametrize("tail", [
     bytes([0x00, 0x03, 0x7C]),        # does not start with the slave address
     bytes([0xD2, 0x03, 0x7C, 0x00]),  # starts with it, but is a bogus frame
+    bytes([0xD2, 0x03, 0xF0, 0x00]),  # plausible header, impossible bytecount
 ])
 def test_partial_frame_from_the_lost_request_does_not_swallow_the_retry(tail):
     fx = daly2_fixtures.AIOBMSBLE_4S

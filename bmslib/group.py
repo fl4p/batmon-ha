@@ -150,11 +150,17 @@ class VirtualGroupBms:
         pass
 
     async def set_switch(self, switch: str, state: bool):
+        results = []
         for bms in self.members:
             try:
-                await bms.set_switch(switch, state)
+                results.append(await bms.set_switch(switch, state))
             except Exception as ex:
                 self.logger.error("Group %s failed to set %s switch for %s: %s", self.name, switch, bms.name, ex)
+                results.append(False)
+        # A driver returns False when the BMS refused the write; the caller
+        # (mqtt_util) then skips the optimistic HA state echo.
+        if any(r is False for r in results):
+            return False
 
     async def fetch_device_info(self):
         raise NotImplementedError()

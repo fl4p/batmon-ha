@@ -90,6 +90,9 @@ class Daly2Bt(BtBms):
         # drop the first request after connecting; daly.py's handshake re-asks
         # for the same reason (#416). Retry that first request once.
         self._first_reply_pending = False
+        # Payload length of the read in flight, so a stale tail cannot pass for
+        # a 0x03 reply header with a bogus bytecount and stall the parse.
+        self._read_bytecount = None
 
     def _notification_handler(self, _sender, data):
         self.logger.debug("ble data frame %s", data)
@@ -110,6 +113,11 @@ class Daly2Bt(BtBms):
 
             func = self._buffer[1]
             if func == MODBUS_READ_HOLDING:
+                if self._read_bytecount is not None and self._buffer[2] != self._read_bytecount:
+                    self.logger.warning("daly2 unexpected read length %d (want %d): %s",
+                                        self._buffer[2], self._read_bytecount, self._buffer.hex())
+                    del self._buffer[0]
+                    continue
                 # [addr][0x03][bytecount][...data...][crc_lo][crc_hi]
                 expected = 3 + self._buffer[2] + 2
             elif func == MODBUS_WRITE_SINGLE:
@@ -170,6 +178,8 @@ class Daly2Bt(BtBms):
 
     async def _q(self, request: bytes, timeout=None):
         func = request[1]
+        if func == MODBUS_READ_HOLDING:
+            self._read_bytecount = int.from_bytes(request[4:6], 'big') * 2
         attempts = 2 if self._first_reply_pending else 1
         for attempt in range(attempts):
             self._buffer.clear()
