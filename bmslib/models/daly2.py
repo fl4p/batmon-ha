@@ -263,8 +263,9 @@ class Daly2Bt(BtBms):
         req = _write_request(reg, 1 if state else 0)
         self.logger.info("daly2 set %s mosfet -> %s: %s", switch, state, req.hex())
         # A correct write echoes the request frame (func 0x06). If the register
-        # is wrong the BMS stays silent, so don't let the missing echo turn into
-        # a fatal 8s-blocking traceback in the mqtt action queue.
+        # is wrong the BMS stays silent or answers with an exception frame, so
+        # don't let either turn into a fatal blocking traceback in the mqtt
+        # action queue.
         try:
             echo = await self._q(req, timeout=self.SET_SWITCH_TIMEOUT)
             self.logger.info("daly2 %s mosfet write echoed: %s", switch, echo.hex())
@@ -276,5 +277,8 @@ class Daly2Bt(BtBms):
             self.logger.warning(
                 "daly2 %s mosfet write to reg 0x%04x got no echo - register may be "
                 "wrong for this firmware or the command was rejected", switch, reg)
+        except IOError as e:
+            self.logger.warning("daly2 %s mosfet write to reg 0x%04x was rejected: %s",
+                                switch, reg, e)
 
 
