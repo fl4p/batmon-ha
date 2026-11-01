@@ -1,4 +1,4 @@
-## [unreleased]
+## [2.28]
 
 * Fix: when the MQTT watchdog exited the add-on, energy counters, Qmax/SoH and cell-resistance state could go unsaved, because the main loop rarely reached its final store before the forced exit (#391).
 
