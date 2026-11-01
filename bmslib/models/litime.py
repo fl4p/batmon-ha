@@ -64,7 +64,11 @@ class LitimeBt(BtBms):
             current=-int.from_bytes(buf[48:52], byteorder='little',signed=True) / 1000,
             charge = int.from_bytes(buf[62:64], byteorder='little') / 100,
             capacity=int.from_bytes(buf[64:66], byteorder='little') / 100,
-            soc=int.from_bytes(buf[90:92], byteorder='little'),
+            # A float skips BmsSample's charge/capacity derivation on purpose:
+            # the BMS's integer SoC is the reference one (the vendor app shows
+            # it), while the remaining-charge counter can run past `capacity`
+            # and derive a SoC above 100 % (#428).
+            soc=float(int.from_bytes(buf[90:92], byteorder='little')),
             num_cycles=int.from_bytes(buf[96:100], byteorder='little'),
             temperatures= [cels_temperature],
             mos_temperature = int.from_bytes(buf[54:56], byteorder='little'),

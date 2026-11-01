@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix (`litime`): the BMS's own SoC is now published instead of one derived from the charge counter, which can run past `capacity` and gave 109 % while the vendor app showed 99 % (#428).
+
 ## [2.27]
 
 * Fix (JK settings): on firmware without Cell RCV/RFV (HW 11A, FW 11.54), read as 0 V, every SOC 100% write was rejected. Writes to RCV/RFV themselves are now refused instead of locking all writes (#426).
