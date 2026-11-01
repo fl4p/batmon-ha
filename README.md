@@ -393,7 +393,10 @@ Batmon can talk to your BMS through one of four Bluetooth backends. Pick one wit
   the proxy, whichever of HA and the add-on reconnects last takes it over, and the other silently gets
   nothing: an HA restart stops every BMS on the proxy until the add-on reconnects, and the add-on
   winning cuts off HA's own BLE devices there. Use proxies dedicated to the add-on: remove them from
-  HA's ESPHome integration or leave them out of HA. Each proxy has 3 BLE connection slots by default (see
+  HA's ESPHome integration or leave them out of HA. To share one proxy between HA and the add-on, flash
+  [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/) ≥ 0.2.0 instead (browser
+  flasher): it serves up to 4 API clients at once, and each BLE link belongs to the client that opened
+  it, so an add-on restart frees its BMS links. Each proxy has 3 BLE connection slots by default (see
   [esphome_proxy/README.md](bmslib/esphome_proxy/README.md)). Configure the proxies under the
   `bluetooth_proxies:` add-on option:
 

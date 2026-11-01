@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Doc: to share one Bluetooth proxy between Home Assistant and the add-on, flash nimble-ble-proxy ≥ 0.2.0, which serves several API clients and frees a restarted client's BMS links (#391).
+
 * Fix (`litime`): publish the BMS's own SoC; deriving it from the charge counter, which can run past `capacity`, gave 109 % where the app shows 99 %. An implausible field falls back to the derivation (#428).
 * Fix (`daly`): the `0x94` DI/DO flags byte was unpacked signed, so a bit at `0x80` or above (the `0xAA` wired-request fill is reflected into it) raised and left the BMS unavailable (#429, thanks @Vittaly76).
 * Fix (`daly`): temperatures above 87 °C decoded negative because probe values were unpacked signed; they are unsigned bytes offset by 40 (#429).
