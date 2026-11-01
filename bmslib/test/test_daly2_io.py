@@ -124,7 +124,7 @@ def test_set_switch_writes_mosfet_register():
     req = _write_request(SWITCH_REGISTERS["discharge"], 1)
     bms.client = _FakeClient(bms, req)
 
-    asyncio.run(bms.set_switch("discharge", True))
+    assert asyncio.run(bms.set_switch("discharge", True)) is not False
     assert bms.client.written == req
     assert bms._switches["discharge"] is True
 
@@ -139,7 +139,7 @@ def test_set_switch_no_echo_does_not_raise():
     bms.client = _FakeClient(bms, b"")  # no response delivered
 
     t0 = time.monotonic()
-    asyncio.run(bms.set_switch("charge", False))  # should swallow the timeout
+    assert asyncio.run(bms.set_switch("charge", False)) is False
     assert time.monotonic() - t0 < 1.0
 
 
@@ -151,7 +151,7 @@ def test_set_switch_rejected_with_exception_does_not_raise():
     bms.SET_SWITCH_TIMEOUT = 0.1
     bms.client = _FakeClient(bms, _exception_frame(0x06, 0x02))
 
-    asyncio.run(bms.set_switch("charge", True))
+    assert asyncio.run(bms.set_switch("charge", True)) is False
 
 
 def test_set_switch_first_request_after_connect_retries():
@@ -163,7 +163,7 @@ def test_set_switch_first_request_after_connect_retries():
     bms._switches = dict(charge=False, discharge=False)
     bms._first_reply_pending = True
 
-    asyncio.run(bms.set_switch("discharge", True))
+    assert asyncio.run(bms.set_switch("discharge", True)) is not False
 
     assert bms.client.writes == 2
     assert bms._switches["discharge"] is True
@@ -252,14 +252,18 @@ class _TailThenReplyClient(_FakeClient):
         self._deliver()
 
 
-def test_partial_frame_from_the_lost_request_does_not_swallow_the_retry():
+@pytest.mark.parametrize("tail", [
+    bytes([0x00, 0x03, 0x7C]),        # does not start with the slave address
+    bytes([0xD2, 0x03, 0x7C, 0x00]),  # starts with it, but is a bogus frame
+])
+def test_partial_frame_from_the_lost_request_does_not_swallow_the_retry(tail):
     fx = daly2_fixtures.AIOBMSBLE_4S
     bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
     bms.UUID_TX = "tx"
     bms.TIMEOUT = 0.05
-    # a tail that does not start with the slave address, but whose next bytes
-    # look like a 0x03 reply header expecting a full 124-byte payload
-    bms.client = _TailThenReplyClient(bms, fx["raw"], bytes([0x00, 0x03, 0x7C]))
+    # a tail from the lost reply whose next bytes look like a 0x03 reply header
+    # expecting a full 124-byte payload
+    bms.client = _TailThenReplyClient(bms, fx["raw"], tail)
     bms._first_reply_pending = True
 
     sample = asyncio.run(bms.fetch())

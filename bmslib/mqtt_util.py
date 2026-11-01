@@ -687,9 +687,12 @@ def subscribe_switches(mqtt_client: paho.Client, device_topic, bms: BtBms, switc
     async def set_switch(switch_name: str, state: bool):
         assert isinstance(state, bool)
         logger.info('Set %s %s switch %s', bms.name, switch_name, state)
-        await bms.set_switch(switch_name, state)
+        ok = await bms.set_switch(switch_name, state)
         topic = f"{device_topic}/switch/{switch_name}"
-        mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
+        # A driver returns False when the BMS refused the write. Don't echo the
+        # requested state then; the next sample publishes the real register.
+        if ok is not False:
+            mqtt_single_out(mqtt_client, topic, 'ON' if state else 'OFF')
 
     node_id = device_topic.replace('/', '_')
     for switch_name in switches:

@@ -7,6 +7,7 @@
 * Fix (`daly`): the `0x90` current word is unsigned again, so a discharge above 276.7 A no longer reads as roughly −6000 A; ≤3-cell packs no longer crash on the voltage frame (#429).
 * Fix (`daly2`): a module that drops the first request after connecting lost that sampling cycle to an 8 s timeout; the request is now re-sent once (#427).
 * Fix (`daly2`): a Modbus exception reply (func|0x80) timed out instead of reporting the exception code.
+* Fix (`daly2`): a switch write the BMS rejected no longer echoes the requested state to Home Assistant; the next sample publishes the register state.
 
 ## [2.27]
 

@@ -98,46 +98,49 @@ class Daly2Bt(BtBms):
         # A reply cut off by a timeout leaves a partial frame behind, and its
         # tail arrives after the retry cleared the buffer: parsed as a frame
         # head it can swallow the retry's own reply. Every reply starts with
-        # the slave address, so resync on that instead of trusting buffer[1].
-        while self._buffer and self._buffer[0] != MODBUS_ADDRESS:
-            del self._buffer[0]
+        # the slave address, so resync on it; on a bad length or CRC drop that
+        # one sync byte and look for the next address instead of clearing the
+        # buffer, which would take the retry's reply with it.
+        while self._buffer:
+            while self._buffer and self._buffer[0] != MODBUS_ADDRESS:
+                del self._buffer[0]
 
-        if len(self._buffer) < 3:
-            return
+            if len(self._buffer) < 3:
+                return
 
-        func = self._buffer[1]
-        if func == MODBUS_READ_HOLDING:
-            # [addr][0x03][bytecount][...data...][crc_lo][crc_hi]
-            expected = 3 + self._buffer[2] + 2
-        elif func == MODBUS_WRITE_SINGLE:
-            # echo: [addr][0x06][reg_hi][reg_lo][val_hi][val_lo][crc_lo][crc_hi]
-            expected = 8
-        elif func & 0x80:
-            # exception: [addr][func|0x80][exc_code][crc_lo][crc_hi]
-            expected = 5
-        else:
-            self.logger.warning("daly2 unexpected func 0x%02x: %s", func, self._buffer.hex())
-            self._buffer.clear()
-            return
+            func = self._buffer[1]
+            if func == MODBUS_READ_HOLDING:
+                # [addr][0x03][bytecount][...data...][crc_lo][crc_hi]
+                expected = 3 + self._buffer[2] + 2
+            elif func == MODBUS_WRITE_SINGLE:
+                # echo: [addr][0x06][reg_hi][reg_lo][val_hi][val_lo][crc_lo][crc_hi]
+                expected = 8
+            elif func & 0x80:
+                # exception: [addr][func|0x80][exc_code][crc_lo][crc_hi]
+                expected = 5
+            else:
+                self.logger.warning("daly2 unexpected func 0x%02x: %s", func, self._buffer.hex())
+                del self._buffer[0]
+                continue
 
-        if len(self._buffer) < expected:
-            return
+            if len(self._buffer) < expected:
+                return
 
-        frame = bytes(self._buffer[:expected])
-        self._buffer.clear()
+            frame = bytes(self._buffer[:expected])
+            crc_calc = _modbus_crc16(frame[:-2])
+            crc_recv = frame[-2] | (frame[-1] << 8)
+            if crc_calc != crc_recv:
+                self.logger.warning("daly2 crc fail (calc %04x != recv %04x): %s",
+                                    crc_calc, crc_recv, frame.hex())
+                del self._buffer[0]
+                continue
 
-        func = frame[1]
-        crc_calc = _modbus_crc16(frame[:-2])
-        crc_recv = frame[-2] | (frame[-1] << 8)
-        if crc_calc != crc_recv:
-            self.logger.warning("daly2 crc fail (calc %04x != recv %04x): %s",
-                                crc_calc, crc_recv, frame.hex())
-            return
+            del self._buffer[:expected]
 
-        # An exception reply carries func|0x80 as its command byte but answers
-        # the request's function: deliver it under the request key, otherwise
-        # the waiter on the plain function never sees it.
-        self._fetch_futures.set_result(func & 0x7F if func & 0x80 else func, frame)
+            # An exception reply carries func|0x80 as its command byte but answers
+            # the request's function: deliver it under the request key, otherwise
+            # the waiter on the plain function never sees it.
+            self._fetch_futures.set_result(func & 0x7F if func & 0x80 else func, frame)
 
     async def connect(self, **kwargs):
         await super().connect(**kwargs)
@@ -277,8 +280,10 @@ class Daly2Bt(BtBms):
             self.logger.warning(
                 "daly2 %s mosfet write to reg 0x%04x got no echo - register may be "
                 "wrong for this firmware or the command was rejected", switch, reg)
+            return False
         except IOError as e:
             self.logger.warning("daly2 %s mosfet write to reg 0x%04x was rejected: %s",
                                 switch, reg, e)
+            return False
 
 

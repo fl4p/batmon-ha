@@ -1,4 +1,5 @@
 """MQTT command topics: JK settings commands, and re-subscribing every command topic after a reconnect."""
+import asyncio
 import pytest
 
 import bmslib.mqtt_util as mqtt_util
@@ -118,3 +119,31 @@ def test_main_on_connect_resubscribes_commands():
     on_connect = src[src.index('def _on_connect'):src.index('def _on_disconnect')]
     assert 'subscribe_state_topics(client)' in on_connect
     assert 'resubscribe_commands(client)' in on_connect
+
+
+def test_rejected_switch_write_is_not_echoed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mqtt_util, 'mqtt_single_out', lambda *a, **k: calls.append(a))
+
+    class _Refusing(_Bms):
+        async def set_switch(self, name, state):
+            return False
+
+    subscribe_switches(_Client(), 'dev', _Refusing(), ['charge'])
+    mqtt_message_handler(_Client(), None, _Msg('homeassistant/switch/dev/charge/set', 'ON'))
+    asyncio.run(mqtt_util.mqtt_process_action_queue())
+    assert calls == []
+
+
+def test_accepted_switch_write_is_echoed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mqtt_util, 'mqtt_single_out', lambda *a, **k: calls.append(a))
+
+    class _Accepting(_Bms):
+        async def set_switch(self, name, state):
+            return True
+
+    subscribe_switches(_Client(), 'dev', _Accepting(), ['charge'])
+    mqtt_message_handler(_Client(), None, _Msg('homeassistant/switch/dev/charge/set', 'ON'))
+    asyncio.run(mqtt_util.mqtt_process_action_queue())
+    assert calls and calls[-1][1] == 'dev/switch/charge' and calls[-1][2] == 'ON'
