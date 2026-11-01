@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Fix: when the MQTT watchdog exited the add-on, energy counters, Qmax/SoH and cell-resistance state could go unsaved, because the main loop rarely reached its final store before the forced exit (#391).
+
 * Doc: to share one Bluetooth proxy between Home Assistant and the add-on, flash nimble-ble-proxy ≥ 0.2.0, which serves several API clients and frees a restarted client's BMS links (#391).
 
 * Fix (`litime`): publish the BMS's own SoC; deriving it from the charge counter, which can run past `capacity`, gave 109 % where the app shows 99 %. An implausible field falls back to the derivation (#428).

@@ -76,19 +76,23 @@ async def fetch_loop(fn, period, max_errors, max_backoff=60):
         await fn.bms.disconnect()
 
 
+_store_lock = threading.Lock()  # the watchdog thread and the main shutdown path may both store
+
+
 def store_states(samplers: list[BmsSampler], final=False):
-    meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
-    from bmslib.store import store_meter_states
-    store_meter_states(meter_states)
-    for s in samplers:
-        try:
-            s.store_impedance_state(final=final)
-        except Exception as e:
-            logger.error('%s: error storing cell resistance state: %s', s.bms.name, e)
-        try:
-            s.store_qmax_state(final=final)
-        except Exception as e:
-            logger.error('%s: error storing Qmax/SoH state: %s', s.bms.name, e)
+    with _store_lock:
+        meter_states = {s.bms.name: s.get_meter_state() for s in samplers}
+        from bmslib.store import store_meter_states
+        store_meter_states(meter_states)
+        for s in samplers:
+            try:
+                s.store_impedance_state(final=final)
+            except Exception as e:
+                logger.error('%s: error storing cell resistance state: %s', s.bms.name, e)
+            try:
+                s.store_qmax_state(final=final)
+            except Exception as e:
+                logger.error('%s: error storing Qmax/SoH state: %s', s.bms.name, e)
 
 
 def _runtime_kind():
@@ -130,6 +134,12 @@ def background_thread(timeout: float, sampler_list: List[BmsSampler]):
     t_start = time.time()
     while not shutdown:
         if not bg_checks(sampler_list, timeout, t_start):
+            # the watchdog kills the process below; the main loop may not reach its own
+            # final store in time (it sleeps through backoff + period first, #391)
+            try:
+                store_states(sampler_list, final=True)
+            except Exception as e:
+                logger.error('Error storing final states: %s', e)
             break
         time.sleep(4)
     logger.debug("Background thread ends. shutdown=%s", shutdown)
