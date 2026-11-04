@@ -116,6 +116,13 @@ def bg_checks(sampler_list, timeout, t_start):
             else:
                 logger.error("MQTT never published a message after %.0fs, exit", timeout)
             shutdown = True
+            # background_thread kills the process 10 s from now; the main loop may not reach
+            # its own final store in time (it sleeps through backoff + period first, #391).
+            # Store here: both background_loop and background_thread call this.
+            try:
+                store_states(sampler_list, final=True)
+            except Exception as e:
+                logger.error('Error storing final states: %s', e)
             return False
 
     global t_last_store
@@ -134,12 +141,6 @@ def background_thread(timeout: float, sampler_list: List[BmsSampler]):
     t_start = time.time()
     while not shutdown:
         if not bg_checks(sampler_list, timeout, t_start):
-            # the watchdog kills the process below; the main loop may not reach its own
-            # final store in time (it sleeps through backoff + period first, #391)
-            try:
-                store_states(sampler_list, final=True)
-            except Exception as e:
-                logger.error('Error storing final states: %s', e)
             break
         time.sleep(4)
     logger.debug("Background thread ends. shutdown=%s", shutdown)
