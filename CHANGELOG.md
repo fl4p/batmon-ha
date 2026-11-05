@@ -1,3 +1,7 @@
+## [unreleased]
+
+* Fix (`ble_stack: esphome`): one unreachable proxy held start-up forever, so nothing was polled. Start-up now waits at most 10 s; an offline proxy keeps reconnecting in the background (#430).
+
 ## [2.28]
 
 * Fix: when the MQTT watchdog exited the add-on, energy counters, Qmax/SoH and cell-resistance state could go unsaved, because the main loop rarely reached its final store before the forced exit (#391).
