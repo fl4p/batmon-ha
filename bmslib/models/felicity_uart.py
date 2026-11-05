@@ -94,11 +94,20 @@ layout above are a re-expression of their documentation.
 Configure with:
     address: serial
     adapter: /dev/ttyUSB0
-    type:    felicity_uart          # or felicity_uart:2 for DIP address 2
+    type:    felicity_uart          # or felicity_uart:2 for bus address 2
     alias:   any human-readable name
 
-Several packs share one bus, each with its own DIP address (1, 2, 3, ...); add one
+Several packs share one bus, each with its own address (1, 2, 3, ...); add one
 device per pack on the same adapter. Default address 1. 9600 8N1.
+
+The FLB48314TG1 has no DIP switches: the packs discover each other and assign
+themselves consecutive addresses, which is why the upstream daemon enumerates
+the bus instead of being told the numbers (Krzysztof Hajdamowicz, #415). The
+protocol carries no serial number or any other pack identity, so if that
+assignment ever moves, nothing on the wire can tell -- an `alias` (and the
+energy meters keyed to it) would silently follow a different pack. Other models
+in the family may well have switches; either way, start at 1 and add one entry
+per pack until one stops answering.
 Untested on hardware.
 """
 import math
@@ -347,7 +356,7 @@ class FelicityUart(BtBms):
         spec = kwargs.pop('type_spec', None)
         self.slave = int(spec, 0) if spec else 1
         if not 1 <= self.slave <= 247:
-            raise ValueError("felicity address must be 1..247 (the DIP switch number), got %r" % (spec,))
+            raise ValueError("felicity address must be 1..247, got %r" % (spec,))
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
         self._last_cells: List[int] = []
@@ -489,6 +498,6 @@ class FelicityUart(BtBms):
         raise NotImplementedError("Felicity packs expose no writable registers over RS485")
 
     def __str__(self):
-        # several packs share one `serial` address, so the DIP address belongs
+        # several packs share one `serial` address, so the bus address belongs
         # in every log line next to the name
         return 'FelicityUart(%s,%s,addr=%d)' % (self.address, self.name, self.slave)
