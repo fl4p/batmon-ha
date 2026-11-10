@@ -411,6 +411,9 @@ def normalize_ble_address(address):
 FORCE_DISCONNECT_TIMEOUT = 10.0
 
 
+# stopping the scanner in _connect_with_scanner(), also while a cancellation waits
+SCANNER_STOP_TIMEOUT = 5.0
+
 class BtBms:
     shutdown = False
 
@@ -693,34 +696,37 @@ class BtBms:
         self.logger.debug("starting scan")
         await scanner.start()
 
-        attempt = 1
-        while True:
-            try:
-                discovered = set(b.address for b in scanner.discovered_devices)
-                ad = f' using adapter {self._adapter}' if self._adapter else ''
-                # Case-insensitive: backends disagree on MAC case (the ESPHome
-                # proxy reports uppercase), and an exact membership test here
-                # would reject a device that is plainly in range (#399).
-                if self.address.upper() not in {d.upper() for d in discovered}:
-                    raise BleakDeviceNotFoundError(
-                        self.address, 'Device %s%s not discovered. Make sure it in range and is not being '
-                                      'accessed by another app. (found %s)' % (
-                                          self.address, ad, discovered))
+        try:  # a caller's timeout cancels us mid-retry; the scan must not keep running
+            attempt = 1
+            while True:
+                try:
+                    discovered = set(b.address for b in scanner.discovered_devices)
+                    ad = f' using adapter {self._adapter}' if self._adapter else ''
+                    # Case-insensitive: backends disagree on MAC case (the ESPHome
+                    # proxy reports uppercase), and an exact membership test here
+                    # would reject a device that is plainly in range (#399).
+                    if self.address.upper() not in {d.upper() for d in discovered}:
+                        raise BleakDeviceNotFoundError(
+                            self.address, 'Device %s%s not discovered. Make sure it in range and is not being '
+                                          'accessed by another app. (found %s)' % (
+                                              self.address, ad, discovered))
 
-                self.logger.debug("connect attempt %d", attempt)
-                await self._connect_client(timeout=timeout / 2)
-                break
+                    self.logger.debug("connect attempt %d", attempt)
+                    await self._connect_client(timeout=timeout / 2)
+                    break
+                except Exception as e:
+                    await self.client.disconnect()
+                    if attempt < 8:
+                        self.logger.debug('retry %d after error %s', attempt, e)
+                        await asyncio.sleep(0.2 * (1.5 ** attempt))
+                        attempt += 1
+                    else:
+                        raise
+        finally:
+            try:  # bounded: it also runs while a cancellation waits for us
+                await asyncio.wait_for(scanner.stop(), SCANNER_STOP_TIMEOUT)
             except Exception as e:
-                await self.client.disconnect()
-                if attempt < 8:
-                    self.logger.debug('retry %d after error %s', attempt, e)
-                    await asyncio.sleep(0.2 * (1.5 ** attempt))
-                    attempt += 1
-                else:
-                    await scanner.stop()
-                    raise
-
-        await scanner.stop()
+                self.logger.warning('stopping the scanner failed: %s', str(e) or type(e).__name__)
 
     async def disconnect(self):
         self._connect_complete = False

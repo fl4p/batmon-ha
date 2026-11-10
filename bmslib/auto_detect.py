@@ -36,13 +36,42 @@ AUTO = 'auto'
 
 CONNECT_ATTEMPTS = 3
 CONNECT_TIMEOUT = 20
+# the scanner fallback retries up to 8 times inside; cap it as a whole
+SCAN_CONNECT_TIMEOUT = 60
+DISCOVERY_TIMEOUT = 4.0  # services after connect (JK v19 returns before discovery)
+GATT_OP_TIMEOUT = 10.0  # one start_notify / write / get_services
 # per request; the drivers allow 8 s (Daly, Daly2) to 16 s (JBD), a busy proxy can be slow
 REPLY_TIMEOUT = 8.0
 TEARDOWN_TIMEOUT = 5.0
-# per device: worst case is every connect attempt failing, or a silent device on the
-# ff01/ff02 layout where three probes each wait REPLY_TIMEOUT, or a silent fff0 device
-# offering both fff1/fff2 (three Daly probes) and fff3/fff4 (bm2 listens 2x, bm6)
-DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 7 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
+RETRY_PAUSE = 2.0
+# None: detect_budget(), the sum of every bounded step. Every await in detect() has
+# its own bound, so this outer limit is a backstop that holds by construction.
+DETECT_TIMEOUT: Optional[float] = None
+
+
+def _probe_budget(probe) -> float:
+    # start_notify, then per step a write and the reply wait, then stop_notify
+    return (GATT_OP_TIMEOUT + sum(GATT_OP_TIMEOUT + REPLY_TIMEOUT * probe.wait_factor for _ in probe.steps)
+            + TEARDOWN_TIMEOUT + 0.1 * (1 + len(probe.steps)))  # 50 ms poll granularity
+
+
+def _open_budget() -> float:
+    # plain connect, teardown (disconnect + direct close), scanner connect plus the
+    # bounded scanner stop it runs when cancelled, discovery polls (each get_services
+    # bounded by the remaining discovery time, plus a 0.5 s pause)
+    from bmslib import bt
+    return (CONNECT_TIMEOUT + 2 * TEARDOWN_TIMEOUT + SCAN_CONNECT_TIMEOUT + bt.SCANNER_STOP_TIMEOUT
+            + DISCOVERY_TIMEOUT + 0.5 + 0.1)
+
+
+def detect_budget(probes=None) -> float:
+    """Worst case of detect(): failed connect attempts, one that succeeds, every
+    probe in the table running to its bound (the GATT gate only ever skips some),
+    and the final teardown."""
+    probes = probes if probes is not None else _build_probes()
+    failed_attempt = _open_budget() + 2 * TEARDOWN_TIMEOUT + RETRY_PAUSE
+    return ((CONNECT_ATTEMPTS - 1) * failed_attempt + _open_budget()
+            + sum(_probe_budget(p) for p in probes) + 2 * TEARDOWN_TIMEOUT + 1)
 
 
 def _uuid16(short: int) -> str:
@@ -334,18 +363,19 @@ class AutoDetectBt(BtBms):
         DalyBt/AntBt/JKBt fall back to), and wait for service discovery: JK v19
         sometimes returns from connect() with no services yet (jikong.py)."""
         try:
-            await self.connect(timeout=CONNECT_TIMEOUT)
+            # the backend's own timeout is not trusted to hold (proxies, habluetooth)
+            await asyncio.wait_for(self.connect(timeout=CONNECT_TIMEOUT), CONNECT_TIMEOUT)
         except Exception as e:
             self.logger.info('auto: %s plain connect failed (%s), connecting with scanner',
                              self.name, str(e) or type(e).__name__)
             await self._force_disconnect(TEARDOWN_TIMEOUT)
-            await self._connect_with_scanner(timeout=CONNECT_TIMEOUT)
-        deadline = time.monotonic() + 4
+            await asyncio.wait_for(self._connect_with_scanner(timeout=CONNECT_TIMEOUT), SCAN_CONNECT_TIMEOUT)
+        deadline = time.monotonic() + DISCOVERY_TIMEOUT
         while not list(self.client.services):
             get_svc = getattr(self.client, 'get_services', None)
             if get_svc is not None:
                 try:
-                    await get_svc()
+                    await asyncio.wait_for(get_svc(), min(GATT_OP_TIMEOUT, max(0.1, deadline - time.monotonic())))
                 except Exception:
                     pass
             if list(self.client.services):
@@ -358,17 +388,19 @@ class AutoDetectBt(BtBms):
         rx = self._char(probe.rx, ('notify', 'indicate'))
         tx = self._char(probe.tx, ('write', 'write-without-response'))
         self._rx_clear()  # nothing from an earlier probe counts
-        await self.client.start_notify(rx, self._on_notify)
         try:
+            # inside the try: a start_notify that timed out may still have subscribed
+            await asyncio.wait_for(self.client.start_notify(rx, self._on_notify), GATT_OP_TIMEOUT)
             for frame, valid in probe.steps:
                 if frame is None:
                     pass  # listen only; keep what was pushed while subscribing
                 elif probe.response is None:  # the bleak default, as the driver calls it
                     self._rx_clear()  # replies to an earlier request don't count
-                    await self.client.write_gatt_char(tx, frame)
+                    await asyncio.wait_for(self.client.write_gatt_char(tx, frame), GATT_OP_TIMEOUT)
                 else:
                     self._rx_clear()
-                    await self.client.write_gatt_char(tx, frame, response=probe.response)
+                    await asyncio.wait_for(self.client.write_gatt_char(tx, frame, response=probe.response),
+                                           GATT_OP_TIMEOUT)
                 t_end = time.monotonic() + REPLY_TIMEOUT * probe.wait_factor
                 while not valid(self._rx_frames if probe.framed else bytes(self._rx_buf)):
                     if time.monotonic() > t_end:
@@ -412,7 +444,7 @@ async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
                 last_exc = e
                 logger.info('auto: %s connect attempt %d failed: %s', name, attempt + 1, str(e) or type(e).__name__)
                 await bms._force_disconnect(TEARDOWN_TIMEOUT)
-                await asyncio.sleep(2)
+                await asyncio.sleep(RETRY_PAUSE)
         if not res.connected:
             res.error = 'cannot connect: %s' % (str(last_exc) or type(last_exc).__name__)
             return res
@@ -484,15 +516,16 @@ async def _resolve_one(dev: dict, adverts: dict, bt_discovered_devices, detect_n
     adv = adverts.get(normalize_ble_address(mac))
     logger.info('auto: detecting the BMS type of %s (%s)%s', label, mac,
                 '' if adv else ', no advertisement seen')
+    limit = DETECT_TIMEOUT if DETECT_TIMEOUT is not None else detect_budget()
     res = Result()
     try:
         await asyncio.wait_for(
             detect(mac, name=label, adapter=dev.get('adapter'), psk=dev.get('pin'), adv=adv, res=res),
-            DETECT_TIMEOUT)
+            limit)
     except Exception as e:  # incl. timeout: one device must not stop the others
         res.type = None  # never accept a type from a run that did not finish
         if isinstance(e, asyncio.TimeoutError):
-            res.error = 'timed out after %.0f s' % DETECT_TIMEOUT
+            res.error = 'timed out after %.0f s' % limit
         else:
             res.error = '%s: %s' % (type(e).__name__, e)
 

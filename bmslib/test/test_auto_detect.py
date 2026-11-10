@@ -484,3 +484,70 @@ def test_stream_buffer_is_bounded_and_keeps_the_newest_bytes():
     probe = next(p for p in _build_probes() if p.type == 'jk')
     assert len(bms._rx_buf) == ad.RX_BUF_MAX
     assert all(valid(bytes(bms._rx_buf)) for _f, valid in probe.steps)
+
+
+# ---------------------------------------------------------------- time limit
+
+def _tiny_limits(monkeypatch):
+    for name, v in (('CONNECT_TIMEOUT', 0.05), ('SCAN_CONNECT_TIMEOUT', 0.05), ('DISCOVERY_TIMEOUT', 0.05),
+                    ('GATT_OP_TIMEOUT', 0.05), ('REPLY_TIMEOUT', 0.05), ('TEARDOWN_TIMEOUT', 0.05),
+                    ('RETRY_PAUSE', 0.01)):
+        monkeypatch.setattr(ad, name, v)
+    from bmslib import bt
+    monkeypatch.setattr(bt, 'SCANNER_STOP_TIMEOUT', 0.05)
+
+
+# every probe layout, so every probe in the table is eligible
+GATT_ALL = [SimpleNamespace(characteristics=[
+    _char(u, 'notify', 'write') for u in (0xFFF1, 0xFFF2, 0xFFF3, 0xFFF4, 0xFF01, 0xFF02, 0xFFE1)])]
+
+
+def _elapsed(coro_factory):
+    async def run():
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        res = await asyncio.wait_for(coro_factory(), 30)  # backstop for the test itself
+        return res, loop.time() - t0
+    return asyncio.run(run())
+
+
+def test_every_gatt_call_hanging_still_ends_within_the_budget(monkeypatch):
+    _tiny_limits(monkeypatch)
+
+    class Hung(_FakeDevice):
+        async def start_notify(self, char, cb, **kw):
+            await asyncio.Event().wait()
+
+        async def write_gatt_char(self, char, data, response=None):
+            await asyncio.Event().wait()
+
+        async def stop_notify(self, char):
+            await asyncio.Event().wait()
+
+    dev = Hung(GATT_ALL, lambda f: None)
+    res, t = _elapsed(lambda: detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type is None and res.connected
+    assert len(res.tried) == len(_build_probes())  # each probe got its turn
+    assert t < ad.detect_budget()
+
+
+def test_hanging_connect_ends_within_the_budget(monkeypatch):
+    _tiny_limits(monkeypatch)
+
+    class NeverConnects(_FakeDevice):
+        async def connect(self, timeout=20):
+            await asyncio.Event().wait()
+
+    dev = NeverConnects(GATT_ALL, lambda f: None)
+    res, t = _elapsed(lambda: detect('aa', 'x', bms_factory=_factory(dev)))
+    assert not res.connected and 'cannot connect' in res.error
+    assert t < ad.detect_budget()
+
+
+def test_budget_covers_the_worst_case_with_real_limits(monkeypatch):
+    # every probe to its bound plus all connect attempts; not just "some" probes (Codex, #41)
+    monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 8.0)  # undo the _fast fixture
+    probes = _build_probes()
+    assert ad.detect_budget() >= (ad.CONNECT_ATTEMPTS * (ad.CONNECT_TIMEOUT + ad.SCAN_CONNECT_TIMEOUT)
+                                  + sum(ad.REPLY_TIMEOUT * p.wait_factor * len(p.steps) for p in probes)
+                                  + sum(ad.TEARDOWN_TIMEOUT for _ in probes))
