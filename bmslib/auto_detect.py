@@ -22,10 +22,11 @@ never be pinned. The log says which `type:` to put in the config instead.
 """
 
 import asyncio
+import collections
 import functools
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from bmslib.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
@@ -45,7 +46,9 @@ REPLY_TIMEOUT = 8.0
 TEARDOWN_TIMEOUT = 5.0
 RETRY_PAUSE = 2.0
 # None: detect_budget(), the sum of every bounded step. Every await in detect() has
-# its own bound, so this outer limit is a backstop that holds by construction.
+# its own bound; this outer limit is a backstop. It is not a hard wall-clock bound:
+# asyncio.wait_for waits for the cancelled task's cleanup, and a backend whose
+# connect/disconnect unwinding ignores cancellation (BlueZ D-Bus) can overrun it.
 DETECT_TIMEOUT: Optional[float] = None
 
 
@@ -176,13 +179,15 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
 # BM6/BM2 frames are one AES block, one per notification: validate per notification,
 # never over the concatenated stream, where windows straddling two notifications (or
 # overlapping inside one) would give random data hundreds of chances to match (#41).
-# Only the first BM_MAX_FRAMES notifications are kept, so the pure-Python AES
-# (~0.23 ms/block, cached) does bounded work however much a device sends.
+# Only the newest BM_MAX_FRAMES 16-byte notifications are kept (a reply arriving after
+# junk still counts, unless 64 more arrive within one 50 ms check), so the pure-Python
+# AES (~0.23 ms/block, cached) does bounded work however much a device sends.
 BM_MAX_FRAMES = 64
 
 # The other validators rescan the byte stream every 50 ms. Keep only its newest bytes:
 # the longest reply (JK, 300 bytes) fits many times over, a reply arriving after a
-# flood is still seen (a fixed prefix would hide it), and a check costs < 1 ms.
+# flood is still seen (a fixed prefix would hide it). Bounded work per check: < 1 ms
+# on random bytes, ~20 ms worst case (Daly2, header-dense junk; Codex review #41).
 RX_BUF_MAX = 4096
 
 
@@ -193,7 +198,7 @@ def _bm_decrypt(key: bytes, block: bytes) -> bytes:
 
 
 def _bm_plain(frames: List[bytes], key: bytes):
-    return [_bm_decrypt(key, f) for f in frames[:BM_MAX_FRAMES] if len(f) == 16]
+    return [_bm_decrypt(key, f) for f in list(frames)[-BM_MAX_FRAMES:] if len(f) == 16]
 
 
 def _bm6_reply(frames: List[bytes]) -> bool:
@@ -320,6 +325,20 @@ def order_probes(probes: List[Probe], preferred: List[str]) -> List[Probe]:
 
 # ---------------------------------------------------------------- the probe run
 
+class GattStall(Exception):
+    """A GATT call ran into its own time limit. Cancelling it may leave backend state
+    behind (aioesphomeapi installs the notify callback before awaiting the ack, and
+    its cleanup misses a cancellation), so detection drops the link rather than
+    probing on over it."""
+
+
+async def _gatt(aw, what: str):
+    try:
+        return await asyncio.wait_for(aw, GATT_OP_TIMEOUT)
+    except asyncio.TimeoutError:
+        raise GattStall('%s timed out after %.0f s' % (what, GATT_OP_TIMEOUT)) from None
+
+
 @dataclass
 class Result:
     type: Optional[str] = None  # confirmed batmon type, or None
@@ -338,13 +357,13 @@ class AutoDetectBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._rx_buf = bytearray()
-        self._rx_frames: List[bytes] = []
+        self._rx_frames: Deque[bytes] = collections.deque(maxlen=BM_MAX_FRAMES)
 
     def _on_notify(self, _sender, data):
         self._rx_buf += data
         if len(self._rx_buf) > RX_BUF_MAX:
             del self._rx_buf[:len(self._rx_buf) - RX_BUF_MAX]
-        if len(self._rx_frames) < BM_MAX_FRAMES:
+        if len(data) == 16:  # a BM frame is one AES block; others never count
             self._rx_frames.append(bytes(data))
 
     def _rx_clear(self):
@@ -390,17 +409,16 @@ class AutoDetectBt(BtBms):
         self._rx_clear()  # nothing from an earlier probe counts
         try:
             # inside the try: a start_notify that timed out may still have subscribed
-            await asyncio.wait_for(self.client.start_notify(rx, self._on_notify), GATT_OP_TIMEOUT)
+            await _gatt(self.client.start_notify(rx, self._on_notify), 'start_notify')
             for frame, valid in probe.steps:
                 if frame is None:
                     pass  # listen only; keep what was pushed while subscribing
                 elif probe.response is None:  # the bleak default, as the driver calls it
                     self._rx_clear()  # replies to an earlier request don't count
-                    await asyncio.wait_for(self.client.write_gatt_char(tx, frame), GATT_OP_TIMEOUT)
+                    await _gatt(self.client.write_gatt_char(tx, frame), 'write')
                 else:
                     self._rx_clear()
-                    await asyncio.wait_for(self.client.write_gatt_char(tx, frame, response=probe.response),
-                                           GATT_OP_TIMEOUT)
+                    await _gatt(self.client.write_gatt_char(tx, frame, response=probe.response), 'write')
                 t_end = time.monotonic() + REPLY_TIMEOUT * probe.wait_factor
                 while not valid(self._rx_frames if probe.framed else bytes(self._rx_buf)):
                     if time.monotonic() > t_end:
@@ -458,6 +476,9 @@ async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
                 if await bms.run_probe(probe):
                     res.type, res.probe = probe.type, str(probe)
                     return res
+            except GattStall as e:
+                res.error = 'probe %s: %s' % (probe, e)
+                return res  # the finally drops the link
             except Exception as e:
                 logger.info('auto: %s: probe %s failed: %s', name, probe, str(e) or type(e).__name__)
             if not bms.is_connected:

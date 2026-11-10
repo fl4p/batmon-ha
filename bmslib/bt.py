@@ -694,9 +694,8 @@ class BtBms:
 
         scanner = BleakScanner(adapter=self._adapter) if self._adapter else BleakScanner()
         self.logger.debug("starting scan")
-        await scanner.start()
-
-        try:  # a caller's timeout cancels us mid-retry; the scan must not keep running
+        try:  # a caller's timeout cancels us mid-start or mid-retry; the scan must not keep running
+            await scanner.start()
             attempt = 1
             while True:
                 try:

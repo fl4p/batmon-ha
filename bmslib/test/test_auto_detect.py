@@ -526,9 +526,35 @@ def test_every_gatt_call_hanging_still_ends_within_the_budget(monkeypatch):
 
     dev = Hung(GATT_ALL, lambda f: None)
     res, t = _elapsed(lambda: detect('aa', 'x', bms_factory=_factory(dev)))
-    assert res.type is None and res.connected
-    assert len(res.tried) == len(_build_probes())  # each probe got its turn
+    # a stalled GATT call ends detection and drops the link (Codex review #41: a
+    # cancelled ESPHome start_notify leaves its callback behind)
+    assert res.type is None and res.connected and 'start_notify timed out' in res.error
+    assert len(res.tried) == 1 and not dev.is_connected
     assert t < ad.detect_budget()
+
+
+def test_hanging_write_alone_is_bounded(monkeypatch):
+    _tiny_limits(monkeypatch)
+
+    class HungWrite(_FakeDevice):
+        async def write_gatt_char(self, char, data, response=None):
+            await asyncio.Event().wait()
+
+    dev = HungWrite(GATT_ALL, lambda f: None)
+    res, t = _elapsed(lambda: detect('aa', 'x', bms_factory=_factory(dev)))
+    assert 'write timed out' in res.error and t < ad.detect_budget()
+
+
+def test_hanging_service_discovery_is_bounded(monkeypatch):
+    _tiny_limits(monkeypatch)
+
+    class NoServices(_FakeDevice):
+        async def get_services(self):
+            await asyncio.Event().wait()
+
+    dev = NoServices([], lambda f: None)
+    res, t = _elapsed(lambda: detect('aa', 'x', bms_factory=_factory(dev)))
+    assert not res.connected and t < ad.detect_budget()
 
 
 def test_hanging_connect_ends_within_the_budget(monkeypatch):
@@ -551,3 +577,89 @@ def test_budget_covers_the_worst_case_with_real_limits(monkeypatch):
     assert ad.detect_budget() >= (ad.CONNECT_ATTEMPTS * (ad.CONNECT_TIMEOUT + ad.SCAN_CONNECT_TIMEOUT)
                                   + sum(ad.REPLY_TIMEOUT * p.wait_factor * len(p.steps) for p in probes)
                                   + sum(ad.TEARDOWN_TIMEOUT for _ in probes))
+
+
+
+def test_bm_frames_after_64_junk_notifications_still_count():
+    # Codex review #41 r2: the first 64 notifications were kept forever
+    for n in (63, 64, 65, 200):
+        bms = AutoDetectBt('test_jbd', name='x')
+        for i in range(n):
+            bms._on_notify(None, bytearray(i.to_bytes(16, 'big')))
+            bms._on_notify(None, bytearray(20))  # wrong length: must not take a slot
+        bms._on_notify(None, bytearray(REPLIES['bm6']))
+        assert ad._bm6_reply(bms._rx_frames), n
+
+
+def test_bm2_listens_two_reply_timeouts(monkeypatch):
+    monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 0.2)
+
+    class Slow(_FakeDevice):
+        async def start_notify(self, char, cb, **kw):
+            await super().start_notify(char, cb)
+            asyncio.get_running_loop().call_later(0.3, cb, None, bytearray(REPLIES['bm2']))
+
+    dev = Slow(GATT_BM, lambda f: None)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'bm2' and dev.writes == []
+
+
+def test_budget_contains_every_term(monkeypatch):
+    # each limit must enter detect_budget() at least as often as detect() can spend it
+    monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 8.0)  # undo the _fast fixture
+    from bmslib import bt
+    probes = _build_probes()
+    a = ad.CONNECT_ATTEMPTS
+    steps = sum(len(p.steps) for p in probes)
+    least = {
+        (ad, 'CONNECT_TIMEOUT'): a,
+        (ad, 'SCAN_CONNECT_TIMEOUT'): a,
+        (ad, 'DISCOVERY_TIMEOUT'): a,
+        (bt, 'SCANNER_STOP_TIMEOUT'): a,
+        (ad, 'RETRY_PAUSE'): a - 1,
+        (ad, 'GATT_OP_TIMEOUT'): len(probes) + steps,
+        (ad, 'REPLY_TIMEOUT'): sum(p.wait_factor * len(p.steps) for p in probes),
+        (ad, 'TEARDOWN_TIMEOUT'): a * 2 + (a - 1) * 2 + len(probes) + 2,
+    }
+    base = ad.detect_budget()
+    for (mod, name), times in least.items():
+        with monkeypatch.context() as m:
+            m.setattr(mod, name, getattr(mod, name) + 100)
+            assert ad.detect_budget() - base >= times * 100 - 1e-6, name
+
+
+def test_scanner_is_stopped_when_cancelled(monkeypatch):
+    from bmslib import bt
+
+    class FakeScanner:
+        instances = []
+
+        def __init__(self, *a, **kw):
+            self.started = self.stopped = False
+            self.discovered_devices = [SimpleNamespace(address='test_jbd')]
+            FakeScanner.instances.append(self)
+
+        async def start(self):
+            self.started = True
+            if hang_in_start:
+                await asyncio.Event().wait()
+
+        async def stop(self):
+            self.stopped = True
+
+    monkeypatch.setattr(bt, 'BleakScanner', FakeScanner)
+    class HungConnect(_FakeDevice):
+        async def connect(self, timeout=20):
+            await asyncio.Event().wait()
+
+    for hang_in_start in (True, False):  # cancelled while starting / while connecting
+        FakeScanner.instances.clear()
+        bms = AutoDetectBt('test_jbd', name='x')
+        bms.client = HungConnect(GATT_416, lambda f: None)
+
+        async def run():
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(bt.BtBms._connect_with_scanner(bms), 0.1)
+
+        asyncio.run(run())
+        assert FakeScanner.instances and FakeScanner.instances[0].stopped, hang_in_start

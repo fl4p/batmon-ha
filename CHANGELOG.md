@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* `type: auto`: every connect, subscribe and write during detection now has its own time limit, and the overall limit is computed from them. The old fixed limit (133 s) could cut off a device that offers many probe layouts before every probe had run.
+* `type: auto`: every connect, subscribe and write now has its own time limit; the overall limit is their sum. The old fixed 133 s could cut probing short. A stalled call ends detection.
 * Fix: a cancelled scanner connect left its Bluetooth scan running; the scanner is now stopped in every case.
 * `type: auto`: the receive buffer keeps only the newest 4 KiB, so a device flooding notifications during detection can't grow it without bound or slow every reply check.
 * `type: auto` now detects the `bm2` and `bm6` car battery monitors, so an Ancel BM200 finds its protocol by itself (#41).
