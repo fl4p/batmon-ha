@@ -31,7 +31,7 @@ from bmslib.bms import BmsSample
 from bmslib.bt import BtBms
 
 BM6_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 57])  # "leagend\xff\xfe0100009"
-# BM2 (Quicklynks, rebranded as Ancel BM200 etc., #41): "leagend\xff\xfe1882466", from
+# BM2 (Quicklynks and rebrands, #41; some Ancel BM200 speak BM6 instead): "leagend\xff\xfe1882466", from
 # KrystianD/bm2-battery-monitor and doubleagent.net's BM2 write-up.
 BM2_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 49, 56, 56, 50, 52, 54, 54])
 
@@ -354,9 +354,10 @@ class Bm6Bt(BtBms):
 
 
 class Bm2Bt(Bm6Bt):
-    """Quicklynks BM2 / Ancel BM200 (#41). Same GATT layout as the BM6 with another key; the
+    """Quicklynks BM2 and rebrands (#41). Same GATT layout as the BM6 with another key; the
     device pushes an F5 realtime frame on FFF4 every second or so on its own, so fetch() just
-    waits for the next one. No temperature in that frame."""
+    waits for the next one. No temperature in that frame. At least one Ancel BM200 speaks the
+    BM6 protocol instead and needs Bm6Bt."""
     KEY = BM2_KEY
     TIMEOUT = 15
 
@@ -366,7 +367,15 @@ class Bm2Bt(Bm6Bt):
 
     async def fetch(self) -> BmsSample:
         with self._fetch_futures.acquire(0xF5):
-            plain = await self._fetch_futures.wait_for(0xF5, self.TIMEOUT)
+            try:
+                plain = await self._fetch_futures.wait_for(0xF5, self.TIMEOUT)
+            except asyncio.TimeoutError:
+                if _cancellation_requested():
+                    raise asyncio.CancelledError from None
+                # a BM6-protocol device only answers requests, so it stays silent here (#41)
+                self.logger.warning("%s no BM2 frame within %ss; some Ancel BM200 units speak "
+                                    "the BM6 protocol, try type: bm6", self.name, self.TIMEOUT)
+                raise
         d = decode_bm2_realtime(plain)
         return BmsSample(
             voltage=d['voltage'],

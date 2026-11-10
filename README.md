@@ -49,8 +49,8 @@ batmon device connectors:
 * Basen BMS (`basen`), ported from [syssi/esphome-basen-bms](https://github.com/syssi/esphome-basen-bms)
 * LiTime BMS (`litime`)
 * Legacy Offgridtec OGT-12200 / Topband batteries (`offgridtec`): unsolicited FFE4 ASCII-hex protocol
-* BM6 Bluetooth car battery monitor (`bm6`): voltage, temperature, SOC and charging/low-voltage state, no current (#160)
-* Quicklynks BM2 and rebrands such as the Ancel BM200 (`bm2`): voltage and SOC (#41)
+* BM6 Bluetooth car battery monitor and the Ancel BM200 (`bm6`): voltage, temperature, SOC and charging/low-voltage state, no current (#160, #41)
+* Quicklynks BM2 and rebrands (`bm2`): voltage and SOC. An Ancel BM200 reads with `bm6`, not `bm2` (#41)
 * Generic no-name Chinese BMS with Modbus RTU over Nordic UART (`noname_modbus`) — see [issue #131](https://github.com/fl4p/batmon-ha/issues/131)
 * Victron SmartShunt (make sure to update to the latest firmware
   and [enable GATT](https://community.victronenergy.com/questions/93919/victron-bluetooth-ble-protocol-publication.html)

@@ -958,7 +958,7 @@ For any of these, the canonical references are:
 
 ## BM6 / BM2 car battery monitors — `models/bm6.py`
 
-**Vendor / variants.** 12 V lead-acid "battery health" dongles clamped to the car battery, sold under many names. `bm6`: BM6 (Leagend/Quicklynks, also Sealey BT2020). `bm2`: Quicklynks BM2, Ancel BM200 and other rebrands using the reskinned BM2 app. Not a BMS: no cells, no current sensor, no switches.
+**Vendor / variants.** 12 V lead-acid "battery health" dongles clamped to the car battery, sold under many names. `bm6`: BM6 (Leagend/Quicklynks, also Sealey BT2020), and the Ancel BM200 (reported working with `bm6`, voltage, SOC and temperature, while `bm2` read nothing; #41, 2026-11-07). `bm2`: Quicklynks BM2 and rebrands using the reskinned BM2 app. Not a BMS: no cells, no current sensor, no switches.
 
 **Transport.** BLE GATT service `0xfff0`, write on `0xfff3`, notify on `0xfff4`. Every 16-byte frame in either direction is AES-128 with a fixed per-model key and a zero IV (one block, so effectively ECB). Batmon carries a tiny pure-Python AES for this; the keys are in the module (`BM6_KEY` = `leagend\xff\xfe0100009`, `BM2_KEY` = `leagend\xff\xfe1882466`).
 
@@ -987,7 +987,7 @@ bmslib/models/
 ├── ant.py            ANT new-protocol (7E A1)
 ├── basen.py          Basen BLE (0xFA00), ported from syssi/esphome-basen-bms
 ├── basen_uart.py     Basen RS232/RS485
-├── bm6.py            BM6 and BM2/Ancel BM200 car battery monitors (AES, no current)
+├── bm6.py            BM6 (incl. Ancel BM200) and BM2 car battery monitors (AES, no current)
 ├── daly.py           Daly legacy protocol over BLE (a5 80 …), incl. set SOC (0x21)
 ├── daly_uart.py      Daly over RS485/UART, multi-board bus
 ├── daly2.py          Daly Modbus BLE module (D2 03)

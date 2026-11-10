@@ -279,3 +279,17 @@ def test_bm2_fetch_sample():
 
     sample = asyncio.run(run())
     assert sample.voltage == pytest.approx(12.88) and sample.soc == 100
+
+
+def test_bm2_timeout_suggests_bm6(caplog):
+    """An Ancel BM200 speaking the BM6 protocol pushes nothing, so bm2 times out (#41)."""
+    from bmslib.models.bm6 import Bm2Bt
+
+    async def run():
+        bms = Bm2Bt("00:11:22:33:44:55", name="bm2")
+        bms.TIMEOUT = 0.05
+        return await bms.fetch()
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(run())
+    assert "try type: bm6" in caplog.text

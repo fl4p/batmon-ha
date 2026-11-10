@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Doc: the Ancel BM200 reads with `type: bm6`, not `bm2`; `bm2` now suggests `bm6` when no BM2 frame arrives. Thanks @BigDurl (#41).
 * Fix (`ble_stack: esphome`): one unreachable proxy held start-up forever, so nothing was polled. Start-up now waits at most 10 s; an offline proxy keeps reconnecting in the background (#430).
 
 ## [2.28]
