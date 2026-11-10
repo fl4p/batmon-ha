@@ -7,6 +7,7 @@ import pytest
 
 import bmslib.auto_detect as ad
 from bmslib.auto_detect import AutoDetectBt, _build_probes, detect, resolve_auto_devices
+from bmslib.models.bm6 import BM2_KEY, BM6_KEY, EMPTY_REALTIME, bm6_encrypt
 from bmslib.test.data import ant_fixtures, daly2_fixtures, jbd_fixtures
 
 
@@ -38,6 +39,10 @@ REPLIES = {
     'jbd': jbd_fixtures.SYSSI_3CELL['raw'] + _jbd(0x04, bytes.fromhex('0cfe0cff0cfe0cff')),
     'jk': _jk(0x03),
     'ant': bytes(ant_fixtures.INLINE_8S['raw']),
+    # tarball.ca's BM6 realtime reply; two pushed BM2 frames (bm6 decode tests)
+    'bm6': bytes.fromhex('5a7a41c3a57ca1fa9247f76557c5d618'),
+    'bm2': (bm6_encrypt(bytes.fromhex('f550816400fa00000000000000000000'), BM2_KEY)
+            + bm6_encrypt(bytes.fromhex('f54f414c0b0f00000000000000000000'), BM2_KEY)),
 }
 
 
@@ -62,7 +67,7 @@ def test_split_and_prefixed_replies_still_validate():
 def test_requests_are_never_accepted_as_replies():
     # an echo of what we sent must not confirm anything (Daly's own callback accepts its 0x90 echo)
     probes = _build_probes()
-    sent = b''.join(frame for p in probes for frame, _ in p.steps)
+    sent = b''.join(frame for p in probes for frame, _ in p.steps if frame)
     assert not [p.type for p in probes if _accepts(p, sent)]
 
 
@@ -373,3 +378,54 @@ def test_module_answering_only_host_0x40_is_daly():
     dev = _FakeDevice(GATT_416, lambda f: _daly_a5(f) if f[1] == 0x40 else None)
     res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
     assert res.type == 'daly' and res.probe == 'daly (A5, host 0x40) on fff1/fff2'
+
+
+# ---------------------------------------------------------------- BM6 / BM2 (#41)
+
+GATT_BM = [SimpleNamespace(characteristics=[_char(0xFFF3, 'write'), _char(0xFFF4, 'notify')])]
+
+
+class _PushingDevice(_FakeDevice):
+    """A BM2: pushes frames on its own once subscribed."""
+
+    def __init__(self, frames):
+        super().__init__(GATT_BM, lambda f: None)
+        self._frames = frames
+
+    async def start_notify(self, char, cb, **kw):
+        await super().start_notify(char, cb)
+
+        async def push():
+            for f in self._frames:
+                await asyncio.sleep(0)
+                if self._cb:
+                    self._cb(None, bytearray(f))
+
+        asyncio.ensure_future(push())
+
+
+def test_bm2_detected_by_listening_only():
+    r = REPLIES['bm2']
+    dev = _PushingDevice([r[:16], r[16:]])
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'bm2' and dev.writes == []
+
+
+def test_bm6_detected_ancel_bm200():
+    dev = _FakeDevice(GATT_BM, lambda f: REPLIES['bm6'] if f == bm6_encrypt(
+        bytes.fromhex('d1550700000000000000000000000000'), BM6_KEY) else None)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'bm6'
+    assert res.tried == ['bm2 (listening for pushed frames)', 'bm6']
+    assert {u for u, _ in dev.writes} == {_uuid(0xFFF3)}
+
+
+def test_bm6_empty_sentinel_still_confirms_bm6():
+    # the #412 Battery Guard answers the sentinel when subscribed first
+    probe = next(p for p in _build_probes() if p.type == 'bm6')
+    assert _accepts(probe, bm6_encrypt(EMPTY_REALTIME, BM6_KEY))
+
+
+def test_single_bm2_frame_is_not_enough():
+    probe = next(p for p in _build_probes() if p.type == 'bm2')
+    assert not _accepts(probe, REPLIES['bm2'][:16])

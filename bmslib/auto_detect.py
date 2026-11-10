@@ -8,8 +8,8 @@ device answered that protocol's read request with a reply that passes a strict
 validator (header, address, command, exact length, checksum), see PROBES.
 
 Safety:
-  * Only the read requests below are sent, each only to the characteristic its
-    driver writes, and only if the device exposes that characteristic with the
+  * Only the read requests below are sent (bm2 sends nothing, it only listens to
+    the frames the device pushes), each only to the characteristic its driver writes, and only if the device exposes that characteristic with the
     needed properties. Never a SIG characteristic (the snoop probe once renamed
     a Daly module through GAP Device Name, #416), never a driver's connect().
   * Residual risk, not verified: a foreign BMS behind the same vendor UUID could
@@ -22,6 +22,7 @@ never be pinned. The log says which `type:` to put in the config instead.
 """
 
 import asyncio
+import functools
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -39,8 +40,9 @@ CONNECT_TIMEOUT = 20
 REPLY_TIMEOUT = 8.0
 TEARDOWN_TIMEOUT = 5.0
 # per device: worst case is every connect attempt failing, or a silent device on the
-# ff01/ff02 layout where three probes each wait REPLY_TIMEOUT
-DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 4 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
+# ff01/ff02 layout where three probes each wait REPLY_TIMEOUT, or a silent fff0 device
+# offering both fff1/fff2 (three Daly probes) and fff3/fff4 (bm2, bm6)
+DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 6 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
 
 
 def _uuid16(short: int) -> str:
@@ -142,16 +144,45 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
     return check
 
 
+def _bm_blocks(buf: bytes, key: bytes):
+    """Every 16-byte window of `buf`, decrypted. Frames are one AES block each and
+    arrive one per notification, but scanning every offset tolerates a stray prefix."""
+    return [_bm_decrypt(key, bytes(buf[i:i + 16])) for i in range(len(buf) - 15)]
+
+
+@functools.lru_cache(maxsize=1024)
+def _bm_decrypt(key: bytes, block: bytes) -> bytes:
+    # the validator rescans the whole buffer every 50 ms; the AES is pure Python
+    from bmslib.models.bm6 import bm6_decrypt
+    return bm6_decrypt(block, key)
+
+
+def _bm6_reply(buf: bytes) -> bool:
+    # A whole AES block that decrypts to `d1 55 07` under the BM6 key cannot be chance.
+    # The #412 Battery Guard answers the empty sentinel to this ordering; that still
+    # proves the protocol, Bm6Bt then switches the ordering by itself.
+    from bmslib.models.bm6 import BM6_KEY, CMD_REALTIME
+    return any(p[:3] == b'\xd1\x55\x07' and p != CMD_REALTIME  # not an echo of the request
+               for p in _bm_blocks(buf, BM6_KEY))
+
+
+def _bm2_pushed(buf: bytes) -> bool:
+    # only the first byte (F5) is fixed, so require two pushed frames with a sane SOC
+    from bmslib.models.bm6 import BM2_KEY
+    return sum(1 for p in _bm_blocks(buf, BM2_KEY) if p[0] == 0xF5 and p[3] <= 100) >= 2
+
+
 # ---------------------------------------------------------------- probe table
 
 @dataclass
 class Probe:
     """One way a driver talks to a device: where, and the read requests that must
-    all be answered (two requests where the checksum is only 8 bits wide)."""
+    all be answered (two requests where the checksum is only 8 bits wide). A step
+    whose request is None writes nothing and only listens."""
     type: str  # batmon `type:` it confirms
     rx: str
     tx: str
-    steps: List[Tuple[bytes, Callable[[bytes], bool]]]
+    steps: List[Tuple[Optional[bytes], Callable[[bytes], bool]]]
     response: Optional[bool] = None  # write mode as the driver writes; None = bleak default
     label: str = ''
 
@@ -161,6 +192,7 @@ class Probe:
 
 def _build_probes() -> List[Probe]:
     from bmslib.models.ant import AntCommandFuncs, _ant_command
+    from bmslib.models.bm6 import BM6_KEY, CMD_REALTIME, bm6_encrypt
     from bmslib.models.daly import daly_command_message
     from bmslib.models.daly2 import _read_request
     from bmslib.models.jbd import _jbd_command
@@ -188,6 +220,12 @@ def _build_probes() -> List[Probe]:
     probes.append(Probe('ant', _uuid16(0xFFE1), _uuid16(0xFFE1),
                         [(_ant_command(AntCommandFuncs.Status, 0x0000, 0xBE), _ant_reply(0x11))],
                         response=False))
+    # BM6/BM2 car battery monitors (#41, #160): bm2 first, it only listens; the Ancel
+    # BM200 can be either, so the advertisement can't tell them apart
+    bm_rx, bm_tx = _uuid16(0xFFF4), _uuid16(0xFFF3)
+    probes.append(Probe('bm2', bm_rx, bm_tx, [(None, _bm2_pushed)], label='bm2 (listening for pushed frames)'))
+    probes.append(Probe('bm6', bm_rx, bm_tx, [(bm6_encrypt(CMD_REALTIME, BM6_KEY), _bm6_reply)],
+                        response=True))
     return probes
 
 
@@ -297,7 +335,9 @@ class AutoDetectBt(BtBms):
         try:
             for frame, valid in probe.steps:
                 self._rx_buf.clear()  # replies to an earlier request don't count
-                if probe.response is None:  # the bleak default, as the driver calls it
+                if frame is None:
+                    pass  # listen only
+                elif probe.response is None:  # the bleak default, as the driver calls it
                     await self.client.write_gatt_char(tx, frame)
                 else:
                     await self.client.write_gatt_char(tx, frame, response=probe.response)

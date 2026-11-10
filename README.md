@@ -118,8 +118,9 @@ displayed in the discovery list.
 For a mock BMS use `dummy`.
 
 `type: auto` (Bluetooth only) asks the device at every start which protocol it speaks and logs the `type:` to put in
-the config instead. It knows `daly` (A5), `daly2` (Modbus), `jbd`, `jk` and `ant`, and accepts a type only on a
-valid reply to a read request, sent to that driver's own characteristic. A device that doesn't answer is skipped
+the config instead. It knows `daly` (A5), `daly2` (Modbus), `jbd`, `jk`, `ant`, `bm2` and `bm6`, and accepts a type
+only on a valid reply to a read request, sent to that driver's own characteristic (`bm2` is detected by listening
+only, the device pushes its frames). A device that doesn't answer is skipped
 with an error, never guessed. Any other BMS still needs its `type:` set by hand.
 
 With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
