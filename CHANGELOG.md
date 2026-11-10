@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* `type: auto`: the receive buffer keeps only the newest 4 KiB, so a device flooding notifications during detection can't grow it without bound or slow every reply check.
 * `type: auto` now detects the `bm2` and `bm6` car battery monitors, so an Ancel BM200 finds its protocol by itself (#41).
 * Doc: the Ancel BM200 reads with `type: bm6`, not `bm2`; `bm2` now suggests `bm6` when no BM2 frame arrives. Thanks @BigDurl (#41).
 * Fix (`ble_stack: esphome`): one unreachable proxy held start-up forever, so nothing was polled. Start-up now waits at most 10 s; an offline proxy keeps reconnecting in the background (#430).

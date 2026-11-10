@@ -472,3 +472,15 @@ def test_receiver_keeps_a_bounded_number_of_notifications():
     for i in range(1000):
         bms._on_notify(None, bytearray(16))
     assert len(bms._rx_frames) == ad.BM_MAX_FRAMES
+
+
+def test_stream_buffer_is_bounded_and_keeps_the_newest_bytes():
+    bms = AutoDetectBt('test_jbd', name='x')
+    for _ in range(1000):
+        bms._on_notify(None, bytearray(b'\x55' * 244))  # JK-header-like junk
+    assert len(bms._rx_buf) == ad.RX_BUF_MAX
+    for i in range(0, len(REPLIES['jk']), 20):
+        bms._on_notify(None, bytearray(REPLIES['jk'][i:i + 20]))
+    probe = next(p for p in _build_probes() if p.type == 'jk')
+    assert len(bms._rx_buf) == ad.RX_BUF_MAX
+    assert all(valid(bytes(bms._rx_buf)) for _f, valid in probe.steps)

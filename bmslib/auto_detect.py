@@ -151,6 +151,11 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
 # (~0.23 ms/block, cached) does bounded work however much a device sends.
 BM_MAX_FRAMES = 64
 
+# The other validators rescan the byte stream every 50 ms. Keep only its newest bytes:
+# the longest reply (JK, 300 bytes) fits many times over, a reply arriving after a
+# flood is still seen (a fixed prefix would hide it), and a check costs < 1 ms.
+RX_BUF_MAX = 4096
+
 
 @functools.lru_cache(maxsize=1024)
 def _bm_decrypt(key: bytes, block: bytes) -> bytes:
@@ -308,6 +313,8 @@ class AutoDetectBt(BtBms):
 
     def _on_notify(self, _sender, data):
         self._rx_buf += data
+        if len(self._rx_buf) > RX_BUF_MAX:
+            del self._rx_buf[:len(self._rx_buf) - RX_BUF_MAX]
         if len(self._rx_frames) < BM_MAX_FRAMES:
             self._rx_frames.append(bytes(data))
 
