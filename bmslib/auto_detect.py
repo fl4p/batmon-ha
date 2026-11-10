@@ -41,8 +41,8 @@ REPLY_TIMEOUT = 8.0
 TEARDOWN_TIMEOUT = 5.0
 # per device: worst case is every connect attempt failing, or a silent device on the
 # ff01/ff02 layout where three probes each wait REPLY_TIMEOUT, or a silent fff0 device
-# offering both fff1/fff2 (three Daly probes) and fff3/fff4 (bm2, bm6)
-DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 6 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
+# offering both fff1/fff2 (three Daly probes) and fff3/fff4 (bm2 listens 2x, bm6)
+DETECT_TIMEOUT = CONNECT_ATTEMPTS * (CONNECT_TIMEOUT + 5) + 7 * REPLY_TIMEOUT + 2 * TEARDOWN_TIMEOUT
 
 
 def _uuid16(short: int) -> str:
@@ -144,39 +144,40 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
     return check
 
 
-# A BM reply, or two BM2 pushes, sit well inside this; a device streaming something
-# else on fff4 must not make each 50 ms check decrypt an unbounded buffer (~0.23 ms/block)
-_BM_SCAN_BYTES = 256
-
-
-def _bm_blocks(buf: bytes, key: bytes):
-    """Every 16-byte window of the first _BM_SCAN_BYTES of `buf`, decrypted. Frames are
-    one AES block each and arrive one per notification, but scanning every offset
-    tolerates a stray prefix."""
-    buf = buf[:_BM_SCAN_BYTES]
-    return [_bm_decrypt(key, bytes(buf[i:i + 16])) for i in range(len(buf) - 15)]
+# BM6/BM2 frames are one AES block, one per notification: validate per notification,
+# never over the concatenated stream, where windows straddling two notifications (or
+# overlapping inside one) would give random data hundreds of chances to match (#41).
+# Only the first BM_MAX_FRAMES notifications are kept, so the pure-Python AES
+# (~0.23 ms/block, cached) does bounded work however much a device sends.
+BM_MAX_FRAMES = 64
 
 
 @functools.lru_cache(maxsize=1024)
 def _bm_decrypt(key: bytes, block: bytes) -> bytes:
-    # the validator rescans the whole buffer every 50 ms; the AES is pure Python
     from bmslib.models.bm6 import bm6_decrypt
     return bm6_decrypt(block, key)
 
 
-def _bm6_reply(buf: bytes) -> bool:
-    # A whole AES block that decrypts to `d1 55 07` under the BM6 key cannot be chance.
-    # The #412 Battery Guard answers the empty sentinel to this ordering; that still
-    # proves the protocol, Bm6Bt then switches the ordering by itself.
-    from bmslib.models.bm6 import BM6_KEY, CMD_REALTIME
-    return any(p[:3] == b'\xd1\x55\x07' and p != CMD_REALTIME  # not an echo of the request
-               for p in _bm_blocks(buf, BM6_KEY))
+def _bm_plain(frames: List[bytes], key: bytes):
+    return [_bm_decrypt(key, f) for f in frames[:BM_MAX_FRAMES] if len(f) == 16]
 
 
-def _bm2_pushed(buf: bytes) -> bool:
-    # only the first byte (F5) is fixed, so require two pushed frames with a sane SOC
+def _bm6_reply(frames: List[bytes]) -> bool:
+    # d1 55 07 plus a temperature sign byte of 0/1 (31 bits, ~1 in 2e9 per random
+    # notification). The #412 Battery Guard answers the exact empty sentinel to this
+    # ordering; that still identifies the protocol, Bm6Bt then switches ordering itself.
+    from bmslib.models.bm6 import BM6_KEY, CMD_REALTIME, EMPTY_REALTIME
+    return any(p == EMPTY_REALTIME or (p[:3] == b'\xd1\x55\x07' and p[3] in (0, 1)
+                                       and p != CMD_REALTIME)  # not an echo of the request
+               for p in _bm_plain(frames, BM6_KEY))
+
+
+def _bm2_pushed(frames: List[bytes]) -> bool:
+    # F5, SOC <= 100 and the ten zero bytes every published capture ends with
+    # (KrystianD's reverse_engineering.md, doubleagent.net): ~90 bits, one frame suffices
     from bmslib.models.bm6 import BM2_KEY
-    return sum(1 for p in _bm_blocks(buf, BM2_KEY) if p[0] == 0xF5 and p[3] <= 100) >= 2
+    return any(p[0] == 0xF5 and p[3] <= 100 and not any(p[6:])
+               for p in _bm_plain(frames, BM2_KEY))
 
 
 # ---------------------------------------------------------------- probe table
@@ -192,6 +193,8 @@ class Probe:
     steps: List[Tuple[Optional[bytes], Callable[[bytes], bool]]]
     response: Optional[bool] = None  # write mode as the driver writes; None = bleak default
     label: str = ''
+    framed: bool = False  # validators get the list of notifications, not the byte stream
+    wait_factor: float = 1  # x REPLY_TIMEOUT per step
 
     def __str__(self):
         return self.label or self.type
@@ -230,9 +233,11 @@ def _build_probes() -> List[Probe]:
     # BM6/BM2 car battery monitors (#41, #160): bm2 first, it only listens; the Ancel
     # BM200 can be either, so the advertisement can't tell them apart
     bm_rx, bm_tx = _uuid16(0xFFF4), _uuid16(0xFFF3)
-    probes.append(Probe('bm2', bm_rx, bm_tx, [(None, _bm2_pushed)], label='bm2 (listening for pushed frames)'))
+    # the BM2's push interval is not documented: listen for two reply timeouts
+    probes.append(Probe('bm2', bm_rx, bm_tx, [(None, _bm2_pushed)], framed=True, wait_factor=2,
+                        label='bm2 (listening for pushed frames)'))
     probes.append(Probe('bm6', bm_rx, bm_tx, [(bm6_encrypt(CMD_REALTIME, BM6_KEY), _bm6_reply)],
-                        response=True))
+                        response=True, framed=True))
     return probes
 
 
@@ -299,9 +304,16 @@ class AutoDetectBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._rx_buf = bytearray()
+        self._rx_frames: List[bytes] = []
 
     def _on_notify(self, _sender, data):
         self._rx_buf += data
+        if len(self._rx_frames) < BM_MAX_FRAMES:
+            self._rx_frames.append(bytes(data))
+
+    def _rx_clear(self):
+        self._rx_buf.clear()
+        self._rx_frames.clear()
 
     def _char(self, uuid: str, props) -> Optional[object]:
         for service in self.client.services:
@@ -338,18 +350,20 @@ class AutoDetectBt(BtBms):
     async def run_probe(self, probe: Probe) -> bool:
         rx = self._char(probe.rx, ('notify', 'indicate'))
         tx = self._char(probe.tx, ('write', 'write-without-response'))
+        self._rx_clear()  # nothing from an earlier probe counts
         await self.client.start_notify(rx, self._on_notify)
         try:
             for frame, valid in probe.steps:
-                self._rx_buf.clear()  # replies to an earlier request don't count
                 if frame is None:
-                    pass  # listen only
+                    pass  # listen only; keep what was pushed while subscribing
                 elif probe.response is None:  # the bleak default, as the driver calls it
+                    self._rx_clear()  # replies to an earlier request don't count
                     await self.client.write_gatt_char(tx, frame)
                 else:
+                    self._rx_clear()
                     await self.client.write_gatt_char(tx, frame, response=probe.response)
-                t_end = time.monotonic() + REPLY_TIMEOUT
-                while not valid(bytes(self._rx_buf)):
+                t_end = time.monotonic() + REPLY_TIMEOUT * probe.wait_factor
+                while not valid(self._rx_frames if probe.framed else bytes(self._rx_buf)):
                     if time.monotonic() > t_end:
                         if self._rx_buf:
                             self.logger.info('auto: %s: no valid reply (%d bytes: %s)', probe,

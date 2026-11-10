@@ -41,13 +41,14 @@ REPLIES = {
     'ant': bytes(ant_fixtures.INLINE_8S['raw']),
     # tarball.ca's BM6 realtime reply; two pushed BM2 frames (bm6 decode tests)
     'bm6': bytes.fromhex('5a7a41c3a57ca1fa9247f76557c5d618'),
-    'bm2': (bm6_encrypt(bytes.fromhex('f550816400fa00000000000000000000'), BM2_KEY)
-            + bm6_encrypt(bytes.fromhex('f54f414c0b0f00000000000000000000'), BM2_KEY)),
+    'bm2': bm6_encrypt(bytes.fromhex('f550816400fa00000000000000000000'), BM2_KEY),
 }
 
 
-def _accepts(probe, buf: bytes) -> bool:
-    return all(valid(buf) for _frame, valid in probe.steps)
+def _accepts(probe, *notifications: bytes) -> bool:
+    """BM probes validate per notification, the others the concatenated stream."""
+    data = list(notifications) if probe.framed else b''.join(notifications)
+    return all(valid(data) for _frame, valid in probe.steps)
 
 
 def test_each_reply_confirms_exactly_its_own_type():
@@ -59,16 +60,15 @@ def test_each_reply_confirms_exactly_its_own_type():
 def test_split_and_prefixed_replies_still_validate():
     for typ, reply in REPLIES.items():
         probe = next(p for p in _build_probes() if p.type == typ)
-        buf = b'\x00junk' + reply
-        assert _accepts(probe, buf), typ
-        assert not _accepts(probe, buf[:-1]), typ  # truncated: not yet
+        assert _accepts(probe, b'\x00junk', reply), typ
+        assert not _accepts(probe, b'\x00junk', reply[:-1]), typ  # truncated: not yet
 
 
 def test_requests_are_never_accepted_as_replies():
     # an echo of what we sent must not confirm anything (Daly's own callback accepts its 0x90 echo)
     probes = _build_probes()
-    sent = b''.join(frame for p in probes for frame, _ in p.steps if frame)
-    assert not [p.type for p in probes if _accepts(p, sent)]
+    sent = [frame for p in probes for frame, _ in p.steps if frame]
+    assert not [p.type for p in probes if _accepts(p, *sent)]
 
 
 def test_daly2_rejects_foreign_address_and_wrong_length():
@@ -405,8 +405,7 @@ class _PushingDevice(_FakeDevice):
 
 
 def test_bm2_detected_by_listening_only():
-    r = REPLIES['bm2']
-    dev = _PushingDevice([r[:16], r[16:]])
+    dev = _PushingDevice([REPLIES['bm2']])
     res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
     assert res.type == 'bm2' and dev.writes == []
 
@@ -426,17 +425,50 @@ def test_bm6_empty_sentinel_still_confirms_bm6():
     assert _accepts(probe, bm6_encrypt(EMPTY_REALTIME, BM6_KEY))
 
 
-def test_single_bm2_frame_is_not_enough():
+def test_bm2_rejects_overlapping_windows_in_one_notification():
+    # Codex review, #41: one 31-byte notification held two F5 windows (offsets 0, 13)
     probe = next(p for p in _build_probes() if p.type == 'bm2')
-    assert not _accepts(probe, REPLIES['bm2'][:16])
+    assert not _accepts(probe, bytes.fromhex('454e136cdaea20ce006191b04654aeeaeeb281274e29aa9df16bf2ca210494'))
+    # an F5 frame that does not end in the zero padding every capture shows
+    assert not _accepts(probe, bm6_encrypt(bytes.fromhex('f550816400fa00000000000000000001'), BM2_KEY))
+    assert not _accepts(probe, bm6_encrypt(bytes.fromhex('f5508165' + '00' * 12), BM2_KEY))  # SOC 101
+
+
+def test_bm6_rejects_wrong_sign_byte():
+    probe = next(p for p in _build_probes() if p.type == 'bm6')
+    assert not _accepts(probe, bm6_encrypt(bytes.fromhex('d1550702170100' + '00' * 9), BM6_KEY))
+
+
+def test_bm_reply_after_junk_notifications_still_counts():
+    # finding 2 of the review: a frozen byte prefix hid a late valid reply
+    for typ, key in (('bm2', BM2_KEY), ('bm6', BM6_KEY)):
+        probe = next(p for p in _build_probes() if p.type == typ)
+        assert _accepts(probe, *([bytes(16)] * 20 + [bytes(300)]), REPLIES[typ]), typ
+
+
+def test_bm2_frame_pushed_while_subscribing_counts():
+    class Eager(_FakeDevice):
+        async def start_notify(self, char, cb, **kw):
+            await super().start_notify(char, cb)
+            cb(None, bytearray(REPLIES['bm2']))  # before start_notify returns
+
+    dev = Eager(GATT_BM, lambda f: None)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert res.type == 'bm2' and dev.writes == []
 
 
 def test_bm_validators_are_bounded_on_a_flood(monkeypatch):
-    # a device streaming garbage on fff4 must not make each check decrypt it all
-    import os
+    # deterministic: distinct 16-byte notifications, so the cache can't hide the work
     calls = []
     real = ad._bm_decrypt.__wrapped__
     monkeypatch.setattr(ad, '_bm_decrypt', lambda k, b: calls.append(1) or real(k, b))
-    flood = os.urandom(20000)
-    assert not ad._bm6_reply(flood) and not ad._bm2_pushed(flood)
-    assert len(calls) <= 2 * (ad._BM_SCAN_BYTES - 15)
+    flood = [i.to_bytes(16, 'big') for i in range(5000)]
+    ad._bm6_reply(flood), ad._bm2_pushed(flood)
+    assert len(calls) <= 2 * ad.BM_MAX_FRAMES
+
+
+def test_receiver_keeps_a_bounded_number_of_notifications():
+    bms = AutoDetectBt('test_jbd', name='x')
+    for i in range(1000):
+        bms._on_notify(None, bytearray(16))
+    assert len(bms._rx_frames) == ad.BM_MAX_FRAMES

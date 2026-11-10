@@ -293,3 +293,20 @@ def test_bm2_timeout_suggests_bm6(caplog):
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(run())
     assert "try type: bm6" in caplog.text
+
+
+def test_bm2_timeout_hint_warns_once(caplog):
+    import logging
+    from bmslib.models.bm6 import Bm2Bt
+
+    async def run():
+        bms = Bm2Bt("00:11:22:33:44:55", name="bm2")
+        bms.TIMEOUT = 0.02
+        for _ in range(3):
+            with pytest.raises(asyncio.TimeoutError):
+                await bms.fetch()
+
+    with caplog.at_level(logging.DEBUG):
+        asyncio.run(run())
+    warned = [r for r in caplog.records if "try type: bm6" in r.getMessage() and r.levelno >= logging.WARNING]
+    assert len(warned) == 1

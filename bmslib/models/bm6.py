@@ -360,6 +360,7 @@ class Bm2Bt(Bm6Bt):
     BM6 protocol instead and needs Bm6Bt."""
     KEY = BM2_KEY
     TIMEOUT = 15
+    _bm6_hinted = False
 
     def _route(self, plain: bytes):
         if plain[0] == 0xF5:
@@ -373,8 +374,10 @@ class Bm2Bt(Bm6Bt):
                 if _cancellation_requested():
                     raise asyncio.CancelledError from None
                 # a BM6-protocol device only answers requests, so it stays silent here (#41)
-                self.logger.warning("%s no BM2 frame within %ss; some Ancel BM200 units speak "
-                                    "the BM6 protocol, try type: bm6", self.name, self.TIMEOUT)
+                log = self.logger.debug if self._bm6_hinted else self.logger.warning
+                self._bm6_hinted = True
+                log("%s no BM2 frame within %ss; some Ancel BM200 units speak the BM6 "
+                    "protocol, try type: bm6 (or type: auto)", self.name, self.TIMEOUT)
                 raise
         d = decode_bm2_realtime(plain)
         return BmsSample(
