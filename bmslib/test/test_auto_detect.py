@@ -429,3 +429,14 @@ def test_bm6_empty_sentinel_still_confirms_bm6():
 def test_single_bm2_frame_is_not_enough():
     probe = next(p for p in _build_probes() if p.type == 'bm2')
     assert not _accepts(probe, REPLIES['bm2'][:16])
+
+
+def test_bm_validators_are_bounded_on_a_flood(monkeypatch):
+    # a device streaming garbage on fff4 must not make each check decrypt it all
+    import os
+    calls = []
+    real = ad._bm_decrypt.__wrapped__
+    monkeypatch.setattr(ad, '_bm_decrypt', lambda k, b: calls.append(1) or real(k, b))
+    flood = os.urandom(20000)
+    assert not ad._bm6_reply(flood) and not ad._bm2_pushed(flood)
+    assert len(calls) <= 2 * (ad._BM_SCAN_BYTES - 15)

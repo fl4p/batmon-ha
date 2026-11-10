@@ -144,9 +144,16 @@ def _ant_reply(func: int) -> Callable[[bytes], bool]:
     return check
 
 
+# A BM reply, or two BM2 pushes, sit well inside this; a device streaming something
+# else on fff4 must not make each 50 ms check decrypt an unbounded buffer (~0.23 ms/block)
+_BM_SCAN_BYTES = 256
+
+
 def _bm_blocks(buf: bytes, key: bytes):
-    """Every 16-byte window of `buf`, decrypted. Frames are one AES block each and
-    arrive one per notification, but scanning every offset tolerates a stray prefix."""
+    """Every 16-byte window of the first _BM_SCAN_BYTES of `buf`, decrypted. Frames are
+    one AES block each and arrive one per notification, but scanning every offset
+    tolerates a stray prefix."""
+    buf = buf[:_BM_SCAN_BYTES]
     return [_bm_decrypt(key, bytes(buf[i:i + 16])) for i in range(len(buf) - 15)]
 
 
