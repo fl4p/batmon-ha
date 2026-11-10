@@ -102,12 +102,19 @@ device per pack on the same adapter. Default address 1. 9600 8N1.
 
 The FLB48314TG1 has no DIP switches: the packs discover each other and assign
 themselves consecutive addresses, which is why the upstream daemon enumerates
-the bus instead of being told the numbers (Krzysztof Hajdamowicz, #415). The
-protocol carries no serial number or any other pack identity, so if that
-assignment ever moves, nothing on the wire can tell -- an `alias` (and the
-energy meters keyed to it) would silently follow a different pack. Other models
-in the family may well have switches; either way, start at 1 and add one entry
-per pack until one stops answering.
+the bus instead of being told the numbers (Krzysztof Hajdamowicz, #415). He
+reports the assignment is stable across a power cycle and across adding or
+removing a pack -- a pack joining a running bus takes the next free address --
+so configured numbers are a workable model here and we do not enumerate. Two
+caveats. The numbering does not follow the wiring order (on his stack the
+leftmost pack holds address 2), so a pack has to be identified by its readings,
+not its position. And the protocol carries no serial number or any other pack
+identity, so should an assignment ever move, nothing on the wire can tell -- an
+`alias` (and the energy meters keyed to it) would silently follow a different
+pack. Address 0 is dead on his hardware, which is why we refuse it rather than
+probing it as upstream's docs/protocol.md 6 does. Other models in the family
+may well have switches; either way, start at 1 and add one entry per pack until
+one stops answering.
 Untested on hardware.
 """
 import math

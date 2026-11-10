@@ -254,9 +254,11 @@ Supported types (baud rate in parentheses):
   Modbus's byte count. `felicity_uart:<addr>` for the bus address
   (default 1); several packs share one adapter, one device entry each. The
   FLB48314TG1 has no DIP switches — the packs auto-assign consecutive addresses,
-  so start at 1 and add entries until one stops answering. The protocol carries
-  no pack serial, so a reassignment cannot be detected: an `alias` would follow
-  whichever pack holds that address. An
+  so start at 1 and add entries until one stops answering. The assignment is
+  stable across a power cycle and survives adding or removing a pack (a pack
+  joining a running bus takes the next free address), but it does not follow the
+  wiring order, so identify each pack by its readings rather than its position
+  before giving it an `alias`. Address 0 never answers. An
   alternative to the BLE `felicity` for setups troubled by bonding or adapter
   scan contention ([#415](https://github.com/fl4p/batmon-ha/issues/415)); it has
   not been run on hardware yet, so no claim that it is the more reliable path.
