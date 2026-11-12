@@ -602,7 +602,7 @@ class BtBms:
         except Exception as e:
             self.logger.warning('error clearing futures pool: %s', str(e) or type(e))
 
-    async def _connect_client(self, timeout):
+    async def _connect_client(self, timeout, scan_on_not_found=True):
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
@@ -616,8 +616,12 @@ class BtBms:
         except getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError) as exc:
             if BtBms.shutdown:
                 raise
-            self.logger.error("%s, starting scanner", exc)
-            await bt_discovery(self.logger)
+            if scan_on_not_found:  # _connect_with_scanner already runs a scan on this adapter
+                self.logger.error("%s, starting scanner", exc)
+                try:  # scan where we connect; the proxy stack has no local adapter (see bt_diagnostics)
+                    await bt_discovery(self.logger, adapter=None if scanner_is_proxy() else self._adapter)
+                except Exception as e:  # keep the not-found semantics for the caller
+                    self.logger.warning('discovery after failed connect: %s', str(e) or type(e))
             raise
 
         self._connect_time = time.time()
@@ -692,7 +696,8 @@ class BtBms:
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
 
-        scanner = BleakScanner(adapter=self._adapter) if self._adapter else BleakScanner()
+        # the proxy stack has no local adapter (see bt_diagnostics)
+        scanner = BleakScanner(adapter=self._adapter) if self._adapter and not scanner_is_proxy() else BleakScanner()
         self.logger.debug("starting scan")
         try:  # a caller's timeout cancels us mid-start or mid-retry; the scan must not keep running
             await scanner.start()
@@ -711,7 +716,7 @@ class BtBms:
                                               self.address, ad, discovered))
 
                     self.logger.debug("connect attempt %d", attempt)
-                    await self._connect_client(timeout=timeout / 2)
+                    await self._connect_client(timeout=timeout / 2, scan_on_not_found=False)
                     break
                 except Exception as e:
                     await self.client.disconnect()

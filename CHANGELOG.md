@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: after a failed connect, the diagnostic scan ran on the default controller, not the configured `adapter:`; the scanner connect no longer starts a second scan, and drops `adapter:` on the ESPHome proxy stack.
 * `type: auto`: every connect, subscribe and write now has its own time limit; the overall limit is their sum. The old fixed 133 s could cut probing short. A stalled call ends detection.
 * Fix: a cancelled scanner connect left its Bluetooth scan running; the scanner is now stopped in every case.
 * `type: auto`: the receive buffer keeps only the newest 4 KiB, so a device flooding notifications during detection can't grow it without bound or slow every reply check.
