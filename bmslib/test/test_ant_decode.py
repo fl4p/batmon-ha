@@ -79,8 +79,12 @@ def test_ant_reassembly_extra_section():
     extra = bytes([0xff, 0x01, 0x00, 0x04, 0x4e, 0x12, 0x09, 0x00])
     raw = frame + extra + bytes(calc_crc16(extra)) + b"\xaa\x55"
     bms = AntBt("00:11:22:33:44:55", name="ant")
-    got = _feed(bms, _chunks(raw, [20]))
-    assert len(got) == 1 and got[0][0] == 0x12 and got[0][1].startswith(frame)
+    # the extra section + AA 55 arrive in their own notification, after the
+    # frame was already accepted at its CRC
+    got = _feed(bms, _chunks(raw, [20, len(frame)]))
+    assert len(got) == 1 and got[0][0] == 0x12 and got[0][1] == frame
+    # the orphaned tail is dropped, not kept as the start of a bogus frame
+    assert not bms._buffer
     # the following reply still gets through
     raw2 = bytes(ant_fixtures.INLINE_8S["raw"])
     got = _feed(bms, _chunks(raw2, range(20, len(raw2), 20)))
@@ -98,3 +102,13 @@ def test_ant_negative_temperatures():
     assert sample.temperatures[0] == -5
     assert math.isnan(sample.temperatures[1])
     assert sample.mos_temperature == -3
+
+
+def test_ant_reassembly_lost_header_fragment():
+    # the fragment carrying 7E A1 is lost: the headerless rest must not be
+    # buffered, so the next reply decodes cleanly
+    raw = bytes(ant_fixtures.INLINE_8S["raw"])
+    chunks = _chunks(raw, range(20, len(raw), 20))
+    bms = AntBt("00:11:22:33:44:55", name="ant")
+    got = _feed(bms, chunks[1:] + chunks)
+    assert got == [(0x11, raw)]
