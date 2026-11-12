@@ -530,5 +530,6 @@ multi-arch images (`ghcr.io/fl4p/batmon-ha`), compose examples, and a Helm chart
 * [Daly_RS485_UART_Protocol.pdf](https://github.com/jblance/mpp-solar/blob/master/docs/protocols/DALY-Daly_RS485_UART_Protocol.pdf)
 * [JK-bms esphome](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp#L336)
 * [JK02 protocol](https://github.com/jblance/mpp-solar/blob/master/mppsolar/protocols/jk02.py)
+* [ANT BMS 7E A1 protocol spec](https://github.com/yosle/ant-bms-ble/blob/main/PROTOCOL.md)
 
 [install-shield]: https://img.shields.io/badge/dynamic/json?style=for-the-badge&color=green&label=Analytics&suffix=%20Installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/addons.json&query=$.2af0a32d_batmon.total

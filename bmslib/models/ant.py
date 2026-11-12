@@ -2,6 +2,7 @@
 ANT BMS
 
 https://github.com/syssi/esphome-ant-bms/blob/main/components/ant_bms_ble/ant_bms_ble.cpp
+https://github.com/yosle/ant-bms-ble/blob/main/PROTOCOL.md
 https://github.com/juamiso/ANT_BMS
 https://github.com/Sgw32/BMSCtl
 
@@ -83,30 +84,38 @@ class AntBt(BtBms):
 
         if data.startswith(b'\x7E\xA1'):
             self._buffer.clear()
+        elif not self._buffer.startswith(b'\x7E\xA1'):
+            # tail of a frame we already consumed (e.g. the "extra section" some
+            # firmware appends after the payload CRC) or junk: wait for a header
+            self._buffer.clear()
+            return
 
         self._buffer += data
 
-        if self._buffer.endswith(b'\x55'):
-            buf = self._buffer
-            func = buf[2]
-            data_len = buf[5]
-            frame_len = 6 + data_len + 4
+        # Complete once header + payload + CRC are in. Don't key on a trailing
+        # 0x55: a fragment can end in 0x55 mid-frame (dropped the whole frame),
+        # and long responses may carry an extra section between the CRC and
+        # AA 55, so the frame tail isn't at 10 + len either.
+        # https://github.com/yosle/ant-bms-ble/blob/main/PROTOCOL.md (#431)
+        buf = self._buffer
+        if len(buf) < 6:
+            return
+        func = buf[2]
+        data_len = buf[5]
+        frame_len = 6 + data_len + 4
+        if len(buf) < frame_len - 2:
+            return
 
-            if len(buf) < frame_len:
-                self.logger.warning('Unexpected size: header says %d, got %d bytes (%r)', frame_len, len(buf), buf)
-                buf.clear()
-                return
+        crc = calc_crc16(buf[1:1 + frame_len - 5])
+        crc_exp = list(buf[frame_len - 4:frame_len - 2])
 
-            crc = calc_crc16(buf[1:1 + frame_len - 5])
-            crc_exp = list(buf[frame_len - 4:frame_len - 2])
+        self._last_response = buf[:]
+        self._buffer.clear()
 
-            self._last_response = buf[:]
-            self._buffer.clear()
-
-            if crc != crc_exp:
-                self.logger.warning('CRC16 error: %s != %s (expected)', crc, crc_exp)
-            else:
-                self._fetch_futures.set_result(func, self._last_response)
+        if crc != crc_exp:
+            self.logger.warning('CRC16 error: %s != %s (expected)', crc, crc_exp)
+        else:
+            self._fetch_futures.set_result(func, self._last_response)
 
     async def connect(self, timeout=20, **kwargs):
         # await super().connect(**kwargs)
@@ -179,11 +188,12 @@ class AntBt(BtBms):
         self._voltages = [u16(i * 2 + offset) for i in range(num_cell)]
         offset += num_cell * 2
 
-        temperatures = [u16(i * 2 + offset) for i in range(num_temp)]
-        temperatures = [t if t != 65496 else math.nan for t in temperatures]
+        # temperatures are int16 (spec #431); -40 means no sensor
+        temperatures = [i16(i * 2 + offset) for i in range(num_temp)]
+        temperatures = [t if t != -40 else math.nan for t in temperatures]
         offset += num_temp * 2
 
-        mos_temp = u16(offset)
+        mos_temp = i16(offset)
         offset += 2
 
         # balancer_temp = u16(offset)
