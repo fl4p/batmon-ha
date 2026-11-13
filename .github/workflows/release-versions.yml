@@ -1,0 +1,32 @@
+name: Release versions
+
+# The Helm chart appVersion and the tag pinned in doc/Docker.md must equal
+# config.yaml `version:` (bmslib/test/test_release_versions.py). Needs only pytest.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'config.yaml'
+      - 'charts/batmon-ha/Chart.yaml'
+      - 'doc/Docker.md'
+      - 'bmslib/test/test_release_versions.py'
+      - '.github/workflows/release-versions.yml'
+  pull_request:
+    paths:
+      - 'config.yaml'
+      - 'charts/batmon-ha/Chart.yaml'
+      - 'doc/Docker.md'
+      - 'bmslib/test/test_release_versions.py'
+      - '.github/workflows/release-versions.yml'
+
+jobs:
+  in-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install pytest
+      - run: python -m pytest -q -p no:cacheprovider bmslib/test/test_release_versions.py
