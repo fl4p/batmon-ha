@@ -226,6 +226,38 @@ batmon implements the **new protocol** (`7E A1`).
 - [klotztech/VBMS](https://github.com/klotztech/VBMS) — Android/Python UI for ANT
 - [RoboDurden/AntBms-Arduino](https://github.com/RoboDurden/AntBms-Arduino) — Arduino impl of new UART protocol
 
+### Wired — `models/ant_uart.py` (`ant_uart`, `ant_old_uart`)
+
+**Port.** 4-pin JST 1.25 mm comm port, 3.3 V TTL: VCC, GND, RX, TX. The BMS does not answer unless VCC is connected
+(syssi README, issue #1). One report of the BMS TX high level at only ~1.16 V, below the ESP input threshold; on boards
+with a 6-pin display connector only the first GND is battery ground (syssi issue #90).
+
+**Baud.** 19200 8N1 in every captured exchange (2020 board, issue #28; 2021 board, issue #37) and in syssi's
+components. The vendor protocol PDF and the vendor PC tool (`MaYiSystem.exe`, issue #20 screenshot) say 9600, hence
+the `:<baud>` type suffix.
+
+**Which protocol.** 2021+ boards speak `7E A1` on the wire: the vendor PC tool polls `7E A1 01 00 00 BE 18 55 AA 55`
+over a serial port (issue #20, which also lists the 0x51 write ACKs). Some 2021 boards also answer the
+old `5A 5A 00 00 01 01` read, but with placeholders: power always 9999 W, current 0 (issue #37). Another 2021 board did
+not answer the old read at all (issue #18, transport not stated). Pre-2021 boards only speak the old protocol. Hence two types, no
+auto-detection. syssi's `ant_bms` UART component switched to `7E A1` only in 3.0.0 (PR #162); its hardware test box
+is unticked.
+
+**`7E A1` on the wire** is byte-identical to BLE, decoded by `AntBt.fetch`. The serial framer resyncs on `7E A1`, ends a
+frame at its CRC and skips the `AA 55` tail and any extra section. MOS state order: byte 46+offset is the discharge
+MOS, 47+offset the charge MOS (yosle PROTOCOL.md, `disMosState` before `chMosState`; the 14S PC-tool capture reads
+`01 02` with all cells at 4.113 V, i.e. charge in overcharge protection). syssi's decoder has them the other way round.
+
+**`AA 55 AA FF` (old).** 140 bytes, big-endian, 16-bit sum of bytes 4..137 at 138..139 (big-endian). Request
+`5A 5A <addr> <data hi> <data lo> <sum>`, status read `5A 5A 00 00 01 01` (the PDF writes `5A 5A 00 00 00 00`, BLE uses
+`DB DB 00 00 00 00`). Fields: 4 pack V (0.1 V), 6..69 cells (mV), 70 i32 current (0.1 A), 74 SOC, 75/79 capacity /
+remaining (µAh), 83 cycle Ah (mAh), 87 uptime s, 91 MOS temp, 93 balancer temp, 95..101 NTCs (-40 = absent; one 2020
+board reads 0 for its two unused slots), 103/104/105 charge / discharge / balancer status, 111 i32 power W, 115..122
+max / min / avg cell, 123 cell count, 132 balancing bitmask, 136 system log word. **Current sign: positive =
+discharging** (issue #28 log: remaining charge rises 0.02 Ah per 10 s while the BMS reads -7.4 A; dbus-serialbattery
+negates it for Victron's charge-positive convention). Capacity 0 means not configured. Writes need a password
+(`A5 A5 F1..F4`, then `A5 A5 FF 00 00` apply) and are not implemented.
+
 ---
 
 ## Victron SmartShunt — `models/victron.py`

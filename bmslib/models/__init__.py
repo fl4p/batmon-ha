@@ -51,6 +51,8 @@ def get_bms_model_class(name: str):
         felicity_uart='models.felicity_uart.FelicityUart',  # Felicity Solar 48V packs, Voltronic "LIB" over RS485 (#415)
         pace_uart='models.pace.PaceUart',  # PACE "paceic" RS232/RS485 ASCII protocol (#276)
         ant='models.ant.AntBt',
+        ant_uart='models.ant_uart.AntUart',  # 2021+ ANT over UART; same 7E A1 frames as BLE
+        ant_old_uart='models.ant_uart.AntOldUart',  # pre-2021 ANT, AA 55 AA FF 140-byte frames
         victron='models.victron.SmartShuntBt',
         group_parallel='bmslib.group.VirtualGroupBms',
         group_serial='bmslib.group.SeriesGroupBms',

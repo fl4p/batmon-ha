@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* New wired types `ant_uart` (2021+ ANT boards, same `7E A1` frames as BLE) and `ant_old_uart` (older `AA 55 AA FF` boards), 19200 baud. Checked against captured frames only, untested on hardware.
 * `soh_estimator`: new `SoC gauge error` diagnostic, the BMS's SoC minus what each full charge or rest near empty says. A gauge that never resyncs shows up there (doc/SoC.md).
 * `impedance_estimator`, `soh_estimator`: the estimator code moved to `bmslib/estimators/`, which changes the code fingerprint of saved state, so saved Cell Resistance windows and Qmax/SoH segments are discarded once and relearned.
 

@@ -165,6 +165,21 @@ Protocol cross-references:
 
 ---
 
+## ANT BMS wired (`ant_uart`, `ant_old_uart`) — `ant_uart_fixtures.py`
+
+| Fixture | Type | Source |
+|---|---|---|
+| `NEW_16S`, `NEW_DEVICE_INFO` | harvested | [`syssi/esphome-ant-bms` — `tests/components/ant_bms/frames_16s_status.h`](https://github.com/syssi/esphome-ant-bms/blob/main/tests/components/ant_bms/frames_16s_status.h) (Apache-2.0), a v2021 recording also in `esp32-ble-example-faker.yaml`. Expected values are the ones in that file's header and in `ant_bms_test.cpp`. |
+| `NEW_14S_PC_TOOL` | captured frame | [syssi/esphome-ant-bms #18](https://github.com/syssi/esphome-ant-bms/issues/18), bchiu 2022-10-26: the vendor PC tool's serial exchange with a 24BHUB board (reply at 20:25:25). Expected values are syssi's byte-by-byte annotation of this frame in the same issue (2023-03-07). |
+| `OLD_2020_8S_CHARGING` | captured frame | #28, [lucasimons' log](https://github.com/syssi/esphome-ant-bms/files/8304995/logs_ant-bms-2020_logs.1.txt): 2020 board, 8S, 19200 baud, request `5A 5A 00 00 01 01`, frame at 14:55:41 incl. the 10 trailing `FF` noise bytes. Expected values are the ESPHome sensor lines of the same poll (14:55:40). |
+| `OLD_2020_8S` | captured frame | #28, [log 8283047](https://github.com/syssi/esphome-ant-bms/files/8283047/logs_ant-bms-2020_logs.txt), 09:38:14; identical to syssi's `tests/components/ant_bms_old/frames_8s.h`, expected values from that file. |
+| `OLD_2021_8S` | captured frame | [#37](https://github.com/syssi/esphome-ant-bms/issues/37), [log 8599527](https://github.com/syssi/esphome-ant-bms/files/8599527/logs_ant-bms_logs.txt): a 2021 board answering the old request, 20:51:02. Only the text sensors were logged (MOSFETs "Manually turned off", balancer "Off"); the power placeholder 9999 is what the issue reports. |
+
+The 2020 captures pin the current sign: the remaining charge rises from poll to poll
+(94.5548 → 94.5749 Ah in 10 s) while the BMS reads -7.4 A, so negative is charging.
+
+---
+
 ## LiTime — `litime_fixtures.py`
 
 | Fixture | Type | Source |
