@@ -375,7 +375,7 @@ async def main():
     # pack_temp_estimator (off by default): the ambient topics are registered
     # before the broker connection, so on_connect subscribes them -- on the first
     # connect and again after every reconnect.
-    from bmslib.pack_temp_publisher import ambient_cache_from_config
+    from bmslib.estimators.pack_temp_publisher import ambient_cache_from_config
     ambient_cache = ambient_cache_from_config(user_config, bmslib.mqtt_util.register_state_topic, log=logger)
 
     if user_config.get('mqtt_broker'):

@@ -1,4 +1,4 @@
-"""Experimental Qmax / SoH estimator (bmslib/qmax.py).
+"""Experimental Qmax / SoH estimator (bmslib/estimators/qmax.py).
 
 Pure Python, like the module. Every known-bad case comes in a pair: the test
 that the guard rejects it, and a calibration test that breaks exactly that
@@ -32,7 +32,7 @@ from collections import deque
 import paho.mqtt.client as paho
 import pytest
 
-import bmslib.qmax as q
+import bmslib.estimators.qmax as q
 from bmslib.bms import BmsSample
 import bmslib.mqtt_util as q_mqtt
 from bmslib.mqtt_util import publish_hass_discovery, publish_qmax
@@ -4274,7 +4274,7 @@ def test_the_sampler_saves_before_the_write_goes_out(monkeypatch):
 
 def test_the_sampler_refuses_the_write_when_the_state_cannot_be_saved(monkeypatch):
     import bmslib.store
-    from bmslib.estimator_common import CounterWriteRefused
+    from bmslib.estimators.common import CounterWriteRefused
     s, _ = _run_sampler(3, bms=_Counting(capacity=100.0), soh_estimator=True, design_capacity=100.0)
 
     def fail(name, st):

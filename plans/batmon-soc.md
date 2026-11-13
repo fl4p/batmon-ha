@@ -192,7 +192,7 @@ bit-identical.
 ### Replay (in `~/dev/pv/bat-impedance`, not the add-on)
 
 A new script next to `tele_long_qmax.py` / `van_qmax.py` that drives
-`bmslib.qmax` the way those do and, for every pair of consecutive anchors in
+`bmslib.estimators.qmax` the way those do and, for every pair of consecutive anchors in
 the same epoch, computes the **anchor-to-anchor residual**: the SoC the counter
 predicts at the second anchor, from the first anchor's SoC plus Δq / C, minus
 that anchor's SoC. It does this for each limiting candidate (min cell SoC, and

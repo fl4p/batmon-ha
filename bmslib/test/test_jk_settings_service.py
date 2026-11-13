@@ -733,7 +733,7 @@ def test_a_capacity_write_goes_through_the_counter_write(tmp_path):
 
 
 def test_a_capacity_write_is_not_sent_when_the_counter_write_refuses(tmp_path):
-    from bmslib.estimator_common import CounterWriteRefused
+    from bmslib.estimators.common import CounterWriteRefused
     bms, client = _make()
     svc, pub = _service(tmp_path, writable={'total_capacity'}), FakePublish()
     _tick(svc, bms, pub)

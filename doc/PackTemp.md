@@ -35,6 +35,6 @@ pack_temp_ambient_max_age: 600   # s, default 600
 
 ## Model
 
-A lumped RC model, `bmslib/pack_temp_rc.py`. The coefficients were fitted on one LiFePO4 pack with room, outdoor and
+A lumped RC model, `bmslib/estimators/pack_temp_rc.py`. The coefficients were fitted on one LiFePO4 pack with room, outdoor and
 MOSFET temperatures logged; on a held-out period the estimate had an RMSE of 1.42 °C against the measured cell
 temperature (using the MOSFET temperature directly: 1.92 °C). The same coefficients are used for every pack.

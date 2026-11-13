@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Optional
 
-from bmslib.estimator_common import CounterWriteRefused
+from bmslib.estimators.common import CounterWriteRefused
 from bmslib.models.jk_settings import (SETTINGS, SettingError, encode_setting, format_changes, format_value,
                                        implausible_settings, parse_write_option, unsupported, validate_change)
 from bmslib.util import get_logger

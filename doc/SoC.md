@@ -6,7 +6,7 @@ This is Part 2 of `plans/batmon-soc.md`. Nothing in the add-on changed. The repl
 ## Method
 
 The replay feeds the 16 long telemetry packs (2026-05-25 to 2026-09-24, 15 s ticks) through
-`bmslib.qmax` the same way `tele_long_qmax.py` does. It records every anchor: a full charge (top)
+`bmslib.estimators.qmax` the same way `tele_long_qmax.py` does. It records every anchor: a full charge (top)
 or a rest near empty read off the OCV curve (ocv). For each pair of consecutive anchors in the same
 epoch it computes two residuals, in percentage points (pp):
 

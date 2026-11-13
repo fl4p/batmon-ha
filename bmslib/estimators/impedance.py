@@ -48,7 +48,7 @@ prototype produced a plausible wrong number without it:
  * Missing inputs are never replaced by plausible values: no SoC means no DOD
    tag and a failed drift gate; no temperature means temp None.
  * A current no pack can carry (a decode glitch such as 2^31 mA; above
-   I_MAX_C_RATE x capacity or I_MAX_ABS_A, estimator_common) makes the sample
+   I_MAX_C_RATE x capacity or I_MAX_ABS_A, estimators.common) makes the sample
    no pair: it never reaches a bin, a window or the learnt quantisation.
 
 Each accepted window is tagged with DOD, the median BMS temperature probe
@@ -87,8 +87,8 @@ import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from bmslib import estimator_common
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
+from bmslib.estimators import common
+from bmslib.estimators.common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite as _finite,
                                      fmt_t as _fmt_t, locked, median)
 from bmslib.util import get_logger
@@ -138,7 +138,7 @@ ROUNDOFF_REL = 1e-9
 IRLS_ITERS = 2
 IRLS_K = 4.0
 
-# Chemistry guard (LFP_MV_LO/HI, CHEM_PERSIST_S/N): see bmslib/estimator_common.py.
+# Chemistry guard (LFP_MV_LO/HI, CHEM_PERSIST_S/N): see bmslib/estimators/common.py.
 # Imported into this module's namespace, and passed from here, so that moving
 # them on this module (as the tests do) moves them for this estimator only.
 
@@ -385,7 +385,7 @@ def _diffs(x):
 
 
 _LAG_ORDER_CACHE = {}
-_FINGERPRINT_STATE = frozenset({'_LAG_ORDER_CACHE'})  # filled at run time: state (estimator_common)
+_FINGERPRINT_STATE = frozenset({'_LAG_ORDER_CACHE'})  # filled at run time: state (estimators.common)
 
 
 def _best_lag_diffs(du, di, max_lag=None, min_diffs=None):
@@ -1062,5 +1062,5 @@ class CellResistanceEstimator:
 # Accepted windows are only restored into the code that computed them: after an
 # upgrade that changed any gate or the fit, old windows would mix two
 # definitions of R in one median. Computed last, over the code that actually
-# runs, this module's and the shared helpers' (estimator_common.code_fingerprint).
-CODE_FINGERPRINT = estimator_common.code_fingerprint(globals(), vars(estimator_common))
+# runs, this module's and the shared helpers' (estimators.common.code_fingerprint).
+CODE_FINGERPRINT = common.code_fingerprint(globals(), vars(common))

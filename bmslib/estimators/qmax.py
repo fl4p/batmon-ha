@@ -55,7 +55,7 @@ integrated with the trapezoid rule at whatever cadence it arrives. A gap
 longer than MAX_GAP_S invalidates the open segment (anchors on the far side of
 it cannot be paired), but keeps the anchors; a shorter one is bridged
 linearly. A current no pack can carry (a decode glitch, above I_MAX_C_RATE x
-capacity or I_MAX_ABS_A, estimator_common) is never integrated and is no
+capacity or I_MAX_ABS_A, estimators.common) is never integrated and is no
 sample: an isolated one leaves a hole that the next good sample bridges under
 the same rule, as if it had not come -- but only if the GLITCH_NB_N good
 samples either side of the hole agree with their local level
@@ -181,7 +181,7 @@ The estimator still logs every anchor and every candidate pair it rejects,
 with the reason.
 
 Chemistry: LiFePO4 only, the same persistent-out-of-band rule as the cell
-resistance estimator (bmslib/estimator_common.py).
+resistance estimator (bmslib/estimators/common.py).
 """
 import copy
 import logging
@@ -191,8 +191,8 @@ from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from bmslib import bms as _bms
-from bmslib import estimator_common
-from bmslib.estimator_common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
+from bmslib.estimators import common
+from bmslib.estimators.common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, locked, median,
                                      v_fin, v_int, v_opt_fin)
 from bmslib.util import get_logger
@@ -618,7 +618,7 @@ class OcvCurve:
 
     def fingerprint_data(self):
         """What makes this curve this curve, for the code fingerprint
-        (estimator_common): the data and parameters it was built with, and
+        (estimators.common): the data and parameters it was built with, and
         the smoothed curve and slope that soc() inverts and gates on. The
         tables are rounded to 1 nV, so that a last-bit difference of exp() in
         another libm does not count as another curve; anything that moves
@@ -678,7 +678,7 @@ def _merge(ts, vs, max_points):
 
 
 # A tuple, not a list: module-level lists are state to the code fingerprint and
-# left out of it (estimator_common._is_const), and this grid is configuration.
+# left out of it (estimators.common._is_const), and this grid is configuration.
 _TAU_GRID = tuple(FIT_TAU_MIN_S * (FIT_TAU_MAX_S / FIT_TAU_MIN_S) ** (k / (FIT_TAU_GRID - 1))
                   for k in range(FIT_TAU_GRID))
 
@@ -2160,15 +2160,15 @@ DEFAULT_CURVE = OcvCurve()
 
 # Anchors and segments are only restored into the code that made them: a change
 # to the curve or any gate would mix two definitions of Qmax. Computed last, over
-# the code that actually runs (estimator_common.code_fingerprint): this module,
+# the code that actually runs (estimators.common.code_fingerprint): this module,
 # the shared helpers, and the one function of bms.py that derives inputs the
 # saved state depends on (the SoC and capacities the stop rule reads; rev8). Not
 # all of bms.py and sampling.py: every unrelated change there would discard
 # months of segments. What the sampler does with a sample is add_sample() and
 # best_temperature() here.
 def code_fingerprint() -> Optional[str]:
-    return estimator_common.code_fingerprint(
-        globals(), vars(estimator_common), {'__name__': _bms.__name__, 'derive_charge_fields': _bms.derive_charge_fields})
+    return common.code_fingerprint(
+        globals(), vars(common), {'__name__': _bms.__name__, 'derive_charge_fields': _bms.derive_charge_fields})
 
 
 CODE_FINGERPRINT = code_fingerprint()

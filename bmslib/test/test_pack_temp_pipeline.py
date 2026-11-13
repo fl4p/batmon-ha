@@ -12,8 +12,8 @@ import time
 import numpy as np
 import pytest
 
-from bmslib.ambient_cache import AmbientCache, _parse_payload
-from bmslib.pack_temp_publisher import PackTempRCPublisher
+from bmslib.estimators.ambient_cache import AmbientCache, _parse_payload
+from bmslib.estimators.pack_temp_publisher import PackTempRCPublisher
 from bmslib.bms import BmsSample
 
 

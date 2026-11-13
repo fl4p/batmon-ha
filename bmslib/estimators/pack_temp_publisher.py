@@ -15,8 +15,8 @@ sampler's main loop only sees one method call.
 import math
 from typing import Optional, TYPE_CHECKING
 
-from bmslib.pack_temp_rc import PackTempRCEstimator, _valid
-from bmslib.ambient_cache import AmbientCache
+from bmslib.estimators.pack_temp_rc import PackTempRCEstimator, _valid
+from bmslib.estimators.ambient_cache import AmbientCache
 
 if TYPE_CHECKING:
     from bmslib.bms import BmsSample

@@ -271,7 +271,7 @@ class BmsSampler:
         # aggregates of its members, which are estimated on their own.
         self.impedance = None
         if impedance_estimator and not bms.is_virtual:
-            from bmslib.impedance import CellResistanceEstimator
+            from bmslib.estimators.impedance import CellResistanceEstimator
             self.impedance = CellResistanceEstimator(bms.name)
             logger.info('%s: cell resistance estimator enabled (experimental)', bms.name)
             if impedance_state:
@@ -283,7 +283,7 @@ class BmsSampler:
         # `capacity:` option [Ah]; without it nothing is published.
         self.qmax = None
         if soh_estimator and not bms.is_virtual:
-            from bmslib.qmax import QmaxEstimator
+            from bmslib.estimators.qmax import QmaxEstimator
             self.qmax = QmaxEstimator(bms.name, design_capacity=design_capacity)
             logger.info('%s: Qmax/SoH estimator enabled (experimental), design capacity %s', bms.name,
                         ('%.1f Ah' % self.qmax.design_capacity) if self.qmax.design_capacity else
@@ -314,7 +314,7 @@ class BmsSampler:
         self._pack_temp = None  # this iteration's estimate, None when it had no MOS reading
         if ambient_cache is not None and not bms.is_virtual:
             from functools import partial
-            from bmslib.pack_temp_publisher import PackTempRCPublisher
+            from bmslib.estimators.pack_temp_publisher import PackTempRCPublisher
             self._pack_temp_publisher = PackTempRCPublisher(
                 device_topic=self.mqtt_topic_prefix, ambient=ambient_cache,
                 publish_fn=partial(mqtt_single_out, mqtt_client))
@@ -408,7 +408,7 @@ class BmsSampler:
                 try:
                     self.store_qmax_state()
                 except Exception as e:
-                    from bmslib.estimator_common import CounterWriteRefused
+                    from bmslib.estimators.common import CounterWriteRefused
                     logger.error('%s: %s not sent: the Qmax/SoH state could not be saved first: %s', self.bms.name,
                                  why, summarize_exc(e))
                     raise CounterWriteRefused(str(e)) from e
@@ -895,7 +895,7 @@ class BmsSampler:
     async def _qmax_temperature(self, sample: BmsSample):
         """(best cell temperature known or None, whether it is the MOSFET's):
         qmax.best_temperature."""
-        from bmslib.qmax import best_temperature
+        from bmslib.estimators.qmax import best_temperature
         if self._pack_temp is not None and math.isfinite(self._pack_temp):
             return best_temperature(self._pack_temp, None, None)
         # sample.temperatures is only filled when a sink or a group wanted it

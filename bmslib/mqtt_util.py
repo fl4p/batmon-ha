@@ -192,14 +192,14 @@ def publish_cell_resistance(client, device_topic, value_mohm: Optional[float], a
         mqtt_single_out(client, f"{device_topic}/cell_resistance", round_to_n(value_mohm, 3))
 
 
-# Qmax/SoH (bmslib/qmax.py) is published once per accepted segment -- weeks
+# Qmax/SoH (bmslib/estimators/qmax.py) is published once per accepted segment -- weeks
 # apart at best -- and never refreshed. The entity expires with the estimate
 # itself: a year after the newest segment, the age limit of the median. An
 # estimate that may no longer go out is withdrawn before that (withdraw_qmax).
 QMAX_EXPIRE_S = 365 * 86400
 
 # offset_drift_pct is the drift of the ASSUMED offset offset_assumed_a (a tuning
-# constant or the rest reading), not a bound on the error (bmslib/qmax.py).
+# constant or the rest reading), not a bound on the error (bmslib/estimators/qmax.py).
 # anchors: what the newest segment ran between ('ocv->top': a rest near empty,
 # then a charge termination, doc/SoH.md); top_anchored: how many of the counted
 # segments used a top anchor, whose 100 % is full as the charger defines it.
@@ -360,14 +360,14 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         _hass_discovery('meter/%s' % name, **m, long_expiry=True, precision=2)
 
     if cell_resistance:
-        # experimental, see bmslib/impedance.py: median per-cell resistance,
+        # experimental, see bmslib/estimators/impedance.py: median per-cell resistance,
         # normalised to 25 degC [mOhm]; the attributes say how
         _hass_discovery('cell_resistance', None, "mΩ", state_class="measurement", icon="resistor",
                         name="Cell Resistance", precision=2, expire_after=CELL_RESISTANCE_EXPIRE_S,
                         json_attributes_topic=f"{device_topic}/cell_resistance/attributes")
 
     if soh_est:
-        # experimental, see bmslib/qmax.py: capacity of the limiting cell [Ah], and
+        # experimental, see bmslib/estimators/qmax.py: capacity of the limiting cell [Ah], and
         # that against the design capacity (only published when one is known)
         _hass_discovery('qmax_est', None, "Ah", state_class="measurement", icon="battery-heart-variant",
                         name="Qmax (est.)", precision=1, expire_after=QMAX_EXPIRE_S,
@@ -382,7 +382,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
 
     if pack_temp_est:
         # pack_temp_estimator: RC estimate of the cell temperature from MOS + ambient
-        # (bmslib/pack_temp_publisher.py publishes the state on this topic)
+        # (bmslib/estimators/pack_temp_publisher.py publishes the state on this topic)
         _hass_discovery('pack_temp_est', "temperature", "°C", state_class="measurement",
                         name="Pack Temp (RC est.)", precision=1)
 

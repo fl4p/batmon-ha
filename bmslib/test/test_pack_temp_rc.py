@@ -10,7 +10,7 @@ import math
 import numpy as np
 import pytest
 
-from bmslib.pack_temp_rc import (
+from bmslib.estimators.pack_temp_rc import (
     PackTempRCEstimator,
     RC_COEFFS_DEFAULT,
     _valid,

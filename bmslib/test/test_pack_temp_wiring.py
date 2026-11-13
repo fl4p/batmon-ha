@@ -14,9 +14,9 @@ import paho.mqtt.client as paho
 import pytest
 
 import bmslib.mqtt_util as mqtt_util
-from bmslib.ambient_cache import AmbientCache
+from bmslib.estimators.ambient_cache import AmbientCache
 from bmslib.bms import BmsSample
-from bmslib.pack_temp_publisher import AMBIENT_MAX_AGE_DEFAULT_S, ambient_cache_from_config
+from bmslib.estimators.pack_temp_publisher import AMBIENT_MAX_AGE_DEFAULT_S, ambient_cache_from_config
 from bmslib.sampling import BmsSampler
 
 
@@ -213,7 +213,7 @@ def _impedance_rows(s):
 
 @pytest.mark.parametrize('bad_mos', [math.nan, 1648.0, float('inf')])
 def test_impedance_rows_carry_the_pack_temp_tag_or_none(bad_mos, monkeypatch):
-    import bmslib.impedance as imp
+    import bmslib.estimators.impedance as imp
     s = _sampler(_Bms(mos=(40.0, 40.0, bad_mos)), ambient_cache=AmbientCache(), impedance_estimator=True)
     for _ in range(3):
         asyncio.run(s())

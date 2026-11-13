@@ -1,4 +1,4 @@
-"""Shared estimator helpers (bmslib/estimator_common.py): the code fingerprint
+"""Shared estimator helpers (bmslib/estimators/common.py): the code fingerprint
 that decides whether persisted estimator state is restored."""
 import os
 import shutil
@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-import bmslib.estimator_common as ec
+import bmslib.estimators.common as ec
 
 BMSLIB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -22,9 +22,12 @@ def _py(cwd, code, *flags, seed='0'):
 
 
 def _copy_bmslib(dst):
+    """The fingerprinted modules and what they import, as a package under dst.
+    Returns the bmslib/ copy; the estimators are in its estimators/."""
     pkg = dst / 'bmslib'
-    pkg.mkdir()
-    for f in ('__init__.py', 'estimator_common.py', 'qmax.py', 'impedance.py', 'util.py', 'bms.py'):
+    (pkg / 'estimators').mkdir(parents=True)
+    for f in ('__init__.py', 'util.py', 'bms.py', 'estimators/__init__.py', 'estimators/common.py',
+              'estimators/qmax.py', 'estimators/impedance.py'):
         shutil.copy(os.path.join(BMSLIB, f), pkg / f)
     return pkg
 
@@ -38,9 +41,9 @@ def test_a_stale_pyc_is_fingerprinted_as_the_code_that_runs(tmp_path, mod, old, 
     vouch for the new source, which is not running."""
     pkg = _copy_bmslib(tmp_path)
     name = old.split()[0]
-    probe = 'import bmslib.%s as m; print(m.CODE_FINGERPRINT, m.%s)' % (mod, name)
+    probe = 'import bmslib.estimators.%s as m; print(m.CODE_FINGERPRINT, m.%s)' % (mod, name)
     fp_old, v_old = _py(tmp_path, probe)  # also writes the .pyc
-    src = pkg / (mod + '.py')
+    src = pkg / 'estimators' / (mod + '.py')
     st = src.stat()
     text = src.read_text()
     assert text.count(old) == 1 and len(new) == len(old)
@@ -49,7 +52,7 @@ def test_a_stale_pyc_is_fingerprinted_as_the_code_that_runs(tmp_path, mod, old, 
 
     fp_stale, v_stale = _py(tmp_path, probe)
     assert v_stale == v_old, 'precondition: the stale .pyc must be what runs'
-    shutil.rmtree(pkg / '__pycache__')
+    shutil.rmtree(pkg / 'estimators' / '__pycache__')
     fp_new, v_new = _py(tmp_path, probe, '-B')
     assert v_new != v_old
     assert fp_stale == fp_old  # what runs is the old code, and the fingerprint says so
@@ -62,7 +65,7 @@ def test_the_fingerprint_does_not_depend_on_the_hash_seed_or_the_install_path(tm
     for sub in ('a', 'b'):
         (tmp_path / sub).mkdir()
         (tmp_path / sub / 'setmod.py').write_text(
-            'from bmslib.estimator_common import code_fingerprint\n'
+            'from bmslib.estimators.common import code_fingerprint\n'
             "WORDS = {'alpha', 'beta', 'gamma', 'delta', 'epsilon'}\n"
             'def f(x):\n'
             "    return x in {'p', 'q', 'r', 's', 't', 'u'}\n"
@@ -113,8 +116,8 @@ def test_the_fingerprint_does_not_depend_on_what_else_was_imported(exe):
     0xda vs 0xfa in marshal's output), so turning one estimator on discarded
     the other's saved state."""
     fps = set()
-    for pre in ('', 'import bmslib.impedance; ', 'import bmslib.estimator_common, bmslib.impedance; '):
-        r = subprocess.run([exe, '-B', '-c', pre + 'import bmslib.qmax as q, bmslib.impedance as i; '
+    for pre in ('', 'import bmslib.estimators.impedance; ', 'import bmslib.estimators.common, bmslib.estimators.impedance; '):
+        r = subprocess.run([exe, '-B', '-c', pre + 'import bmslib.estimators.qmax as q, bmslib.estimators.impedance as i; '
                             'print(q.CODE_FINGERPRINT, i.CODE_FINGERPRINT)'],
                            cwd=os.path.dirname(BMSLIB), capture_output=True, text=True, timeout=60,
                            env=dict(os.environ, PYTHONPATH=os.path.dirname(BMSLIB)))
@@ -131,8 +134,8 @@ def test_calibration_marshal_depends_on_the_import_order_on_python_310():
     if not p310:
         pytest.skip('no python3.10 on PATH to calibrate against')
     outs = set()
-    for pre in ('', 'import bmslib.impedance; '):
-        r = subprocess.run([p310, '-B', '-c', pre + 'import marshal, bmslib.qmax as q; '
+    for pre in ('', 'import bmslib.estimators.impedance; '):
+        r = subprocess.run([p310, '-B', '-c', pre + 'import marshal, bmslib.estimators.qmax as q; '
                             'print(marshal.dumps(q.fit_relaxation.__code__).hex())'],
                            capture_output=True, text=True, timeout=60,
                            env=dict(os.environ, PYTHONPATH=os.path.dirname(BMSLIB)))
@@ -147,13 +150,13 @@ def test_comments_docstrings_and_moved_lines_keep_the_fingerprint_logic_does_not
     class's __firstlineno__), so a comment-only edit discarded months of Qmax
     segments. Every edit below shifts every line after it."""
     pkg = _copy_bmslib(tmp_path)
-    src = pkg / (mod + '.py')
+    src = pkg / 'estimators' / (mod + '.py')
     text = src.read_text()
-    probe = 'import bmslib.%s as m; print(m.CODE_FINGERPRINT)' % mod
+    probe = 'import bmslib.estimators.%s as m; print(m.CODE_FINGERPRINT)' % mod
 
     def fp(new_text):
         src.write_text(new_text)
-        shutil.rmtree(pkg / '__pycache__', ignore_errors=True)
+        shutil.rmtree(pkg / 'estimators' / '__pycache__', ignore_errors=True)
         out, = _py(tmp_path, probe, '-B')
         return out
 
@@ -182,7 +185,7 @@ def test_comments_docstrings_and_moved_lines_keep_the_fingerprint_logic_does_not
 
 
 def _own_lag_cache(monkeypatch):
-    import bmslib.impedance as imp
+    import bmslib.estimators.impedance as imp
     monkeypatch.setattr(imp, '_LAG_ORDER_CACHE', dict(imp._LAG_ORDER_CACHE))  # restored after the test
     assert 7 not in imp._LAG_ORDER_CACHE
     return imp
@@ -212,11 +215,11 @@ def test_the_estimators_name_their_run_time_state_and_nothing_else():
     """Module-level containers are configuration unless the module names them
     as state; what it names must be a container that is filled at run time,
     never configuration. A new one fails here and needs that decision."""
-    import bmslib.impedance as imp
-    import bmslib.qmax as q
+    import bmslib.estimators.impedance as imp
+    import bmslib.estimators.qmax as q
     found = {m.__name__ + '.' + k for m in (q, imp, ec) for k, v in vars(m).items()
              if not k.startswith('__') and isinstance(v, (list, dict, set, bytearray))}
-    assert found == {'bmslib.impedance._LAG_ORDER_CACHE'}
+    assert found == {'bmslib.estimators.impedance._LAG_ORDER_CACHE'}
     named = {m.__name__ + '.' + k for m in (q, imp, ec) for k in getattr(m, ec.STATE_NAMES_ATTR, ())}
     assert named == found
 
@@ -298,7 +301,7 @@ def test_the_qmax_fingerprint_covers_how_bmssample_derives_its_inputs_and_nothin
     pkg = _copy_bmslib(tmp_path)
     src = pkg / 'bms.py'
     text = src.read_text()
-    probe = 'import bmslib.qmax as m; print(m.CODE_FINGERPRINT)'
+    probe = 'import bmslib.estimators.qmax as m; print(m.CODE_FINGERPRINT)'
     base, = _py(tmp_path, probe, '-B')
     for old, new, same in (('elif math.isnan(capacity) and soc > .2', 'elif math.isnan(capacity) and soc > .3', False),
                            ('MIN_VALUE_EXPIRY = 20', 'MIN_VALUE_EXPIRY = 21', True)):
@@ -414,8 +417,8 @@ def test_what_cannot_be_fingerprinted_is_unknown_never_a_match():
 
 
 def test_the_estimators_fingerprint_their_code_and_the_shared_helpers():
-    import bmslib.impedance as imp
-    import bmslib.qmax as q
+    import bmslib.estimators.impedance as imp
+    import bmslib.estimators.qmax as q
     assert q.CODE_FINGERPRINT and imp.CODE_FINGERPRINT and q.CODE_FINGERPRINT != imp.CODE_FINGERPRINT
     import bmslib.bms as bms
     inputs = {'__name__': 'bmslib.bms', 'derive_charge_fields': bms.derive_charge_fields}
@@ -427,7 +430,7 @@ def test_the_estimators_fingerprint_their_code_and_the_shared_helpers():
 # ---------------------------------------------------------------- configured objects (third review)
 
 def _curve_fp(monkeypatch, curve):
-    import bmslib.qmax as q
+    import bmslib.estimators.qmax as q
     monkeypatch.setattr(q, 'DEFAULT_CURVE', curve)
     return q.code_fingerprint()
 
@@ -447,7 +450,7 @@ def test_the_curve_the_module_runs_with_is_fingerprinted(monkeypatch, what, make
     left out (third review), so OcvCurve(sigma=1.0, min_slope=1.0) or a
     shifted table kept the fingerprint and old anchors restored under another
     curve. The same curve built again keeps it."""
-    import bmslib.qmax as q
+    import bmslib.estimators.qmax as q
     assert _curve_fp(monkeypatch, q.OcvCurve()) == q.CODE_FINGERPRINT
     assert _curve_fp(monkeypatch, make(q)) not in (q.CODE_FINGERPRINT, None)
 
@@ -456,7 +459,7 @@ def test_calibration_a_curve_that_describes_nothing_keeps_the_fingerprint(monkey
     """Known-bad for the object rule: without what the curve says about
     itself, a curve with another smoothing and slope gate fingerprints as the
     shipped one -- the review's measurement at cab71f4."""
-    import bmslib.qmax as q
+    import bmslib.estimators.qmax as q
     monkeypatch.setattr(q.OcvCurve, 'fingerprint_data', lambda self: ())
     base = _curve_fp(monkeypatch, q.OcvCurve())
     assert _curve_fp(monkeypatch, q.OcvCurve(sigma=1.0, min_slope=1.0)) == base
@@ -469,11 +472,11 @@ def test_an_edited_default_curve_changes_the_fingerprint_of_the_real_module(tmp_
     """The same, as an edit of qmax.py in a fresh process (the review's
     mutation)."""
     pkg = _copy_bmslib(tmp_path)
-    src = pkg / 'qmax.py'
+    src = pkg / 'estimators' / 'qmax.py'
     text = src.read_text()
     old = 'DEFAULT_CURVE = OcvCurve()'
     assert text.count(old) == 1
-    probe = 'import bmslib.qmax as m; print(m.CODE_FINGERPRINT)'
+    probe = 'import bmslib.estimators.qmax as m; print(m.CODE_FINGERPRINT)'
     base, = _py(tmp_path, probe, '-B')
     src.write_text(text.replace(old, new))
     edited, = _py(tmp_path, probe, '-B')

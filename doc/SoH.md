@@ -353,7 +353,7 @@ and with the cell count of the newest segment, so segments of a pack with anothe
 new pack with the same nameplate and cell count is not recognised; delete `qmax_<name>.json` when replacing one.
 
 Saved state is also discarded when the code that computed it changed: the bytecode of any function or method in
-`bmslib/qmax.py` or `bmslib/estimator_common.py`, a default argument, what a function closes over (a factory's or a
+`bmslib/estimators/qmax.py` or `bmslib/estimators/common.py`, a default argument, what a function closes over (a factory's or a
 decorator's argument), an attribute set on a function, a module-level or class-level constant, list or dict (the OCV
 table, every gate), the built-in curve as built (its data, smoothing and slope gate, and the tables made from them),
 how a BMS sample's SoC and capacities are derived (`derive_charge_fields` in `bmslib/bms.py`, which the restart rules

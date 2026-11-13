@@ -1,4 +1,4 @@
-"""Experimental cell-resistance estimator (bmslib/impedance.py).
+"""Experimental cell-resistance estimator (bmslib/estimators/impedance.py).
 
 Pure Python, like the module. Every known-bad case comes in a pair: the test
 that the guard rejects it, and a calibration test that breaks exactly that
@@ -19,7 +19,7 @@ from collections import Counter, deque
 import paho.mqtt.client as paho
 import pytest
 
-import bmslib.impedance as imp
+import bmslib.estimators.impedance as imp
 from bmslib.bms import BmsSample
 from bmslib.mqtt_util import publish_hass_discovery
 from bmslib.sampling import BmsSampler
@@ -842,18 +842,18 @@ def test_a_split_run_with_temperature_tags_equals_the_whole_one():
 
 
 def test_the_fingerprint_covers_the_normalisation():
-    from bmslib import estimator_common
-    base = estimator_common.code_fingerprint(vars(imp), vars(estimator_common))
+    from bmslib.estimators import common
+    base = common.code_fingerprint(vars(imp), vars(common))
     assert base == imp.CODE_FINGERPRINT
     for name, val in (('R_TEMP_K', 0.03), ('R_REF_C', 20.0), ('R_NORM_T_LO', 5.0), ('R_NORM_T_HI', 45.0),
                       ('PACK_TEMP_WARMUP_S', 3600.0)):
-        assert estimator_common.code_fingerprint({**vars(imp), name: val}, vars(estimator_common)) != base, name
+        assert common.code_fingerprint({**vars(imp), name: val}, vars(common)) != base, name
 
     def window_temperature(w):  # same name, other code
         return 25.0, 'probe', None
 
-    assert estimator_common.code_fingerprint({**vars(imp), 'window_temperature': window_temperature},
-                                             vars(estimator_common)) != base
+    assert common.code_fingerprint({**vars(imp), 'window_temperature': window_temperature},
+                                             vars(common)) != base
 
 
 # ------------------------------------------------------------ MQTT discovery
@@ -991,7 +991,7 @@ def test_sampler_passes_probe_mosfet_and_pack_temperature_with_its_age():
     """Precondition of the normalisation: the real call path hands over the
     probes even when only the estimator wants them (no sink, no group), the
     MOSFET reading, and the RC estimate with how long it has run."""
-    from bmslib.ambient_cache import AmbientCache
+    from bmslib.estimators.ambient_cache import AmbientCache
     for ambient in (None, AmbientCache(max_age_s=600)):
         bms = _DalyLikeBms()
         s = BmsSampler(bms, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60, publish_period=3600,

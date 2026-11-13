@@ -38,7 +38,7 @@ def derive_charge_fields(soc, charge, capacity, soh, aged_capacity):
     """What BmsSample derives from the charge fields a driver reported ->
     (soc, capacity, soh, aged_capacity). A function of its own because the
     Qmax/SoH estimator's saved state depends on it (its stop rule reads the
-    SoC and both capacities): bmslib/qmax.py fingerprints this code with its
+    SoC and both capacities): bmslib/estimators/qmax.py fingerprints this code with its
     own."""
     # infer soc from capacity if soc is nan or type(soc)==int (for higher precision)
     if capacity > 0 and (math.isnan(soc) or (isinstance(soc, int) and charge > 0)):
