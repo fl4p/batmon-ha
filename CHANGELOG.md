@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* `soh_estimator`: new `SoC gauge error` diagnostic, the BMS's SoC minus what each full charge or rest near empty says. A gauge that never resyncs shows up there (doc/SoC.md).
+
 ## [2.29]
 
 * Fix (`ant`): a BLE fragment ending in byte `0x55` was taken as the frame end, so the whole reply was dropped and the read timed out; frames are now complete by length (#431).

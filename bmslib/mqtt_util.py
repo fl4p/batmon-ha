@@ -237,6 +237,17 @@ def publish_qmax(client, device_topic, res: dict):
         mqtt_single_out(client, f"{device_topic}/soh_est", round_to_n(res['soh'], 4))
 
 
+# Last SoC gauge check (sampling.BmsSampler._check_gauge): kept while no new full charge or
+# rest comes, which can be weeks; then it expires rather than vouch for an old gauge.
+SOC_GAUGE_EXPIRE_S = 30 * 86400
+
+
+def publish_soc_gauge_error(client, device_topic, error_pp: float, attributes: dict):
+    """The BMS's SoC minus the SoC a full charge or a rest near empty says [pp]."""
+    mqtt_single_out(client, f"{device_topic}/soc_gauge_error/attributes", json.dumps(attributes))
+    mqtt_single_out(client, f"{device_topic}/soc_gauge_error", round(error_pp, 1))
+
+
 def hass_device_json(device_topic, device_info: DeviceInfo = None, display_name=None) -> dict:
     """The HA `device` block shared by all entities of one BMS."""
     return {
@@ -363,6 +374,11 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                         json_attributes_topic=f"{device_topic}/qmax_est/attributes")
         _hass_discovery('soh_est', None, "%", state_class="measurement", icon="battery-heart-variant",
                         name="SoH (est.)", precision=1, expire_after=QMAX_EXPIRE_S)
+        # the BMS's SoC against each full charge / rest near empty the estimator finds (doc/SoC.md)
+        _hass_discovery('soc_gauge_error', None, "%", state_class="measurement", icon="gauge",
+                        name="SoC gauge error", precision=1, expire_after=SOC_GAUGE_EXPIRE_S,
+                        entity_category="diagnostic",
+                        json_attributes_topic=f"{device_topic}/soc_gauge_error/attributes")
 
     if pack_temp_est:
         # pack_temp_estimator: RC estimate of the cell temperature from MOS + ambient

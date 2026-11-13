@@ -7,7 +7,7 @@ import re
 import sys
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from copy import copy
 from typing import Optional, List, Dict
 
@@ -22,7 +22,7 @@ from bmslib.group import BmsGroup, GroupNotReady
 from bmslib.jk_settings_service import NullSettingsPublisher
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
-    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings
+    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings, publish_soc_gauge_error
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -140,6 +140,13 @@ class BmsSampleSink:
     def publish_meters(self, bms_name: str, readings: Dict[str, float]):
         raise NotImplementedError()
 
+
+# SoC gauge check (BmsSampler._check_gauge): how much BMS SoC history is kept (a rest
+# anchor comes out when the rest ends, a cut-off one ~2 min after the cut), how old the
+# reading may be at the anchor's time, and from what error on the log warns.
+GAUGE_SOC_KEEP_S = 30 * 60.0
+GAUGE_SOC_MAX_AGE_S = 120.0
+GAUGE_WARN_PP = 10.0
 
 class BmsSampler:
     """
@@ -285,6 +292,10 @@ class BmsSampler:
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None
+        # SoC gauge check (_check_gauge): anchors up to this time were already compared
+        # (restored ones are history); the BMS's SoC of the last minutes, (t, soc)
+        self._gauge_seen_t = max((a['t'] for a in self.qmax.anchors), default=None) if self.qmax else None
+        self._soc_hist = deque()
         # store_qmax_state runs on the loop and on the background thread; a
         # periodic save that took its snapshot before a counter write must not
         # land after the write's own save (rev3 review, F1)
@@ -904,11 +915,47 @@ class BmsSampler:
                          exc_info=True)
             est.disable('internal error', persistent=False)
             r = None
+        self._check_gauge(sample)
         if r is not None:
             self._qmax_clear = None  # a new estimate replaces the cleared one
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
         else:
             self._withdraw_qmax()
+
+    def _check_gauge(self, sample: BmsSample):
+        """Compare the BMS's SoC with every new anchor of the Qmax estimator (a
+        guarded full charge = 100 %, or a long rest read off the OCV curve near
+        empty; the lowest cell, the one that ends a discharge) and publish the
+        difference. No counting and no capacity: a gauge that never resyncs
+        shows up at the next anchor (doc/SoC.md). The BMS's SoC is the last one
+        at or before the anchor's own time, at most GAUGE_SOC_MAX_AGE_S older;
+        none, and the anchor is not compared."""
+        est = self.qmax
+        if est is None:
+            return
+        t = sample.timestamp
+        if sample.soc is not None and math.isfinite(sample.soc):
+            self._soc_hist.append((t, float(sample.soc)))
+        while self._soc_hist and self._soc_hist[0][0] < t - GAUGE_SOC_KEEP_S:
+            self._soc_hist.popleft()
+        for a in list(est.anchors):
+            if self._gauge_seen_t is not None and a['t'] <= self._gauge_seen_t:
+                continue
+            self._gauge_seen_t = a['t']
+            before = [x for x in self._soc_hist if x[0] <= a['t']]
+            if not before or a['t'] - before[-1][0] > GAUGE_SOC_MAX_AGE_S:
+                logger.info('%s: SoC gauge not checked at the %s anchor of %s: no BMS SoC from then',
+                            self.bms.name, a['kind'], a['t'])
+                continue
+            bms_soc, soc = before[-1][1], min(a['soc'])
+            err = bms_soc - soc
+            what = 'a full charge' if a['kind'] == 'top' else 'a rest near empty'
+            (logger.warning if abs(err) >= GAUGE_WARN_PP else logger.info)(
+                '%s: the BMS reads SoC %.1f %% at %s that says %.1f %% (gauge error %+.1f pp)%s', self.bms.name,
+                bms_soc, what, soc, err, '; set SOC can correct it' if abs(err) >= GAUGE_WARN_PP else '')
+            publish_soc_gauge_error(self.mqtt_client, device_topic=self.mqtt_topic_prefix, error_pp=err,
+                                    attributes=dict(anchor=a['kind'], anchor_time=a['t'], anchor_soc=round(soc, 1),
+                                                    bms_soc=round(bms_soc, 1)))
 
     def _withdraw_qmax(self):
         """Clear what may no longer be published (the estimator says why, once)

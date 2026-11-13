@@ -60,4 +60,19 @@ with `set SOC`. That needs no capacity, no counting and no error budget. It need
 Qmax already has, and both anchor kinds already pass the estimator's temperature and evaluability
 gates.
 
-That is a possible follow-up; it is not implemented.
+## The gauge check (implemented)
+
+With `soh_estimator: true`, every BMS gets a diagnostic sensor called `SoC gauge error`. Its value
+is the BMS's SoC minus the SoC of the newest anchor, in percentage points. The anchor's SoC is that
+of its lowest cell, the one that ends a discharge.
+
+- The value updates once per anchor (`BmsSampler._check_gauge`). It expires after 30 days without a
+  new one.
+- Its attributes give the anchor kind and time, the anchor's SoC and the BMS's SoC.
+- An error of 10 pp or more is logged as a warning that suggests correcting the gauge with
+  `set SOC`.
+- The BMS's SoC must come from at most 2 minutes before the anchor. If there is none, that anchor
+  is skipped and not counted as a zero error.
+- Anchors restored from the saved state are not checked again.
+- A full-charge anchor is full as the charger defines it, which can be a few percent below the
+  cells' own full (doc/SoH.md). An error of a few pp there is noise.

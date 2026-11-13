@@ -4338,3 +4338,73 @@ def test_set_soc_over_mqtt_goes_through_the_counter_write(monkeypatch):
     cb = q_mqtt._switch_callbacks['homeassistant/number/dev_x/set_soc/set']
     asyncio.run(cb('42'))
     assert calls == [('boundary', 'set SOC to 42.0%'), ('set_soc', 42.0)]
+
+
+# ================================================================ SoC gauge check (BmsSampler._check_gauge)
+
+def _gauge_sampler(monkeypatch, anchors=()):
+    import bmslib.sampling as smp
+    s, bms = _run_sampler(1, soh_estimator=True, design_capacity=100.0)
+    s.qmax.anchors.extend(anchors)
+    s._gauge_seen_t = max((a['t'] for a in s.qmax.anchors), default=None)  # as at start: restored ones are history
+    out = []
+    monkeypatch.setattr(smp, 'publish_soc_gauge_error',
+                        lambda client, device_topic, error_pp, attributes: out.append((error_pp, attributes)))
+    return s, out
+
+
+def _soc_sample(t, soc):
+    return BmsSample(voltage=53.0, current=0.0, soc=soc, timestamp=t)
+
+
+def test_a_gauge_that_did_not_resync_is_reported_at_the_next_anchor(monkeypatch, caplog):
+    s, out = _gauge_sampler(monkeypatch)
+    for k in range(10):
+        s._check_gauge(_soc_sample(T0 + 10 * k, 60.0))
+    s.qmax.anchors.append(dict(t=T0 + 85, kind='ocv', soc=[6.0, 4.5, 7.0]))  # the rest ended at T0 + 85
+    s._check_gauge(_soc_sample(T0 + 100, 61.0))
+    assert out == [(55.5, dict(anchor='ocv', anchor_time=T0 + 85, anchor_soc=4.5, bms_soc=60.0))]
+    assert 'set SOC can correct it' in caplog.text
+    s._check_gauge(_soc_sample(T0 + 110, 61.0))
+    assert len(out) == 1  # once per anchor
+
+
+def test_a_gauge_that_agrees_is_published_without_a_warning(monkeypatch, caplog):
+    s, out = _gauge_sampler(monkeypatch)
+    s._check_gauge(_soc_sample(T0, 99.0))
+    s.qmax.anchors.append(dict(t=T0 + 30, kind='top', soc=[100.0] * 4))
+    s._check_gauge(_soc_sample(T0 + 60, 100.0))
+    assert [e for e, _ in out] == [-1.0] and 'set SOC' not in caplog.text
+
+
+def test_restored_anchors_are_not_checked_again(monkeypatch):
+    s, out = _gauge_sampler(monkeypatch, anchors=[dict(t=T0 - 600, kind='top', soc=[100.0])])
+    s._check_gauge(_soc_sample(T0 - 650, 40.0))  # a BMS SoC from then exists: only the guard skips it
+    s._check_gauge(_soc_sample(T0, 40.0))
+    assert out == []
+
+
+def test_no_bms_soc_from_the_anchor_time_means_no_check(monkeypatch):
+    """Unevaluable is not a zero error: an anchor with no BMS SoC within
+    GAUGE_SOC_MAX_AGE_S before it is skipped."""
+    import bmslib.sampling as smp
+    s, out = _gauge_sampler(monkeypatch)
+    s._check_gauge(_soc_sample(T0, 50.0))
+    s.qmax.anchors.append(dict(t=T0 + smp.GAUGE_SOC_MAX_AGE_S + 5, kind='ocv', soc=[5.0]))
+    s._check_gauge(_soc_sample(T0 + 400, 50.0))
+    s.qmax.anchors.append(dict(t=T0 + 450, kind='ocv', soc=[5.0]))
+    s._check_gauge(BmsSample(voltage=53.0, current=0.0, soc=math.nan, timestamp=T0 + 460))
+    assert out == [(45.0, dict(anchor='ocv', anchor_time=T0 + 450, anchor_soc=5.0, bms_soc=50.0))]
+
+
+def test_the_gauge_error_entity_is_announced_with_the_soh_estimator():
+    msgs = {}
+
+    class _C:
+        def publish(self, topic, payload, *a, **k):
+            msgs[topic] = payload
+            return paho.MQTTMessageInfo(0)
+
+    publish_hass_discovery(_C(), 'dev/x', 60, BmsSample(voltage=53.0, current=1.0, soc=50.0), 4, [],
+                           soh_est=True)
+    assert any('soc_gauge_error' in t for t in msgs)
