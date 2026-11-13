@@ -1,5 +1,7 @@
 ## [unreleased]
 
+## [2.29]
+
 * Fix (`ant`): a BLE fragment ending in byte `0x55` was taken as the frame end, so the whole reply was dropped and the read timed out; frames are now complete by length (#431).
 * Fix (`ant`): sub-zero temperatures read as ~65535 °C; probe and MOS temperatures are signed (#431, thanks @yosle for the protocol spec).
 * Fix: after a failed connect, the diagnostic scan ran on the default controller, not the configured `adapter:`; the scanner connect no longer starts a second scan, and drops `adapter:` on the ESPHome proxy stack.
