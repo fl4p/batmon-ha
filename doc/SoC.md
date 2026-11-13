@@ -1,6 +1,6 @@
 # Would a batmon-owned SoC beat the BMS gauge? (replay, 2026-11-13)
 
-This is Part 2 of `plans/batmon-soc.md`. Nothing in the add-on changed. The replay is
+Nothing in the add-on changed. The replay is
 `bat-impedance/tele_long_soc.py`, and its output is `bat-impedance/report/tele_long_soc.txt`.
 
 ## Method

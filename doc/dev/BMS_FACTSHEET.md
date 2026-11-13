@@ -9,7 +9,6 @@ Per-BMS reference: vendor, transport, wire protocol, what fields end up in `BmsS
 - syssi's ESPHome BMS components — <https://github.com/syssi> — the de-facto reverse-engineering reference for Chinese BMSes; many of his repos host the only public copy of the vendor protocol PDF.
 - Sleeper85's `esphome-yambms` — <https://github.com/Sleeper85/esphome-yambms> — "Yet Another Multi-BMS" ESPHome aggregator. Useful for cross-checking JK / JBD / Seplos / PACE wire formats; does **not** cover Victron / SOK / SuperVolt / LiTime / Daly / ANT.
 - aiobmsble package source — <https://github.com/patman15/aiobmsble> — Python BLE plugins consumed by batmon via `bmslib/models/BLE_BMS_wrap.py`.
-- Prior research session (Claude): `f4cc5902-c6ce-475b-956c-30a0900b3c8c` — earlier deep-dive on JK/JBD field semantics behind the SOC / SOH / `aged_capacity` fix (#365).
 
 ---
 

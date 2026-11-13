@@ -319,7 +319,7 @@ service_uuids[], last_seen}` — **`id` is identity, `platform_id` is a cache** 
 `retrievePeripherals`, falling back to a scan matched on name + advertised service UUIDs, then
 rewriting `platform_id`. This is the same lesson as `bt.py:414`/#399: identity is not an address
 spelling. Manufacturer data *is* available on iOS, so the auto-detect matchers lifted from
-`docs/BMS_FACTSHEET.md` (Basen `0x6F80`, Renogy `0xE14C`, LiTime `0x585A`, Topband) still work.
+`doc/dev/BMS_FACTSHEET.md` (Basen `0x6F80`, Renogy `0xE14C`, LiTime `0x585A`, Topband) still work.
 
 **Step 5 — scope.** Ship the ~11 native BLE families first; `aiobmsble` is reachable later since
 native CPython can simply `pip install` it with the mobile wheels PyPI now serves — a further
