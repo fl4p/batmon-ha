@@ -14,8 +14,8 @@ model:
                   + a_outdoor * (outdoor[k] - T_pack[k])
                   + a_mos     * (mos[k]      - T_pack[k])
 
-Coefficients fitted offline by non-negative least squares on bat_caravan 2023
-data (see thermal_rc.py of the bat-impedance project). Free-running validation:
+Coefficients fitted offline by non-negative least squares on 2023 data of one LiFePO4
+pack (see thermal_rc.py of the bat-impedance project). Free-running validation:
 
     RMSE = 1.42 C / R^2 = 0.65  (held-out time-split test)
 

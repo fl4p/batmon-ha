@@ -15,7 +15,18 @@ pack_temp_ambient_max_age: 600   # s, default 600
 
 * The topics are MQTT state topics carrying a temperature in °C, as a plain number or a small JSON object. Home
   Assistant does not publish entity states to MQTT by itself; use `mqtt_statestream` or the sensor's own MQTT
-  integration.
+  integration. With `mqtt_statestream` in HA's `configuration.yaml`:
+
+  ```yaml
+  mqtt_statestream:
+    base_topic: homeassistant
+    include:
+      entities:
+        - sensor.room_temperature
+        - sensor.outdoor_temperature
+  ```
+
+  publishes `homeassistant/sensor/room_temperature/state` and `homeassistant/sensor/outdoor_temperature/state`.
 * Both topics are optional. Without one, that input stays empty and the model runs on what it has, down to the MOSFET
   alone. A missing ambient value is never replaced by a default.
 * A reading older than `pack_temp_ambient_max_age` counts as missing. `mqtt_statestream` publishes on change only, so
