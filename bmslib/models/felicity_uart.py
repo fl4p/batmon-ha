@@ -16,7 +16,7 @@ Framing (the one thing that is not ordinary Modbus):
 
 The two bytes after the function code are a 16-bit REGISTER count, not the 8-bit
 byte count of standard Modbus, so the frame is `4 + 2*count + 2` bytes long. Every
-off-the-shelf Modbus client -- and `bmslib.modbus_rtu.extract_read_frame`, which the
+off-the-shelf Modbus client -- and `bmslib.uart.modbus_rtu.extract_read_frame`, which the
 other wired Modbus drivers use -- rejects such a frame. Hence the private
 `extract_frame` below; the shared helper is left exactly as the other drivers found
 it. CRC-16/Modbus, 9600 8N1, reply 60-80 ms after the request.
@@ -123,7 +123,7 @@ from typing import List, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
-from bmslib.modbus_rtu import build_read, check_crc, ModbusError, u16_be, u32_be, FC_READ_HOLDING
+from bmslib.uart.modbus_rtu import build_read, check_crc, ModbusError, u16_be, u32_be, FC_READ_HOLDING
 
 REG_VERSION = 0x01      # 1, read 6: protocol type/version, fw u32, hw u32
 REG_CELLS = 0x10        # 16, read 21: cell count + 20 cell voltages
@@ -403,7 +403,7 @@ class FelicityUart(BtBms):
     async def connect(self, timeout=10, **kwargs):
         await self.client.connect(timeout=timeout)
         self._buffer.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("felicity-uart-%d" % self.slave, "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char

@@ -78,7 +78,7 @@ def test_temperature_offset_zero_celsius():
 def test_serial_char_stub_is_stable_dict_key():
     # Regression for the reconnect callback-accumulation bug: a fresh stub built
     # on each connect() must collapse to one callback-dict key, not pile up.
-    from bmslib.wired import SerialCharStub
+    from bmslib.uart import SerialCharStub
     d = {}
     for _ in range(3):
         d[SerialCharStub("pace-uart", "notify")] = "handler"

@@ -34,7 +34,7 @@ import time
 from typing import Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.modbus_rtu import append_crc
+from bmslib.uart.modbus_rtu import append_crc
 from bmslib.bt import BtBms
 from bmslib.models.jikong import JKBt, feed_frames, FRAME_SIZE
 from bmslib.util import to_hex_str
@@ -94,7 +94,7 @@ class JkPbUart(JKBt):
     async def connect(self, timeout=10, **kwargs):
         await self.client.connect(timeout=timeout)
         self._buffer.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("jk-pb-uart-%d" % self.bus_addr, "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char

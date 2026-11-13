@@ -20,7 +20,7 @@ from . import FuturesPool
 from .bms import BmsSample, DeviceInfo
 from .pwmath import EWMA
 from .util import get_logger
-from .wired import SerialServiceStub, SerialCharStub
+from .uart import SerialServiceStub, SerialCharStub
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
@@ -473,7 +473,7 @@ class BtBms:
             self._adapter = normalize_adapter(adapter)
 
             if address == 'serial':
-                from bmslib.wired import SerialBleakClientWrapper
+                from bmslib.uart import SerialBleakClientWrapper
                 assert adapter, "You need to specify a serial device (adapter)"
                 # SERIAL_KWARGS carries the per-model framing knobs (eol /
                 # timeout). It MUST be forwarded: with the defaults

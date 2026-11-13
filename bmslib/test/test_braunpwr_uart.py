@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 from bmslib.models.braunpwr_uart import BraunPwrUart, build_request, decode_analog
 from bmslib.models.pace import _checksum, build_frame, parse_frame
 
@@ -42,7 +42,7 @@ class _NullWrapper:
 
 @pytest.fixture
 def serial_stub(monkeypatch):
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
 
 
 # --- reference transcriptions of the reporter's ESPHome config ------------------

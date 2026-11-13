@@ -9,8 +9,8 @@ import os
 
 import pytest
 
-import bmslib.wired
-from bmslib import modbus_rtu as mb
+import bmslib.uart
+from bmslib.uart import modbus_rtu as mb
 from bmslib.models.noname_modbus import crc16_modbus as crc16_reference
 
 _DATA = os.path.join(os.path.dirname(__file__), 'data')
@@ -41,7 +41,7 @@ class _NullWrapper:
 
 @pytest.fixture
 def serial_stub(monkeypatch):
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
 
 
 # --- modbus helper -----------------------------------------------------------

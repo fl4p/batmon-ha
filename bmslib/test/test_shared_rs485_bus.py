@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 import bmslib.models.daly
 from bmslib.models import daly_uart as du
 from bmslib.test.data import daly_uart_fixtures as fx
@@ -60,10 +60,10 @@ class _FakeTransport:
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
     _FakeTransport.instances = []
-    bmslib.wired._reset_shared_ports()
-    monkeypatch.setattr(bmslib.wired, 'SerialTransport', _FakeTransport)
+    bmslib.uart._reset_shared_ports()
+    monkeypatch.setattr(bmslib.uart, 'SerialTransport', _FakeTransport)
     yield
-    bmslib.wired._reset_shared_ports()
+    bmslib.uart._reset_shared_ports()
 
 
 def _bms(board, port=PORT, name=None):
@@ -103,7 +103,7 @@ def test_incompatible_link_settings_are_rejected():
     from bmslib.models.jikong_uart import JKUart
 
     _bms(1)
-    with pytest.raises(bmslib.wired.SharedSerialPortError) as e:
+    with pytest.raises(bmslib.uart.SharedSerialPortError) as e:
         JKUart('serial', name='jk', adapter=PORT)
     assert '9600' in str(e.value) and '115200' in str(e.value)
 
@@ -211,7 +211,7 @@ def test_duplicate_board_number_on_one_bus_is_rejected():
     publish each other's data. Fail loudly at connect."""
     a, b = _bms(2), _bms(2, name='dup')
     asyncio.run(a.connect())
-    with pytest.raises(bmslib.wired.SharedSerialPortError) as e:
+    with pytest.raises(bmslib.uart.SharedSerialPortError) as e:
         asyncio.run(b.connect())
     assert 'daly_uart:<board>' in str(e.value)
 
@@ -331,9 +331,9 @@ def test_two_daly_on_one_real_serial_port(monkeypatch):
     import threading
 
     # undo the fake transport: this test wants the real one
-    monkeypatch.setattr(bmslib.wired, 'SerialTransport',
-                        bmslib.wired.transport.SerialTransport)
-    bmslib.wired._reset_shared_ports()
+    monkeypatch.setattr(bmslib.uart, 'SerialTransport',
+                        bmslib.uart.transport.SerialTransport)
+    bmslib.uart._reset_shared_ports()
 
     BOARDS = {4: 0x44, 7: 0x77}
     master, slave = pty.openpty()
@@ -379,7 +379,7 @@ def test_two_daly_on_one_real_serial_port(monkeypatch):
     finally:
         # Release the tty before closing the pty: the reader thread holds the
         # slave open, and closing the master under it blocks.
-        bmslib.wired._reset_shared_ports()
+        bmslib.uart._reset_shared_ports()
         stop.set()
         os.close(slave)
         os.close(master)

@@ -267,7 +267,7 @@ class DalyUart(DalyBt):
         # whether anything arrived "since connect".
         self._uart_buf.clear()
         self._uart_stats.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         # The stub uuid is the bus-wide identity of this BMS (SerialCharStub has
         # value-based equality). Include the board number so several Daly can
         # share one RS485 port without overwriting each other's callback -- and

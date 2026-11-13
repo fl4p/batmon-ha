@@ -11,9 +11,9 @@ import time
 
 import pytest
 
-import bmslib.wired as wired
+import bmslib.uart as wired
 from bmslib.store import _user_config_apply_global_adapter
-from bmslib.wired.transport import serial_url
+from bmslib.uart.transport import serial_url
 
 
 @pytest.fixture(autouse=True)

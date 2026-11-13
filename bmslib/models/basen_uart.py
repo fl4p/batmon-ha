@@ -292,7 +292,7 @@ class BasenUart(BtBms):
 
     async def connect(self, timeout=10, **kwargs):
         await self.client.connect(timeout=timeout)
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("basen-uart", "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char

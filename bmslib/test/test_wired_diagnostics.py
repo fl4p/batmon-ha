@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 from bmslib.models import daly_uart as du
 from bmslib.models.daly import daly_command_message
 from bmslib.test.data import daly_uart_fixtures as fx
@@ -21,9 +21,9 @@ from bmslib.test.data import daly_uart_fixtures as fx
 def _isolate_shared_ports():
     """Serial ports are cached per device path so several BMS can share one bus.
     Without resetting, one test's fake port leaks into the next."""
-    bmslib.wired._reset_shared_ports()
+    bmslib.uart._reset_shared_ports()
     yield
-    bmslib.wired._reset_shared_ports()
+    bmslib.uart._reset_shared_ports()
 
 
 # === feed_buffer accounting =================================================
@@ -86,7 +86,7 @@ class _NullWrapper:
 
 @pytest.fixture
 def uart_bms(monkeypatch):
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
     return lambda **kw: du.DalyUart('serial', name='t', adapter='/dev/ttyUSB0', **kw)
 
 
@@ -193,10 +193,10 @@ class _FlakyTransport:
 
 
 def _wrapper_with(monkeypatch, transport_factory, max_errors=3, port='/dev/fake'):
-    monkeypatch.setattr(bmslib.wired, 'SerialTransport', transport_factory)
-    monkeypatch.setattr(bmslib.wired._SharedSerialPort, 'RX_MAX_ERRORS', max_errors)
-    monkeypatch.setattr(bmslib.wired._SharedSerialPort, 'RX_ERROR_SLEEP', 0.001)
-    return bmslib.wired.SerialBleakClientWrapper(port)
+    monkeypatch.setattr(bmslib.uart, 'SerialTransport', transport_factory)
+    monkeypatch.setattr(bmslib.uart._SharedSerialPort, 'RX_MAX_ERRORS', max_errors)
+    monkeypatch.setattr(bmslib.uart._SharedSerialPort, 'RX_ERROR_SLEEP', 0.001)
+    return bmslib.uart.SerialBleakClientWrapper(port)
 
 
 def _set_callback(wrapper, key, fn):
@@ -278,7 +278,7 @@ def test_bad_board_number_skips_only_that_device(monkeypatch, bad_type, caplog):
     unknown types with a warning; a rejecting constructor must do the same."""
     from bmslib.models import construct_bms
 
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
     dev = dict(address='serial', adapter='/dev/ttyUSB0', type=bad_type, alias='bad')
     with caplog.at_level('ERROR'):
         assert construct_bms(dev, False, []) is None
@@ -289,7 +289,7 @@ def test_good_board_number_still_constructs(monkeypatch):
     """Calibration for the above: the skip path must not swallow valid configs."""
     from bmslib.models import construct_bms
 
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
     dev = dict(address='serial', adapter='/dev/ttyUSB0', type='daly_uart:2', alias='ok')
     bms = construct_bms(dev, False, [])
     assert bms is not None and bms.board == 2

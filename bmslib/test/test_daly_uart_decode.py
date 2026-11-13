@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 from bmslib.models import daly_uart as du
 from bmslib.models.daly import DalyBt, daly_command_message
 from bmslib.test.data import daly_uart_fixtures as fx
@@ -23,7 +23,7 @@ class _NullWrapper:
 def uart_bms(monkeypatch):
     """Build a DalyUart against a stub transport, exercising the real
     address='serial' construction path."""
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
 
     def make(**kwargs):
         return du.DalyUart('serial', name='t', adapter='/dev/ttyUSB0', **kwargs)

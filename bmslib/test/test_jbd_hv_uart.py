@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 from bmslib.models.jbd_hv_uart import (CMD_FULL, CMD_SHORT, JbdHvUart, build_request, check_frame, checksum,
                                        decode_full, decode_short)
 
@@ -187,7 +187,7 @@ class _NullWrapper:
 
 @pytest.fixture
 def serial_stub(monkeypatch):
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _NullWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _NullWrapper)
 
 
 def _with_checksum(frame: bytearray) -> bytes:

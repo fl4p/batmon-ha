@@ -300,7 +300,7 @@ def parse_device_info(buf: bytes) -> dict:
 
 # ---------------------------------------------------------------------------
 # Thin BtBms wrapper — re-uses the existing SerialBleakClientWrapper transport
-# (bmslib/wired/__init__.py) so users can select this BMS via
+# (bmslib/uart/__init__.py) so users can select this BMS via
 # ``address: serial`` + ``adapter: /dev/ttyUSB0`` in options.json.
 
 import asyncio
@@ -346,12 +346,12 @@ class JKUart(BtBms):
         # The SerialBleakClientWrapper ignores the char argument and just
         # forwards every byte it reads to all registered callbacks, so a
         # stub char is fine here.
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         await self.client.start_notify(SerialCharStub("uart", "notify"), self._notification_handler)
 
     async def disconnect(self):
         try:
-            from bmslib.wired import SerialCharStub
+            from bmslib.uart import SerialCharStub
             await self.client.stop_notify(SerialCharStub("uart", "notify"))
         except Exception:
             pass
@@ -361,7 +361,7 @@ class JKUart(BtBms):
         """Send the read-all request, wait for one complete response frame."""
         self._last_frame = None
         self._last_frame_event.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         await self.client.write_gatt_char(SerialCharStub("uart", "write"), data=build_status_request())
         await asyncio.wait_for(self._last_frame_event.wait(), timeout=self.TIMEOUT)
         assert self._last_frame is not None

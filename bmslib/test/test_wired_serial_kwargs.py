@@ -10,7 +10,7 @@ cmd=0x93, got 0/1 responses`` on every single poll.
 """
 import pytest
 
-import bmslib.wired
+import bmslib.uart
 from bmslib.models.basen_uart import BasenUart
 from bmslib.models.daly_uart import DalyUart
 from bmslib.models.pace import PaceUart
@@ -27,7 +27,7 @@ class _CapturingWrapper:
 
 @pytest.fixture
 def captured(monkeypatch):
-    monkeypatch.setattr(bmslib.wired, 'SerialBleakClientWrapper', _CapturingWrapper)
+    monkeypatch.setattr(bmslib.uart, 'SerialBleakClientWrapper', _CapturingWrapper)
     _CapturingWrapper.last = None
     return _CapturingWrapper
 

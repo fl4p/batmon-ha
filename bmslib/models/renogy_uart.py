@@ -33,7 +33,7 @@ from typing import List, Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.bt import BtBms
-from bmslib.modbus_rtu import build_read, extract_read_frame, ModbusError, u16_be, u32_be, FC_READ_HOLDING
+from bmslib.uart.modbus_rtu import build_read, extract_read_frame, ModbusError, u16_be, u32_be, FC_READ_HOLDING
 
 REG_CELLS = 0x1388      # 5000, read 0x22 registers: count, 16 cells, temp count, 16 temps
 REG_SOC = 0x13B2        # 5042, read 7: current, voltage, remaining(2), capacity(2), cycles
@@ -115,7 +115,7 @@ class RenogyUart(BtBms):
     async def connect(self, timeout=10, **kwargs):
         await self.client.connect(timeout=timeout)
         self._buffer.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("renogy-uart-%d" % self.slave, "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char

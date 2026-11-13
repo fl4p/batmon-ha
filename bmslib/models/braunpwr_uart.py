@@ -231,7 +231,7 @@ class BraunPwrUart(BtBms):
     async def connect(self, timeout=10, **kwargs):
         await self.client.connect(timeout=timeout)
         self._buffer.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("braunpwr-uart-%d" % self.pack_addr, "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char

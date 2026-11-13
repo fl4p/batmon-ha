@@ -23,8 +23,8 @@ import math
 
 import pytest
 
-import bmslib.wired
-from bmslib.modbus_rtu import build_read, crc16_modbus, extract_read_frame, ModbusError, FC_READ_HOLDING
+import bmslib.uart
+from bmslib.uart.modbus_rtu import build_read, crc16_modbus, extract_read_frame, ModbusError, FC_READ_HOLDING
 from bmslib.models import felicity_uart as fu
 from bmslib.test.data import felicity_uart_fixtures as fx
 
@@ -433,10 +433,10 @@ def _reply_for(req: bytes):
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
     _FakeTransport.instances = []
-    bmslib.wired._reset_shared_ports()
-    monkeypatch.setattr(bmslib.wired, 'SerialTransport', _FakeTransport)
+    bmslib.uart._reset_shared_ports()
+    monkeypatch.setattr(bmslib.uart, 'SerialTransport', _FakeTransport)
     yield
-    bmslib.wired._reset_shared_ports()
+    bmslib.uart._reset_shared_ports()
 
 
 def test_address_suffix_and_validation():

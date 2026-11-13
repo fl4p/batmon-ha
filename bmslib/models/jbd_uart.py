@@ -37,7 +37,7 @@ class JbdUart(JbdBt):
         # address == 'serial'; just open it and register the frame handler.
         await self.client.connect(timeout=timeout)
         self._buffer.clear()
-        from bmslib.wired import SerialCharStub
+        from bmslib.uart import SerialCharStub
         char = SerialCharStub("jbd-uart", "notify")
         await self.client.start_notify(char, self._notification_handler)
         self.UUID_RX = char
