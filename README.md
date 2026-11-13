@@ -246,7 +246,7 @@ separate ports; on some boards they share a UART with the Bluetooth module, so u
 
 To request another BMS family over RS485, open an issue with a captured frame.
 
-## Adding a new BMS
+## Adding an unsupported BMS
 
 If your BMS isn't supported yet, set `type: snoop` (optionally
 `type: snoop:jbd,jk,daly,ant,sok,supervolt` to also write known probe
