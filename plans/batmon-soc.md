@@ -1,6 +1,8 @@
 # batmon SoC — narrowed to two prerequisites (rev 3)
 
-Status: Part 1 implemented 2026-11-01; Part 2 not started. Rev 1 2026-10-27,
+Status: Part 1 implemented 2026-11-01. Part 2 replayed 2026-11-13 without any
+add-on change (the replay wraps `_pair`): results in doc/SoC.md. A counted SoC
+is not justified; a gauge-drift check at anchors is the cheaper follow-up. Rev 1 2026-10-27,
 rev 2 2026-10-28, rev 3 2026-11-01.
 
 ## Part 1 as built, after the rev 3 review
