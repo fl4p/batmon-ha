@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-from bmslib.bt import bt_discovery
+from bmslib.ble.bt import bt_discovery
 from bmslib.util import get_logger
 
 logger = get_logger()
