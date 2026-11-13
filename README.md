@@ -352,20 +352,6 @@ peaks, leading to even greater error.
 * to see logs during installation: Settings / System / Logs / Supervisor (choose from the menu at the top-right
   corner), [link](`http://homeassistant.local:8123/config/logs?provider=supervisor`)
 
-## TODO
-
-* Implement daly2 [#33](https://github.com/fl4p/batmon-ha/issues/33)
-* Port to MicroPython for MCU (ESP32 etc.)
-* make this a custom
-  integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
-* use the new [Bluetooth integration since HA 2022.8 ](https://www.home-assistant.io/integrations/bluetooth/) ?
-* Implement BMS data push (JK)
-* Read device bt info [see](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/)
-* Implement RS485 for more BMS families [#22](https://github.com/fl4p/batmon-ha/issues/22) — JK (`jk_uart`) and Daly (
-  `daly_uart`) are done; JBD, ANT still TODO
-* Implement old JK04?
-* web interface (export, import bms meter data)
-
 ## Stand-alone
 
 You can run the add-on outside of Home Assistant (e.g. on a remote RPI sending MQTT data of WiFI).
@@ -374,6 +360,8 @@ See [doc/Standalone.md](doc/Standalone.md)
 
 To run it in a container instead, see [doc/Docker.md](doc/Docker.md): prebuilt
 multi-arch images (`ghcr.io/fl4p/batmon-ha`), compose examples, and a Helm chart.
+
+For microcontrollers (ESP32 etc.) there is a MicroPython port: [batmon-mp](https://github.com/fl4p/batmon-mp).
 
 # Contribute / Donate
 
