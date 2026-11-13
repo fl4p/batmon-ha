@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: a standalone or Docker `options.json` without `mqtt_user` crashed at the MQTT connect; an unset user or password now means anonymous (#202, thanks @coconup).
 * `soh_estimator`: new `SoC gauge error` diagnostic, the BMS's SoC minus what each full charge or rest near empty says. A gauge that never resyncs shows up there (doc/SoC.md).
 * `impedance_estimator`, `soh_estimator`: the estimator code moved to `bmslib/estimators/`, which changes the code fingerprint of saved state, so saved Cell Resistance windows and Qmax/SoH segments are discarded once and relearned.
 

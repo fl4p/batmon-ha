@@ -384,13 +384,13 @@ async def main():
             user_config.mqtt_port = user_config.get('mqtt_port', int(user_config.mqtt_broker[(port_idx + 1):]))
             user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
         mqtt_port = int(user_config.get('mqtt_port', None) or 1883)
-        logger.info('connecting mqtt %s@%s:%s', user_config.mqtt_user, user_config.mqtt_broker, mqtt_port)
+        logger.info('connecting mqtt %s@%s:%s', user_config.get('mqtt_user'), user_config.mqtt_broker, mqtt_port)
         # paho_monkey_patch()
         mqtt_client = paho.mqtt.client.Client(CallbackAPIVersion.VERSION2)
         mqtt_configured = True
         mqtt_client.enable_logger(logger)
         if user_config.get('mqtt_user', None):
-            mqtt_client.username_pw_set(user_config.mqtt_user, user_config.mqtt_password)
+            mqtt_client.username_pw_set(user_config.mqtt_user, user_config.get('mqtt_password'))
 
         mqtt_client.on_message = mqtt_message_handler
 
