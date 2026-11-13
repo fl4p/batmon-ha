@@ -257,82 +257,49 @@ the protocol or share with us in an issue. See
 
 ## BLE Stack
 
-Batmon can talk to your BMS through one of four Bluetooth backends. Pick one with the global
-`ble_stack` option:
+The global `ble_stack` option picks the Bluetooth backend:
 
-* **`bleak`** (default) — uses [bleak](https://pypi.org/project/bleak/), a cross-platform Python
-  BLE library that wraps the OS's native stack: BlueZ on Linux, CoreBluetooth on macOS, WinRT on
-  Windows. On Linux (and therefore inside the HA add-on) it talks to `bluetoothd` over D-Bus and
-  coexists with Home Assistant's Bluetooth integration — the adapter stays in the HA Bluetooth
-  pool and is shared. This is the most compatible option and what you want unless you're chasing a
-  specific problem.
-* **`bumble`** — uses [bumble](https://github.com/google/bumble), a pure-Python BLE stack that
-  talks HCI directly (no BlueZ, no D-Bus). Cross-platform (Linux/macOS/Windows via HCI socket,
-  USB dongle, or serial transports). Always needs **exclusive HCI access** to its controller —
-  on Linux that means bumble brings the BlueZ-managed adapter down, so it leaves the HA
-  Bluetooth pool. You need to dedicate one adapter to it and disable it in HA under Integrations / Bluetooth;
-  Use it for best reliability and if you have many BMS.
-* **`bluek`** — talks to the kernel BlueZ stack directly over L2CAP and `mgmt` sockets (no D-Bus).
-  Coexists with `bluetoothd`, so the adapter stays in the HA Bluetooth pool. Useful when D-Bus is
-  the bottleneck but you don't want to take the adapter away from HA. **Linux only** (BlueZ is
-  Linux-specific). [fl4p/bluek](https://github.com/fl4p/bluek/)
-* **`esphome`** — routes all BLE through one or more
-  [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html) devices
-  (typically a cheap ESP32 flashed with the upstream
-  [bluetooth-proxies](https://github.com/esphome/bluetooth-proxies) firmware). The add-on
-  doesn't touch any local Bluetooth adapter — you can extend BLE reach to wherever your BMSes
-  physically live (other rooms, outdoors) just by powering an ESP32 there. **An ESPHome proxy serves
-  BLE to one client only**: its advertisements and the data of every BLE connection go to whichever
-  API client subscribed last (ESPHome ≥ 2026.7; before that, the first). If Home Assistant also uses
-  the proxy, whichever of HA and the add-on reconnects last takes it over, and the other silently gets
-  nothing: an HA restart stops every BMS on the proxy until the add-on reconnects, and the add-on
-  winning cuts off HA's own BLE devices there. Use proxies dedicated to the add-on: remove them from
-  HA's ESPHome integration or leave them out of HA. To share one proxy between HA and the add-on, flash
-  [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/) ≥ 0.2.0 instead (browser
-  flasher): it serves up to 4 API clients at once, and each BLE link belongs to the client that opened
-  it, so an add-on restart frees its BMS links. Each proxy has 3 BLE connection slots by default (see
-  [esphome_proxy/README.md](bmslib/ble/esphome_proxy/README.md)). Configure the proxies under the
-  `bluetooth_proxies:` add-on option:
+* `bleak` (default): BlueZ over D-Bus. Shares the adapter with Home Assistant's Bluetooth integration. Start here.
+* `bumble`: own HCI stack ([bumble](https://github.com/google/bumble)), no BlueZ. Takes the adapter exclusively:
+  dedicate one to it and disable it in HA under Integrations / Bluetooth. Most reliable with many BMS.
+* `bluek`: kernel BlueZ sockets without D-Bus ([fl4p/bluek](https://github.com/fl4p/bluek/)). Shares the adapter with
+  HA. Linux only. Has helped with connection timeouts.
+* `esphome`: connects through [ESPHome Bluetooth Proxies](https://esphome.io/components/bluetooth_proxy.html), so
+  BMS can be anywhere an ESP32 reaches. See below.
 
-  ```yaml
-  ble_stack: esphome
-  bluetooth_proxies:
-    - host: garage-proxy.local
-      noise_psk: "<base64 Noise key from the proxy's ESPHome config>"
-      name: "garage"          # diagnostic label only
-    - host: 192.168.1.43
-      noise_psk: "<another key>"
-  ```
+`bumble`, `bluek` and `esphome` are experimental.
 
-  Proxy firmware should set `bluetooth_proxy: { active: true, cache_services: false }` — see
-  [bmslib/ble/esphome_proxy/README.md](bmslib/ble/esphome_proxy/README.md) for the rationale and a known
-  incompatibility (ANT-BLE20PHUB BMS).
+### ESPHome proxies
 
-`bumble`, `bluek` and `esphome` are experimental — try `bleak` first. Users have already reported
-that `bluek` helps in case of connection timeouts.
+```yaml
+ble_stack: esphome
+bluetooth_proxies:
+  - host: garage-proxy.local
+    noise_psk: "<base64 Noise key from the proxy's ESPHome config>"
+    name: "garage"          # log label only
+  - host: 192.168.1.43
+    noise_psk: "<another key>"
+```
+
+* A stock ESPHome proxy serves one API client. If HA uses it too, HA and the add-on take it from each other on every
+  reconnect. Remove the proxy from HA, or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
+  ≥ 0.2.0, which serves up to 4 clients.
+* Each proxy has 3 connection slots by default.
+* Set `bluetooth_proxy: { active: true, cache_services: false }` in the proxy firmware. Details and a known
+  incompatibility (ANT-BLE20PHUB) in [bmslib/ble/esphome_proxy/README.md](bmslib/ble/esphome_proxy/README.md).
 
 ### `adapter:` per BMS
 
-The per-device `adapter:` option only applies to backends that have a notion of a local Bluetooth
-adapter:
-
-| `ble_stack` | What `adapter:` accepts | If omitted |
+| `ble_stack` | `adapter:` | If omitted |
 |---|---|---|
-| `bleak` | A BlueZ adapter name like `hci0`, `hci1`. | Uses BlueZ's `[default]` adapter |
-| `bluek` | Same as `bleak` — kernel adapter name. | Uses the first available |
-| `bumble` | Same — pick one adapter (bumble will take it exclusively). | First available |
-| `esphome` | **Leave unset.** There's no local adapter; the proxy host stack picks the best-RSSI proxy automatically per connect. | n/a — auto-routed |
+| `bleak`, `bluek` | adapter name, e.g. `hci1` | default adapter |
+| `bumble` | adapter name; bumble takes it exclusively | first available |
+| `esphome` | leave unset; the best-RSSI proxy is picked per connect | |
 
-(For `address: serial` / RS-485 BMSes, `adapter:` is the serial port path like `/dev/ttyUSB0`
-or a network port like `tcp://host:8880`, independent of `ble_stack`.)
+For wired BMS, `adapter:` is the serial port, see [Serial / RS485](#serial--rs485).
 
-`adapter:` can also be set once at the top level of the configuration, next to `ble_stack:`. It
-is then the default for every device that doesn't carry its own, and the log says which devices
-inherited it. Because the value means two different things, only matching devices inherit: a
-controller (`hci1`, or its MAC) goes to BLE devices, an absolute port path (`/dev/ttyUSB0`) to
-wired ones. Groups and commented-out devices never inherit. A top-level `adapter:` that reaches
-no device — or that is neither a controller nor an absolute path — is reported instead of
-quietly doing nothing (#414).
+A top-level `adapter:` is the default for every device without its own: a controller (`hci1` or its MAC) for BLE
+devices, a port path for wired ones. The log lists which devices inherited it.
 
 ## Energy Meters
 
