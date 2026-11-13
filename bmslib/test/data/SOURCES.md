@@ -58,6 +58,23 @@ concatenate them before replaying.
 
 ---
 
+## JK04 (old JK active balancers) — `jk04_fixtures.py`
+
+All frames are real device responses, 300 B, CRC-checked by `test_jk04_decode.py`. Expected values in the
+tests come from the device owners (app values) or from the upstream decoders' own tests, never from batmon.
+Licenses: [`syssi/esphome-jk-bms`](https://github.com/syssi/esphome-jk-bms) is Apache-2.0,
+[`jblance/mpp-solar`](https://github.com/jblance/mpp-solar) is MIT.
+
+| Fixture | Type | Source |
+|---|---|---|
+| `B2A16S_DEVICE_INFO`, `B2A16S_SETTINGS` | harvested | [syssi discussion #48](https://github.com/syssi/esphome-jk-bms/discussions/48), magnetus26's JK-B2A16S hw 3.0 sw 3.3.0, log quoted by syssi on 2022-04-25 (20:54:52 device info, 21:04:30 settings). Identical to the frames in syssi's `esp32-ble-jk04-example-faker.yaml`. Ground truth: syssi's `JkBmsJk04DeviceInfoTest` (model, hw, sw, name `BMS`), and the owner's own settings in the same thread: delta 0.005 V, stop (power off) voltage 3.00 V, max balance current 2.0 A, byte 114 flipping 01 -> 00 with the balancer turned off in the app. |
+| `B2A16S_CELL_INFO`, `B2A16S_CELL_INFO_IDLE` | harvested | Same device, attachment [`logs_bms_logs.txt`](https://github.com/syssi/esphome-jk-bms/files/8516132/logs_bms_logs.txt) of discussion #48 (frame counters 0xC0 and 0xCA, 5 s apart; that log still decoded them as JK02). The first is syssi's `frames_jk04.h` `CELL_INFO_JK04`; ground truth from `jk_bms_ble_jk04_test.cpp`: cell 1 3.353 V, cell 2 3.359 V, total 53.691 V, runtime 1873811 s, balancing. |
+| `B5A24S_DEVICE_INFO`, `B5A24S_SETTINGS`, `B5A24S_CELL_INFO` | harvested | [syssi issue #213](https://github.com/syssi/esphome-jk-bms/issues/213), JSladen's JK-B5A24S hw 8.X sw 8.0.3M, 2022-11-16 10:31 comment (one pass of all three frames). Settings and cell info equal syssi's `frames_jk04_b5a24s.h`; the faker yaml's device info differs only in the uptime bytes. Ground truth: the owner's app table in the same issue (cells 16, trigger delta 0.008 V, max balance 4.5 A, power off 3.2 V) and syssi's `jk_bms_ble_jk04_b5a24s_test.cpp` (Vref 3.033, start balance 4.25 V, balancer on, runtime 591338 s, balancing current -2.6 A). |
+| `B5A24S_CELL_INFO_NOTIFICATIONS` | harvested | Same issue, 10:09 comment: a cell info frame as the four BLE notifications (80+80+80+60 B) it arrived in. Used for the reassembly test only. |
+| `B2A24S_DEVICE_INFO`, `B2A24S_CELL_INFO` | harvested | [`jblance/mpp-solar` `tests/integration/test_protocol_jk04.py`](https://github.com/jblance/mpp-solar/blob/master/tests/integration/test_protocol_jk04.py) `test_getInfo` / `test_getCellData` (the latter also `protocols/jk04.py` `test_responses[1]`), added Dec 2020 (commits 693a552a, deb1d538). JK-B2A24S hw 3.0 sw 3.2.3, 24 cells. Ground truth: the expected dicts of those tests (all 24 cell voltages, resistances, average/delta, highest cell 8, lowest 12, uptime 0D3H23M12S). |
+
+---
+
 ## JK / Jikong UART (`4E 57 …` TLV, separate from BLE) — `jk_uart_fixtures.py`
 
 | Fixture | Type | Source |

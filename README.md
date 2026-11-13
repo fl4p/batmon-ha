@@ -112,12 +112,13 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 * `address`: the Bluetooth MAC address, or the device name as shown in discovery. Start the add-on to see a list of
   visible devices in the log.
-* `type`: `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`,
-  `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`, `sok`,
-  `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under
+* `type`: `jk`, `jk_24s`, `jk_32s`, `jk04`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`,
+  `daly_ble`, `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`,
+  `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under
   [Supported BLE Devices](#supported-ble-devices). `dummy` is a mock BMS.
   * JK: `jk_24s` for the older 24s version (firmware < 11), `jk_32s` for the 32s version (firmware ≥ 11), `jk` to
-    auto-detect (may give invalid data if detection fails).
+    auto-detect (may give invalid data if detection fails). `jk04` for old JK active balancers without a `P` in the
+    model (JK-B2A16S, JK-B5A24S); `jk` and `auto` don't detect them.
   * Daly: `daly` for classic `A5` frames (J/T/A/U/W series), `daly2` for Modbus over BLE (H/K/M/S series, frames start
     with `D2`, [#356](https://github.com/fl4p/batmon-ha/issues/356)). Both look the same over GATT; if one only times
     out, try the other, or run `type: snoop:daly` and check whether replies start with `a5`

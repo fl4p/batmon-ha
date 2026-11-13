@@ -246,6 +246,10 @@ class JKBt(BtBms):
         once in 256. Every field after the splice is then read at the wrong offset,
         e.g. 1,216,000 V and 130 GW published to HA. The layout must be known.
         """
+        from bmslib.models.jk04 import looks_like_jk04_status
+        if looks_like_jk04_status(buf):
+            # an old JK active balancer: its frames never decode as JK02, see models/jk04.py
+            return 'float32 cell voltages, this is a JK04 device, set `type: jk04`'
         if self.is_new_11fw_32s is None:
             return None
         offset = 32 if self.is_new_11fw_32s else 0
@@ -365,9 +369,12 @@ class JKBt(BtBms):
         # after these 2 commands the bms will continuously send 0x02-type messages
 
         buf, _ = self._resp_table[0x01]
-        self.num_cells = buf[114]
+        self.num_cells = self._num_cells_from_settings(buf)
         assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
         self.connect_count += 1
+
+    def _num_cells_from_settings(self, buf) -> int:
+        return buf[114]
 
     async def disconnect(self):
         try:

@@ -40,6 +40,7 @@ def get_bms_model_class(name: str):
         jk='models.jikong.JKBt',  # auto detect
         jk_24s='models.jikong.JKBt_24s',  # https://github.com/syssi/esphome-jk-bms/blob/main/esp32-ble-example.yaml#L6
         jk_32s='models.jikong.JKBt_32s',
+        jk04='models.jk04.JK04Bt',  # old JK active balancers (JK-B2A16S, JK-B5A24S), JK04 protocol
         jk_uart='models.jikong_uart.JKUart',  # RS485/UART TLV protocol; use with address=serial
         daly_uart='models.daly_uart.DalyUart',  # RS485/USB-UART; same A5/04 frames as BLE
         jbd_uart='models.jbd_uart.JbdUart',  # JBD over TTL UART / RS485; same DD..77 frames as BLE
