@@ -167,75 +167,8 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 ## Serial / RS485
 
-Some BMS expose an RS485 (or TTL UART) port in addition to BLE. Batmon can
-read those directly with a USB-to-RS485 adapter, no Bluetooth needed. This
-path is independent of `ble_stack` and works even with Bluetooth disabled.
-
-Supported types (baud rate in parentheses):
-
-* `jk_uart` (115200) — JK / Jikong, native UART TLV protocol (`4E 57 …`),
-  distinct from the BLE format.
-* `daly_uart` (9600) — Daly, same `A5 …` 13-byte frames as Daly BLE.
-* `pace_uart` (9600) — PACE ASCII "paceic" protocol (`~2501…\r`) used by
-  PACE server-rack packs (SOK, SunGoldPower, Sunsynk rebrands, PbmsTools);
-  distinct from the BLE `pace_aiobmsble`
-  ([#276](https://github.com/fl4p/batmon-ha/issues/276)).
-* `basen_uart` (9600) — Basen binary `7E … 0D` protocol; distinct from the
-  BLE `basen`.
-* `jbd_uart` (9600) — JBD / Xiaoxiang / LLT, same `DD … 77` frames as the BLE
-  `jbd` (the BLE module is a UART bridge); TTL UART header or RS485 port.
-* `jbd_hv_uart` (9600) — JBD / LWS high-voltage BMS (HVBMS, up to 200 cells)
-  on its RS485 port: binary `3F 55 … 55 3F` replies to `01 A1 A5 B5`, the
-  protocol of the vendor PC tool (not the supplier's Modbus document). Cell
-  voltages and temperatures, current, SOC, pack and P+/P- voltage, MOS and
-  ambient temperature, insulation resistance. `jbd_hv_uart:<addr>` for the pack
-  address (default 1)
-  ([#424](https://github.com/fl4p/batmon-ha/issues/424)).
-* `jk_pb_uart` (115200) — JK-PB inverter BMS (PB1A16S, PB2A16S, ...) on its
-  RS485-1 port: a Modbus FC16 trigger, answered with the JK02_32S frame the BLE
-  driver decodes. `jk_pb_uart:<n>` selects the RS485 address set in the JK app
-  (default 1). The older `jk_uart` TLV protocol does not work on PB models.
-* `seplos_uart` (19200) — Seplos V2 (BMS 1.0/2.0 hardware) ASCII protocol
-  (`~2000 46 42 …\r`); `seplos_uart:<addr>` for the pack address (default 0),
-  `seplos_uart:<addr>:9600` for the RS232 console port. Seplos V3 (Modbus) is
-  not covered.
-* `braunpwr_uart` (9600) — BraunPWR packs with the KS48100 rack BMS: YD/T 1363
-  ASCII protocol (`>22 01 4A 42 …\r`, command 42H). `braunpwr_uart:<addr>` for
-  the pack address (default 1). It follows the DIP switch, but how is
-  unverified; if nothing answers, try 1 to 16. Connect a USB-RS485 adapter
-  to the packs' RS485 port: in #403 two parallel packs answered on one bus as
-  addresses 1 and 2, so add one device per pack on the same adapter. Needs the
-  BMS's inverter protocol set to Voltronic: in Pylontech mode the packs answer
-  only Pylontech `~` system-summary requests. The BMS's internal 4-pin UART
-  header (where its FC41D WiFi/BLE module plugs in) speaks the same protocol,
-  but avoid it: its GND is the battery's, not the host's earth, and four plain
-  USB-TTL adapters burned out on it in #403. Decoder checked against real
-  reply frames ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
-* `renogy_uart` (9600) — Renogy smart lithium (RBT100LFP12, RBT200LFP12S, ...)
-  Modbus RTU; `renogy_uart:<id>` for the slave id (default `0x30`; the
-  RBT100LFP12SH-G1 uses `0xF7`).
-* `felicity_uart` (9600) — Felicity Solar 48 V packs (FLB48314TG1, FLB48100,
-  LPBF48/LPBA48) on the RS485 pins 5/6 of their RJ45 port: the Voltronic "LIB"
-  protocol, Modbus RTU function 0x03 with a 16-bit register count in place of
-  Modbus's byte count. `felicity_uart:<addr>` for the bus address
-  (default 1); several packs share one adapter, one device entry each. The
-  FLB48314TG1 has no DIP switches — the packs auto-assign consecutive addresses,
-  so start at 1 and add entries until one stops answering. The assignment is
-  stable across a power cycle and survives adding or removing a pack (a pack
-  joining a running bus takes the next free address), but it does not follow the
-  wiring order, so identify each pack by its readings rather than its position
-  before giving it an `alias`. Address 0 never answers. An
-  alternative to the BLE `felicity` for setups troubled by bonding or adapter
-  scan contention ([#415](https://github.com/fl4p/batmon-ha/issues/415)); it has
-  not been run on hardware yet, so no claim that it is the more reliable path.
-
-`pace_uart`, `basen_uart`, `jbd_uart`, `jbd_hv_uart`, `jk_pb_uart`, `seplos_uart`,
-`braunpwr_uart`, `renogy_uart` and `felicity_uart` decoders are unit-tested against captured or
-reference frames but not yet confirmed on live hardware — feedback welcome. The
-protocols were ported from dbus-serialbattery, aiobmsble and the syssi ESPHome
-components; see the module docstrings for the exact sources.
-
-Example config:
+Some BMS have an RS485 (or TTL UART) port. Batmon reads it through a USB-to-RS485 adapter, independent of Bluetooth
+and `ble_stack`.
 
 ```yaml
 - address: serial
@@ -244,35 +177,43 @@ Example config:
   alias: battery1
 ```
 
-`address: serial` selects the wired transport; `adapter` is then the serial
-port path (`/dev/ttyUSB0`, `/dev/ttyAMA0`, `COM3`, …) instead of a Bluetooth
-HCI index. As an HA add-on this works out of the box (the manifest sets
-`uart: true`, mapping the host's serial devices into the container) — prefer
-the stable `/dev/serial/by-id/...` path so the port survives re-plugging.
-Running standalone on Linux, add your user to the `dialout` group.
+`address: serial` selects the wired transport and `adapter` is the port (`/dev/ttyUSB0`, `/dev/ttyAMA0`, `COM3`, …).
+The add-on maps the host's serial devices into the container; prefer the stable `/dev/serial/by-id/...` path.
+Standalone on Linux, add your user to the `dialout` group. A network serial server (ser2net, an ESP USB gateway, …)
+works as `adapter: tcp://192.168.1.108:8880` (raw TCP, set the baud rate on the server) or `rfc2217://host:port`.
 
-A serial adapter on a network serial server (ser2net, an ESP USB gateway, …) works
-as `adapter: tcp://192.168.1.108:8880` (raw TCP) or `rfc2217://host:port`. With raw
-TCP, set the baud rate on the server.
+Types (baud rate in parentheses). `:<addr>` after the type sets the bus address; several packs on one bus share the
+same `adapter:`, one entry each.
+
+* `jk_uart` (115200): JK / Jikong UART protocol. Not for PB models.
+* `jk_pb_uart` (115200): JK-PB inverter BMS (PB1A16S, PB2A16S, …) on RS485-1. Address as set in the JK app, default 1.
+* `daly_uart` (9600): Daly. Address is the board number, see below.
+* `jbd_uart` (9600): JBD / Xiaoxiang / LLT, TTL header or RS485.
+* `jbd_hv_uart` (9600): JBD / LWS high-voltage BMS (HVBMS, up to 200 cells). Default address 1
+  ([#424](https://github.com/fl4p/batmon-ha/issues/424)).
+* `pace_uart` (9600): PACE server-rack packs (SOK, SunGoldPower, Sunsynk rebrands, PbmsTools)
+  ([#276](https://github.com/fl4p/batmon-ha/issues/276)).
+* `basen_uart` (9600): Basen.
+* `seplos_uart` (19200): Seplos V2 (BMS 1.0/2.0 hardware). Default address 0; `seplos_uart:<addr>:9600` for the
+  RS232 console port. Seplos V3 is not supported.
+* `braunpwr_uart` (9600): BraunPWR packs with the KS48100 rack BMS. Set the BMS inverter protocol to Voltronic.
+  Default address 1; if nothing answers, try 1 to 16. Use the RS485 port, not the internal 4-pin UART header: its
+  GND is battery ground and has burned out USB-TTL adapters
+  ([#403](https://github.com/fl4p/batmon-ha/discussions/403)).
+* `renogy_uart` (9600): Renogy smart lithium (RBT100LFP12, RBT200LFP12S, …). Default id `0x30`; the RBT100LFP12SH-G1
+  uses `0xF7`.
+* `felicity_uart` (9600): Felicity Solar 48 V packs (FLB48314TG1, FLB48100, LPBF48/LPBA48), RS485 on RJ45 pins 5/6.
+  Packs without DIP switches number themselves from 1, not in wiring order: add entries from 1 until one stops
+  answering, and tell packs apart by their readings ([#415](https://github.com/fl4p/batmon-ha/issues/415)).
+
+Except for `jk_uart` and `daly_uart`, these are not yet confirmed on live hardware. Feedback welcome.
 
 ### Daly board number
 
-Daly puts the board number in the request, so a BMS whose board number isn't
-the factory default 1 answers nothing at all. Append it to the type:
+A Daly BMS only answers requests carrying its board number ("Board No" in Daly's PC tool, default 1). Append it to
+the type, e.g. `type: daly_uart:2`.
 
-```yaml
-- address: serial
-  adapter: /dev/ttyUSB0
-  type: daly_uart:2       # RS485 board number 2 (omit `:2` for board 1)
-  alias: battery2
-```
-
-Daly's PC tool calls this "Board No".
-
-### Several Daly on one RS485 bus
-
-Give each unit a distinct board number in Daly's PC tool, then point them all at
-the same `adapter:` — one USB adapter for the whole string, not one each:
+Several Daly on one bus need distinct board numbers and share one adapter:
 
 ```yaml
 - address: serial
@@ -285,44 +226,25 @@ the same `adapter:` — one USB adapter for the whole string, not one each:
   alias: battery2
 ```
 
-Batmon opens the port once, shares it, and routes each reply to the unit whose
-board number it carries. Requests are serialized across the bus, so this is safe
-with `concurrent_sampling` too (RS485 is half duplex — only one unit may
-transmit at a time).
-
-Two units configured with the *same* board number are rejected at connect: they
-would answer each other's requests and publish each other's readings. Mixing
-families on one port (say `jk_uart` at 115200 and `daly_uart` at 9600) is
-rejected for the same reason — one wire cannot run two baud rates.
+This is safe with `concurrent_sampling`. Two entries with the same board number, or different BMS families on one
+port, are rejected.
 
 ### Troubleshooting a silent wired link
 
-`timeout awaiting result for cmd=0x93, got 0/1 responses` means no reply was
-decoded. The message now says whether any bytes arrived at all — `0 bytes
-received` is a wiring/adapter/port problem, while a non-zero count with `0
-valid frames` points at the baud rate or the board number.
+`timeout awaiting result ... 0 bytes received` is a wiring, adapter or port problem. Bytes received but `0 valid
+frames` points at the baud rate or the address.
 
-For Daly, `tools/daly_serial_probe.py` sweeps board numbers, payload fill bytes
-and RTS/DTR states and dumps every raw byte, so one run tells you which board
-answers (or that nothing does):
+For Daly, `tools/daly_serial_probe.py` sweeps board numbers and line settings and dumps the raw bytes:
 
 ```
 python3 tools/daly_serial_probe.py /dev/serial/by-id/usb-FTDI_...-port0
 ```
 
-Wiring, as confirmed on a Daly 4S in [#398](https://github.com/fl4p/batmon-ha/issues/398):
-the Daly-supplied XH 5-pin RS485/CAN cable is pin 1 = B−, pin 2 = A+,
-pin 3 = GND, pins 4–5 = CAN. **GND must be connected** — without it there is no
-communication at all. A plain FTDI USB-RS485 adapter works.
+Daly wiring ([#398](https://github.com/fl4p/batmon-ha/issues/398)): the supplied XH 5-pin RS485/CAN cable is pin 1 =
+B−, pin 2 = A+, pin 3 = GND, pins 4–5 = CAN. **Connect GND**, without it nothing works. Daly's TTL UART and RS485 are
+separate ports; on some boards they share a UART with the Bluetooth module, so unplug the BT module if in doubt.
 
-Daly's UART (TTL) and RS485 are separate ports with different pinouts. On some
-boards they share one UART with the Bluetooth module, so BT and a wired link
-cannot both be used; on others (including recent ones with two UART headers)
-they run at the same time. If in doubt, unplug the BT module and retest.
-
-To request another BMS family over RS485, open an issue with a captured
-frame (`tcpdump` of the USB-serial line, or a wireshark log from the
-vendor's PC tool).
+To request another BMS family over RS485, open an issue with a captured frame.
 
 ## Adding a new BMS
 
