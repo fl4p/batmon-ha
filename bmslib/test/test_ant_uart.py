@@ -209,3 +209,12 @@ def test_old_protocol_framer():
     assert buf == raw[:2]
     with pytest.raises(ValueError):
         au.decode_old_status(raw[:139])
+
+
+def test_old_protocol_trailing_zero_ntc_slots_are_absent():
+    # 2020 boards fill unused NTC slots with 0, not -40 (issue #28 captures)
+    t = au._ntc_present([16, 17, 0, 0])
+    assert t[:2] == [16, 17] and all(math.isnan(x) for x in t[2:])
+    assert au._ntc_present([0, 0, 0, 0]) == [0, 0, 0, 0]  # a real 0 degC everywhere stays
+    t = au._ntc_present([5, -40, 7, 0])
+    assert t[0] == 5 and math.isnan(t[1]) and t[2] == 7 and math.isnan(t[3])

@@ -17,8 +17,11 @@ ANT boards speak one of two protocols on the wire:
              4..137 (big-endian) at 138..139; layout in ``decode_old_status``.
     Current at 70..73 is int32 * 0.1 A, positive = discharging (batmon's own
     sign): in the issue #28 capture the remaining charge rises while it reads
-    -7.4 A. Some 2021 boards still answer this request, but fill several fields
-    with placeholders (power 9999 W, current 0), so they belong on ``ant_uart``.
+    -7.4 A. Some 2021 boards answer this request too, with power as a 9999 W
+    placeholder (not used here); current is real (issue #37). For a 2021 board
+    this is the wire path with captured evidence: ``7E A1`` has only been seen
+    from the PC tool (issue #20, no BMS attached) and over a Bluetooth serial
+    port (issue #18), never as a reply on the wire.
 
 Link: 19200 8N1. That is what syssi/esphome-ant-bms runs and what every captured
 exchange used, on 2020 and 2021 boards. The vendor protocol PDF and the vendor
@@ -143,6 +146,8 @@ class AntUart(AntBt):
 
     async def _q(self, cmd: AntCommandFuncs, addr, val, resp_code):
         async def exchange():
+            # junk with a false 7E A1 header would otherwise hold this reply back for the next poll
+            self._buffer.clear()
             with await self._fetch_futures.acquire_timeout(resp_code, timeout=self.TIMEOUT / 2):
                 await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val))
                 return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
@@ -161,6 +166,18 @@ class AntUart(AntBt):
 
 
 # --- pre-2021 protocol -------------------------------------------------------
+
+def _ntc_present(ntc):
+    """-40 marks an absent probe. 2020 boards fill unused slots with 0 instead (issue #28), so 0 in a
+    trailing slot after a non-zero probe is absent too; a lone or leading 0 stays a real 0 degC."""
+    out = [math.nan if t == -40 else t for t in ntc]
+    for i in range(len(out) - 1, 0, -1):
+        if out[i] == 0 and any(t not in (0,) and not math.isnan(t) for t in out[:i]):
+            out[i] = math.nan
+        elif not math.isnan(out[i]):
+            break
+    return out
+
 
 OLD_REQUEST_STATUS = bytes.fromhex('5a5a00000101')
 OLD_HEADER = b'\xaa\x55\xaa\xff'
@@ -231,7 +248,7 @@ def decode_old_status(f: bytes) -> dict:
         uptime=u(87, 4),
         mos_temperature=s(91, 2),
         balancer_temperature=s(93, 2),
-        temperatures=[math.nan if t == -40 else t for t in ntc],
+        temperatures=_ntc_present(ntc),
         charge_status=f[103],
         discharge_status=f[104],
         balancer_status=f[105],

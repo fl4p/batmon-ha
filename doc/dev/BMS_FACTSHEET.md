@@ -236,10 +236,11 @@ with a 6-pin display connector only the first GND is battery ground (syssi issue
 components. The vendor protocol PDF and the vendor PC tool (`MaYiSystem.exe`, issue #20 screenshot) say 9600, hence
 the `:<baud>` type suffix.
 
-**Which protocol.** 2021+ boards speak `7E A1` on the wire: the vendor PC tool polls `7E A1 01 00 00 BE 18 55 AA 55`
-over a serial port (issue #20, which also lists the 0x51 write ACKs). Some 2021 boards also answer the
-old `5A 5A 00 00 01 01` read, but with placeholders: power always 9999 W, current 0 (issue #37). Another 2021 board did
-not answer the old read at all (issue #18, transport not stated). Pre-2021 boards only speak the old protocol. Hence two types, no
+**Which protocol.** No `7E A1` reply has been captured on the wire. The vendor PC tool sends
+`7E A1 01 00 00 BE 18 55 AA 55` (issue #20, recorded through a socat pipe with no BMS attached; it also lists the 0x51
+write ACKs), and the issue #18 14S reply most likely came over a Bluetooth serial port. A 2021 board does answer the
+old `5A 5A 00 00 01 01` read on the wire, with power as a 9999 W placeholder and real current (issue #37; the 0 A in
+its frame is both MOSFETs off). Another 2021 board did not answer the old read (issue #18, likely over Bluetooth). Pre-2021 boards only speak the old protocol. Hence two types, no
 auto-detection. syssi's `ant_bms` UART component switched to `7E A1` only in 3.0.0 (PR #162); its hardware test box
 is unticked.
 

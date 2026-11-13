@@ -205,8 +205,9 @@ same `adapter:`, one entry each.
 * `felicity_uart` (9600): Felicity Solar 48 V packs (FLB48314TG1, FLB48100, LPBF48/LPBA48), RS485 on RJ45 pins 5/6.
   Packs without DIP switches number themselves from 1, not in wiring order: add entries from 1 until one stops
   answering, and tell packs apart by their readings ([#415](https://github.com/fl4p/batmon-ha/issues/415)).
-* `ant_uart` (19200): ANT BMS from 2021 on (16ZMB, 24AHA, 24BH, …); `ant_old_uart` (19200) for older ANT boards.
-  3.3 V TTL on the 4-pin comm port; connect VCC too, or the BMS does not answer. `ant_uart:9600` sets another baud rate.
+* `ant_uart` (19200): ANT BMS from 2021 on (16ZMB, 24AHA, 24BH, …); if it doesn't answer, try `ant_old_uart`, which
+  is also for older ANT boards. 3.3 V TTL on the 4-pin port; connect VCC to the adapter's 3.3 V, or the BMS doesn't
+  answer. Append `:9600` to the type for 9600 baud.
 
 Except for `jk_uart` and `daly_uart`, these are not yet confirmed on live hardware. Feedback welcome.
 
