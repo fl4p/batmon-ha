@@ -129,10 +129,6 @@ Otherwise, the name as found in Bluetooth discovery is used.
 `display_name` sets the device name shown in Home Assistant, and `temperature_names` names the temperature probes in
 order. Neither changes MQTT topics or unique IDs, so entity history is kept.
 
-For `jbd`, batmon also reads the identity and settings registers (manufacturer, model, manufacture date, capacity,
-protection thresholds, balancing, voltage curve) once per start and publishes them under `jbd/`. These registers need
-factory mode, which batmon leaves without saving, so no setting is changed.
-
 `jbd` charge and discharge switches write the MOS register inside factory mode, keep the other MOSFET's state, and
 read the state back, so a refused change is logged as an error. On firmware 3.2 this re-enabled charging after an
 undervoltage cut-off. It does not override an active protection; a state a protection holds is not rewritten for
