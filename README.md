@@ -110,7 +110,7 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 * `address`: the Bluetooth MAC address, or the device name as shown in discovery. Start the add-on to see a list of
   visible devices in the log.
-* `type`: `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`,
+* `type`: `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `jbd_hv_uart`, `ant`, `daly`, `daly2`, `daly_ble`,
   `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`, `sok`,
   `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under
   [Supported BLE Devices](#supported-ble-devices). `dummy` is a mock BMS.
@@ -191,8 +191,9 @@ The add-on maps the host's serial devices into the container; prefer the stable 
 Standalone on Linux, add your user to the `dialout` group. A network serial server (ser2net, an ESP USB gateway, …)
 works as `adapter: tcp://192.168.1.108:8880` (raw TCP, set the baud rate on the server) or `rfc2217://host:port`.
 
-Types (baud rate in parentheses). `:<addr>` after the type sets the bus address; several packs on one bus share the
-same `adapter:`, one entry each.
+Types (baud rate in parentheses). Types with an address (`daly_uart`, `jbd_hv_uart`, `jk_pb_uart`, `seplos_uart`,
+`braunpwr_uart`, `renogy_uart`, `felicity_uart`) take it as `type:<addr>`; several packs on one bus then share the same
+`adapter:`, one entry each. The other types allow one pack per port.
 
 * `jk_uart` (115200): JK / Jikong UART protocol. Not for PB models.
 * `jk_pb_uart` (115200): JK-PB inverter BMS (PB1A16S, PB2A16S, …) on RS485-1. Address as set in the JK app, default 1.
@@ -235,8 +236,8 @@ Several Daly on one bus need distinct board numbers and share one adapter:
   alias: battery2
 ```
 
-This is safe with `concurrent_sampling`. Two entries with the same board number, or different BMS families on one
-port, are rejected.
+This is safe with `concurrent_sampling`. Two entries with the same board number are rejected, and so are devices on
+one port that need different baud rates.
 
 ### Troubleshooting a silent wired link
 
@@ -290,8 +291,8 @@ bluetooth_proxies:
     noise_psk: "<another key>"
 ```
 
-* A stock ESPHome proxy serves one API client. If HA uses it too, HA and the add-on take it from each other on every
-  reconnect. Remove the proxy from HA, or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
+* A stock ESPHome proxy serves one API client: the last to connect (ESPHome ≥ 2026.7), before that the first. If HA
+  uses it too, one of them gets nothing. Remove the proxy from HA, or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
   ≥ 0.2.0, which serves up to 4 clients.
 * Each proxy has 3 connection slots by default.
 * Set `bluetooth_proxy: { active: true, cache_services: false }` in the proxy firmware. Details and a known
@@ -308,7 +309,7 @@ bluetooth_proxies:
 For wired BMS, `adapter:` is the serial port, see [Serial / RS485](#serial--rs485).
 
 A top-level `adapter:` is the default for every device without its own: a controller (`hci1` or its MAC) for BLE
-devices, a port path for wired ones. The log lists which devices inherited it.
+devices, an absolute port path (`/dev/ttyUSB0`) or URL for wired ones. The log lists which devices inherited it.
 
 ## Energy Meters
 
@@ -363,7 +364,7 @@ For microcontrollers (ESP32 etc.) there is a MicroPython port: [batmon-mp](https
 # Contribute / Donate
 
 * [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)
-* [Patreon](patreon.com/user?u=88448325) (Donations & News)
+* [Patreon](https://www.patreon.com/user?u=88448325) (Donations & News)
 
 ## References
 
