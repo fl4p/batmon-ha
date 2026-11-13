@@ -190,7 +190,7 @@ For verbose logs of particular BMS add `debug: true`.
 * `pack_temp_estimator` (experimental, off by default) estimates the cell temperature of packs whose BMS only reports a
   MOSFET temperature, as a `Pack Temp (RC est.)` sensor. `pack_temp_room_topic` / `pack_temp_outdoor_topic` are MQTT
   topics carrying ambient temperatures (e.g. from HA's `mqtt_statestream`); both are optional, without them the
-  estimate follows the MOSFET temperature, damped. See [bmslib/PACK_TEMP_RC_INTEGRATION.md](bmslib/PACK_TEMP_RC_INTEGRATION.md).
+  estimate follows the MOSFET temperature, damped. See [doc/PackTemp.md](doc/PackTemp.md).
 * `jk_settings` (off by default) reads the settings of JK BMSes (BLE, firmware ≥ 11) and shows them in Home Assistant.
   A device's `settings_write` (`all` and/or a comma list of names; `all` leaves out critical settings) makes them
   changeable, with backup and read-back check. See [doc/JK-Settings.md](doc/JK-Settings.md).
