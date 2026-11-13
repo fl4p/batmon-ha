@@ -94,8 +94,7 @@ I tested the add-on on a Raspberry Pi 4 and 5 using Home Assistant Operating Sys
 
 ## Configuration
 
-The add-on can read multiple BMS at the same time.
-Add an entry for each device, such as:
+Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 ```
 - address: CC:44:8C:F7:AD:BB
@@ -109,86 +108,62 @@ Add an entry for each device, such as:
   temperature_names: Cell 1,Cell 2 # probe names in HA, in order (optional)
 ```
 
-`address` is the MAC address of the Bluetooth device. If you don't know the MAC address start the add-on, and you'll
-find a list of visible Bluetooth devices in the add-on log. Alternatively you can enter the device name here as
-displayed in the discovery list.
+### Per device
 
-`type` can be `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`, `daly_uart`,
-`pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under [Supported BLE Devices](#supported-ble-devices).
-For a mock BMS use `dummy`.
+* `address`: the Bluetooth MAC address, or the device name as shown in discovery. Start the add-on to see a list of
+  visible devices in the log.
+* `type`: `jk`, `jk_24s`, `jk_32s`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`, `daly_ble`,
+  `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`, `sok`,
+  `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under
+  [Supported BLE Devices](#supported-ble-devices). `dummy` is a mock BMS.
+  * JK: `jk_24s` for the older 24s version (firmware < 11), `jk_32s` for the 32s version (firmware ≥ 11), `jk` to
+    auto-detect (may give invalid data if detection fails).
+  * Daly: `daly` for classic `A5` frames (J/T/A/U/W series), `daly2` for Modbus over BLE (H/K/M/S series, frames start
+    with `D2`, [#356](https://github.com/fl4p/batmon-ha/issues/356)). Both look the same over GATT; if one only times
+    out, try the other, or run `type: snoop:daly` and check whether replies start with `a5`
+    ([#416](https://github.com/fl4p/batmon-ha/issues/416)).
+  * `auto` (Bluetooth only) probes the device at every start and logs the `type:` to use. It knows `daly`, `daly2`,
+    `jbd`, `jk`, `ant`, `bm2` and `bm6`; a device that doesn't answer is skipped with an error, never guessed.
+* `alias`: MQTT topic prefix and HA name. Defaults to the Bluetooth name.
+* `display_name`, `temperature_names`: device name and temperature probe names (comma list, in order) in HA. Topics and
+  unique IDs don't change, so history is kept.
+* `pin`: pairing PIN, for the Victron SmartShunt, newer JBD firmware (Liontron and other packs whose app asks for a
+  6-digit password, [#217](https://github.com/fl4p/batmon-ha/issues/217)) and Felicity packs renamed from `F07…` to
+  `SolarB_…` ([#415](https://github.com/fl4p/batmon-ha/issues/415)). BlueZ bonds the device before sampling starts
+  (like `bluetoothctl pair`). This needs a local adapter; an ESPHome proxy cannot answer a PIN prompt.
+* `adapter`: Bluetooth adapter to use, e.g. `hci1`. See [`adapter:` per BMS](#adapter-per-bms).
+* `current_calibration`: factor applied to the current reading. `-1` flips the sign.
+* `capacity`: nameplate capacity of this pack in Ah, needed by `soh_estimator`.
+* `settings_write`: JK settings this device may change, see `jk_settings`.
+* `debug: true`: verbose log for this device only.
 
-`type: auto` (Bluetooth only) asks the device at every start which protocol it speaks and logs the `type:` to put in
-the config instead. It knows `daly` (A5), `daly2` (Modbus), `jbd`, `jk`, `ant`, `bm2` and `bm6`, and accepts a type
-only on a valid reply to a read request, sent to that driver's own characteristic (`bm2` is detected by listening
-only, the device pushes its frames). A device that doesn't answer is skipped
-with an error, never guessed. Any other BMS still needs its `type:` set by hand.
+### Global
 
-With the `alias` field you can set the MQTT topic prefix and the name as displayed in Home Assistant.
-Otherwise, the name as found in Bluetooth discovery is used.
-
-`display_name` sets the device name shown in Home Assistant, and `temperature_names` names the temperature probes in
-order. Neither changes MQTT topics or unique IDs, so entity history is kept.
-
-If the device requires a PIN when pairing add `pin: "123456"` (and replace 123456 with the device's PIN). This is the
-case for the Victron SmartShunt and for newer JBD firmware (Liontron and other packs whose app asks for a 6-digit
-password): those BMS only answer after a passkey pairing, batmon pairs with the given `pin` and then talks the normal
-JBD protocol (#217). Felicity packs whose firmware update renamed them from `F07…` to `SolarB_…` need this too (#415, upstream
-[BMS_BLE-HA#735](https://github.com/patman15/BMS_BLE-HA/issues/735)). Three FLB48314TG1-H packs were confirmed
-working once every pack was bonded — but bonding alone was not enough there: one pack was already bonded and still
-failed with `failed to discover services, device disconnected` until Home Assistant's own Bluetooth integration was
-disabled, which frees the adapter from scan contention. If a bonded pack still fails, try that next.
-
-The bond is made by BlueZ (the same operation as `bluetoothctl pair`), before the add-on starts sampling, and stays in
-place afterwards. It needs a local Bluetooth adapter: an ESPHome proxy can be asked to pair, but has no agent to answer
-a PIN prompt, so a device with a `pin:` has to be reached through an adapter on the machine running the add-on.
-
-Add `adapter: "hci1"` to select a bluetooth adapter other than the default one.
-
-With `current_calibration` you can calibrate the current sensor. The current reading is multiplied by this factor. Set
-it to `-1` to flip the sign if you experience wrong charge/discharge meters.
-
-For verbose logs of particular BMS add `debug: true`.
-
-* Set MQTT user and password. MQTT broker is usually `core-mosquitto`.
-* `concurrent_sampling` tries to read all BMSs at the same time (instead of a serial read one after another). This can
-  increase sampling rate for more timely-accurate data. Might cause Bluetooth connection issues if `keep_alive` is
-  disabled.
-* `keep_alive` will never close the bluetooth connection. Use for higher sampling rate. You will not be able to connect
-  to the BMS from your phone anymore while the add-on is running.
-* `sample_period` is the time in seconds to wait between BMS reads. Small periods generate more data points per time.
-  It does *not* change how long a BMS is given to answer — see `ble_request_timeout` for that.
-* `ble_request_timeout` is how long an `aiobmsble` device (`felicity`, `daly_ble`, any tag from
-  [Supported BLE Devices](#supported-ble-devices)) gets to answer one request, in seconds. The default is the library's
-  5 s, split over three attempts with doubling waits (0.71 s, 1.43 s, 2.86 s), so a pack slower than 0.71 s only
-  answers on a retry. Raise it (e.g. `12`) if a device times out in `_await_msg` while others on the same adapter are
-  being polled. Note that a device whose write mode aiobmsble has not pinned down yet runs that sequence twice (once
-  per mode), so a fully silent pack takes about **twice** the configured value before it gives up — and a slow poll
-  pushes out the whole cycle, since `sample_period` is slept *after* the poll, not instead of it. It is necessarily
-  global: aiobmsble holds the value on its base class, so it applies to every `_ble` device at once, and a per-device
-  setting would be a lie (#415).
-* Set `publish_period` to a higher value than `sample_period` to throttle MQTT data, while sampling BMS for accurate
-  energy meters. On publish, samples since previous publish are averaged. Periods shorter than 2s can slow down history
-  plots in HA.
-* `invert_current` changes the sign of the current. Normally it is positive during discharge, inverted its negative.
-* `expire_values_after` time span in seconds when sensor values become "Unavailable"
-* `impedance_estimator` (experimental, off by default) estimates the per-cell resistance of LiFePO4 packs and publishes
-  it as a `Cell Resistance` sensor in mΩ. See [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
-* `soh_estimator` (experimental, off by default) estimates the present capacity of LiFePO4 packs from long rests and
-  the charge counted between them, as `Qmax (est.)` (Ah) and `SoH (est.)` (%) sensors, against the per-device
-  `capacity:` (Ah, the nameplate of this one pack, not of the bank), without which it publishes nothing. On its built-in OCV curve it gives no value yet;
-  see [doc/SoH.md](doc/SoH.md).
-* `pack_temp_estimator` (experimental, off by default) estimates the cell temperature of packs whose BMS only reports a
-  MOSFET temperature, as a `Pack Temp (RC est.)` sensor. `pack_temp_room_topic` / `pack_temp_outdoor_topic` are MQTT
-  topics carrying ambient temperatures (e.g. from HA's `mqtt_statestream`); both are optional, without them the
-  estimate follows the MOSFET temperature, damped. See [doc/PackTemp.md](doc/PackTemp.md).
-* `jk_settings` (off by default) reads the settings of JK BMSes (BLE, firmware ≥ 11) and shows them in Home Assistant.
-  A device's `settings_write` (`all` and/or a comma list of names; `all` leaves out critical settings) makes them
-  changeable, with backup and read-back check. See [doc/JK-Settings.md](doc/JK-Settings.md).
-* `watchdog` stops the program on too many errors (make sure to enable the Home Assistant watchdog to restart the add-on
-  after it exits)
-* For JK bms: set `type` to `jk_24s` for the older 24s version (firmware<11.x), `jk_32s` for the newer 32s version (fw>
-  =11.x), or `jk` if you don't know (might cause invalid battery data when detection fails)
-* type `daly2` is for Daly BMS that speak Modbus over BLE (H/K/M/S series, frames start with `D2`). Reads, cell voltages and MOSFET switches work, see [issue #356](https://github.com/fl4p/batmon-ha/issues/356). The GATT layout doesn't tell the two Daly protocols apart: both use service `fff0` with `fff1/fff2`. If `daly2` only times out, use `daly` (classic `A5` frames, J/T/A/U/W series), or run `type: snoop:daly` and check whether the replies start with `a5` ([#416](https://github.com/fl4p/batmon-ha/issues/416))
+* MQTT: set `mqtt_user` and `mqtt_password`. The broker is usually `core-mosquitto`.
+* `sample_period`: seconds between BMS reads.
+* `publish_period`: seconds between MQTT publishes; samples in between are averaged. Set it above `sample_period` to
+  throttle MQTT while keeping energy meters accurate. Below 2 s, HA history plots get slow.
+* `keep_alive`: never close the Bluetooth connection. Allows faster sampling, but your phone app can't connect while
+  the add-on runs.
+* `concurrent_sampling`: read all BMS at the same time instead of one after another. Can cause connection problems
+  without `keep_alive`.
+* `ble_request_timeout`: seconds an `aiobmsble` device (`felicity`, `daly_ble`, any tag from
+  [Supported BLE Devices](#supported-ble-devices)) gets to answer, default 5. Raise it (e.g. `12`) if a device times
+  out in `_await_msg`. Applies to all such devices; a silent device can take up to twice this value to give up.
+* `invert_current`: flip the current sign. Normally discharge is positive.
+* `expire_values_after`: seconds after which a sensor shows "Unavailable".
+* `watchdog`: exit on too many errors. Enable the HA watchdog so the add-on restarts.
+* `jk_settings`: show JK settings (BLE, firmware ≥ 11) in HA. A device's `settings_write` (`all` and/or a comma list of
+  names; `all` leaves out critical settings) makes them writable, with backup and read-back check. See
+  [doc/JK-Settings.md](doc/JK-Settings.md).
+* Experimental estimators, all off by default:
+  * `impedance_estimator`: per-cell resistance of LiFePO4 packs, as `Cell Resistance` (mΩ). See
+    [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
+  * `soh_estimator`: present capacity of LiFePO4 packs as `Qmax (est.)` and `SoH (est.)`, against the device's
+    `capacity:`. With the built-in OCV curve it gives no value yet, see [doc/SoH.md](doc/SoH.md).
+  * `pack_temp_estimator`: cell temperature for packs that only report a MOSFET temperature, as
+    `Pack Temp (RC est.)`. Optional `pack_temp_room_topic` / `pack_temp_outdoor_topic` take ambient temperatures from
+    MQTT. See [doc/PackTemp.md](doc/PackTemp.md).
 
 ## Serial / RS485
 
@@ -478,6 +453,9 @@ peaks, leading to even greater error.
   hardware
 * Either bleak or bluetooth support in HA docker seems unstable. see related
   issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* A bonded (`pin:`) device that still fails with `failed to discover services, device disconnected`: disable Home
+  Assistant's own Bluetooth integration to free the adapter from scan contention
+  ([#415](https://github.com/fl4p/batmon-ha/issues/415)).
 * Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
 * [doc/Downgrade.md](doc/Downgrade.md) to an earlier version
 * to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
