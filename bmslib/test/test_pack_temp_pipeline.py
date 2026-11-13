@@ -60,7 +60,6 @@ def test_cache_missing_channel():
     cache = AmbientCache()
     assert cache.get("room") is None
     assert cache.get("outdoor") is None
-    assert cache.snapshot() == {}
 
 
 # ---------- PackTempRCPublisher ----------

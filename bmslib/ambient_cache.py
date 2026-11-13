@@ -26,7 +26,6 @@ from typing import Optional, Dict
 class _Channel:
     last_value: Optional[float] = None
     last_t: Optional[float] = None
-    last_raw: Optional[str] = None
 
 
 class AmbientCache:
@@ -44,8 +43,8 @@ class AmbientCache:
         self._lock = threading.Lock()
 
     def topic_callback(self, channel: str):
-        """Returns a paho-shaped callback (payload: str) that updates `channel`.
-        Wire it via mqtt_util's switch-callback dict or a dedicated subscribe."""
+        """A plain callback (payload) that updates `channel`, called on the paho
+        thread. Registered with mqtt_util.register_state_topic()."""
         def _cb(payload: str):
             v = _parse_payload(payload)
             if v is None:
@@ -54,7 +53,6 @@ class AmbientCache:
                 ch = self._channels.setdefault(channel, _Channel())
                 ch.last_value = v
                 ch.last_t = time.time()
-                ch.last_raw = payload[:64]
         return _cb
 
     def get(self, channel: str, now: Optional[float] = None) -> Optional[float]:
@@ -68,19 +66,6 @@ class AmbientCache:
             if (now - ch.last_t) > self.max_age_s:
                 return None
             return ch.last_value
-
-    def snapshot(self) -> Dict[str, dict]:
-        """Diagnostic snapshot of all channels."""
-        now = time.time()
-        out = {}
-        with self._lock:
-            for name, ch in self._channels.items():
-                out[name] = dict(
-                    value=ch.last_value,
-                    age_s=(now - ch.last_t) if ch.last_t else None,
-                    raw=ch.last_raw,
-                )
-        return out
 
 
 def _parse_payload(payload) -> Optional[float]:
