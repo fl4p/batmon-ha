@@ -32,7 +32,7 @@ import math
 from typing import List, Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.uart.modbus_rtu import build_read, extract_read_frame, ModbusError, u16_be, u32_be, FC_READ_HOLDING
 
 REG_CELLS = 0x1388      # 5000, read 0x22 registers: count, 16 cells, temp count, 16 temps

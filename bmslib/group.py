@@ -3,7 +3,7 @@ from copy import copy
 from typing import Dict, List
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms, normalize_ble_address
+from bmslib.ble.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
 from bmslib.wire.aggregate import (  # noqa: F401
     is_finite,

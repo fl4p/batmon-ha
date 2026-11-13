@@ -6,7 +6,7 @@ and every other `_ble` type a PIN was a silent no-op — and a BMS that only
 serves GATT to a bonded central (Felicity firmware that renames the pack to
 `SolarB_*`) could not be read at all, with nothing in the log saying why.
 
-The bond itself is BlueZ's, not bleak's — see bmslib/pairing.py. What the
+The bond itself is BlueZ's, not bleak's — see bmslib/ble/pairing.py. What the
 wrapper owes is: hand the address and the pin to that code before the aiobmsble
 driver connects, once, and never let a pairing problem raise.
 """
@@ -16,7 +16,7 @@ import inspect
 
 import pytest
 
-import bmslib.pairing as pairing
+import bmslib.ble.pairing as pairing
 from bmslib.models.BLE_BMS_wrap import BMS, BLEDeviceResolver
 
 
@@ -68,7 +68,7 @@ def _reset(monkeypatch):
     monkeypatch.setattr(BLEDeviceResolver, "resolve", staticmethod(fake_resolve))
     monkeypatch.setattr(pairing, "bond_with_pin", fake_bond)
     # default: a local adapter, i.e. bonding is possible
-    monkeypatch.setattr("bmslib.bt.scanner_is_proxy", lambda: False)
+    monkeypatch.setattr("bmslib.ble.bt.scanner_is_proxy", lambda: False)
     yield
 
 
@@ -162,7 +162,7 @@ def test_a_raising_bond_does_not_break_the_connect(monkeypatch):
 def test_proxy_stack_warns_instead_of_pairing(monkeypatch):
     """An ESPHome node can be told to pair, but has no agent to answer a PIN
     request, so a `pin:` cannot be delivered over that stack. Say it once."""
-    monkeypatch.setattr("bmslib.bt.scanner_is_proxy", lambda: True)
+    monkeypatch.setattr("bmslib.ble.bt.scanner_is_proxy", lambda: True)
     bms = _make_bms(psk="123456")
     asyncio.run(bms.connect())
     asyncio.run(bms.connect())

@@ -10,8 +10,8 @@ import types
 import bleak
 import pytest
 
-import bmslib.bt
-from bmslib.bt import BtBms
+import bmslib.ble.bt
+from bmslib.ble.bt import BtBms
 
 NotFound = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
@@ -38,8 +38,8 @@ def _run(adapter, proxy, monkeypatch):
         seen['adapter'] = adapter
         return []
 
-    monkeypatch.setattr(bmslib.bt, 'bt_discovery', fake_discovery)
-    monkeypatch.setattr(bmslib.bt, 'scanner_is_proxy', lambda: proxy)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', fake_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: proxy)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter=adapter)
@@ -67,7 +67,7 @@ def test_no_nested_scan_from_scanner_connect(monkeypatch):
     async def fake_discovery(logger, timeout=5, adapter=None):
         called.append(adapter)
 
-    monkeypatch.setattr(bmslib.bt, 'bt_discovery', fake_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', fake_discovery)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')
@@ -80,8 +80,8 @@ def test_failed_scan_keeps_not_found(monkeypatch):
     async def broken_discovery(logger, timeout=5, adapter=None):
         raise RuntimeError('org.bluez.Error.InProgress')
 
-    monkeypatch.setattr(bmslib.bt, 'bt_discovery', broken_discovery)
-    monkeypatch.setattr(bmslib.bt, 'scanner_is_proxy', lambda: False)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', broken_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: False)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')
@@ -106,8 +106,8 @@ class _Scanner:
 
 @pytest.mark.parametrize('proxy,expect', [(False, {'adapter': 'hci1'}), (True, {})])
 def test_scanner_connect_adapter(monkeypatch, proxy, expect):
-    monkeypatch.setattr(bmslib.bt, 'BleakScanner', _Scanner)
-    monkeypatch.setattr(bmslib.bt, 'scanner_is_proxy', lambda: proxy)
+    monkeypatch.setattr(bmslib.ble.bt, 'BleakScanner', _Scanner)
+    monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: proxy)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False, _pending_disconnect_call=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')

@@ -38,7 +38,7 @@ import math
 from typing import List, Optional
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.models.pace import SOI, EOI, build_frame, parse_frame, _Cursor, CID2_OK
 
 VER = 0x20

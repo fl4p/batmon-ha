@@ -27,7 +27,7 @@ import math
 import crcmod as crcmod
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.util import to_hex_str
 
 crc16_modbus = crcmod.mkCrcFun(0x18005, rev=True, initCrc=0xFFFF, xorOut=0x0000)

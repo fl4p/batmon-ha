@@ -20,7 +20,7 @@ That is a diagnostic, so it must never cost more than the failure it describes.
 import asyncio
 import time
 
-from bmslib.bt import enumerate_services
+from bmslib.ble.bt import enumerate_services
 
 
 class _Log:

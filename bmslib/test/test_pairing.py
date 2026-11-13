@@ -1,4 +1,4 @@
-"""Tests for bmslib/pairing.py — bonding a BMS through BlueZ's own Device1.Pair().
+"""Tests for bmslib/ble/pairing.py — bonding a BMS through BlueZ's own Device1.Pair().
 
 Neither bleak in the image can do this job: stock bleak 2.0.0 (the
 requirements.txt pin) ships no pairing agent at all, and both it and the fork in
@@ -19,7 +19,7 @@ import asyncio
 
 import pytest
 
-import bmslib.pairing as pairing
+import bmslib.ble.pairing as pairing
 
 ADDR = "A4:05:FD:13:98:6E"
 PATH = "/org/bluez/hci0/dev_A4_05_FD_13_98_6E"

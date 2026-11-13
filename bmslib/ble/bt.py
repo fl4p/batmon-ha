@@ -16,11 +16,11 @@ import bleak.exc
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
-from . import FuturesPool
-from .bms import BmsSample, DeviceInfo
-from .pwmath import EWMA
-from .util import get_logger
-from .uart import SerialServiceStub, SerialCharStub
+from bmslib import FuturesPool
+from bmslib.bms import BmsSample, DeviceInfo
+from bmslib.pwmath import EWMA
+from bmslib.util import get_logger
+from bmslib.uart import SerialServiceStub, SerialCharStub
 
 BleakDeviceNotFoundError = getattr(bleak.exc, 'BleakDeviceNotFoundError', bleak.exc.BleakError)
 
@@ -100,7 +100,7 @@ async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: 
         # to the proxy scanner; passing it on would just fail scanner init
         adapter = None
         try:
-            from bmslib.esphome_proxy import proxy_sources
+            from bmslib.ble.esphome_proxy import proxy_sources
             sources = proxy_sources()
         except Exception:
             sources = None

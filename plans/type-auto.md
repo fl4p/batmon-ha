@@ -57,7 +57,7 @@ a Daly module stored the probe frame as its name (#416).
 ## Revision after the Codex plan review (2026-10-04)
 
 Review log: `~/codex-reviews/batmon-type-auto-plan/review.log`. Implemented in
-`bmslib/auto_detect.py`; how each finding was handled:
+`bmslib/ble/auto_detect.py`; how each finding was handled:
 
 1. *Probe safety* — audited allowlist only (`_build_probes`): Daly A5 0x90/0x94,
    Daly2 read 0x0000×0x3E, JBD 0x03/0x04, JK 0x97 only (not 0x96, which starts
@@ -81,7 +81,7 @@ Review log: `~/codex-reviews/batmon-type-auto-plan/review.log`. Implemented in
    disconnect, exceptions isolated per device; an unresolved device is skipped
    (address commented out), the others start.
 7. *Advertisements* — `bt_discovery()` now records every advertisement in
-   `bmslib.bt.discovered_adverts` (all adapters); all aiobmsble matchers are
+   `bmslib.ble.bt.discovered_adverts` (all adapters); all aiobmsble matchers are
    evaluated, not just the first; a missing advertisement only means no ordering.
 8. *Scope* — the five native families; other aiobmsble types the advertisement
    matches are named in the failure message, never probed.

@@ -12,7 +12,7 @@ import asyncio
 import time
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms, enumerate_services
+from bmslib.ble.bt import BtBms, enumerate_services
 
 
 class SuperVoltBt(BtBms):

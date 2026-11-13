@@ -24,7 +24,7 @@ import statistics
 
 from bmslib import FuturesPool
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 def get_str(ubit, uuid):

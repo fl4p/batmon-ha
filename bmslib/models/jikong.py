@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import List, Callable, Dict, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms, enumerate_services
+from bmslib.ble.bt import BtBms, enumerate_services
 from bmslib.models.jk_settings import SETTINGS, decode_settings, encode_setting, format_changes
 from bmslib.util import to_hex_str
 
@@ -667,7 +667,7 @@ class JKBt(BtBms):
 async def main():
     # _jk_command(0x96)
 
-    # await bmslib.bt.bt_discovery(logger=get_logger())
+    # await bmslib.ble.bt.bt_discovery(logger=get_logger())
     mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'  # caravan
     # mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
     mac_address = 'BB92A45B-ABA1-2EA8-1BD3-DA140771C79D'  # caravan (intel)

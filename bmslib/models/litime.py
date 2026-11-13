@@ -10,7 +10,7 @@ https://github.com/chadj/litime-bluetooth-battery
 import asyncio
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 def _litime_command(command: int):

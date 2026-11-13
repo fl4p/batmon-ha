@@ -305,7 +305,7 @@ def parse_device_info(buf: bytes) -> dict:
 
 import asyncio
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 class JKUart(BtBms):

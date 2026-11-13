@@ -11,7 +11,7 @@ References
 import asyncio
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms, enumerate_services
+from bmslib.ble.bt import BtBms, enumerate_services
 
 # Daly Modbus slave address used on BLE (host->BMS). 0xD2 is what the official
 # app and ESPHome's daly_bms_ble send.

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from aiobmsble.bms import tdt_bms
-from bmslib.bms_ble.plugins import tdt_nocrc_bms
+from bmslib.ble.bms_ble.plugins import tdt_nocrc_bms
 
 FRAME_8C = bytearray(  # 4 cell message
     b"\x7e\x00\x01\x03\x00\x8c\x00\x20\x04\x0c\xe1\x0c\xdf\x0c\xe1\x0c"

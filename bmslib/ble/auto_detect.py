@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
-from bmslib.bt import BtBms, normalize_ble_address
+from bmslib.ble.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -62,7 +62,7 @@ def _open_budget() -> float:
     # plain connect, teardown (disconnect + direct close), scanner connect plus the
     # bounded scanner stop it runs when cancelled, discovery polls (each get_services
     # bounded by the remaining discovery time, plus a 0.5 s pause)
-    from bmslib import bt
+    from bmslib.ble import bt
     return (CONNECT_TIMEOUT + 2 * TEARDOWN_TIMEOUT + SCAN_CONNECT_TIMEOUT + bt.SCANNER_STOP_TIMEOUT
             + DISCOVERY_TIMEOUT + 0.5 + 0.1)
 

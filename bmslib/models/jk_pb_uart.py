@@ -35,7 +35,7 @@ from typing import Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.uart.modbus_rtu import append_crc
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.models.jikong import JKBt, feed_frames, FRAME_SIZE
 from bmslib.util import to_hex_str
 

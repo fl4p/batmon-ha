@@ -915,7 +915,7 @@ No syssi component. Not in YamBMS. No batmon-native driver. Distinct from `model
 
 ---
 
-## ATORCH CW20 power meter — `bmslib/bms_ble/plugins/cw20_bms.py` (batmon-local)
+## ATORCH CW20 power meter — `bmslib/ble/bms_ble/plugins/cw20_bms.py` (batmon-local)
 
 **Not a BMS.** The CW20 is an inline DC energy meter / smart shunt from **ATORCH** (Shenzhen — same family as the **DL24M / DL24P** e-loads and **DT20** shunts). 4-wire hookup, color screen, 0-420V DC, 30/100/200/300/400/500/600A shunt variants, ships with WiFi + BLE. No cells, no SoC, no temperatures-per-probe, no FET control — only V / I / P / Ah / kWh / case-temp. Plugin **shipped in batmon-ha, not upstream aiobmsble**, but loaded through the same `_aiobmsble` device-type lookup (it imports `aiobmsble.basebms.BaseBMS` and `BMSDp`). Added in batmon [PR #319](https://github.com/fl4p/batmon-ha/pull/319) by @irokezzz; rework triggered by [issue #338](https://github.com/fl4p/batmon-ha/issues/338) (KeyError on `battery_level`, broken `await dict`, BlueZ "Operation already in progress" colliding with JBD).
 
@@ -1004,4 +1004,4 @@ bmslib/models/
 └── BLE_BMS_wrap.py   wrapper for any aiobmsble plugin
 ```
 
-aiobmsble plugins ship as a separate PyPI package. The local `bmslib/bms_ble/plugins/` directory holds batmon-only plugins (currently `cw20_bms` for the CW20 power meter).
+aiobmsble plugins ship as a separate PyPI package. The local `bmslib/ble/bms_ble/plugins/` directory holds batmon-only plugins (currently `cw20_bms` for the CW20 power meter).

@@ -3,7 +3,7 @@ from functools import partial
 
 import bleak
 
-import bmslib.bt
+import bmslib.ble.bt
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -90,7 +90,7 @@ def get_bms_model_class(name: str):
             mod = importlib.import_module(f'aiobmsble.bms.{type_}')
         except ImportError as e:
             try:
-                mod = importlib.import_module(f'bmslib.bms_ble.plugins.{type_}')
+                mod = importlib.import_module(f'bmslib.ble.bms_ble.plugins.{type_}')
             except ImportError:
                 raise e
 
@@ -140,7 +140,7 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
             extra_kwargs['type_spec'] = type_spec
 
     if slug.lower() == 'auto':
-        # main() resolves these before construction (bmslib/auto_detect.py); one
+        # main() resolves these before construction (bmslib/ble/auto_detect.py); one
         # still here was not resolved, e.g. in the pair-only pre-step
         logger.info('%s: type auto not resolved in this run', addr)
         return None
@@ -170,7 +170,7 @@ def construct_bms(dev: dict, verbose_log: bool, bt_discovered_devices: list):
     name: str = dev.get('alias') or dev_by_addr(addr).name
 
     try:
-        bms: bmslib.bt.BtBms = bms_class(
+        bms: bmslib.ble.bt.BtBms = bms_class(
             address=addr,
             name=name,
             verbose_log=verbose_log or dev.get('debug'),

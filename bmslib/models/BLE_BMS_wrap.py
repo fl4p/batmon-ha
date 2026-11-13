@@ -7,7 +7,7 @@ from aiobmsble import BMSSample
 from bleak import BLEDevice
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms, BleakDeviceNotFoundError, ConnectLock, normalize_ble_address
+from bmslib.ble.bt import BtBms, BleakDeviceNotFoundError, ConnectLock, normalize_ble_address
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -232,7 +232,7 @@ class BMS():
         once its _connect() is under way -- the bond has to be in BlueZ
         beforehand.
 
-        The bond is BlueZ's own Pair(), see bmslib/pairing.py for why
+        The bond is BlueZ's own Pair(), see bmslib/ble/pairing.py for why
         `BleakClient.pair()` cannot do this job. `main.py pair-only` bonds every
         configured device before the add-on starts sampling; this is the
         fallback for a device that was not bonded then (added to the config
@@ -246,7 +246,7 @@ class BMS():
         if self._psk_paired:
             return
 
-        from bmslib.bt import scanner_is_proxy
+        from bmslib.ble.bt import scanner_is_proxy
         if scanner_is_proxy():
             # A proxy can ask its ESPHome node to pair (bleak_esphome's
             # bluetooth_device_pair, firmware >= 2024.3 with the PAIRING feature
@@ -258,7 +258,7 @@ class BMS():
             self._psk_paired = True
             return
 
-        import bmslib.pairing as pairing
+        import bmslib.ble.pairing as pairing
         self._psk_attempts += 1
         try:
             res = await pairing.bond_with_pin(self.address, self._psk,
@@ -332,7 +332,7 @@ class BMS():
         # except BleakCharacteristicNotFoundError as e:
         #    from bmslib.util import get_logger
         #    logger = get_logger()
-        #    from bmslib.bt import enumerate_services
+        #    from bmslib.ble.bt import enumerate_services
         #    logger.error('%s Error: %s', self, e)
         #    await enumerate_services(self.client, logger)
 

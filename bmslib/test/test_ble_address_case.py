@@ -19,8 +19,8 @@ candidate never appeared), and `type: daly_ble` died in
 
 import pytest
 
-import bmslib.bt
-from bmslib.bt import normalize_ble_address
+import bmslib.ble.bt
+from bmslib.ble.bt import normalize_ble_address
 
 REPORTED = 'd1:1a:04:01:01:b7'  # verbatim from the #399 config
 CANONICAL = 'D1:1A:04:01:01:B7'  # what a proxy-sourced advertisement is keyed by
@@ -77,9 +77,9 @@ def test_adapter_mac_regex_was_not_rebound():
     `_MAC_RE`, silently rebinding the stricter colon-only pattern that
     `resolve_adapter()` uses to recognize a controller MAC. They are separate
     names now; keep them that way."""
-    assert bmslib.bt._MAC_RE.pattern != bmslib.bt._BLE_MAC_RE.pattern
-    assert not bmslib.bt._MAC_RE.match('0C-EF-15-47-4A-46')
-    assert bmslib.bt._BLE_MAC_RE.match('0C-EF-15-47-4A-46')
+    assert bmslib.ble.bt._MAC_RE.pattern != bmslib.ble.bt._BLE_MAC_RE.pattern
+    assert not bmslib.ble.bt._MAC_RE.match('0C-EF-15-47-4A-46')
+    assert bmslib.ble.bt._BLE_MAC_RE.match('0C-EF-15-47-4A-46')
 
 
 def test_the_client_is_built_with_the_canonical_address():
@@ -92,7 +92,7 @@ def test_the_client_is_built_with_the_canonical_address():
     """
     seen = []
 
-    class _Bms(bmslib.bt.BtBms):
+    class _Bms(bmslib.ble.bt.BtBms):
         def _create_client(self, addr_or_device):
             seen.append(addr_or_device)
             return object()
@@ -160,7 +160,7 @@ def test_telemetry_identity_survives_canonicalization():
     """
     from bmslib.sinks import hash_urlsafe, telemetry_address
 
-    class _Bms(bmslib.bt.BtBms):
+    class _Bms(bmslib.ble.bt.BtBms):
         pass
 
     bms = _Bms(REPORTED, 'battery1')

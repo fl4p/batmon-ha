@@ -16,7 +16,7 @@ from unittest.mock import patch
 import paho.mqtt.client as paho
 
 from bmslib.bms import BmsSample, DeviceInfo, MIN_VALUE_EXPIRY
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.models.jk_settings import LABELS, SETTINGS, format_value
 from bmslib.util import get_logger
 from bmslib.wire.fields import (round_to_n, capitalize_words, is_none_or_nan,

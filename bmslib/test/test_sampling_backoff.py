@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-import bmslib.bt
+import bmslib.ble.bt
 from bmslib.sampling import BmsSampler
 
 
@@ -44,7 +44,7 @@ def _run(sampler, num_skipped_cycles_per_failure):
             state["skip"] -= 1
             return None  # inside the retry window, _sample_inner() bails out early
         state["skip"] = num_skipped_cycles_per_failure
-        raise bmslib.bt.BleakDeviceNotFoundError("fake not found")
+        raise bmslib.ble.bt.BleakDeviceNotFoundError("fake not found")
 
     sampler._sample_inner = _sample_inner
 

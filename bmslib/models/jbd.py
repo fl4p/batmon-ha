@@ -17,7 +17,7 @@ import datetime
 import time
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 def _jbd_command(command: int):

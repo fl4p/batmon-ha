@@ -5,7 +5,7 @@ import pathlib
 import asyncio
 from types import SimpleNamespace
 
-from bmslib.bms_ble.plugins import cw20_bms
+from bmslib.ble.bms_ble.plugins import cw20_bms
 
 
 def load_frames():

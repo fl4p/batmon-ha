@@ -122,7 +122,7 @@ import time
 from typing import List, Optional, Tuple
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.uart.modbus_rtu import build_read, check_crc, ModbusError, u16_be, u32_be, FC_READ_HOLDING
 
 REG_VERSION = 0x01      # 1, read 6: protocol type/version, fw u32, hw u32

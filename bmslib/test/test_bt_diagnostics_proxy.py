@@ -13,9 +13,9 @@ scanners instead, and never pass a local `adapter:` to the proxy scanner.
 
 import asyncio
 
-import bmslib.bt
-import bmslib.esphome_proxy
-from bmslib.bt import bt_diagnostics
+import bmslib.ble.bt
+import bmslib.ble.esphome_proxy
+from bmslib.ble.bt import bt_diagnostics
 
 
 class _Log:
@@ -47,18 +47,18 @@ class _FakeScanner:
 
 
 def _install(monkeypatch, module, sources=None, raises=False):
-    """Point bmslib.bt at a fake scanner whose __module__ selects the stack."""
+    """Point bmslib.ble.bt at a fake scanner whose __module__ selects the stack."""
     scanner = type('S', (_FakeScanner,), {})
     scanner.__module__ = module
-    monkeypatch.setattr(bmslib.bt, 'BleakScanner', scanner)
-    monkeypatch.setattr(bmslib.bt, 'bt_adapters_info',
+    monkeypatch.setattr(bmslib.ble.bt, 'BleakScanner', scanner)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_adapters_info',
                         lambda: [dict(index=0, name='hci0', mac='43:34:B0:00:1F:AC', bus='UART')])
 
     def _sources():
         if raises:
             raise RuntimeError('manager not up')
         return sources
-    monkeypatch.setattr(bmslib.esphome_proxy, 'proxy_sources', _sources)
+    monkeypatch.setattr(bmslib.ble.esphome_proxy, 'proxy_sources', _sources)
     return scanner
 
 

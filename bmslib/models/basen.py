@@ -29,7 +29,7 @@ import asyncio
 from typing import List
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 SOF_A = 0x3A
 SOF_B = 0x3B

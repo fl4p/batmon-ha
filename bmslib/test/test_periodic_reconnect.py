@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-import bmslib.bt
+import bmslib.ble.bt
 from bmslib.sampling import BmsSampler
 
 
@@ -18,7 +18,7 @@ def _no_ble_scan(monkeypatch):
     """The error handler runs a real 3 s BLE scan for a non-serial address."""
     async def _noop(*a, **k):
         pass
-    monkeypatch.setattr(bmslib.bt, 'bt_diagnostics', _noop)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_diagnostics', _noop)
 
 
 class _Bms:
@@ -52,7 +52,7 @@ class _Bms:
         self.is_connected = False
 
     async def force_disconnect(self):
-        assert bmslib.bt.ConnectLock.locked(), "teardown must run under ConnectLock"
+        assert bmslib.ble.bt.ConnectLock.locked(), "teardown must run under ConnectLock"
         self.forced += 1
         self.is_connected = False
 
@@ -144,5 +144,5 @@ def test_only_when_connected():
 
 def test_models_expose_force_disconnect():
     from bmslib.models.BLE_BMS_wrap import BMS as Wrap
-    assert callable(getattr(bmslib.bt.BtBms, 'force_disconnect'))
+    assert callable(getattr(bmslib.ble.bt.BtBms, 'force_disconnect'))
     assert callable(getattr(Wrap, 'force_disconnect'))

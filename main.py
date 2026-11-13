@@ -13,7 +13,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 
 def _early_select_ble_stack():
-    """Install the ESPHome-Proxy bleak shim before bmslib.bt imports bleak.
+    """Install the ESPHome-Proxy bleak shim before bmslib.ble.bt imports bleak.
 
     Returns the list of configured proxies (possibly empty) if the shim was
     installed; None otherwise. Reads options.json directly to avoid pulling
@@ -30,7 +30,7 @@ def _early_select_ble_stack():
             continue
     if not opt or opt.get('ble_stack') != 'esphome':
         return None
-    from bmslib.esphome_proxy import install_bleak_shim
+    from bmslib.ble.esphome_proxy import install_bleak_shim
     if not install_bleak_shim():
         return None
     return opt.get('bluetooth_proxies') or []
@@ -38,14 +38,14 @@ def _early_select_ble_stack():
 
 _esphome_proxies = _early_select_ble_stack()
 
-import bmslib.bt
+import bmslib.ble.bt
 import bmslib.mqtt_util
 from bmslib.bms import MIN_VALUE_EXPIRY
 from bmslib.group import BmsGroup, VirtualGroupBms, resolve_member_ref
 from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler, fetch_loop as _fetch_loop
-from bmslib.scan import stop_all_scanners
+from bmslib.ble.scan import stop_all_scanners
 from bmslib.store import ConfigError, load_user_config
 from bmslib.util import get_logger, exit_process
 
@@ -171,29 +171,29 @@ async def main():
 
     pair_only = len(sys.argv) > 1 and sys.argv[1] == "pair-only"
     if pair_only:
-        logger.info('Started in pair-only mode (bleak %s)', bmslib.bt.bleak_version())
+        logger.info('Started in pair-only mode (bleak %s)', bmslib.ble.bt.bleak_version())
         psks = set(
             dev.get('pin') for dev in user_config.get('devices', []) if dev.get('pin') and dev['address'][0] != '#')
         if not psks:
             logger.info('No PSK, nothing to pair')
             sys.exit(0)
 
-    bms_list: list[bmslib.bt.BtBms] = []
+    bms_list: list[bmslib.ble.bt.BtBms] = []
     extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
 
     if _esphome_proxies is not None:
         # ble_stack=esphome: bring up habluetooth + connect each configured
         # proxy. Must run before any BMS connect, since the wrappers refuse
         # connections until at least one scanner is registered.
-        from bmslib.esphome_proxy import start_proxies
+        from bmslib.ble.esphome_proxy import start_proxies
         await start_proxies(_esphome_proxies)
 
     if user_config.get('bt_power_cycle'):
         try:
             logger.info('Power cycle bluetooth hardware')
-            bmslib.bt.bt_power(False)
+            bmslib.ble.bt.bt_power(False)
             await asyncio.sleep(1)
-            bmslib.bt.bt_power(True)
+            bmslib.ble.bt.bt_power(True)
             await asyncio.sleep(2)
         except Exception as e:
             logger.warning("Error power cycling BT: %s", e)
@@ -201,11 +201,11 @@ async def main():
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "skip-discovery":
             raise Exception("skip-discovery")
-        if bmslib.bt.scanner_is_proxy():
+        if bmslib.ble.bt.scanner_is_proxy():
             # every BleakScanner is the same proxy scanner here, so one scan per
             # adapter would print the identical device list N times and read as
             # proof that the BMS are on separate proxies (#391)
-            from bmslib.esphome_proxy import proxy_sources
+            from bmslib.ble.esphome_proxy import proxy_sources
             logger.info('Scanning via esphome-proxy (proxies=%s)', proxy_sources())
             pinned = sorted({str(dev.get('adapter')) for dev in user_config.get('devices', [])
                              if dev.get('adapter') and not is_serial_device(dev)})
@@ -215,14 +215,14 @@ async def main():
                                ', '.join(pinned))
             bl_ctrls = {None}
         else:
-            for a in bmslib.bt.bt_adapters_info():
+            for a in bmslib.ble.bt.bt_adapters_info():
                 logger.info('Adapter %s  %s  %s', a['name'], a['mac'], a['bus'])
-            bl_ctrls = set(bmslib.bt.bt_controllers_hci() or [None])
+            bl_ctrls = set(bmslib.ble.bt.bt_controllers_hci() or [None])
             # normalize so a device referenced by controller MAC dedupes against its hciN
-            bl_ctrls |= {bmslib.bt.normalize_adapter(dev.get('adapter'))
+            bl_ctrls |= {bmslib.ble.bt.normalize_adapter(dev.get('adapter'))
                          for dev in user_config.get('devices', [])
                          if dev.get('adapter') and not is_serial_device(dev)}
-        g = asyncio.gather(*[bmslib.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
+        g = asyncio.gather(*[bmslib.ble.bt.bt_discovery(logger, timeout=5, adapter=a) for a in bl_ctrls])
         ble_devices = (await asyncio.wait_for(g, 30))[0]
     except Exception as e:
         ble_devices = []
@@ -246,8 +246,8 @@ async def main():
     except PackageNotFoundError:
         aiobmsble_ver = '<not-found>'
     logger.info('Batmon ver %s, aiobmsble ver %s, Bleak ver %s, BtBackend ver %s', ver, aiobmsble_ver,
-                bmslib.bt.bleak_version(),
-                bmslib.bt.bt_stack_version())
+                bmslib.ble.bt.bleak_version(),
+                bmslib.ble.bt.bt_stack_version())
 
     if pair_only:
         # Bond by address, before any model is constructed. Pairing is a
@@ -256,7 +256,7 @@ async def main():
         # (the only one whose bleak has a PIN agent) deliberately has no
         # aiobmsble, so every `_ble` type -- `felicity` among them -- is an
         # "Unknown device type" here and would never be reached (#415).
-        from bmslib.pairing import FAILED, bond_with_pin
+        from bmslib.ble.pairing import FAILED, bond_with_pin
         for dev in user_config.get('devices', []):
             pin = dev.get('pin')
             addr = str(dev.get('address') or '')
@@ -268,8 +268,8 @@ async def main():
             # there in the discovery list.
             addr = next((d.address for d in ble_devices
                          if (d.name or '').strip() == addr.strip()), addr)
-            res = await bond_with_pin(bmslib.bt.normalize_ble_address(addr), pin,
-                                      adapter=bmslib.bt.normalize_adapter(dev.get('adapter')),
+            res = await bond_with_pin(bmslib.ble.bt.normalize_ble_address(addr), pin,
+                                      adapter=bmslib.ble.bt.normalize_adapter(dev.get('adapter')),
                                       name=dev.get('alias') or addr)
             if res == FAILED:
                 # keep going: one pack that refuses to bond must not stop the
@@ -301,11 +301,11 @@ async def main():
     unresolved_auto: Dict[str, str] = {}  # ref -> label of `type: auto` devices left out
     if any(str(d.get('type') or '').strip().lower() == 'auto' for d in devices):
         # before construction: each `type: auto` becomes the type its device
-        # answered, or is skipped (doc in bmslib/auto_detect.py). The pair-only
+        # answered, or is skipped (doc in bmslib/ble/auto_detect.py). The pair-only
         # pre-step doesn't probe, it only needs to know which devices are left out.
-        from bmslib.auto_detect import resolve_auto_devices
+        from bmslib.ble.auto_detect import resolve_auto_devices
         devices, unresolved_auto = await resolve_auto_devices(
-            devices, bmslib.bt.discovered_adverts, ble_devices, detect_now=not pair_only)
+            devices, bmslib.ble.bt.discovered_adverts, ble_devices, detect_now=not pair_only)
 
     for dev in devices:
 
@@ -322,7 +322,7 @@ async def main():
         names.add(name)
         dev_args[name] = dev
 
-    bms_by_name: dict[str, bmslib.bt.BtBms] = {bms.address: bms for bms in bms_list if not bms.is_virtual}
+    bms_by_name: dict[str, bmslib.ble.bt.BtBms] = {bms.address: bms for bms in bms_list if not bms.is_virtual}
     bms_by_name.update({bms.name: bms for bms in bms_list})
     groups_by_bms: dict[str, BmsGroup] = {}
     disabled_groups = []
@@ -685,7 +685,7 @@ async def main():
     await stop_all_scanners()
 
     if _esphome_proxies is not None:
-        from bmslib.esphome_proxy import stop_proxies
+        from bmslib.ble.esphome_proxy import stop_proxies
         await stop_proxies()
 
 
@@ -693,7 +693,7 @@ def on_exit(*args, **kwargs):
     global shutdown
     logger.debug('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
     shutdown += 1
-    bmslib.bt.BtBms.shutdown = True
+    bmslib.ble.bt.BtBms.shutdown = True
     if shutdown == 5:
         sys.exit(1)
 

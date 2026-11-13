@@ -28,7 +28,7 @@ import asyncio
 import math
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 BM6_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 57])  # "leagend\xff\xfe0100009"
 # BM2 (Quicklynks and rebrands, #41; some Ancel BM200 speak BM6 instead): "leagend\xff\xfe1882466", from

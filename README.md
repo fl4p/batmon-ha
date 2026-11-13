@@ -404,7 +404,7 @@ Batmon can talk to your BMS through one of four Bluetooth backends. Pick one wit
   [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/) ≥ 0.2.0 instead (browser
   flasher): it serves up to 4 API clients at once, and each BLE link belongs to the client that opened
   it, so an add-on restart frees its BMS links. Each proxy has 3 BLE connection slots by default (see
-  [esphome_proxy/README.md](bmslib/esphome_proxy/README.md)). Configure the proxies under the
+  [esphome_proxy/README.md](bmslib/ble/esphome_proxy/README.md)). Configure the proxies under the
   `bluetooth_proxies:` add-on option:
 
   ```yaml
@@ -418,7 +418,7 @@ Batmon can talk to your BMS through one of four Bluetooth backends. Pick one wit
   ```
 
   Proxy firmware should set `bluetooth_proxy: { active: true, cache_services: false }` — see
-  [bmslib/esphome_proxy/README.md](bmslib/esphome_proxy/README.md) for the rationale and a known
+  [bmslib/ble/esphome_proxy/README.md](bmslib/ble/esphome_proxy/README.md) for the rationale and a known
   incompatibility (ANT-BLE20PHUB BMS).
 
 `bumble`, `bluek` and `esphome` are experimental — try `bleak` first. Users have already reported

@@ -14,7 +14,7 @@ from typing import Optional, List, Dict
 import bleak.exc
 import paho.mqtt.client
 
-import bmslib.bt
+import bmslib.ble.bt
 from bmslib.algorithm import create_algorithm
 from bmslib.bms import DeviceInfo, BmsSample, MIN_VALUE_EXPIRY
 from bmslib.cache.mem import mem_cache_deco
@@ -72,10 +72,10 @@ async def bt_power_cycle(bms_name):
                    'bluetooth controller(s). This drops all BLE connections.', bms_name)
     powered_off = False
     try:
-        await asyncio.to_thread(bmslib.bt.bt_power, False)
+        await asyncio.to_thread(bmslib.ble.bt.bt_power, False)
         powered_off = True
         await asyncio.sleep(BT_POWER_CYCLE_SETTLE)  # settle before powering back up
-        await asyncio.to_thread(bmslib.bt.bt_power, True)
+        await asyncio.to_thread(bmslib.ble.bt.bt_power, True)
         await asyncio.sleep(BT_POWER_CYCLE_SETTLE)
     except asyncio.CancelledError:
         # main.py cancels the pending fetch loops whenever one of them returns.
@@ -84,13 +84,13 @@ async def bt_power_cycle(bms_name):
         if powered_off:
             logger.warning('bt power cycle cancelled while the controller was down, '
                            'powering back up')
-            asyncio.ensure_future(asyncio.to_thread(bmslib.bt.bt_power, True))
+            asyncio.ensure_future(asyncio.to_thread(bmslib.ble.bt.bt_power, True))
         raise
     except Exception as e:
         logger.error('bt power cycle failed: %s', str(e) or type(e).__name__)
         if powered_off:
             with contextlib.suppress(Exception):
-                await asyncio.to_thread(bmslib.bt.bt_power, True)
+                await asyncio.to_thread(bmslib.ble.bt.bt_power, True)
         return False
 
     logger.info('bt power cycle attempted (bluetoothctl does not report success)')
@@ -154,7 +154,7 @@ class BmsSampler:
     Also updates meters.
     """
 
-    def __init__(self, bms: bmslib.bt.BtBms,
+    def __init__(self, bms: bmslib.ble.bt.BtBms,
                  mqtt_client: paho.mqtt.client.Client,
                  dt_max_seconds,
                  expire_after_seconds,
@@ -340,7 +340,7 @@ class BmsSampler:
             return
         logger.info('%s periodic reconnect after %.0f s', bms.name, age)
         self._reconnect_due_s = math.inf  # once per connect, even if the teardown fails
-        async with bmslib.bt.ConnectLock:
+        async with bmslib.ble.bt.ConnectLock:
             await bms.force_disconnect()
 
     def status(self) -> dict:
@@ -432,7 +432,7 @@ class BmsSampler:
                 self._num_not_found = 0
                 self._num_error_disconnects = 0
             return s
-        except (bmslib.bt.BleakDeviceNotFoundError, bmslib.bt.BleakNotFoundError) as e:
+        except (bmslib.ble.bt.BleakDeviceNotFoundError, bmslib.ble.bt.BleakNotFoundError) as e:
             # back off on the number of failed *connects*, not on _num_errors: the latter
             # also counts the cycles spent waiting in _sample_inner(), so the wait fed
             # itself and hit the 291 s cap after 3 failures (#391).
@@ -464,7 +464,7 @@ class BmsSampler:
             # exc_info kept for unexpected types where the trace is informative.
             short_trace_types = (TimeoutError, asyncio.TimeoutError, OSError,
                                  bleak.exc.BleakError)
-            if isinstance(ex, bmslib.bt.BleakCharacteristicNotFoundError):
+            if isinstance(ex, bmslib.ble.bt.BleakCharacteristicNotFoundError):
                 logger.error('%s error (#%d): %s', self.bms.name, self._num_errors,
                              str(ex) or type(ex).__name__)
             elif isinstance(ex, short_trace_types):
@@ -481,11 +481,11 @@ class BmsSampler:
             if isinstance(ex, short_trace_types) and (t_now - self._last_diag_t) > 30:
                 self._last_diag_t = t_now
                 logger.info('%s stack: Bleak %s, %s', self.bms.name,
-                            bmslib.bt.bleak_version(),
-                            bmslib.bt.bt_stack_version())
+                            bmslib.ble.bt.bleak_version(),
+                            bmslib.ble.bt.bt_stack_version())
                 if self.bms.address != 'serial':
                     try:
-                        await bmslib.bt.bt_diagnostics(
+                        await bmslib.ble.bt.bt_diagnostics(
                             self.bms.address, getattr(self.bms, '_adapter', None),
                             logger, timeout=3.0)
                     except Exception as de:
@@ -1096,7 +1096,7 @@ async def fetch_loop(fn, period, max_errors, should_stop=None, max_backoff=60):
             # (see #367). Keep full trace for unexpected non-BLE exception types.
             short_types = (TimeoutError, asyncio.TimeoutError, OSError,
                            bleak.exc.BleakError,
-                           bmslib.bt.BleakCharacteristicNotFoundError)
+                           bmslib.ble.bt.BleakCharacteristicNotFoundError)
             if isinstance(e, short_types):
                 logger.error('Error (num %d, max %d) reading BMS: %s',
                              num_errors_row, max_errors, summarize_exc(e))

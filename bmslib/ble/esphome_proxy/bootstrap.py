@@ -2,7 +2,7 @@
 
 Two-step contract for the caller (main.py):
 
-  1. install_bleak_shim()      - synchronous; called BEFORE `import bmslib.bt`
+  1. install_bleak_shim()      - synchronous; called BEFORE `import bmslib.ble.bt`
                                   so that `from bleak import BleakClient,
                                   BleakScanner` inside bt.py resolves to the
                                   habluetooth wrappers.

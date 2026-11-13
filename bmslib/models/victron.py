@@ -10,7 +10,7 @@ from functools import partial
 from typing import Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 VICTRON_CHARACTERISTICS = {
     "charge": dict(  # consumed Ah

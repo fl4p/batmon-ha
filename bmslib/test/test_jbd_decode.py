@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-import bmslib.bt as bt_module
+import bmslib.ble.bt as bt_module
 from bmslib.models.jbd import (
     JbdBt,
     _decode_jbd_date,
@@ -431,10 +431,10 @@ class _FakeTime:
 @pytest.fixture
 def fake_clock(monkeypatch):
     """A controllable clock for the runtime estimator (BtBms.estimate_runtime,
-    in bmslib.bt), so tests can simulate polling cadence and outages without
+    in bmslib.ble.bt), so tests can simulate polling cadence and outages without
     sleeping.
 
-    Replaces the *name* `time` in bt's namespace. Patching `bmslib.bt.time.
+    Replaces the *name* `time` in bt's namespace. Patching `bmslib.ble.bt.time.
     monotonic` instead would mutate the stdlib `time` module process-wide
     (`bt.time is sys.modules['time']`), and asyncio's event loop reads
     `time.monotonic()` for every scheduling deadline -- a frozen clock makes
@@ -546,7 +546,7 @@ def fake_ble(monkeypatch):
     """Drive the real BtBms.__aenter__/__aexit__ and JbdBt.connect()/disconnect()
     against a fake client. Only the transport (_connect_client) is stubbed, so the
     keep_alive policy under test is the production one, not a copy of it."""
-    from bmslib.bt import BtBms
+    from bmslib.ble.bt import BtBms
 
     connects = []
 

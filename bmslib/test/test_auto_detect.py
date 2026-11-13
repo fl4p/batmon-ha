@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import bmslib.auto_detect as ad
-from bmslib.auto_detect import AutoDetectBt, _build_probes, detect, resolve_auto_devices
+import bmslib.ble.auto_detect as ad
+from bmslib.ble.auto_detect import AutoDetectBt, _build_probes, detect, resolve_auto_devices
 from bmslib.models.bm6 import BM2_KEY, BM6_KEY, EMPTY_REALTIME, bm6_encrypt
 from bmslib.test.data import ant_fixtures, daly2_fixtures, jbd_fixtures
 
@@ -493,7 +493,7 @@ def _tiny_limits(monkeypatch):
                     ('GATT_OP_TIMEOUT', 0.05), ('REPLY_TIMEOUT', 0.05), ('TEARDOWN_TIMEOUT', 0.05),
                     ('RETRY_PAUSE', 0.01)):
         monkeypatch.setattr(ad, name, v)
-    from bmslib import bt
+    from bmslib.ble import bt
     monkeypatch.setattr(bt, 'SCANNER_STOP_TIMEOUT', 0.05)
 
 
@@ -607,7 +607,7 @@ def test_bm2_listens_two_reply_timeouts(monkeypatch):
 def test_budget_contains_every_term(monkeypatch):
     # each limit must enter detect_budget() at least as often as detect() can spend it
     monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 8.0)  # undo the _fast fixture
-    from bmslib import bt
+    from bmslib.ble import bt
     probes = _build_probes()
     a = ad.CONNECT_ATTEMPTS
     steps = sum(len(p.steps) for p in probes)
@@ -629,7 +629,7 @@ def test_budget_contains_every_term(monkeypatch):
 
 
 def test_scanner_is_stopped_when_cancelled(monkeypatch):
-    from bmslib import bt
+    from bmslib.ble import bt
 
     class FakeScanner:
         instances = []

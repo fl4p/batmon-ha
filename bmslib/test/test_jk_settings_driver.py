@@ -117,7 +117,7 @@ def test_ok_write_reports_no_other_changes():
 
 
 def test_connect_count_counts_completed_connects(monkeypatch):
-    from bmslib.bt import BtBms
+    from bmslib.ble.bt import BtBms
 
     async def link_up(self, timeout=20):
         pass

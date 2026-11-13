@@ -23,7 +23,7 @@ import time
 from typing import Optional
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 _SIG_BASE_SUFFIX = '-0000-1000-8000-00805f9b34fb'

@@ -38,7 +38,7 @@ import asyncio
 from typing import List, Optional
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 SOI = 0x7E  # '~'
 EOI = 0x0D  # '\r'

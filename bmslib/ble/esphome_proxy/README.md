@@ -13,7 +13,7 @@ adapter.
    No `PYTHONPATH` shadow is set; this stack does not replace `bleak`
    wholesale.
 2. `main.py` calls `install_bleak_shim()` *before* importing
-   `bmslib.bt`. The shim monkey-patches `bleak.BleakClient` and
+   `bmslib.ble.bt`. The shim monkey-patches `bleak.BleakClient` and
    `bleak.BleakScanner` to `habluetooth.HaBleakClientWrapper` and
    `HaBleakScannerWrapper`, then constructs a `BluetoothManager` and
    registers it with `habluetooth.set_manager`. From then on, every
@@ -26,7 +26,7 @@ adapter.
    `APIClient` + `ReconnectLogic` + `connect_scanner` +
    `async_register_scanner` internally, so reconnect-on-WiFi-blip is
    handled for free.
-4. BMS connect paths (`bmslib/bt.py`, `bmslib/models/BLE_BMS_wrap.py`)
+4. BMS connect paths (`bmslib/ble/bt.py`, `bmslib/models/BLE_BMS_wrap.py`)
    then `BleakClient(addr_or_device).connect()` as normal. The
    `HaBleakClientWrapper` asks the manager for the best-RSSI
    connectable scanner that has heard `addr` recently and routes the

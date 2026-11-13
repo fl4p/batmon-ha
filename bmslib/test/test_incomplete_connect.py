@@ -22,7 +22,7 @@ here: the cycle does not fail, so the error count never grows.
 import asyncio
 import time
 
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 class _Client:

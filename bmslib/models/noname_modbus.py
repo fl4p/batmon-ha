@@ -20,7 +20,7 @@ import asyncio
 import math
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 SLAVE_ID = 0x01

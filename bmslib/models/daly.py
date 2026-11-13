@@ -21,7 +21,7 @@ import time
 from typing import Dict, Optional
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms, enumerate_services
+from bmslib.ble.bt import BtBms, enumerate_services
 from bmslib.cache.mem import mem_cache_deco
 
 

@@ -10,7 +10,7 @@ from threading import Thread
 from typing import Callable, Union
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.util import get_logger, dotdict
 
 

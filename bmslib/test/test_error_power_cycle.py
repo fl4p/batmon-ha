@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-import bmslib.bt
+import bmslib.ble.bt
 from bmslib import sampling
 from bmslib.sampling import BmsSampler
 
@@ -40,11 +40,11 @@ class _FakeBms:
 def bt_power_calls(monkeypatch):
     """Record bt_power() calls, and make the cycle instant and un-rate-limited."""
     calls = []
-    monkeypatch.setattr(bmslib.bt, "bt_power", lambda on: calls.append(on))
+    monkeypatch.setattr(bmslib.ble.bt, "bt_power", lambda on: calls.append(on))
     monkeypatch.setattr(sampling, "BT_POWER_CYCLE_SETTLE", 0)
     monkeypatch.setattr(sampling, "_t_last_bt_power_cycle", 0.0)
     # the BLE diagnostics scan is irrelevant here and would try to touch a real adapter
-    monkeypatch.setattr(bmslib.bt, "bt_diagnostics", None)
+    monkeypatch.setattr(bmslib.ble.bt, "bt_diagnostics", None)
     return calls
 
 
@@ -214,7 +214,7 @@ def test_cancellation_between_off_and_on_still_powers_the_controller_up(monkeypa
     """main.py cancels the pending fetch loops whenever one of them returns. Being
     cancelled mid-cycle must not leave the radio switched off for good."""
     calls = []
-    monkeypatch.setattr(bmslib.bt, "bt_power", lambda on: calls.append(on))
+    monkeypatch.setattr(bmslib.ble.bt, "bt_power", lambda on: calls.append(on))
     monkeypatch.setattr(sampling, "BT_POWER_CYCLE_SETTLE", 5)
     monkeypatch.setattr(sampling, "_t_last_bt_power_cycle", 0.0)
 
@@ -240,5 +240,5 @@ def test_power_cycle_survives_a_failing_bt_power(monkeypatch):
     def _boom(on):
         raise OSError("bluetoothctl not found")
 
-    monkeypatch.setattr(bmslib.bt, "bt_power", _boom)
+    monkeypatch.setattr(bmslib.ble.bt, "bt_power", _boom)
     assert asyncio.run(sampling.bt_power_cycle("fake")) is False

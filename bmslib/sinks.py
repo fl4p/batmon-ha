@@ -12,7 +12,7 @@ import zlib
 from typing import List, Dict, Union
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 from bmslib.circuit_breaker import CircuitBreaker
 from bmslib.mqtt_util import remove_none_values, remove_equal_values
 from bmslib.sampling import BmsSampleSink

@@ -1,7 +1,7 @@
 """Decoder for the legacy Offgridtec OGT-12200 BLE protocol."""
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 
 class OffgridtecBt(BtBms):

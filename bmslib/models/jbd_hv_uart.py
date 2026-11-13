@@ -50,7 +50,7 @@ Configure with:
 from typing import List
 
 from bmslib.bms import BmsSample
-from bmslib.bt import BtBms
+from bmslib.ble.bt import BtBms
 
 HEAD = b'\x3f\x55'
 TAIL = b'\x55\x3f'

@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-from bmslib.esphome_proxy import bootstrap
+from bmslib.ble.esphome_proxy import bootstrap
 
 
 class _Aborted(Exception):
