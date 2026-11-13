@@ -283,8 +283,12 @@ class JKBt(BtBms):
         if resp_type == 0x02:
             why = self._status_frame_implausible(buf)
             if why:
-                self.logger.error("%s implausible status frame, discarding (%s): %s...",
-                                  self.name, why, to_hex_str(buf[:32]))
+                # a JK04 unit streams these every second; say it once, not per frame
+                jk04 = why.startswith('float32 cell voltages')
+                log = self.logger.debug if jk04 and getattr(self, '_jk04_hint_logged', False) else self.logger.error
+                log("%s implausible status frame, discarding (%s): %s...", self.name, why, to_hex_str(buf[:32]))
+                if jk04:
+                    self._jk04_hint_logged = True
                 return
         self._resp_table[resp_type] = buf, time.time()
         self._fetch_futures.set_result(resp_type, buf[:])
@@ -369,9 +373,17 @@ class JKBt(BtBms):
         # after these 2 commands the bms will continuously send 0x02-type messages
 
         buf, _ = self._resp_table[0x01]
-        self.num_cells = self._num_cells_from_settings(buf)
-        assert 0 < self.num_cells <= 24, "num_cells unexpected %s" % self.num_cells
+        self.num_cells = self._cells_from_settings_checked(buf)
         self.connect_count += 1
+
+    def _cells_from_settings_checked(self, buf) -> int:
+        n = self._num_cells_from_settings(buf)
+        if not 0 < n <= 24 and buf[114] in (0, 1) and 0 < buf[34] <= 24:
+            # JK04 keeps its cell count at byte 34 and the balancer switch at 114 (0 = off)
+            raise ValueError("num_cells unexpected %s; if this is an old JK active balancer (JK-B2A16S, "
+                             "JK-B2A24S, JK-B5A24S), set `type: jk04`" % n)
+        assert 0 < n <= 24, "num_cells unexpected %s" % n
+        return n
 
     def _num_cells_from_settings(self, buf) -> int:
         return buf[114]

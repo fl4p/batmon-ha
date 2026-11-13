@@ -73,7 +73,7 @@ def _cell_voltages(frame) -> list:
 def looks_like_jk04_status(frame) -> bool:
     """True if a 0x02 frame carries float32 cell voltages (JK04), never for a physical JK02 frame.
 
-    A float32 between 0.5 and 8 V has 0x3F or 0x40 as its top byte. In a JK02 frame the same byte is
+    A float32 between 0.5 and 5 V has 0x3F or 0x40 as its top byte. In a JK02 frame the same byte is
     the high byte of an odd cell's u16 mV, 0x3F/0x40 there means > 16 V per cell. A JK02 slot with
     only the even cell set reads as a denormal float and fails the range check."""
     if len(frame) < 300 or frame[4] != 0x02:

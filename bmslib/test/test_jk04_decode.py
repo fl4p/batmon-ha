@@ -240,3 +240,24 @@ def test_no_other_switches_or_settings():
     assert not bms.supports_set_soc()
     assert not bms.supports_settings()
     assert bms.settings_from_recent_frame(60) is None
+
+
+@pytest.mark.parametrize('frame', [fx.B5A24S_SETTINGS, fx.B2A16S_SETTINGS])
+def test_jk_type_balancer_off_settings_hint_jk04(frame):
+    """With the balancer off, JK04 settings byte 114 (JK02's cell count) is 0, so `type: jk` fails at
+    connect, before any cell frame: the error must still point at `jk04` (discussion #48 shows 01 -> 00)."""
+    off = bytearray(frame)
+    off[114] = 0
+    with pytest.raises(ValueError, match='jk04'):
+        JKBt("00:11:22:33:44:55", name="jk")._cells_from_settings_checked(off)
+    # balancer on: 114 = 1 passes as a 1-cell pack, and the cell frame check gives the hint instead
+    assert JKBt("00:11:22:33:44:55", name="jk")._cells_from_settings_checked(bytearray(frame)) == 1
+
+
+def test_jk_type_jk04_hint_logged_once(caplog):
+    bms = JKBt("00:11:22:33:44:55", name="jk")
+    with caplog.at_level('DEBUG'):
+        for _ in range(3):
+            bms._decode_msg(bytearray(fx.B2A16S_CELL_INFO))
+    errors = [r for r in caplog.records if r.levelname == 'ERROR' and 'jk04' in r.getMessage()]
+    assert len(errors) == 1
