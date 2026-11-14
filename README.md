@@ -18,15 +18,15 @@ I created this to compare BMS readings for a detailed evaluation of BMS reliabil
 * Energy consumption meters (using trapezoidal power integrators)
 * Integrates with Home Assistant Energy dashboard and [Utility Meter](doc/HA%20Energy%20Dashboard.md) sensor helper
 * Control BMS charging and discharging switches
-* Set the SOC gauge from HA via a `set SOC` number entity, e.g. to reset a drifted gauge to 0 % after a low-voltage cut-off: Daly (`daly`, `daly_uart`) and JK with firmware >= 11 (`jk`, `jk_32s`) (#144)
+* Set the SoC gauge from HA (Daly, JK firmware ≥ 11), e.g. to reset a drifted gauge (#144)
 * Home Assistant MQTT Discovery
 * Can run as stand-alone app without Home-Assistant and directly write to [InfluxDB](doc/InfluxDB.md)
 * Battery Groups for parallel batteries, see [doc/Groups.md](doc/Groups.md)
 * Charge Algorithms, see [doc/Algorithms.md](doc/Algorithms.md)
 * Low latency for responsive automation (fast load shedding)
-* Experimental serial communication for JK and Daly BMS
+* RS485 / UART for many BMS, see [Serial / RS485](#serial--rs485)
 * Current sensor gain calibration
-* Custom bluetooth stack for increased reliability
+* Alternative Bluetooth stacks and ESPHome proxies, see [BLE Stack](#ble-stack)
 
 ### Supported BLE Devices
 
@@ -38,17 +38,16 @@ batmon device connectors:
 * JK BMS / jikong with JK02 protocol (`jk` over BLE, `jk_uart` over RS485 — see [Serial / RS485](#serial--rs485))
 * JK-PB inverter BMS (PB1A16S, PB2A16S, ...; `jk` over BLE, `jk_pb_uart` over RS485)
 * Daly BMS (`daly`, `daly2`, `daly_ble` over BLE, `daly_uart` over RS485 — see [Serial / RS485](#serial--rs485))
-* JBD / Xiaoxiang / LLT BMS (`jbd` over BLE, `jbd_uart` over TTL UART or RS485)
+* JBD / Jiabaida / Xiaoxiang / LLT / Overkill Solar BMS (`jbd` over BLE, `jbd_uart` over TTL UART or RS485)
 * Seplos V2 BMS, 48 V rack packs (`seplos_ble`, `seplos_v2_ble` over BLE, `seplos_uart` over RS485)
 * Renogy smart lithium batteries (`renogy_ble` over BLE via the BT-2 dongle, `renogy_uart` over RS485)
 * Felicity Solar 48 V LiFePo4 packs (FLB48314TG1, FLB48100, LPBF48/LPBA48; `felicity` over BLE, `felicity_uart` over RS485)
-* JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
 * ANT BMS (`ant` over BLE, `ant_uart` / `ant_old_uart` over UART)
 * Supervolt BMS (`supervolt`)
 * SOK / ABC-BMS (`sok`, routed through the aiobmsble `abc_bms` decoder; use `sok_legacy` for the pre-2023 native driver)
 * Basen BMS (`basen`), ported from [syssi/esphome-basen-bms](https://github.com/syssi/esphome-basen-bms)
 * LiTime BMS (`litime`)
-* Legacy Offgridtec OGT-12200 / Topband batteries (`offgridtec`): unsolicited FFE4 ASCII-hex protocol
+* Legacy Offgridtec OGT-12200 / Topband batteries (`offgridtec`)
 * BM6 Bluetooth car battery monitor and the Ancel BM200 (`bm6`): voltage, temperature, SOC and charging/low-voltage state, no current (#160, #41)
 * Quicklynks BM2 and rebrands (`bm2`): voltage and SOC. An Ancel BM200 reads with `bm6`, not `bm2` (#41)
 * Generic no-name Chinese BMS with Modbus RTU over Nordic UART (`noname_modbus`) — see [issue #131](https://github.com/fl4p/batmon-ha/issues/131)
@@ -78,9 +77,8 @@ More `aiobmsble` device connectors:
 * Renogy Bluetooth battery (`renogy`), Renogy BT battery pro (`renogy_pro`)
 * all other devices [aiobmsble](https://github.com/patman15/aiobmsble/?tab=readme-ov-file#supported-devices) supports
 
-You can switch from the batmon to the aiobmsble connectors, just append a `_ble` to the `type` field, e.g. instead
-of `type: daly` (batmon), write `type: daly_ble` (aiobmsble). This can help if you experience connection issues, because
-some of the `aiobmsble` connectors are more up to date.
+To use the aiobmsble connector instead of batmon's, append `_ble` to the type, e.g. `type: daly_ble`. Some of them are
+more up to date and can help with connection issues.
 
 I tested the add-on on a Raspberry Pi 4 and 5 using Home Assistant Operating System.
 
@@ -112,7 +110,7 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 * `address`: the Bluetooth MAC address, or the device name as shown in discovery. Start the add-on to see a list of
   visible devices in the log.
-* `type`: `jk`, `jk_24s`, `jk_32s`, `jk04`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `ant_uart`,
+* `type`: `jk`, `jk_24s`, `jk_32s`, `jk04`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `jbd_hv_uart`, `ant`, `ant_uart`,
   `ant_old_uart`, `daly`, `daly2`, `daly_ble`, `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`,
   `felicity_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`,
   `victron`, or any tag listed under
@@ -141,7 +139,7 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 ### Global
 
-* MQTT: set `mqtt_user` and `mqtt_password`. The broker is usually `core-mosquitto`.
+* MQTT: `mqtt_user` and `mqtt_password`. `mqtt_broker` is usually `core-mosquitto`; `mqtt_port` defaults to 1883.
 * `sample_period`: seconds between BMS reads.
 * `publish_period`: seconds between MQTT publishes; samples in between are averaged. Set it above `sample_period` to
   throttle MQTT while keeping energy meters accurate. Below 2 s, HA history plots get slow.
@@ -155,6 +153,17 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 * `invert_current`: flip the current sign. Normally discharge is positive.
 * `expire_values_after`: seconds after which a sensor shows "Unavailable".
 * `watchdog`: exit on too many errors. Enable the HA watchdog so the add-on restarts.
+* `verbose_log`: debug log for everything. For one device use its `debug: true`.
+* `adapter`: default `adapter:` for devices without their own, see [`adapter:` per BMS](#adapter-per-bms).
+* `bt_power_cycle`: power-cycle the Bluetooth adapter at start.
+* `bt_power_cycle_on_error`: power-cycle the Bluetooth adapter when reconnecting a BMS keeps failing, at most every
+  10 minutes. Drops all BLE connections.
+* `reconnect_interval_minutes`: drop each `keep_alive` connection every N minutes so the next connect can pick another
+  ESPHome proxy. Only useful with several proxies.
+* `influxdb_host`, `influxdb_username`, `influxdb_password`, `influxdb_database`, `influxdb_ssl`,
+  `influxdb_verify_ssl`: write samples to InfluxDB, see [doc/InfluxDB.md](doc/InfluxDB.md).
+* `gui`, `gui_port`, `gui_push_period`, `gui_allow_direct`: web UI, off under HA. See [doc/GUI.md](doc/GUI.md).
+* `telemetry`: send anonymized samples to the developer, on by default. See [doc/Telemetry.md](doc/Telemetry.md).
 * `jk_settings`: show JK settings (BLE, firmware ≥ 11) in HA. A device's `settings_write` (`all` and/or a comma list of
   names; `all` leaves out critical settings) makes them writable, with backup and read-back check. See
   [doc/JK-Settings.md](doc/JK-Settings.md).
@@ -184,8 +193,9 @@ The add-on maps the host's serial devices into the container; prefer the stable 
 Standalone on Linux, add your user to the `dialout` group. A network serial server (ser2net, an ESP USB gateway, …)
 works as `adapter: tcp://192.168.1.108:8880` (raw TCP, set the baud rate on the server) or `rfc2217://host:port`.
 
-Types (baud rate in parentheses). `:<addr>` after the type sets the bus address; several packs on one bus share the
-same `adapter:`, one entry each.
+Types (baud rate in parentheses). Types with an address (`daly_uart`, `jbd_hv_uart`, `jk_pb_uart`, `seplos_uart`,
+`braunpwr_uart`, `renogy_uart`, `felicity_uart`) take it as `type:<addr>`; several packs on one bus then share the same
+`adapter:`, one entry each. The other types allow one pack per port.
 
 * `jk_uart` (115200): JK / Jikong UART protocol. Not for PB models.
 * `jk_pb_uart` (115200): JK-PB inverter BMS (PB1A16S, PB2A16S, …) on RS485-1. Address as set in the JK app, default 1.
@@ -231,8 +241,8 @@ Several Daly on one bus need distinct board numbers and share one adapter:
   alias: battery2
 ```
 
-This is safe with `concurrent_sampling`. Two entries with the same board number, or different BMS families on one
-port, are rejected.
+This is safe with `concurrent_sampling`. Two entries with the same board number are rejected, and so are devices on
+one port that need different baud rates.
 
 ### Troubleshooting a silent wired link
 
@@ -286,8 +296,8 @@ bluetooth_proxies:
     noise_psk: "<another key>"
 ```
 
-* A stock ESPHome proxy serves one API client. If HA uses it too, HA and the add-on take it from each other on every
-  reconnect. Remove the proxy from HA, or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
+* A stock ESPHome proxy serves one API client: the last to connect (ESPHome ≥ 2026.7), before that the first. If HA
+  uses it too, one of them gets nothing. Remove the proxy from HA, or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
   ≥ 0.2.0, which serves up to 4 clients.
 * Each proxy has 3 connection slots by default.
 * Set `bluetooth_proxy: { active: true, cache_services: false }` in the proxy firmware. Details and a known
@@ -304,57 +314,45 @@ bluetooth_proxies:
 For wired BMS, `adapter:` is the serial port, see [Serial / RS485](#serial--rs485).
 
 A top-level `adapter:` is the default for every device without its own: a controller (`hci1` or its MAC) for BLE
-devices, a port path for wired ones. The log lists which devices inherited it.
+devices, an absolute port path (`/dev/ttyUSB0`) or URL for wired ones. The log lists which devices inherited it.
 
 ## Energy Meters
 
 Batmon implements energy metering by computing the integral of power values from the BMS with the trapezoidal rule. You
-can add theses meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*,
+can add these meters to your Home Assistant Energy Dashboard or use them with the HA Helper *Utility Meter*,
 see [doc/HA Energy Dashboard.md](doc/HA%20Energy%20Dashboard.md).
 
 * `Total Energy Discharge` Meter: total Energy out of the battery (increasing only, use this for the Energy Dashboard)
 * `Total Energy Charge`: total Energy into the battery (increasing only, use this for the Energy Dashboard)
-* `Total Energy`: The total energy flow into and out of the battery (decreasing and increasing).
-  This equals to `(Total Energy Charge) - (Total Energy Discharge)`. It will increase over time because batteries are
-  not ideal. You can create a derivative helper to compute energy flow within e.g. 24h.
-* `Total Cycles`: Total full cycles of the battery. One complete discharge and charge is a full cycle: SoC 100%-0%-100%.
-  This is not a value provided by the BMS, Batmon computes this by differentiating the SoC (
-  e.g. `integrate(abs(diff(SoC% / 100 / 2)))`).
+* `Total Energy`: `Total Energy Charge` minus `Total Energy Discharge`. Grows over time through battery losses. Use a
+  derivative helper for e.g. the energy flow per 24 h.
+* `Total Cycles`: full cycles (SoC 100 %→0 %→100 %), computed by batmon from SoC changes.
 
-The accuracy depends on the accuracy of the voltage and current readings from the BMS.
-Consider these having an error of 2~5%. Some BMS do not detect small currents (<200mA) and can miss high frequency
-peaks, leading to even greater error.
+Expect 2–5 % error from the BMS's voltage and current readings, more if it misses small currents (< 200 mA) or short
+peaks.
 
 ## Troubleshooting
 
 * Power cycle (turn off and on) the BMS Bluetooth hardware/dongle (or BMS)
-* Enable `bt_power_cycle`. If it doesn't work, manually power cycle Bluetooth on the host you are running batmon
-  on [#91](https://github.com/fl4p/batmon-ha/discussions/91).
+* Enable `bt_power_cycle`, or power-cycle Bluetooth on the host by hand ([#91](https://github.com/fl4p/batmon-ha/discussions/91))
 * When experiencing unstable connection enable `keep_alive`
-* `TimeoutError: timeout waiting`: put BT devices closer, disable inverters and other EMI sources
+* `TimeoutError: timeout waiting`: move the Bluetooth adapter closer to the BMS, away from inverters and other EMI
+  sources (cheap inverters can be heavy emitters)
 * Try another `ble_stack`: `bumble` for exclusive adapter access (you need to remove it from HA Integration first), or
   `bluek` to bypass D-Bus on Linux (has helped with timeouts)
-* Enable `verbose_log` and check the logs. If that is too noisy set `debug: true` in the BMS configuration as described
-  above
+* Enable `verbose_log`, or `debug: true` on one device, and check the logs
 * Try to find the BMS with a BLE
   scan ([Chrome Browser](chrome://bluetooth-internals/#devices), [linux](https://ukbaz.github.io/howto/beacon_scan_cmd_line.html))
-* After a long-lasting bluetooth connection is lost both Daly and JBD dongles occasionally refuse to accept new
-  connections and disappear from bluetooth discovery. Remove wires from the dongle and reconnect for a restart.
-* Some users reported unstable Bluetooth connection with Raspberry Pi 4 onboard bluetooth hardware and WiFi enabled. It
-  appears that disabling WiFi helps. ([#42](https://github.com/fl4p/batmon-ha/issues/42))
-* Cheap inverters might cause heavy EMI (electromagnetic interference). Turn them off or keep them away from the
-  bluetooth
-  hardware
-* Either bleak or bluetooth support in HA docker seems unstable. see related
-  issues [106](https://github.com/fl4p/batmon-ha/issues/106) [109](https://github.com/fl4p/batmon-ha/issues/109)
+* Daly and JBD dongles sometimes stop advertising after a long connection drops. Unplug and replug the dongle.
+* Raspberry Pi 4 onboard Bluetooth with WiFi on can be unstable; disabling WiFi helps ([#42](https://github.com/fl4p/batmon-ha/issues/42))
 * A bonded (`pin:`) device that still fails with `failed to discover services, device disconnected`: disable Home
   Assistant's own Bluetooth integration to free the adapter from scan contention
   ([#415](https://github.com/fl4p/batmon-ha/issues/415)).
-* Try another bluetooth hardware. Note you can choose the adapter with `adapter` parameter for each BMS individually
+* Try another Bluetooth adapter; `adapter:` selects one per BMS
 * [doc/Downgrade.md](doc/Downgrade.md) to an earlier version
-* to see more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
+* For more log entries, run this in the Terminal add-on: `ha host logs --identifier addon_<slug>_batmon`. You'll find
   the slug in the URL of the add-on page.
-* to see logs during installation: Settings / System / Logs / Supervisor (choose from the menu at the top-right
+* Logs during installation: Settings / System / Logs / Supervisor (choose from the menu at the top-right
   corner), [link](`http://homeassistant.local:8123/config/logs?provider=supervisor`)
 
 ## Stand-alone
@@ -371,7 +369,7 @@ For microcontrollers (ESP32 etc.) there is a MicroPython port: [batmon-mp](https
 # Contribute / Donate
 
 * [PayPal](https://www.paypal.com/donate/?hosted_button_id=6LACACFHQMR3C)
-* [Patreon](patreon.com/user?u=88448325) (Donations & News)
+* [Patreon](https://www.patreon.com/user?u=88448325) (Donations & News)
 
 ## References
 
