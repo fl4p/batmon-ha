@@ -290,12 +290,6 @@ def _hci_dev_info(dev_id: int) -> Optional[dict]:
         sock.close()
 
 
-def _hci_addr_for_index(dev_id: int) -> Optional[str]:
-    """Uppercase MAC of controller `dev_id`, or None."""
-    info = _hci_dev_info(dev_id)
-    return info['mac'] if info else None
-
-
 def _hci_candidate_indices() -> List[int]:
     indices = set(range(8))
     for n in bt_controllers_hci():
@@ -321,7 +315,8 @@ def _hci_index_for_mac(mac: str) -> Optional[int]:
     """
     target = mac.upper()
     for dev_id in _hci_candidate_indices():
-        if _hci_addr_for_index(dev_id) == target:
+        info = _hci_dev_info(dev_id)
+        if info and info['mac'] == target:
             return dev_id
     return None
 
@@ -442,7 +437,6 @@ class BtBms:
         self._fetch_futures = FuturesPool()
         self._psk = psk
         self._connect_time = 0
-        self._pending_disconnect_call = False
 
         # connect() does more than open the link: it discovers characteristics,
         # subscribes and reads one-shot device state. When it raises half-way the
@@ -491,14 +485,6 @@ class BtBms:
                 # plain dict key and proxies report it upper-case, so handing the
                 # client the raw config spelling would undo the normalization (#399)
                 self.client = self._create_client(self.address)
-
-            self._in_disconnect = False
-
-            """
-            When the bluetooth connection is closed externally we still need to call disconnect() function to stop_notify,
-            otherwise start_notify will fail on re-connect
-            """
-            self._pending_disconnect_call = False
 
     @property
     def slug(self):
@@ -597,9 +583,6 @@ class BtBms:
         if self.is_connected:
             self.logger.warning("%s _on_disconnect but is_connected=True")
 
-        # if not self._in_disconnect:
-        #    self._pending_disconnect_call = True
-
         try:
             self._fetch_futures.clear()
         except Exception as e:
@@ -677,10 +660,6 @@ class BtBms:
         :param timeout:
         :return:
         """
-        if self._pending_disconnect_call:
-            self._pending_disconnect_call = False
-            await self.disconnect()
-
         await self._connect_client(timeout=timeout)
 
     async def _connect_with_scanner(self, timeout=20):
@@ -691,10 +670,6 @@ class BtBms:
         :param timeout:
         :return:
         """
-
-        if self._pending_disconnect_call:
-            self._pending_disconnect_call = False
-            await self.disconnect()
 
         if BtBms.shutdown:
             raise RuntimeError("in shutdown")
@@ -737,9 +712,7 @@ class BtBms:
 
     async def disconnect(self):
         self._connect_complete = False
-        self._in_disconnect = True
         await self.client.disconnect()
-        self._in_disconnect = False
         self._fetch_futures.clear()
 
     async def force_disconnect(self):
@@ -864,9 +837,6 @@ class BtBms:
     async def subscribe(self, callback: Callable[[BmsSample], None]):
         raise NotImplemented()
 
-    async def subscribe_voltages(self, callback: Callable[[List[int]], None]):
-        raise NotImplemented()
-
     async def set_switch(self, switch: str, state: bool):
         """
         Send a switch command to the BMS to control a physical switch, usually a MOSFET or relay.
@@ -910,9 +880,6 @@ class BtBms:
             return
         if self.client.is_connected:
             await self.disconnect()
-
-    def __await__(self):
-        return self.__aexit__().__await__()
 
     def set_keep_alive(self, keep):
         if keep:

@@ -6,12 +6,11 @@ Frame layout (binary, CRC-16/MODBUS little-endian on the wire):
   response FC 0x03/0x04:  <slave> <fc> <bytecount> <data ...> <crc lo> <crc hi>
   exception:              <slave> <fc|0x80> <code> <crc lo> <crc hi>
 """
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 FC_READ_COILS = 0x01
 FC_READ_HOLDING = 0x03
 FC_READ_INPUT = 0x04
-FC_WRITE_MULTIPLE = 0x10
 
 
 def crc16_modbus(data: bytes) -> int:
@@ -37,13 +36,6 @@ def check_crc(frame: bytes) -> bool:
 def build_read(slave: int, reg: int, count: int, fc: int = FC_READ_HOLDING) -> bytes:
     """Read-registers request (FC3 holding / FC4 input / FC1 coils)."""
     return append_crc(bytes([slave, fc, reg >> 8, reg & 0xFF, count >> 8, count & 0xFF]))
-
-
-def build_write_multiple(slave: int, reg: int, values: bytes) -> bytes:
-    """FC16 write-multiple request. ``values`` are the raw register bytes."""
-    n_regs = len(values) // 2
-    body = bytes([slave, FC_WRITE_MULTIPLE, reg >> 8, reg & 0xFF, n_regs >> 8, n_regs & 0xFF, len(values)]) + values
-    return append_crc(body)
 
 
 class ModbusError(ValueError):
@@ -101,6 +93,3 @@ def u16_be(data: bytes, off: int, signed: bool = False) -> int:
 def u32_be(data: bytes, off: int, signed: bool = False) -> int:
     return int.from_bytes(data[off:off + 4], 'big', signed=signed)
 
-
-def regs_be(data: bytes) -> List[int]:
-    return [u16_be(data, i) for i in range(0, len(data) - 1, 2)]

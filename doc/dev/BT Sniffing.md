@@ -6,7 +6,7 @@ Capturing & Understanding
 - contact the manufacturer. they might give you supporting documentations
 - Sniff communication while using an existing BMS app. this gives us the query commands sent to the bms and its binary
   response
-- use the tools/service_explorer.py to find the service characteristic for sending / notification
+- use bleak's `examples/service_explorer.py` to find the service characteristic for sending / notification
 
 # Snooping / Sniffing
 

@@ -2,7 +2,7 @@ import threading
 import time
 
 from bmslib.util import get_logger
-from bmslib.uart.transport import SerialTransport, StdioTransport, serial_url
+from bmslib.uart.transport import SerialTransport, serial_url
 
 logger = get_logger()
 

@@ -109,7 +109,7 @@ def test_scanner_connect_adapter(monkeypatch, proxy, expect):
     monkeypatch.setattr(bmslib.ble.bt, 'BleakScanner', _Scanner)
     monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: proxy)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
-    bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False, _pending_disconnect_call=False,
+    bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')
     with pytest.raises(RuntimeError):
         asyncio.run(BtBms._connect_with_scanner(bms, timeout=1))
