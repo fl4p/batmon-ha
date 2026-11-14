@@ -418,7 +418,10 @@ class BtBms:
     shutdown = False
 
     def __init__(self, address: str, name: str, keep_alive=False, psk=None, adapter=None, verbose_log=False,
-                 _uses_pin=False):
+                 _uses_pin=False, type_spec=None):
+        if type_spec is not None:
+            # a model that takes a `type: x:<spec>` suffix pops it before calling here
+            raise ValueError("type %s takes no `:%s` suffix, remove it" % (type(self).__name__, type_spec))
         self.address = normalize_ble_address(address)
         # The address exactly as configured, before canonicalization. ONLY for
         # keeping an identity that was already derived from the old spelling

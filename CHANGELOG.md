@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Fix: a `:<n>` suffix on a type without an address (`jk_uart`, `jbd_uart`, `pace_uart`, `basen_uart`) crashed with a TypeError; it is now refused with a clear message.
+* New `mqtt_json_topics` option (off by default): each sample, the cell voltages, temperatures and meters also as one JSON object per device under `<alias>/json/` (#204, thanks @coconup).
 * New `jk04` type for old JK active balancers (JK04 protocol, e.g. JK-B2A16S, JK-B5A24S), untested on hardware. `jk` now rejects their frames with a hint instead of decoding them as JK02.
 * Fix: a standalone or Docker `options.json` without `mqtt_user` crashed at the MQTT connect; an unset user or password now means anonymous (#202, thanks @coconup).
 * New wired types `ant_uart` (2021+ ANT boards) and `ant_old_uart` (older boards), 19200 baud, untested on hardware.
