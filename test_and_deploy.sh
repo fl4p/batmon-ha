@@ -3,7 +3,7 @@
 # the addon, and tail the container logs until a successful BMS sample is
 # observed (or timeout).
 #
-# Reads HOST (and optional SLUG, SAMPLE_WAIT) from ./.env.
+# Reads HOST (and optional SLUG, SAMPLE_WAIT, SSH_OPTS) from ./.env.
 # Exit codes: 0 verified, 1 verify failed/timeout, 2 tests failed,
 #             3 missing/incomplete .env, other = step error (set -e).
 
@@ -17,6 +17,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 HOST=havan.local
 # SLUG=batmon          # addon slug (default: batmon, deployed under .../local/batmon-ha)
 # SAMPLE_WAIT=180      # seconds to wait for a successful BMS sample after start
+# SSH_OPTS="-J jumphost -o HostKeyAlias=havan.local"   # extra ssh options (e.g. off-site)
 EOF
   echo "Created template $ENV_FILE — edit HOST and re-run." >&2
   exit 3
@@ -26,8 +27,13 @@ set -a; source "$ENV_FILE"; set +a
 : "${HOST:?HOST not set in $ENV_FILE}"
 SLUG="${SLUG:-batmon}"
 SAMPLE_WAIT="${SAMPLE_WAIT:-180}"
-REMOTE_DIR="/var/lib/homeassistant/addons/local/batmon-ha"
-CONTAINER="addon_local_${SLUG}"
+# Supervisor renamed add-ons to apps: addons/local -> apps/local, addon_local_* -> app_local_*
+REMOTE_DIR="/var/lib/homeassistant/apps/local/batmon-ha"
+CONTAINER="app_local_${SLUG}"
+SSH_OPTS="${SSH_OPTS:-}"
+# SSH_OPTS is split into words on purpose
+# shellcheck disable=SC2086
+rsh() { ssh $SSH_OPTS "$@"; }
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -57,7 +63,7 @@ step "2/4 rsync -> ${HOST}:${REMOTE_DIR}"
 # --excludes below cover things gitignore deliberately doesn't (e.g. .git
 # itself, IDE/dev-host-only files, and options.json/user_id which the addon
 # generates on the target).
-rsync -a --delete \
+rsync -a --delete -e "ssh ${SSH_OPTS}" \
   --filter=':- .gitignore' \
   --exclude=.git --exclude=doc --exclude=.idea \
   --exclude=options.json --exclude=.env \
@@ -69,7 +75,7 @@ step "3/4 rebuild & restart local_${SLUG} (slow on Pi: pip installs run inside t
 # `ha apps rebuild` refuses with "Version changed, use Update instead" when
 # config.yaml's version differs from the installed one, so try update first
 # and fall back to rebuild for same-version source changes.
-ssh "$HOST" "sudo ha apps stop local_${SLUG} || true; { sudo ha apps update local_${SLUG} || sudo ha apps rebuild local_${SLUG}; } && sudo ha apps start local_${SLUG}"
+rsh "$HOST" "sudo ha apps stop local_${SLUG} || true; { sudo ha apps update local_${SLUG} || sudo ha apps rebuild local_${SLUG}; } && sudo ha apps start local_${SLUG}"
 
 step "4/4 verify — tailing ${CONTAINER} up to ${SAMPLE_WAIT}s for a successful BMS sample"
 # Success marker: `<name>: BmsSampl(...)` — emitted in bmslib/sampling.py whenever
@@ -79,7 +85,7 @@ step "4/4 verify — tailing ${CONTAINER} up to ${SAMPLE_WAIT}s for a successful
 # remote `timeout` kills the stream. awk with fflush echoes each line live AND
 # exits 0 on first match (which SIGPIPEs ssh → ends the remote command cleanly).
 set +e
-ssh "$HOST" "sudo timeout ${SAMPLE_WAIT} docker logs -f --tail 0 ${CONTAINER} 2>&1" \
+rsh "$HOST" "sudo timeout ${SAMPLE_WAIT} docker logs -f --tail 0 ${CONTAINER} 2>&1" \
   | awk '
       { print; fflush() }
       /: BmsSampl\(/ { found=1; exit }
