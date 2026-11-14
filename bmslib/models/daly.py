@@ -333,10 +333,6 @@ class DalyBt(BtBms):
         status = await self._fetch_status()
         await self.client.write_gatt_char(self.UUID_TX, msg)
 
-        #if switch == "charge" and state != status['discharging_mosfet']:
-        #   msg = daly_command_message(fet_addr["discharge"], extra="01" if status['discharging_mosfet'] else "00")
-        #    await self.client.write_gatt_char(self.UUID_TX, msg)
-
     async def set_soc(self, soc: float):
         msg = self._build_request(0x21, extra=daly_set_soc_payload(soc))
         self.logger.info('write soc %.1f%%: %s', soc, msg.hex())
@@ -486,22 +482,3 @@ class DalyBt(BtBms):
 
     def debug_data(self):
         return dict(r=self._last_response, buf=self._fetch_nr, rx=self.UUID_RX, tx=self.UUID_TX)
-
-
-async def main():
-    mac_address = '3D7394B1-BCFD-4CDC-A10D-3D113E2317A6'  # daly osx
-    mac_address = '62E06493-A9CC-A884-87B9-03BAB9A95FDB'
-
-    bms = DalyBt(mac_address, name="daly")
-    await bms.connect()
-    s = await bms.fetch()
-    print(s)
-    sample = await bms.fetch_voltages(num_cells=8)
-    print(sample)
-    await bms.fetch()
-    await bms.set_switch("discharge", True)
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

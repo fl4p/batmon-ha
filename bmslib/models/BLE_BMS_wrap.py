@@ -194,16 +194,12 @@ class BMS():
     def client(self):
         return self.ble_bms._client if self.ble_bms else None
 
-    def _notification_handler(self, sender, data: bytes):
-        pass
-
     @property
     def keep_alive(self):
         return self._keep_alive
 
     def set_keep_alive(self, keep):
         self._keep_alive = keep
-        # self.ble_bms._reconnect = not keep
 
     @property
     def slug(self):
@@ -221,9 +217,6 @@ class BMS():
     async def __aexit__(self, *args):
         if not self._keep_alive and self.is_connected:
             await self.disconnect()
-
-    def __await__(self):
-        return self.__aexit__().__await__()
 
     async def _pair_psk(self) -> None:
         """Bond with the BMS before the aiobmsble driver opens its own connection.
@@ -331,22 +324,7 @@ class BMS():
             **_bms_config_kwargs(keep_alive=bool(self._keep_alive)),
         )
 
-        # try:
         await self.ble_bms._connect()
-        # except BleakCharacteristicNotFoundError as e:
-        #    from bmslib.util import get_logger
-        #    logger = get_logger()
-        #    from bmslib.ble.bt import enumerate_services
-        #    logger.error('%s Error: %s', self, e)
-        #    await enumerate_services(self.client, logger)
-
-        # await super().connect(**kwargs)
-        # try:
-        #    await super().connect(timeout=6)
-        # except Exception as e:
-        #    self.logger.info("%s normal connect failed (%s), connecting with scanner", self.name, str(e) or type(e))
-        #    await self._connect_with_scanner(timeout=timeout)
-        # await self.start_notify(self.CHAR_UUID, self._notification_handler)
 
     async def disconnect(self):
         if self.ble_bms is not None:

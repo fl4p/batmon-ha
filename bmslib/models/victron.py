@@ -132,28 +132,3 @@ class SmartShuntBt(BtBms):
             sn=None,
         )
         return dev
-
-
-async def main():
-    # raise NotImplementedError()
-    v = SmartShuntBt(address='8B133977-182C-62EE-8E81-41FF77969EE9', name='test')
-    await v.connect()
-
-    _prev_val = None
-
-    while True:
-        r = await v.fetch()
-        v.logger.info(r)
-        await asyncio.sleep(2)
-
-        # testing read vs notify latency and frequency:
-        # char = VICTRON_CHARACTERISTICS['current']
-        # val = parse_value(await v.client.read_gatt_char(char['uuid']), char)
-        # if val != _prev_val:
-        #    print('val changed', val)
-        #    _prev_val = val
-        # await asyncio.sleep(.1)
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

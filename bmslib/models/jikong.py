@@ -584,7 +584,6 @@ class JKBt(BtBms):
             await self._write(addresses[switch], [0x1 if state else 0x0, 0, 0, 0])
             await asyncio.sleep(.2)  # wait a bit before triggering settings fetch
         self._resp_table.pop(0x01, None)  # invalidate settings frame which stores switch states
-        # await asyncio.sleep(0.2)  # not sure if this is needed
 
     def supports_set_soc(self) -> bool:
         # register 0x6E exists in the JK02_32S protocol only (fw >= 11), see syssi/esphome-jk-bms
@@ -683,40 +682,6 @@ class JKBt(BtBms):
         return dict(resp=self._resp_table, char_w=self.char_handle_write, char_r=self.char_handle_notify)
 
 
-async def main():
-    # _jk_command(0x96)
-
-    # await bmslib.ble.bt.bt_discovery(logger=get_logger())
-    mac_address = 'F21958DF-E949-4D43-B12B-0020365C428A'  # caravan
-    # mac_address = '46A9A7A1-D6C6-59C5-52D0-79EC8C77F4D2'  # bat100ah
-    mac_address = 'BB92A45B-ABA1-2EA8-1BD3-DA140771C79D'  # caravan (intel)
-
-    bms = JKBt(mac_address, name='jk', verbose_log=False)
-    async with bms:
-        while True:
-            s = await bms.fetch(wait=True)
-            # print(s, 'I_bal=', s.balance_current, await bms.fetch_voltages())
-            print(s.switches)
-
-            b = not s.switches.get("charge")
-
-            await bms.set_switch("charge", b)
-
-            s = await bms.fetch()
-            print(s.switches)
-
-            if s.switches.get("charge") != b:
-                print('error', s)
-
-            # new_state = not s.switches['charge']
-            # await bms.set_switch('charge', new_state)
-            # await self._q(cmd=0x96, resp= 0x01)
-            # print('set charge', new_state)
-            # await asyncio.sleep(4)
-            # s = await bms.fetch(wait=True)
-            # print(s)
-
-
 class JKBt_24s(JKBt):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -728,7 +693,3 @@ class JKBt_32s(JKBt):
         super().__init__(*args, **kwargs)
         self.is_new_11fw_32s = True
         self.settings_protocol_confirmed = True  # the user forced the 32s type
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

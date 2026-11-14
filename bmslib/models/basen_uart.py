@@ -29,7 +29,6 @@ Configure with:
     type:    basen_uart
     alias:   any human-readable name
 """
-import asyncio
 from typing import List
 
 from bmslib.bms import BmsSample
@@ -362,15 +361,3 @@ class BasenUart(BtBms):
         if not self._last_temps:
             await self.fetch()
         return self._last_temps
-
-
-async def main():
-    bms = BasenUart('serial', name='basen', adapter='/dev/ttyUSB0')
-    await bms.connect()
-    print(await bms.fetch())
-    print(await bms.fetch_voltages())
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

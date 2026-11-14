@@ -385,14 +385,3 @@ class Bm2Bt(Bm6Bt):
             current=math.nan,
             soc=d['soc'],
         )
-
-
-async def main():
-    bms = Bm6Bt('50:54:7B:24:30:10', name='bm6')
-    await bms.connect()
-    print(await bms.fetch())
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

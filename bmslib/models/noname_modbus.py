@@ -16,7 +16,6 @@ Three reads cover everything:
                       remaining/full/design Ah (×10), cycle count.
 """
 
-import asyncio
 import math
 
 from bmslib.bms import BmsSample
@@ -183,18 +182,3 @@ class NoNameModbusBt(BtBms):
 
     async def fetch_voltages(self):
         return list(self._cells_mv)
-
-
-async def main():
-    import sys
-    bms = NoNameModbusBt(sys.argv[1], name='noname_modbus', verbose_log=True)
-    await bms.connect()
-    try:
-        print(await bms.fetch())
-        print(await bms.fetch_voltages())
-    finally:
-        await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

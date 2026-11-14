@@ -25,7 +25,6 @@ Only reads are implemented (no MOSFET switching). Decoders are covered by unit
 tests using the captured example frames from the upstream protocol doc, but
 have not been run against live hardware yet.
 """
-import asyncio
 from typing import List
 
 from bmslib.bms import BmsSample
@@ -281,15 +280,3 @@ class BasenBt(BtBms):
         if not self._last_temps:
             await self.fetch()
         return self._last_temps
-
-
-async def main():
-    bms = BasenBt('AA:BB:CC:DD:EE:FF', name='basen')
-    await bms.connect()
-    print(await bms.fetch())
-    print(await bms.fetch_voltages())
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

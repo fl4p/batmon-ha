@@ -16,9 +16,7 @@ cmd_setting    = [ 0xee, 0xc3, 0x00, 0x00, 0x00 ]
 cmd_protection = [ 0xee, 0xc4, 0x00, 0x00, 0x00 ]
 cmd_break      = [ 0xdd, 0xc0, 0x00, 0x00, 0x00 ]
 """
-import asyncio
 import logging
-import platform
 import struct
 import statistics
 
@@ -99,7 +97,6 @@ class SokBt(BtBms):
             buf = self._buffer[:]
             self._buffer.clear()
 
-            # print(command, 'buffer endswith w', self._buffer)
             self._fetch_futures.set_result(command, buf)
 
     async def connect(self, **kwargs):
@@ -120,8 +117,6 @@ class SokBt(BtBms):
 
         buf = await self._q(cmd=0xC1)  # info
         logging.debug(f'SOK: Received [{bytes(buf).hex().upper()}]')
-        # this is not accurate, find out why
-        # self.volts = (getLeInt3(value, 2) * 4) / 1000**2
         # ma = getLeInt3(buf, 5) / 1000**2
         # num_cycles = (struct.unpack('<H',bytes(buf[14:16]))[0])
         soc = struct.unpack('<H', bytes(buf[16:18]))[0]
@@ -166,19 +161,3 @@ class SokBt(BtBms):
             cell = buf[2+(x*4)]
             cells[cell - 1] = getLeUShort(buf, 3+(x*4))
         return cells
-
-
-async def main():
-    mac_address = (
-        "D6:6C:0A:61:14:30"
-        if platform.system() != "Darwin"
-        else "521087E3-F05D-BB20-5E63-CA46F91205FE"
-    )
-    bms = SokBt(mac_address, name='sok')
-    await bms.connect()
-    sample = await bms.fetch()
-    print(sample)
-    await bms.disconnect()
-
-if __name__ == '__main__':
-    asyncio.run(main())

@@ -88,8 +88,6 @@ class AntBt(BtBms):
 
         # MAX_RESPONSE_SIZE = 152
 
-        # print("bms msg {0}: {1} {2}".format(sender, to_hex_str(data), data))
-
         # self.logger.info('bms msg %d %r', len(data), data)
 
         if data.startswith(b'\x7E\xA1'):
@@ -153,7 +151,6 @@ class AntBt(BtBms):
 
     async def _q(self, cmd: AntCommandFuncs, addr, val, resp_code):
         with await self._fetch_futures.acquire_timeout(resp_code, timeout=self.TIMEOUT/2):
-            # print('writing', _ant_command(cmd, addr, val))
             # Force ATT_WRITE_CMD (no response). The char advertises both
             # write and write-without-response. Default write-with-response
             # triggers an auth check at ATT layer; via an ESPHome BT proxy
@@ -292,29 +289,3 @@ class AntBt(BtBms):
 
     def debug_data(self):
         return self._last_response
-
-
-async def main():
-    # mac_address = '9AA68C04-9C48-4FAD-7798-13ABB4878996'
-    mac_address = '08E27970-3DA3-65C0-05E4-B1A8482449C5'
-
-    # print(to_hex_str(_ant_command(AntCommandFuncs.DeviceInfo, 0x026c, 0x20)))
-
-    bms = AntBt(mac_address, name='ant')
-
-    await bms.connect()
-    print('device info', await bms.fetch_device_info())
-
-    sample = await bms.fetch()
-    print(sample)
-
-    voltages = await bms.fetch_voltages()
-    print('voltage', voltages)
-
-    # sample = await bms.fetch()
-    # print(sample)
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

@@ -7,7 +7,6 @@ https://github.com/chadj/litime-bluetooth-battery
 
 
 """
-import asyncio
 
 from bmslib.bms import BmsSample
 from bmslib.ble.bt import BtBms
@@ -25,7 +24,6 @@ class LitimeBt(BtBms):
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
         self._buffer = bytearray()
-        self._switches = None
         self._last_response = None
 
     def _notification_handler(self, sender, data):
@@ -34,7 +32,6 @@ class LitimeBt(BtBms):
         self._fetch_futures.set_result(0x01, data)
  
     async def connect(self, **kwargs):
-        #await super().connect(**kwargs)
         try:
             await super().connect(**kwargs)
         except Exception as e:
@@ -54,12 +51,8 @@ class LitimeBt(BtBms):
 
     async def fetch(self) -> BmsSample:
         buf = await self._q(cmd=0x01)
-        #self.logger.info('Data read:')
-        #self.logger.info(buf)
         cels_temperature = int.from_bytes(buf[52:54], byteorder='little',signed=True)
         soc_raw = int.from_bytes(buf[90:92], byteorder='little')
-        #self.logger.info('Parsed Cell Temp:')
-        #self.logger.info(cels_temperature)
         sample = BmsSample(
             voltage=int.from_bytes(buf[12:16], byteorder='little') / 1000,
             current=-int.from_bytes(buf[48:52], byteorder='little',signed=True) / 1000,
@@ -77,13 +70,6 @@ class LitimeBt(BtBms):
             total_charge_throughput = int.from_bytes(buf[100:104], byteorder='little'),
             switches= None
         )
-
-        self._switches = None
-
-        # print(dict(num_cell=num_cell, num_temp=num_temp))
-
-        # self.rawdat['P']=round(self.rawdat['Vbat']*self.rawdat['Ibat'], 1)
-        # self.rawdat['Bal'] = int.from_bytes(self.response[12:14], byteorder='big', signed=False)
 
         #product_date = int.from_bytes(buf[10:12], byteorder='big', signed=True)
         # productDate = convertByteToUInt16(data1: data[14], data2: data[15])
@@ -103,21 +89,3 @@ class LitimeBt(BtBms):
 
     def debug_data(self):
         return self._last_response
-
-
-async def main():
-    # mac_address = ''
-    mac_address = 'A4:C1:38:44:48:E7'
-    # serial_service = ''
-
-    bms = LitimeBt(mac_address, name='litime')
-    await bms.connect()
-    voltages = await bms.fetch_voltages()
-    print(voltages)
-    # sample = await bms.fetch()
-    # print(sample)
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

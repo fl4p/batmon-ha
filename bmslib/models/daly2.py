@@ -246,11 +246,6 @@ class Daly2Bt(BtBms):
 
         self._switches = dict(sample.switches)
 
-        # print(dict(num_cell=num_cell, num_temp=num_temp))
-
-        # self.rawdat['P']=round(self.rawdat['Vbat']*self.rawdat['Ibat'], 1)
-        # self.rawdat['Bal'] = int.from_bytes(self.response[12:14], byteorder='big', signed=False)
-
         product_date = int.from_bytes(buf[10:12], byteorder='big', signed=True)
         # productDate = convertByteToUInt16(data1: data[14], data2: data[15])
 

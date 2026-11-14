@@ -20,19 +20,6 @@ def get_bms_model_class(name: str):
     # still reachable as `sok_legacy` for early firmware it works on.
     name = {'sok': 'abc'}.get(name, name)
 
-    if False:
-        import bmslib.models.ant
-        import bmslib.models.daly
-        import bmslib.models.daly2
-        import bmslib.models.dummy
-        import bmslib.models.jbd
-        import bmslib.models.jikong
-        import bmslib.models.sok
-        import bmslib.models.supervolt
-        import bmslib.models.victron
-        import bmslib.models.litime
-        import bmslib.models.bm6
-
     bms_registry = dict(
         daly='models.daly.DalyBt',
         daly2='models.daly2.Daly2Bt',
@@ -71,7 +58,7 @@ def get_bms_model_class(name: str):
     )
 
     mod_class = bms_registry.get(name)
-    if bms_registry.get(name):
+    if mod_class:
         if mod_class.startswith('models'):
             mod_class = 'bmslib.' + mod_class
         ss = mod_class.split('.')
@@ -79,9 +66,6 @@ def get_bms_model_class(name: str):
         return getattr(mod, ss[-1])
 
     try:
-        if 0:
-            from aiobmsble.basebms import BaseBMS
-            from typing import Type
         if name.endswith('_ble'):
             # map any `_ble` devices to `aiobmsble`
             # DEPRECATED

@@ -331,7 +331,7 @@ negates it for Victron's charge-positive convention). Capacity 0 means not confi
 
 **Vendor / variants.** SuperVolt LiFePO4 packs (German campervan/marine). 12V 100/150/200/300 Ah and 24V variants. The BMS module ASCII protocol is shared with a family of Shenzhen modules sold under SuperPack, some Eco-Worthy, and various "Mini" 12V packs.
 
-**Transport.** BLE GATT, Nordic-UART. Original SuperVolt: 16-bit UUIDs `ffe0/ffe1/ffe2`. Later units (SX150P …): Nordic UART service `6e400001…` with TX `6e400002`, RX `6e400003` (see batmon-ha #226). `supervolt.py` tries both layouts in `connect()`.
+**Transport.** BLE GATT, Nordic-UART. Original SuperVolt: 16-bit UUIDs `ffe0/ffe1/ffe2`. Later units (SX150P …): Nordic UART service `6e400001…` with TX `6e400002`, RX `6e400003` (see batmon-ha #226). `supervolt.py` tries both layouts in `connect()`. A third layout from #226 ([comment](https://github.com/fl4p/batmon-ha/issues/226#issuecomment-2160130405)): notify `ff02`, write `ff01` (the reverse of the usual `ff00` pair); never wired into the registry.
 
 **Wire protocol.** ASCII frames bounded by `:` … `~`. Live-data poll: `:000250000E03~`. Capacity poll: `:001031000E05~`. Responses are ASCII hex digits spread across multiple notifications which batmon reassembles by start/end markers. Fields parsed as hex-encoded BE 16/32-bit integers at fixed offsets.
 

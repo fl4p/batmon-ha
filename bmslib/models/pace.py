@@ -34,7 +34,6 @@ Configure with:
     type:    pace_uart
     alias:   any human-readable name
 """
-import asyncio
 from typing import List, Optional
 
 from bmslib.bms import BmsSample
@@ -413,15 +412,3 @@ class PaceUart(BtBms):
         if not self._last_temps:
             await self.fetch()
         return self._last_temps
-
-
-async def main():
-    bms = PaceUart('serial', name='pace', adapter='/dev/ttyUSB0')
-    await bms.connect()
-    print(await bms.fetch())
-    print(await bms.fetch_voltages())
-    await bms.disconnect()
-
-
-if __name__ == '__main__':
-    asyncio.run(main())
