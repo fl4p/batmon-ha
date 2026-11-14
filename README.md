@@ -140,6 +140,10 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 ### Global
 
 * MQTT: `mqtt_user` and `mqtt_password`. `mqtt_broker` is usually `core-mosquitto`; `mqtt_port` defaults to 1883.
+* `mqtt_json_topics` (off by default): also publish one JSON object per group for consumers outside HA, next to the
+  per-metric topics: `<alias>/json/sample` (keys as the topic names, switches/alarms nested, `true`/`false` for
+  ON/OFF), `<alias>/json/cell_voltages` (`cells` in V plus min/max/delta/...), `<alias>/json/temperatures` (°C list,
+  `null` for a missing sensor) and `<alias>/json/meter`.
 * `sample_period`: seconds between BMS reads.
 * `publish_period`: seconds between MQTT publishes; samples in between are averaged. Set it above `sample_period` to
   throttle MQTT while keeping energy meters accurate. Below 2 s, HA history plots get slow.

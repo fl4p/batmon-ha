@@ -154,6 +154,11 @@ configuration:
   mqtt_port:
     name: MQTT broker port
     description: MQTT broker port (default 1883).
+  mqtt_json_topics:
+    name: MQTT JSON topics
+    description: >-
+      Also publish each sample, the cell voltages, temperatures and energy meters as
+      one JSON object per device under <alias>/json/. Off by default.
 
   influxdb_host:
     name: InfluxDB host

@@ -378,6 +378,8 @@ async def main():
     from bmslib.estimators.pack_temp_publisher import ambient_cache_from_config
     ambient_cache = ambient_cache_from_config(user_config, bmslib.mqtt_util.register_state_topic, log=logger)
 
+    bmslib.mqtt_util.set_json_topics(user_config.get('mqtt_json_topics', False))
+
     if user_config.get('mqtt_broker'):
         port_idx = user_config.mqtt_broker.rfind(':')
         if port_idx > 0:

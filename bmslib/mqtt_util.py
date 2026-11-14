@@ -26,6 +26,44 @@ logger = get_logger()
 
 no_publish_fail_warn = False
 
+# mqtt_json_topics (off by default, #204): besides the per-metric topics, which HA
+# discovery reads, publish each group as one JSON object under <device>/json/ for
+# consumers that want a whole sample in one message. Under json/ and not at the
+# group's own path: a <device>/cell_voltages/# subscriber also matches
+# <device>/cell_voltages and would get JSON where it expects numbers.
+json_topics = False
+_json_warned = set()
+
+
+def set_json_topics(on: bool):
+    global json_topics
+    json_topics = bool(on)
+
+
+def publish_json(client, topic, obj):
+    """Publish `obj` as strict JSON (no NaN). An unserialisable value drops the
+    message with a warning, once per topic, instead of failing the sample."""
+    try:
+        data = json.dumps(obj, allow_nan=False, separators=(',', ':'))
+    except (TypeError, ValueError) as e:
+        if topic not in _json_warned:
+            _json_warned.add(topic)
+            logger.warning('mqtt_json_topics: %s not published: %s', topic, e)
+        return False
+    return mqtt_single_out(client, topic, data)
+
+
+def _json_num(x):
+    """A finite number, else None (JSON null). round_to_n returns the rounded
+    value as a string ('53.21'), which goes back to the number it spells."""
+    if isinstance(x, str):
+        try:
+            v = json.loads(x)
+        except ValueError:
+            return x
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else x
+    return None if is_none_or_nan(x) else x
+
 
 # We need to ensure that c encoder will not be launched
 @patch('json.encoder.c_make_encoder', None)
@@ -105,43 +143,61 @@ def mqtt_last_publish_time():
 
 
 def publish_sample(client, device_topic, sample: BmsSample):
+    # j: the <device>/json/sample object. Its keys are the per-metric topic
+    # names; switches and alarms are nested objects; ON/OFF is true/false.
+    j = {}
     for k, v in sample_desc.items():
         topic = f"{device_topic}/{k}"
         s = round_to_n(getattr(sample, v['field']), v.get('significant_digits', 5))
         if not is_none_or_nan(s):
             mqtt_single_out(client, topic, s)
+            j[k] = _json_num(s)
 
     if sample.switches:
+        j['switch'] = {}
         for switch_name, switch_state in sample.switches.items():
             assert isinstance(switch_state, bool)
             topic = f"{device_topic}/switch/{switch_name}"
             mqtt_single_out(client, topic, 'ON' if switch_state else 'OFF')
+            j['switch'][switch_name] = switch_state
 
     if sample.alarms:
+        j['alarm'] = {}
         for alarm_name, alarm_state in sample.alarms.items():
             assert isinstance(alarm_state, bool)
             topic = f"{device_topic}/alarm/{alarm_name}"
             mqtt_single_out(client, topic, 'ON' if alarm_state else 'OFF')
+            j['alarm'][alarm_name] = alarm_state
 
     if sample.problem is not None:
         mqtt_single_out(client, f"{device_topic}/problem",
                         'ON' if sample.problem else 'OFF')
+        j['problem'] = bool(sample.problem)
     if sample.problem_code is not None:
         mqtt_single_out(client, f"{device_topic}/problem_code", sample.problem_code)
+        j['problem_code'] = sample.problem_code
 
     if sample.balancing_cells is not None:
         mqtt_single_out(client, f"{device_topic}/balancing", 'ON' if sample.balancing_cells else 'OFF')
         mqtt_single_out(client, f"{device_topic}/balancing_cells", balancing_cells_str(sample.balancing_cells))
+        j['balancing'] = bool(sample.balancing_cells)
+        j['balancing_cells'] = balancing_cells_str(sample.balancing_cells)
 
     if sample.battery_charging is not None:
         mqtt_single_out(client, f"{device_topic}/battery_charging",
                         'ON' if sample.battery_charging else 'OFF')
+        j['battery_charging'] = bool(sample.battery_charging)
     if sample.battery_mode is not None:
         mqtt_single_out(client, f"{device_topic}/battery_mode", sample.battery_mode)
+        j['battery_mode'] = sample.battery_mode
 
     for key, value in sample.extra_values.items():
         if not is_none_or_nan(value):
             mqtt_single_out(client, f"{device_topic}/{key}", value)
+            j[key] = value
+
+    if json_topics:
+        publish_json(client, f"{device_topic}/json/sample", j)
 
 
 def publish_cell_voltages(client, device_topic, voltages):
@@ -158,14 +214,19 @@ def publish_cell_voltages(client, device_topic, voltages):
         mqtt_single_out(client, topic, voltages[i] / 1000)
 
     stats = cell_stats(voltages)
+    st = {}
     if stats:
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/min", stats['min_mv'] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/min_index", stats['min_index'])
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/max", stats['max_mv'] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/max_index", stats['max_index'])
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/delta", stats['delta_mv'] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/average", stats['avg_mv'] / 1000)
-        mqtt_single_out(client, f"{device_topic}/cell_voltages/median", stats['median_mv'] / 1000)
+        st = dict(min=stats['min_mv'] / 1000, min_index=stats['min_index'], max=stats['max_mv'] / 1000,
+                  max_index=stats['max_index'], delta=stats['delta_mv'] / 1000, average=stats['avg_mv'] / 1000,
+                  median=stats['median_mv'] / 1000)
+        for k, v in st.items():
+            mqtt_single_out(client, f"{device_topic}/cell_voltages/{k}", v)
+
+    if json_topics:
+        # cells: [V] in cell order (cell 1 first), then the stats as on the per-metric topics
+        publish_json(client, f"{device_topic}/json/cell_voltages",
+                  dict(cells=[_json_num(v / 1000) for v in voltages],
+                       **{k: _json_num(v) for k, v in st.items()}))
 
 
 def publish_temperatures(client, device_topic, temperatures):
@@ -175,6 +236,11 @@ def publish_temperatures(client, device_topic, temperatures):
         topic = f"{device_topic}/temperatures/{i + 1}"
         if not is_none_or_nan(temperatures[i]):
             mqtt_single_out(client, topic, round_to_n(temperatures[i], 4))
+
+    if json_topics:
+        # [°C] in sensor order; a missing reading is null so the positions keep their sensors
+        publish_json(client, f"{device_topic}/json/temperatures",
+                  [None if is_none_or_nan(t) else _json_num(round_to_n(t, 4)) for t in temperatures])
 
 
 # An accepted impedance window is published once, not refreshed every cycle, so

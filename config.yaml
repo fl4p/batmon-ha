@@ -121,6 +121,9 @@ schema:
   mqtt_password: "str?"
   mqtt_broker: "str?"
   mqtt_port: "int(1,65535)?"
+  # also publish each sample, the cell voltages, temperatures and meters as one
+  # JSON object under <device>/json/ (#204)
+  mqtt_json_topics: "bool?"
 
   invert_current: "bool"
   keep_alive: "bool"
