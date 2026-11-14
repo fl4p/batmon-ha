@@ -91,7 +91,22 @@ If `venv_esphome` is missing or importing one of those packages fails,
 `addon_main.sh` logs a warning and falls back to plain `bleak` (stock
 BlueZ stack via the regular `venv`).
 
-## Known incompatibility: ANT BMS
+## Sharing a proxy with Home Assistant
+
+A stock ESPHome proxy sends its advertisements and the data of every BLE
+connection to one API client only: the one that subscribed last (ESPHome
+≥ 2026.7; before that, the first). If HA and batmon both use the proxy,
+whichever reconnects last takes it over and the other silently gets nothing:
+
+- an HA restart stops every BMS on that proxy until batmon reconnects;
+- batmon reconnecting cuts off HA's own BLE devices on that proxy.
+
+Either dedicate proxies to batmon (remove them from HA's ESPHome integration)
+or flash [nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
+≥ 0.2.0. It serves up to 4 API clients at once, and each BLE link belongs to
+the client that opened it, so a batmon restart frees only its own links.
+
+## Known incompatibility: ANT BMS with stock ESPHome
 
 The ANT-BLE20PHUB BMS firmware mishandles ESPHome/Bluedroid-style GATT
 flows: the proxy connects, GATT discovery completes, but the CCC write
@@ -107,9 +122,10 @@ as `error 133` (`ESP_GATT_INTERNAL_ERROR`). Verified that:
   spoofed BT MAC, removed `pair()`, sdkconfig+runtime MTU caps) —
   none made the proxy succeed.
 
-If you have an ANT BMS, dedicate a local Bluetooth adapter to it
-(`ble_stack: bleak` or `bluek`) until upstream ESPHome adds an option
-to skip MTU exchange or switches the proxy to the NimBLE host stack.
+[nimble-ble-proxy](https://fl4p.github.io/nimble-ble-proxy-esphome/)
+(NimBLE host) works with an ANT-BLE20PHUB (verified 2026-11, including
+switch writes). With stock ESPHome, use nimble-ble-proxy or a local adapter
+(`ble_stack: bleak` or `bluek`).
 
 ## Status — not in this scaffold
 
@@ -134,16 +150,3 @@ to skip MTU exchange or switches the proxy to the NimBLE host stack.
   don't pull that toolchain in; on armv7 `venv_esphome` typically
   won't build and the addon falls back to bleak. Aarch64 and x86_64
   install cleanly.
-- **Tests.** None yet — first validation is to run against a real proxy.
-
-## Validation plan (next pass)
-
-1. Deploy with one proxy (`ble_stack: esphome`, single
-   `bluetooth_proxies:` entry).
-2. Configure one non-PSK BMS (e.g. Daly, SOK).
-3. Watch addon log for `esphome_proxy: <name> up at <host>` and a
-   subsequent BMS `connected` line.
-4. Check sample latency vs. local `bleak` baseline — expect +5–20ms
-   per GATT round-trip.
-5. Pull the proxy's power; confirm addon logs reflect lost samples
-   followed by automatic recovery (APIConnectionManager reconnects).
