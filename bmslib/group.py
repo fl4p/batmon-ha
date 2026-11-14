@@ -5,12 +5,7 @@ from typing import Dict, List
 from bmslib.bms import BmsSample
 from bmslib.ble.bt import BtBms, normalize_ble_address
 from bmslib.util import get_logger
-from bmslib.wire.aggregate import (  # noqa: F401
-    is_finite,
-    finite_or_fallback,
-    sum_parallel,
-    sum_series,
-)
+from bmslib.wire.aggregate import sum_parallel, sum_series  # noqa: F401  (test/group.py imports sum_parallel from here)
 
 
 class BmsGroup:
@@ -144,9 +139,6 @@ class VirtualGroupBms:
         await self.connect()
 
     async def __aexit__(self, *args):
-        pass
-
-    def __await__(self):
         pass
 
     async def set_switch(self, switch: str, state: bool):

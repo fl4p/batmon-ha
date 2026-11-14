@@ -1,14 +1,19 @@
 import json
 import os
+import random
 import re
+import string
 from os import access, R_OK
 from os.path import isfile
 from threading import Lock
 
-from bmslib.cache import random_str
 from bmslib.util import dotdict, get_logger
 
 logger = get_logger()
+
+
+def random_str(n=12):
+    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(n))
 
 
 def is_readable(file):
@@ -19,10 +24,6 @@ root_dir = '/data/' if is_readable('/data/options.json') else ''
 bms_meter_states_fn = root_dir + 'bms_meter_states.json'
 
 lock = Lock()
-
-
-def store_file(fn):
-    return root_dir + fn
 
 
 def load_meter_states():
@@ -68,10 +69,6 @@ def _store_estimator_state(prefix, bms_name, state):
         os.replace(tmp, fn)
 
 
-def impedance_state_file(bms_name):
-    return _estimator_state_file('impedance_', bms_name)
-
-
 def load_impedance_state(bms_name):
     """The saved cell-resistance estimator state, or None."""
     return _load_estimator_state('impedance_', bms_name, 'cell resistance estimator')
@@ -79,10 +76,6 @@ def load_impedance_state(bms_name):
 
 def store_impedance_state(bms_name, state):
     _store_estimator_state('impedance_', bms_name, state)
-
-
-def qmax_state_file(bms_name):
-    return _estimator_state_file('qmax_', bms_name)
 
 
 def load_qmax_state(bms_name):

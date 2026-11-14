@@ -47,10 +47,6 @@ cfg()  { if _has_bashio; then bashio::config "$1"; else _cfg_json "$1"; fi; }
 log()  { if _has_bashio; then bashio::log.blue "$@"; else echo "$@"; fi; }
 warn() { if _has_bashio; then bashio::log.warning "$@"; else echo "$@" >&2; fi; }
 
-if _has_bashio && bashio::config.exists "install_newer_bleak"; then
-  bashio::addon.option "install_newer_bleak" # delete
-fi
-
 # query MQTT details from supervisor API
 # see e.g. https://github.com/zigbee2mqtt/hassio-zigbee2mqtt/blob/master/common/rootfs/docker-entrypoint.sh
 # also https://github.com/wmbusmeters/wmbusmeters-ha-addon/blob/main/wmbusmeters-ha-addon%2Frun.sh

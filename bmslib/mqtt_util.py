@@ -11,7 +11,6 @@ import queue
 import time
 import traceback
 from typing import Optional
-from unittest.mock import patch
 
 import paho.mqtt.client as paho
 
@@ -23,8 +22,6 @@ from bmslib.wire.fields import (round_to_n, capitalize_words, is_none_or_nan,
                                 balancing_cells_str, sample_desc, meter_desc, cell_stats)  # noqa: F401
 
 logger = get_logger()
-
-no_publish_fail_warn = False
 
 # mqtt_json_topics (off by default, #204): besides the per-metric topics, which HA
 # discovery reads, publish each group as one JSON object under <device>/json/ for
@@ -63,27 +60,6 @@ def _json_num(x):
             return x
         return v if isinstance(v, (int, float)) and not isinstance(v, bool) else x
     return None if is_none_or_nan(x) else x
-
-
-# We need to ensure that c encoder will not be launched
-@patch('json.encoder.c_make_encoder', None)
-def json_dumps_with_round_n(some_object, n=7):
-    # saving original method
-    of = json.encoder._make_iterencode
-
-    def inner(*args, **kwargs):
-        args = list(args)
-        # fifth argument is float formater which will we replace
-        args[4] = lambda o: str(round_to_n(o, n))
-        return of(*args, **kwargs)
-
-    with patch('json.encoder._make_iterencode', wraps=inner):
-        return json.dumps(some_object)
-
-
-def disable_warnings():
-    global no_publish_fail_warn
-    no_publish_fail_warn = True
 
 
 def remove_none_values(fields: dict):
@@ -127,8 +103,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
 
     mqi: paho.MQTTMessageInfo = client.publish(topic, data, retain=retain)
     if mqi.rc != paho.MQTT_ERR_SUCCESS:
-        if not no_publish_fail_warn:
-            logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
+        logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
         return False
 
     now = time.time()
@@ -884,18 +859,3 @@ def mqtt_message_handler(client, userdata, message: paho.MQTTMessage):
         _message_queue.put((callback, payload))
     else:
         logger.warning("No callback for topic %s (payload %s)", message.topic, payload)
-
-
-def paho_monkey_patch():
-    def _handle_pingresp(self):
-        if self._in_packet['remaining_length'] != 0:
-            return paho.MQTT_ERR_PROTOCOL
-
-        # No longer waiting for a PINGRESP.
-        # self._ping_t = 0
-        self._easy_log(paho.MQTT_LOG_DEBUG, "Received PINGRESP (patched)")
-        return paho.MQTT_ERR_SUCCESS
-
-    paho.Client._handle_pingresp = _handle_pingresp
-
-    logger.debug("applied paho monkey patch _handle_pingresp")

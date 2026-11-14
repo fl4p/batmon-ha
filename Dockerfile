@@ -96,8 +96,6 @@ RUN python3 -m venv venv_esphome \
 # python3-dev libffi-dev openssl-dev cargo rust pkgconfig`. We don't pull
 # those in (Rust adds ~400MB to every image), so on armv7 venv_esphome
 # typically won't build; addon_main.sh falls back to bleak.
-RUN . venv/bin/activate
-
 RUN chmod a+x addon_main.sh entrypoint.sh
 
 # entrypoint.sh dispatches: HA add-on base -> addon_main.sh via its

@@ -108,9 +108,6 @@ class PeriodicBoolSignal:
     def __bool__(self):
         return self.state
 
-    def get(self):
-        return self.state
-
     def set_time(self, t):
         if self._last_t == 0:
             self._last_t = t
@@ -166,7 +163,6 @@ class BmsSampler:
                  sinks: Optional[List[BmsSampleSink]] = None,
                  algorithms: Optional[list] = None,
                  current_calibration_factor=1.0,
-                 over_power=None,
                  bms_group: Optional[BmsGroup] = None,
                  bt_power_cycle_on_error=False,
                  reconnect_interval_s: Optional[float] = None,
@@ -201,7 +197,6 @@ class BmsSampler:
         self.num_samples = 0
         self.bms_group = bms_group  # group, virtual, parent
         self.current_calibration_factor = current_calibration_factor
-        self.over_power = over_power or math.nan
 
         self.sinks = sinks or []
         self._last_error = None
@@ -264,8 +259,6 @@ class BmsSampler:
         for meter in self.meters:
             if meter_state and meter.name in meter_state:
                 meter.restore(meter_state[meter.name]['reading'])
-
-        # self.power_stats = EWM(span=120, std_regularisation=0.1)
 
         # The per-device `capacity:` option [Ah] or None. The cell resistance
         # estimator falls back to the capacity the BMS reports (there it only
@@ -464,7 +457,7 @@ class BmsSampler:
 
         except Exception as ex:
             self._last_error_type = type(ex).__name__
-            self._last_error = summarize_exc(ex) if 'summarize_exc' in globals() else str(ex)
+            self._last_error = summarize_exc(ex)
             # Collapse the multi-page asyncio.wait_for traceback that masks the
             # real cause for connect/notify timeouts (see #367, #324). Full
             # exc_info kept for unexpected types where the trace is informative.
@@ -620,8 +613,6 @@ class BmsSampler:
             self.power_integrator_charge += (t_hour, abs(min(0, sample.power)) * 1e-3)  # kWh
             self.power_integrator_discharge += (t_hour, abs(max(0, sample.power)) * 1e-3)  # kWh
 
-            # self.power_stats.add(sample.power)
-
             if (self.sinks or self.bms_group) and not sample.temperatures:
                 sample.temperatures = await self._fetch_temperatures_cached()
 
@@ -773,10 +764,6 @@ class BmsSampler:
             elif self.qmax is not None:
                 self._withdraw_qmax()  # disabled (also restored disabled): clear what an earlier run published
 
-            # z_score = self.power_stats.z_score(sample.power)
-            # if abs(z_score) > 12:
-            #    logger.info('%s Power z_score %.1f (avg=%.0f std=%.2f last=%.0f)', bms.name, z_score, self.power_stats.avg.value, self.power_stats.stddev, sample.power)
-
             PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
             PWR_CHG_HOLD = 4  # time in seconds to keep high frequency sampling after a power jump. this helps capture power transients and noise wave form
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
@@ -789,10 +776,7 @@ class BmsSampler:
                 self._t_last_power_jump = t_now
             self._last_power = sample.power
 
-            if self.period_discov or self.period_pub or \
-                    (t_now - self._t_last_power_jump) < PWR_CHG_HOLD or abs(sample.power) > self.over_power:
-                self._t_pub = t_now
-
+            if self.period_discov or self.period_pub or (t_now - self._t_last_power_jump) < PWR_CHG_HOLD:
                 sample = self.downsampler.pop()
 
                 publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)

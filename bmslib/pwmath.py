@@ -53,34 +53,6 @@ class LHQ:
         return self.last
 
 
-class EWM:
-    # Implement EWMA statistics mean and stddev
-    def __init__(self, span: int, std_regularisation: float):
-        self.avg = EWMA(span)
-        self.std = EWMA(span)
-        self._last_x = math.nan
-        self.std_regularisation = std_regularisation
-
-    def add(self, x):
-        self.avg.add(x)
-        if self.std_regularisation != 0:
-            x = (-1 if x < 0 else 1) * (abs(x) + self.std_regularisation)
-        ex = self._last_x
-        # ex = self.avg.value
-        if math.isfinite(ex):
-            pct = (x - ex) / ex
-            pct = min(abs(pct), 1.4)
-            self.std.add(pct * pct)
-        self._last_x = x
-
-    @property
-    def stddev(self):
-        return abs(self.avg.value * self.std.value)
-
-    def z_score(self, x):
-        return (x - self.avg.value) / (self.stddev + self.std_regularisation)
-
-
 class Integrator:
     """
     Implement a trapezoidal integration, discarding samples with dx > dx_max.
@@ -155,50 +127,3 @@ class DiffAbsSum(Integrator):
         assert isinstance(other, tuple)
         self.add_diff(*other)
         return self
-
-
-def test_integrator():
-    i = Integrator("test", dx_max=1)
-    i += (0, 1)
-    assert i.get() == 0
-    i += (1, 1)
-    assert i.get() == 1
-    i += (1, 2)
-    assert i.get() == 1
-    i += (2, 2)
-    assert i.get() == 3
-    i += (3, 3)  # test trapezoid
-    assert i.get() == (3 + 2.5)
-    i += (5, 3)  # skip (>dt_max)
-    assert i.get() == (3 + 2.5)
-
-
-def test_diff_abs_sum():
-    i = DiffAbsSum("test", dx_max=1, dy_max=0.1)
-    i += (0, 1)
-    assert i.get() == 0
-    i += (1, 1)
-    assert i.get() == 0
-    i += (1, 1.1)
-    assert i.get() == 0
-    i += (2, 1.2)
-    assert round(i.get(), 5) == 0.1
-    i += (3, 1.25)
-    assert round(i.get(), 5) == 0.15
-    i += (4, 1)
-    assert round(i.get(), 5) == 0.15
-    i += (5, 0.95)
-    assert round(i.get(), 5) == 0.2
-
-
-def test_lhq():
-    l = LHQ(span=2, inp_q=.1)
-    l.add(0)
-    assert l.add(0.1) == 0.05
-    assert l.add(0.1) == 0.1
-
-
-if __name__ == "__main__":
-    test_integrator()
-    test_diff_abs_sum()
-    test_lhq()

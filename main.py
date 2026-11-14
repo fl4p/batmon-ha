@@ -1,7 +1,10 @@
 import asyncio
+import atexit
+import json
 import math
 import os
 import random
+import signal
 import sys
 import threading
 import time
@@ -45,7 +48,6 @@ from bmslib.group import BmsGroup, VirtualGroupBms, resolve_member_ref
 from bmslib.models import construct_bms, is_serial_device
 from bmslib.mqtt_util import mqtt_last_publish_time, mqtt_message_handler, mqtt_process_action_queue
 from bmslib.sampling import BmsSampler, fetch_loop as _fetch_loop
-from bmslib.ble.scan import stop_all_scanners
 from bmslib.store import ConfigError, load_user_config
 from bmslib.util import get_logger, exit_process
 
@@ -179,7 +181,6 @@ async def main():
             sys.exit(0)
 
     bms_list: list[bmslib.ble.bt.BtBms] = []
-    extra_tasks = []  # currently unused, add custom coroutines here. must return True on success and can raise
 
     if _esphome_proxies is not None:
         # ble_stack=esphome: bring up habluetooth + connect each configured
@@ -387,7 +388,6 @@ async def main():
             user_config.mqtt_broker = user_config.mqtt_broker[:port_idx]
         mqtt_port = int(user_config.get('mqtt_port', None) or 1883)
         logger.info('connecting mqtt %s@%s:%s', user_config.get('mqtt_user'), user_config.mqtt_broker, mqtt_port)
-        # paho_monkey_patch()
         mqtt_client = paho.mqtt.client.Client(CallbackAPIVersion.VERSION2)
         mqtt_configured = True
         mqtt_client.enable_logger(logger)
@@ -436,16 +436,13 @@ async def main():
                 logger.warning("mqtt not connected after 5 s, publishes will fail until the broker accepts")
         except Exception as ex:
             logger.error('mqtt connection error %s', ex)
-
-        if not user_config.mqtt_broker:
-            bmslib.mqtt_util.disable_warnings()
     else:
         mqtt_client = None
 
     from bmslib.store import load_meter_states
     try:
         meter_states = load_meter_states()
-        logger.debug('meter states: %s', bmslib.mqtt_util.json_dumps_with_round_n(meter_states))
+        logger.debug('meter states: %s', json.dumps(meter_states))
     except FileNotFoundError:
         logger.info("Initialize meter states file")
         meter_states = {}
@@ -583,9 +580,9 @@ async def main():
 
     parallel_fetch = user_config.get('concurrent_sampling', False)
 
-    logger.info('Fetching %d BMS + %d virtual + %d others %s, period=%.2fs, keep_alive=%s',
+    logger.info('Fetching %d BMS + %d virtual %s, period=%.2fs, keep_alive=%s',
                 sum(not bms.is_virtual for bms in bms_list),
-                sum(bms.is_virtual for bms in bms_list), len(extra_tasks),
+                sum(bms.is_virtual for bms in bms_list),
                 'concurrently' if parallel_fetch else 'serially', sample_period, user_config.get('keep_alive', False))
 
     watchdog_en = user_config.get('watchdog', False)
@@ -600,7 +597,7 @@ async def main():
     # add another daemon thread, asyncio can dead-lock with bleak TODO bug?
     threading.Thread(target=lambda: background_thread(wd_timeout, sampler_list), daemon=True).start()
 
-    tasks = sampler_list + extra_tasks
+    tasks = list(sampler_list)
 
     # before we start the loops connect to each bms in random order
     tasks_shuffle = list(tasks)
@@ -633,21 +630,16 @@ async def main():
 
     else:
         async def fn():
-            if parallel_fetch:
-                # concurrent synchronised fetch
-                # this branch is currently not reachable!
-                await asyncio.gather(*[t() for t in tasks], return_exceptions=False)
-            else:
-                random.shuffle(tasks)
-                exceptions = []
-                for t in tasks:
-                    try:
-                        await t()
-                    except Exception as ex:
-                        exceptions.append(ex)
-                if exceptions:
-                    logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
-                    raise exceptions[0]
+            random.shuffle(tasks)
+            exceptions = []
+            for t in tasks:
+                try:
+                    await t()
+                except Exception as ex:
+                    exceptions.append(ex)
+            if exceptions:
+                logger.error('%d exceptions occurred fetching BMSs', len(exceptions))
+                raise exceptions[0]
 
         await fetch_loop(fn, period=sample_period, max_errors=max_errors)
         for t in tasks:
@@ -684,8 +676,6 @@ async def main():
         except:
             pass
 
-    await stop_all_scanners()
-
     if _esphome_proxies is not None:
         from bmslib.ble.esphome_proxy import stop_proxies
         await stop_proxies()
@@ -700,20 +690,9 @@ def on_exit(*args, **kwargs):
         sys.exit(1)
 
 
-try:
-    import atexit
-
-    atexit.register(on_exit)
-except ImportError:
-    pass
-
-try:
-    import signal
-
-    signal.signal(signal.SIGTERM, on_exit)
-    signal.signal(signal.SIGINT, on_exit)
-except ImportError:
-    pass
+atexit.register(on_exit)
+signal.signal(signal.SIGTERM, on_exit)
+signal.signal(signal.SIGINT, on_exit)
 
 asyncio.run(main())
 

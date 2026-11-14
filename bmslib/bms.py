@@ -28,12 +28,6 @@ class DeviceInfo:
         return s + ')'
 
 
-class PowerMonitorSample:
-    # Todo this is a draft
-    def __init__(self, voltage, current, power=math.nan, total_energy=math.nan):
-        pass
-
-
 def derive_charge_fields(soc, charge, capacity, soh, aged_capacity):
     """What BmsSample derives from the charge fields a driver reported ->
     (soc, capacity, soh, aged_capacity). A function of its own because the
