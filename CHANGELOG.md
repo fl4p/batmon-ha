@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Fix: ANT charge/discharge switches (`ant`, `ant_uart`) turned back on by themselves seconds after switching off; batmon now authenticates with the default password before each write.
+
 ## [2.30]
 
 * Fix: a `:<n>` suffix on a type without an address (`jk_uart`, `jbd_uart`, `pace_uart`, `basen_uart`) crashed with a TypeError; it is now refused with a clear message.

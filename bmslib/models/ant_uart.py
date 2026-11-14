@@ -53,7 +53,7 @@ from typing import List, Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.ble.bt import BtBms
-from bmslib.models.ant import AntBt, AntCommandFuncs, _ant_command, calc_crc16
+from bmslib.models.ant import AntBt, AntCommandFuncs, _ant_auth_frame, _ant_command, calc_crc16
 from bmslib.util import to_hex_str
 
 BAUDRATE = 19200
@@ -160,6 +160,8 @@ class AntUart(AntBt):
         addr = register_onoff[switch][0 if state else 1]
 
         async def write():
+            # without the auth frame the BMS reverts a charge-off within seconds (BLE, ant24)
+            await self.client.write_gatt_char(self.char, data=_ant_auth_frame())
             await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0))
 
         await _locked(self.client, write)

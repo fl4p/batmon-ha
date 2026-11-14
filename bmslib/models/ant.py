@@ -58,6 +58,13 @@ def _ant_command(func: AntCommandFuncs, addr, value):
     return frame
 
 
+def _ant_auth_frame(password: bytes = b'123456789abc') -> bytes:
+    """Authenticate (func 0x23, register 0x016A) with the default password, sent before a register write
+    (as syssi/esphome-ant-bms does)."""
+    frame = bytes([0x7e, 0xa1, 0x23, 0x6a, 0x01, len(password)]) + password
+    return frame + bytes(calc_crc16(frame[1:]) + [0xaa, 0x55])
+
+
 class AntBt(BtBms):
     CHAR_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'  # Handle 0x10
     TIMEOUT = 16
@@ -273,6 +280,8 @@ class AntBt(BtBms):
         register_onoff = dict(charge=[0x0006, 0x0004], discharge=[0x0003, 0x0001], balance=[0x000D, 0x000E],
                               buzzer=[0x001E, 0x001F])
         addr = register_onoff[switch][0 if state else 1]
+        # without the auth frame ant24 (sw 20PHUB00-211026A) took a charge-off but reverted it within seconds
+        await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
         await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0), response=False)
 
     def debug_data(self):

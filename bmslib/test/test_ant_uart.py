@@ -150,8 +150,10 @@ def test_new_protocol_switch_write(serial_stub):
 
     asyncio.run(run())
     # vendor PC tool, issue #20: "Charge mosfet off", "Discharge mosfet on"
-    assert bms.client.written == [bytes.fromhex('7ea1510400 00c8e4aa55'),
-                                  bytes.fromhex('7ea1510300007925aa55')]
+    # each write is preceded by the auth frame (default password 123456789abc), as syssi/esphome-ant-bms sends it
+    auth = bytes.fromhex('7ea1236a010c 313233343536373839616263 2062aa55')
+    assert bms.client.written == [auth, bytes.fromhex('7ea1510400 00c8e4aa55'),
+                                  auth, bytes.fromhex('7ea1510300007925aa55')]
 
 
 # --- AA 55 AA FF -------------------------------------------------------------

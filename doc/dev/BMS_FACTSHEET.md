@@ -214,11 +214,15 @@ batmon implements the **new protocol** (`7E A1`).
 
 **Wire protocol.** Frame: `7E A1 <func> <addr-hi> <addr-lo> <len-hi> <len-lo> [<data>] <CRC16-LE> AA 55`. CRC = CRC16-Modbus over bytes after the first header byte. Function codes: `0x01` status, `0x02` device info, `0x23` authenticate, `0x51` write register. Reply func = request + `0x10` (e.g. `0x11`, `0x12`). Settings register space `0x0000–0x017E`.
 
-**Switch writes need no authentication.** Tested 2026-11-14 on ANT-20PHB0TB120A, sw `20PHUB00-211026A`, BLE through an
-ESPHome proxy. The charge-off write (`0x51`, register `0x0004`, no prior `0x23`) opened the charge FET: charge current
-went from 30 A to -2 A within 7 s. The FET then closed again on its own within ~5 s, so charge-off does not hold on
-this unit (unknown whether a BMS setting causes that). The link dropped 22 s after the following charge-on write and
-reconnected 5 s later. One trial; discharge-off was not tested on purpose (live van battery).
+**Switch writes need the `0x23` auth frame first.** `7E A1 23 6A 01 0C "123456789abc" <CRC> AA 55` (default password,
+as syssi sends it before every write). Tested 2026-11-14 on ANT-20PHB0TB120A, sw `20PHUB00-211026A`, BLE through an
+ESPHome proxy, charge switch only (discharge not tried: live van battery):
+- without auth, charge-off (`0x51`, register `0x0004`) opened the FET (30 A to -2 A within 7 s), but the BMS closed it
+  again on its own ~5 s later;
+- with auth, charge-off held for the whole 40 s window (BMS reported OFF, 0 A) until the charge-on write.
+
+Both times the first status poll after the charge-on write went unanswered (one timeout, then normal samples; the first
+run also dropped the link once).
 
 **Fields decoded by batmon.** `voltage`, `current`, `charge`, `capacity`, `total_charge_throughput`, `soc`, `soh`, `temperatures` (6 probes, NaN sentinel 65496), `mos_temperature`, `switches.{charge,discharge}`, plus per-cell mV (up to 32). Device info exposes hardware + firmware strings (with UTF-8 `errors='replace'` for buggy firmware byte streams).
 
