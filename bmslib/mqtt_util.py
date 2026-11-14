@@ -314,6 +314,16 @@ def publish_soc_gauge_error(client, device_topic, error_pp: float, attributes: d
     mqtt_single_out(client, f"{device_topic}/soc_gauge_error", round(error_pp, 1))
 
 
+LINK_EXPIRE_S = 120  # 4 publish periods of BmsSampler.publish_link; more if samples are further apart
+LINK_DESC = {
+    'link/connects': dict(name="Link connects", state_class="total_increasing", icon="connection"),
+    'link/age': dict(name="Link age", device_class="duration", unit="s", state_class="measurement"),
+    'link/rssi': dict(name="Link RSSI", device_class="signal_strength", unit="dBm", state_class="measurement"),
+    'link/tx_power': dict(name="Link TX power", device_class="signal_strength", unit="dBm",
+                          state_class="measurement", icon="antenna"),
+}
+
+
 def hass_device_json(device_topic, device_info: DeviceInfo = None, display_name=None) -> dict:
     """The HA `device` block shared by all entities of one BMS."""
     return {
@@ -330,7 +340,8 @@ def hass_device_json(device_topic, device_info: DeviceInfo = None, display_name=
 def publish_hass_discovery(client, device_topic, expire_after_seconds: int, sample: BmsSample, num_cells,
                            temperatures,
                            device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
-                           pack_temp_est=False, soh_est=False, display_name=None, temperature_names=None):
+                           pack_temp_est=False, soh_est=False, display_name=None, temperature_names=None,
+                           link: Optional[dict] = None):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -445,6 +456,15 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                         name="SoC gauge error", precision=1, expire_after=SOC_GAUGE_EXPIRE_S,
                         entity_category="diagnostic",
                         json_attributes_topic=f"{device_topic}/soc_gauge_error/attributes")
+
+    # keep_alive link diagnostics (bmslib/link_stats.py), published every 30 s. The age and
+    # RSSI expire while the link is down instead of showing the last link's values.
+    for k, desc in LINK_DESC.items():
+        if link and link.get(k) is not None:
+            _hass_discovery(k, desc.get('device_class'), desc.get('unit'), state_class=desc['state_class'],
+                            icon=desc.get('icon'), name=desc['name'],
+                            expire_after=max(LINK_EXPIRE_S, expire_after_seconds),
+                            entity_category="diagnostic")
 
     if pack_temp_est:
         # pack_temp_estimator: RC estimate of the cell temperature from MOS + ambient

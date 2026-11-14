@@ -21,6 +21,7 @@ from bmslib.cache.mem import mem_cache_deco
 from bmslib.group import BmsGroup, GroupNotReady
 from bmslib import mqtt_util
 from bmslib.jk_settings_service import NullSettingsPublisher
+from bmslib.link_stats import LinkStats
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
     QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings, publish_soc_gauge_error
@@ -235,6 +236,10 @@ class BmsSampler:
         self._reconnect_interval_s = reconnect_interval_s if reconnect_interval_s and reconnect_interval_s > 0 else None
         self._t_connected = 0.0
         self._reconnect_due_s = math.inf
+
+        # link diagnostics (connects, link age, RSSI on bluek); published for keep_alive links only
+        self.link = LinkStats(bms.name) if not bms.is_virtual else None
+        self._link_values: Optional[dict] = None  # last published, for HA discovery
 
         self.algorithm = None
         if algorithms:
@@ -560,7 +565,12 @@ class BmsSampler:
         if not was_connected and not bms.is_virtual:
             logger.debug('connecting bms %s', bms)
 
+        connect_time_before = getattr(bms, 'connect_time', None)
+
         async with bms:
+            if self.link is not None:
+                self.link.observe(was_connected, connect_time_before, getattr(bms, 'connect_time', None))
+
             # a successful connect ends the not-found streak. don't wait for a good
             # sample: _sample_inner returns None for a healthy BMS whose fetch_voltages
             # fails (err below), which would carry the old streak forever (#391).
@@ -811,6 +821,7 @@ class BmsSampler:
 
             if self.period_discov or self.period_30s:
                 self.publish_meters()
+                await self.publish_link()
 
             # publish home assistant discovery every 60 samples
             if self.period_discov:
@@ -830,6 +841,7 @@ class BmsSampler:
                     soh_est=self.qmax is not None and self.qmax.enabled,
                     display_name=getattr(bms, 'display_name', None),
                     temperature_names=getattr(bms, 'temperature_names', None),
+                    link=self._link_values,
                 )
 
                 settings = getattr(bms, 'settings', None)
@@ -973,6 +985,23 @@ class BmsSampler:
             return
         if withdraw_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix):
             c[1] = now
+
+    def _link_published(self) -> bool:
+        bms = self.bms
+        return self.link is not None and bool(getattr(bms, 'keep_alive', False))
+
+    async def publish_link(self):
+        """Publish the link diagnostics. Only for keep_alive: without it every
+        sample is its own short connection, so the age and count say nothing."""
+        if not self._link_published():
+            self._link_values = None
+            return
+        connected = bool(self.bms.is_connected)
+        if connected:
+            await self.link.poll_conn_info(self.bms.client)
+        self._link_values = self.link.values(connected)
+        for k, v in self._link_values.items():
+            mqtt_single_out(self.mqtt_client, f"{self.mqtt_topic_prefix}/{k}", v)
 
     def publish_meters(self):
         device_topic = self.mqtt_topic_prefix

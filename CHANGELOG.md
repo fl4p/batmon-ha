@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* New diagnostic entities for `keep_alive` links: `Link connects` and `Link age`, and with `ble_stack: bluek` the live `Link RSSI` and `Link TX power` (other stacks can't read them).
 * Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.
 
 ## [2.30]

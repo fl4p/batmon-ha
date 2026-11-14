@@ -197,6 +197,10 @@ class BMS():
     def _notification_handler(self, sender, data: bytes):
         pass
 
+    @property
+    def keep_alive(self):
+        return self._keep_alive
+
     def set_keep_alive(self, keep):
         self._keep_alive = keep
         # self.ble_bms._reconnect = not keep

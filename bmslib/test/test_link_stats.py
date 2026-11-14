@@ -1,0 +1,207 @@
+"""keep_alive link diagnostics: connect count, link age, RSSI/TX power on bluek."""
+import asyncio
+import json
+import time
+from types import SimpleNamespace
+
+import paho.mqtt.client as paho
+
+import bmslib.link_stats as link_stats
+from bmslib.bms import BmsSample
+from bmslib.link_stats import LinkStats
+from bmslib.mqtt_util import publish_hass_discovery
+from bmslib.test.test_incomplete_connect import _Bms as _IncompleteBms, _enter
+
+
+class _Bms(_IncompleteBms):
+    """Sets connect_time like BtBms._connect_client(), which the base fake skips."""
+
+    async def connect(self, timeout=20):
+        if not self.client.is_connected:
+            self._connect_time = time.time()
+        await super().connect(timeout)
+
+
+class _BluekClient:
+    """bluek's get_conn_info(): a ConnInfo with Optional fields, or an exception."""
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    async def get_conn_info(self):
+        self.calls += 1
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def _poll(link, client):
+    asyncio.run(link.poll_conn_info(client))
+
+
+def test_values_while_connected_and_after_the_link_drops():
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, _BluekClient(SimpleNamespace(rssi=-71, tx_power=9, max_tx_power=20)))
+
+    assert link.values(connected=True) == {'link/connects': 1, 'link/age': 0, 'link/rssi': -71, 'link/tx_power': 9}
+    # down: only the count, so age and RSSI expire instead of showing the dead link's values
+    assert link.values(connected=False) == {'link/connects': 1}
+
+
+def test_no_rssi_on_a_stack_without_get_conn_info():
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, object())  # bleak/BlueZ D-Bus, ESPHome proxy
+    assert set(link.values(connected=True)) == {'link/connects', 'link/age'}
+
+
+def test_an_unknown_value_is_left_out_not_published_as_a_number():
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, _BluekClient(SimpleNamespace(rssi=None, tx_power=None, max_tx_power=None)))
+    assert 'link/rssi' not in link.values(connected=True)
+    assert 'link/tx_power' not in link.values(connected=True)
+
+
+def test_a_failing_read_is_dropped_for_this_link_and_retried_on_the_next(caplog):
+    link = LinkStats('bms')
+    link.on_connect()
+    client = _BluekClient(PermissionError('mgmt status 0x14'))
+    _poll(link, client)
+    _poll(link, client)
+    assert client.calls == 1
+    assert 'link/rssi' not in link.values(connected=True)
+    assert caplog.text.count('reading link RSSI failed') == 1
+
+    link.on_connect()
+    client.result = SimpleNamespace(rssi=-60, tx_power=3, max_tx_power=20)
+    _poll(link, client)
+    assert link.values(connected=True)['link/rssi'] == -60
+
+
+def test_a_good_read_after_a_value_is_cleared_on_reconnect():
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, _BluekClient(SimpleNamespace(rssi=-71, tx_power=9, max_tx_power=20)))
+    link.on_connect()  # values of the old link must not carry over
+    assert 'link/rssi' not in link.values(connected=True)
+
+
+def test_a_hanging_read_times_out(monkeypatch):
+    class _Hang:
+        async def get_conn_info(self):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(link_stats, 'CONN_INFO_TIMEOUT', 0.01)
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, _Hang())
+    assert 'link/rssi' not in link.values(connected=True)
+
+
+def _cycle(bms, link):
+    """What BmsSampler._sample_inner does around `async with bms`."""
+    was_connected = bms.is_connected
+    before = bms.connect_time
+    err = asyncio.run(_enter(bms))
+    if err is None:
+        link.observe(was_connected, before, bms.connect_time)
+    return err
+
+
+def test_connects_count_each_new_link_and_not_each_sample():
+    bms, link = _Bms(), LinkStats('bms')
+    for _ in range(3):
+        assert _cycle(bms, link) is None
+    assert link.connects == 1
+
+    bms.client.is_connected = False  # the link dropped between two samples
+    bms._on_disconnect(bms.client)
+    assert _cycle(bms, link) is None
+    assert link.connects == 2
+
+
+def test_a_link_rebuilt_after_a_half_finished_connect_is_counted():
+    bms, link = _Bms(fail_connect=True), LinkStats('bms')
+    assert isinstance(_cycle(bms, link), TimeoutError)
+    bms.fail_connect = False
+    # was_connected is True here: the link of the failed connect is still up (#391)
+    assert bms.is_connected
+    assert _cycle(bms, link) is None
+    assert bms.client.num_connects == 2
+    assert link.connects == 1  # the failed cycle never sampled, the rebuilt link did
+
+
+def test_aiobmsble_connect_time_is_fixed_so_only_was_connected_counts():
+    link = LinkStats('bms')
+    assert link.observe(False, 100.0, 100.0)
+    assert not link.observe(True, 100.0, 100.0)
+    assert link.connects == 1
+
+
+def _discovery(link):
+    published = {}
+
+    class Result:
+        rc = paho.MQTT_ERR_SUCCESS
+
+    class Client:
+        def publish(self, topic, payload, retain=False):
+            published[topic] = json.loads(payload)
+            return Result()
+
+    publish_hass_discovery(Client(), "test/link", 20, BmsSample(voltage=13.2, current=0), 4, [], link=link)
+    return {t.split('/')[-2]: m for t, m in published.items() if '/_link_' in t}
+
+
+def test_discovery_only_for_values_that_exist():
+    assert _discovery(None) == {}
+    d = _discovery({'link/connects': 3, 'link/age': 12})
+    assert set(d) == {'_link_connects', '_link_age'}
+    assert d['_link_age']['unit_of_measurement'] == 's'
+    assert 'unit_of_measurement' not in d['_link_connects']
+    assert all(m['entity_category'] == 'diagnostic' for m in d.values())
+    # 30 s publish period, so not the sample expiry (20 s here) or they would flicker
+    assert all(m['expire_after'] == link_stats_expire() for m in d.values())
+
+
+def test_discovery_of_rssi_and_tx_power():
+    d = _discovery({'link/connects': 1, 'link/age': 5, 'link/rssi': -70, 'link/tx_power': 9})
+    assert d['_link_rssi']['device_class'] == 'signal_strength'
+    assert d['_link_rssi']['unit_of_measurement'] == 'dBm'
+    assert d['_link_tx_power']['unit_of_measurement'] == 'dBm'
+
+
+def link_stats_expire():
+    from bmslib.mqtt_util import LINK_EXPIRE_S
+    return LINK_EXPIRE_S
+
+
+def _sampler(bms):
+    from bmslib.sampling import BmsSampler
+    return BmsSampler(bms, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60)
+
+
+def test_sampler_publishes_link_values_for_keep_alive_only():
+    bms = _Bms()
+    asyncio.run(_enter(bms))
+    s = _sampler(bms)
+    s.link.on_connect()
+    asyncio.run(s.publish_link())
+    assert set(s._link_values) == {'link/connects', 'link/age'}
+
+    bms.set_keep_alive(False)  # every sample is its own short connection
+    asyncio.run(s.publish_link())
+    assert s._link_values is None
+
+
+def test_sampler_reads_rssi_from_the_bms_client():
+    bms = _Bms()
+    asyncio.run(_enter(bms))
+    bms.client.get_conn_info = _BluekClient(SimpleNamespace(rssi=-66, tx_power=9, max_tx_power=20)).get_conn_info
+    s = _sampler(bms)
+    s.link.on_connect()
+    asyncio.run(s.publish_link())
+    assert s._link_values['link/rssi'] == -66
