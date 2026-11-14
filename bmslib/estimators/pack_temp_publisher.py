@@ -91,7 +91,6 @@ class PackTempRCPublisher:
         self.outdoor_channel = outdoor_channel
         self.sensor_name = sensor_name
         self.estimator = PackTempRCEstimator()
-        self._discovery_sent = False
 
     def update_from_sample(self, sample: "BmsSample") -> Optional[float]:
         """Advance the estimator with this sample's MOS temp + current ambients,
@@ -114,21 +113,3 @@ class PackTempRCPublisher:
         topic = f"{self.device_topic}/{self.sensor_name}"
         self.publish_fn(topic, f"{t_est:.2f}")
         return t_est
-
-    def hass_discovery_payload(self, expire_after_seconds: int) -> tuple:
-        """Returns the (topic, payload) HA-discovery entry to publish once on
-        startup. Mirrors the pattern in mqtt_util.publish_hass_discovery."""
-        node_id = self.device_topic.replace('/', '_')
-        topic = (f"homeassistant/sensor/{node_id}"
-                 f"/_{self.sensor_name}/config")
-        payload = dict(
-            device_class="temperature",
-            unit_of_measurement="°C",
-            state_topic=f"{self.device_topic}/{self.sensor_name}",
-            name="Pack Temp (RC est.)",
-            unique_id=f"{self.device_topic}_{self.sensor_name}",
-            expire_after=int(expire_after_seconds),
-            state_class="measurement",
-            suggested_display_precision=1,
-        )
-        return topic, payload

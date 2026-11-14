@@ -58,7 +58,6 @@ def test_online_matches_offline_simulator_at_fixed_dt():
     # seed the online estimator with the same T0 by faking one first sample
     est._state.t_pack_c = 18.5
     est._state.last_update_s = 0.0
-    est._state.samples_seen = 1
 
     T_online = np.empty(n); T_online[0] = 18.5
     for k in range(1, n):
@@ -121,7 +120,6 @@ def test_handles_irregular_dt_correctly():
     for est in (e1, e2):
         est._state.t_pack_c = 20.0
         est._state.last_update_s = 0.0
-        est._state.samples_seen = 1
     # e1: 50 steps of 60s each
     for k in range(1, 51):
         T1 = e1.update(mos_c=30.0, room_c=20.0, outdoor_c=20.0, t=k * 60)
@@ -137,7 +135,7 @@ def test_large_gap_triggers_reinit():
     estimator should re-seed rather than blindly continue."""
     est = PackTempRCEstimator(max_gap_s=3600)
     est.update(mos_c=22.0, room_c=18.0, outdoor_c=10.0, t=0)
-    T_before = est.t_pack
+    T_before = est.state.t_pack_c
     # 3 hours later, jump to a wildly different MOS
     T_after = est.update(mos_c=45.0, room_c=18.0, outdoor_c=10.0, t=3 * 3600)
     # Re-init: should sit near the new conductance-weighted average, not
@@ -155,10 +153,10 @@ def test_pack_damps_mos_spikes():
     est = PackTempRCEstimator()
     for k in range(20):                     # warmup at steady 22C
         est.update(mos_c=22, room_c=20, outdoor_c=20, t=k * 60)
-    T_pre = est.t_pack
+    T_pre = est.state.t_pack_c
     for k in range(20, 25):                 # 5-min MOS spike to 60C
         est.update(mos_c=60, room_c=20, outdoor_c=20, t=k * 60)
-    T_spike = est.t_pack
+    T_spike = est.state.t_pack_c
     # MOS jumped 38C; pack should follow by < 5% of that = < ~2C
     assert (T_spike - T_pre) < 2.0
 
@@ -170,5 +168,4 @@ def test_persistent_state_survives_serialisation():
     est.update(22, 18, 10, t=60)
     s = est.state
     assert s.t_pack_c is not None
-    assert s.samples_seen == 2
-    assert s.inputs_last == dict(mos=22, room=18, outdoor=10)
+    assert (s.since_s, s.last_update_s) == (0, 60)

@@ -1,5 +1,5 @@
 import time
-from typing import Optional, Union
+from typing import Optional
 
 from bmslib.bms import BmsSample
 from bmslib.util import get_logger, dict_to_short_string
@@ -64,7 +64,7 @@ class SocArgs:
 
 class SocState:
     def __init__(self, charging: bool, last_calibration_time: float):
-        self.charging = charging  # this is not currently used (write only)
+        self.charging = charging  # hysteresis state: charging until charge_stop, then idle until charge_start
         self.last_calibration_time = last_calibration_time
 
     def __str__(self):
@@ -127,23 +127,16 @@ class SocAlgorithm(BaseAlgorithm):
 
 
 # noinspection PyShadowingBuiltins
-def create_algorithm(repr: Union[dict, str], bms_name=None) -> BaseAlgorithm:
-    classes = dict(soc=SocAlgorithm)
-    args, kwargs = [], {}
-    if isinstance(repr, dict):
-        repr = dict(repr)
-        name = repr.pop('name')
-        kwargs = repr
-    else:
-        repr = repr.strip().split(' ')
-        name = repr.pop(0)
-        args = repr
+def create_algorithm(repr: str, bms_name=None) -> BaseAlgorithm:
+    name, *args = repr.strip().split(' ')
 
     from bmslib.store import store_algorithm_state
     state = store_algorithm_state(bms_name, algorithm_name=name)
-    algo = classes[name](
+    if name != 'soc':
+        raise KeyError(name)
+    algo = SocAlgorithm(
         name=name,
-        args=SocArgs(*args, **kwargs),
+        args=SocArgs(*args),
         state=SocState(**state) if state else SocState(charging=True, last_calibration_time=time.time())
     )
 

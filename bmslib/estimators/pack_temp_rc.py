@@ -40,7 +40,7 @@ Notes on usage:
 """
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -70,8 +70,6 @@ class PackTempState:
     """Snapshot of the estimator's internal state (for persistence/diagnostics)."""
     t_pack_c: Optional[float] = None
     last_update_s: Optional[float] = None
-    samples_seen: int = 0
-    inputs_last: dict = field(default_factory=dict)
     # when the state was last (re)initialised from the inputs: until it has run
     # for about one time constant it is still mostly that initial guess
     since_s: Optional[float] = None
@@ -100,13 +98,6 @@ class PackTempRCEstimator:
     @property
     def state(self) -> PackTempState:
         return self._state
-
-    @property
-    def t_pack(self) -> Optional[float]:
-        return self._state.t_pack_c
-
-    def reset(self) -> None:
-        self._state = PackTempState()
 
     def update(self,
                mos_c: Optional[float],
@@ -141,8 +132,6 @@ class PackTempRCEstimator:
             self._state.t_pack_c = self._initial(mos_c, room_c, outdoor_c)
             self._state.last_update_s = t
             self._state.since_s = t
-            self._state.samples_seen += 1
-            self._state.inputs_last = dict(mos=mos_c, room=room_c, outdoor=outdoor_c)
             return self._state.t_pack_c
 
         dt = t - prev_t
@@ -157,8 +146,6 @@ class PackTempRCEstimator:
 
         self._state.t_pack_c = T
         self._state.last_update_s = t
-        self._state.samples_seen += 1
-        self._state.inputs_last = dict(mos=mos_c, room=room_c, outdoor=outdoor_c)
         return T
 
     def _initial(self,

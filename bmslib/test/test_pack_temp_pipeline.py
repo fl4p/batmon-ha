@@ -113,17 +113,17 @@ def test_full_pipeline_damps_mos_spike():
     # warm up at steady MOS=22
     for k in range(30):
         p.update_from_sample(_make_sample(mos_c=22.0, t=k * 60))
-    t_pre = p.estimator.t_pack
+    t_pre = p.estimator.state.t_pack_c
 
     # 5-minute MOS spike to 60
     for k in range(30, 35):
         p.update_from_sample(_make_sample(mos_c=60.0, t=k * 60))
-    t_spike = p.estimator.t_pack
+    t_spike = p.estimator.state.t_pack_c
 
     # back to baseline
     for k in range(35, 70):
         p.update_from_sample(_make_sample(mos_c=22.0, t=k * 60))
-    t_after = p.estimator.t_pack
+    t_after = p.estimator.state.t_pack_c
 
     # Pack barely moves on the spike — and crucially, ALL emitted topic
     # payloads are the same topic with parsable float values
@@ -152,15 +152,3 @@ def test_publisher_handles_stale_ambient_gracefully():
     out = p.update_from_sample(_make_sample(mos_c=23.0, t=600))
     assert out is not None
     assert len(pub.calls) == 2
-
-
-def test_hass_discovery_payload_shape():
-    cache = AmbientCache(); pub = _PublishStub()
-    p = PackTempRCPublisher("bat/test", cache, pub)
-    topic, payload = p.hass_discovery_payload(expire_after_seconds=120)
-    assert topic == "homeassistant/sensor/bat_test/_pack_temp_est/config"
-    assert payload["device_class"] == "temperature"
-    assert payload["unit_of_measurement"] == "°C"
-    assert payload["state_topic"] == "bat/test/pack_temp_est"
-    assert payload["expire_after"] == 120
-    assert payload["unique_id"] == "bat/test_pack_temp_est"
