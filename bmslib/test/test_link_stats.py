@@ -65,20 +65,44 @@ def test_an_unknown_value_is_left_out_not_published_as_a_number():
     assert 'link/tx_power' not in link.values(connected=True)
 
 
-def test_a_failing_read_is_dropped_for_this_link_and_retried_on_the_next(caplog):
+def test_a_failing_read_is_retried_later_and_warned_once_per_link(caplog, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(link_stats.time, 'monotonic', lambda: now[0])
+    link = LinkStats('bms')
+    link.on_connect()
+    client = _BluekClient(TimeoutError())  # a transient controller hiccup
+    _poll(link, client)
+    _poll(link, client)
+    assert client.calls == 1  # not hammered
+    assert 'link/rssi' not in link.values(connected=True)
+
+    now[0] += link_stats.CONN_INFO_RETRY_S
+    _poll(link, client)
+    assert client.calls == 2
+    assert caplog.text.count('reading link RSSI failed') == 1  # the retry logs at debug
+
+    client.result = SimpleNamespace(rssi=-60, tx_power=3, max_tx_power=20)
+    now[0] += link_stats.CONN_INFO_RETRY_S
+    _poll(link, client)
+    assert link.values(connected=True)['link/rssi'] == -60
+
+
+def test_a_new_link_retries_a_failed_read_at_once(caplog):
     link = LinkStats('bms')
     link.on_connect()
     client = _BluekClient(PermissionError('mgmt status 0x14'))
     _poll(link, client)
-    _poll(link, client)
-    assert client.calls == 1
-    assert 'link/rssi' not in link.values(connected=True)
-    assert caplog.text.count('reading link RSSI failed') == 1
-
     link.on_connect()
-    client.result = SimpleNamespace(rssi=-60, tx_power=3, max_tx_power=20)
     _poll(link, client)
-    assert link.values(connected=True)['link/rssi'] == -60
+    assert client.calls == 2
+    assert caplog.text.count('reading link RSSI failed') == 2  # once per link
+
+
+def test_a_reply_without_the_fields_is_an_error_not_a_crash():
+    link = LinkStats('bms')
+    link.on_connect()
+    _poll(link, _BluekClient(object()))
+    assert 'link/rssi' not in link.values(connected=True)
 
 
 def test_a_good_read_after_a_value_is_cleared_on_reconnect():
@@ -141,6 +165,17 @@ def test_aiobmsble_connect_time_is_fixed_so_only_was_connected_counts():
     assert link.connects == 1
 
 
+def test_a_new_client_object_is_a_new_link():
+    """aiobmsble reconnects inside async_update() with a new client; was_connected
+    is True at the next cycle and connect_time does not move."""
+    link, c1, c2 = LinkStats('bms'), object(), object()
+    assert link.observe(False, 100.0, 100.0, c1)
+    assert not link.observe(True, 100.0, 100.0, c1)
+    assert link.observe(True, 100.0, 100.0, c2)
+    assert not link.observe(True, 100.0, 100.0, c2)
+    assert link.connects == 2
+
+
 def _discovery(link):
     published = {}
 
@@ -179,21 +214,22 @@ def link_stats_expire():
     return LINK_EXPIRE_S
 
 
-def _sampler(bms):
+def _sampler(bms, **kw):
     from bmslib.sampling import BmsSampler
-    return BmsSampler(bms, mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60)
+    kw.setdefault('expire_after_seconds', 60)
+    return BmsSampler(bms, dt_max_seconds=120, **kw)
 
 
-def test_sampler_publishes_link_values_for_keep_alive_only():
+def test_sampler_reads_link_values_for_keep_alive_only():
     bms = _Bms()
     asyncio.run(_enter(bms))
-    s = _sampler(bms)
+    s = _sampler(bms, mqtt_client=None)
     s.link.on_connect()
-    asyncio.run(s.publish_link())
+    asyncio.run(s.update_link())
     assert set(s._link_values) == {'link/connects', 'link/age'}
 
     bms.set_keep_alive(False)  # every sample is its own short connection
-    asyncio.run(s.publish_link())
+    asyncio.run(s.update_link())
     assert s._link_values is None
 
 
@@ -201,7 +237,67 @@ def test_sampler_reads_rssi_from_the_bms_client():
     bms = _Bms()
     asyncio.run(_enter(bms))
     bms.client.get_conn_info = _BluekClient(SimpleNamespace(rssi=-66, tx_power=9, max_tx_power=20)).get_conn_info
-    s = _sampler(bms)
+    s = _sampler(bms, mqtt_client=None)
     s.link.on_connect()
-    asyncio.run(s.publish_link())
+    asyncio.run(s.update_link())
     assert s._link_values['link/rssi'] == -66
+
+
+class _Mqtt:
+    """Records (topic, payload) in publish order."""
+
+    def __init__(self):
+        self.log = []
+
+    def publish(self, topic, payload, retain=False):
+        self.log.append((topic, payload))
+        return SimpleNamespace(rc=paho.MQTT_ERR_SUCCESS)
+
+    def subscribe(self, *a, **kw):
+        return paho.MQTT_ERR_SUCCESS, 0
+
+    def message_callback_add(self, *a, **kw):
+        pass
+
+
+def test_the_real_sampling_cycle_counts_links_and_publishes_after_discovery(monkeypatch):
+    import bmslib.mqtt_util as mqtt_util
+    from bmslib.models.dummy import DummyBt
+    monkeypatch.setattr(mqtt_util, '_last_values', {})  # no dedupe across tests
+    bms = DummyBt('dummy-link', name='dl', keep_alive=True)
+    mqtt = _Mqtt()
+    s = _sampler(bms, mqtt_client=mqtt)
+
+    async def cycles(n):
+        for _ in range(n):
+            await s._sample_inner()
+
+    asyncio.run(cycles(3))
+    assert s.link.connects == 1
+
+    topics = [t for t, _ in mqtt.log]
+    disc = topics.index('homeassistant/sensor/dl/_link_connects/config')
+    state = topics.index('dl/link/connects')
+    assert state > disc, 'the state must follow the discovery so HA does not show unknown'
+    assert dict(mqtt.log)['dl/link/connects'] == 1
+
+    bms._connected = False  # the link dropped between two samples
+    s.period_30s.state = True  # next cycle publishes the link values
+    asyncio.run(cycles(1))
+    assert s.link.connects == 2
+    assert [p for t, p in mqtt.log if t == 'dl/link/connects'][-1] == 2
+
+
+def test_expiry_follows_expire_values_after_0():
+    published = {}
+
+    class Client:
+        def publish(self, topic, payload, retain=False):
+            published[topic] = json.loads(payload)
+            return SimpleNamespace(rc=paho.MQTT_ERR_SUCCESS)
+
+    sample = BmsSample(voltage=13.2, current=0)
+    for exp, want in ((0, 0), (20, 120), (600, 600)):
+        published.clear()
+        publish_hass_discovery(Client(), "t/x", exp, sample, 4, [], link={'link/age': 3})
+        assert published['homeassistant/sensor/t_x/_link_age/config'].get('expire_after', 0) == want, exp

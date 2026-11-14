@@ -14,6 +14,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 CONN_INFO_TIMEOUT = 2.0
+CONN_INFO_RETRY_S = 300
 
 
 class LinkStats:
@@ -21,24 +22,32 @@ class LinkStats:
         self.name = name
         self.connects = 0
         self._t_up: Optional[float] = None  # time.monotonic() of the current link
-        self._conn_info_failed = False  # once per link, see conn_info()
+        self._client = None  # the client object of the current link, see observe()
+        self._conn_info_retry_t = 0.0  # time.monotonic() before which a failed read is not retried
+        self._conn_info_warned = False  # once per link
         self.rssi: Optional[int] = None
         self.tx_power: Optional[int] = None
 
     def on_connect(self):
         self.connects += 1
         self._t_up = time.monotonic()
-        self._conn_info_failed = False
+        self._conn_info_retry_t = 0.0
+        self._conn_info_warned = False
         self.rssi = None
         self.tx_power = None
 
-    def observe(self, was_connected: bool, connect_time_before, connect_time_after) -> bool:
-        """Count a new link after the sampler's `async with bms`. A BMS that was
-        not connected before has a new link. So has one whose connect_time moved:
-        __aenter__ rebuilds a link that survived a connect() which raised
-        half-way, and was_connected was True then (#391). aiobmsble models
-        (BLE_BMS_wrap) keep connect_time fixed, so only the first rule applies."""
-        if not was_connected or connect_time_after != connect_time_before:
+    def observe(self, was_connected: bool, connect_time_before, connect_time_after, client=None) -> bool:
+        """Count a new link after the sampler's `async with bms`. It is new when
+        - the BMS was not connected before,
+        - its connect_time moved: __aenter__ rebuilds a link that survived a
+          connect() which raised half-way, and was_connected was True then (#391),
+        - or its client is another object than last time: aiobmsble
+          (BLE_BMS_wrap) reconnects inside async_update() with a new client and
+          keeps connect_time fixed."""
+        new_client = self._client is not None and client is not None and client is not self._client
+        if client is not None:
+            self._client = client
+        if not was_connected or connect_time_after != connect_time_before or new_client:
             self.on_connect()
             return True
         return False
@@ -50,22 +59,26 @@ class LinkStats:
         """Read RSSI/TX power from a client that has bluek's get_conn_info().
 
         A stack without it leaves both None. An error (not connected, no
-        CAP_NET_ADMIN, a failed HCI read) clears both and is logged once per
-        link; the next link tries again."""
+        CAP_NET_ADMIN, a failed HCI read, a timeout) clears both until a retry
+        CONN_INFO_RETRY_S later; it is logged as a warning once per link."""
         get = getattr(client, 'get_conn_info', None)
-        if get is None or self._conn_info_failed:
+        if get is None:
             self.rssi = self.tx_power = None
             return
+        if time.monotonic() < self._conn_info_retry_t:
+            return  # still None from the failed read
         try:
             ci = await asyncio.wait_for(get(), CONN_INFO_TIMEOUT)
+            rssi, tx_power = ci.rssi, ci.tx_power
         except Exception as e:
-            self._conn_info_failed = True
+            self._conn_info_retry_t = time.monotonic() + CONN_INFO_RETRY_S
             self.rssi = self.tx_power = None
-            logger.warning('%s: reading link RSSI failed, not retried on this link: %s',
-                           self.name, str(e) or type(e).__name__)
+            (logger.debug if self._conn_info_warned else logger.warning)(
+                '%s: reading link RSSI failed, retry in %d s: %s',
+                self.name, CONN_INFO_RETRY_S, str(e) or type(e).__name__)
+            self._conn_info_warned = True
             return
-        self.rssi = ci.rssi
-        self.tx_power = ci.tx_power
+        self.rssi, self.tx_power = rssi, tx_power
 
     def values(self, connected: bool) -> dict:
         """Topic suffix -> value. While disconnected only the connect count, so

@@ -463,7 +463,8 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         if link and link.get(k) is not None:
             _hass_discovery(k, desc.get('device_class'), desc.get('unit'), state_class=desc['state_class'],
                             icon=desc.get('icon'), name=desc['name'],
-                            expire_after=max(LINK_EXPIRE_S, expire_after_seconds),
+                            # expire_values_after: 0 turns expiry off for these too
+                            expire_after=max(LINK_EXPIRE_S, expire_after_seconds) if expire_after_seconds else None,
                             entity_category="diagnostic")
 
     if pack_temp_est:

@@ -569,7 +569,8 @@ class BmsSampler:
 
         async with bms:
             if self.link is not None:
-                self.link.observe(was_connected, connect_time_before, getattr(bms, 'connect_time', None))
+                self.link.observe(was_connected, connect_time_before, getattr(bms, 'connect_time', None),
+                                  getattr(bms, 'client', None))
 
             # a successful connect ends the not-found streak. don't wait for a good
             # sample: _sample_inner returns None for a healthy BMS whose fetch_voltages
@@ -821,7 +822,7 @@ class BmsSampler:
 
             if self.period_discov or self.period_30s:
                 self.publish_meters()
-                await self.publish_link()
+                await self.update_link()
 
             # publish home assistant discovery every 60 samples
             if self.period_discov:
@@ -858,6 +859,10 @@ class BmsSampler:
                     # settings states are not retained and only come with a refresh (5 min):
                     # send them again so entities HA just created show a value now
                     self.settings_publisher.states(settings, force=True)
+
+            if self.period_discov or self.period_30s:
+                # after the discovery above, so an entity HA just created gets its state now
+                self.publish_link()
 
         self.num_samples += 1
         t_disc = time.time()
@@ -990,9 +995,10 @@ class BmsSampler:
         bms = self.bms
         return self.link is not None and bool(getattr(bms, 'keep_alive', False))
 
-    async def publish_link(self):
-        """Publish the link diagnostics. Only for keep_alive: without it every
-        sample is its own short connection, so the age and count say nothing."""
+    async def update_link(self):
+        """Read the link diagnostics for publish_link() and the HA discovery.
+        Only for keep_alive: without it every sample is its own short
+        connection, so the age and count say nothing."""
         if not self._link_published():
             self._link_values = None
             return
@@ -1000,7 +1006,9 @@ class BmsSampler:
         if connected:
             await self.link.poll_conn_info(self.bms.client)
         self._link_values = self.link.values(connected)
-        for k, v in self._link_values.items():
+
+    def publish_link(self):
+        for k, v in (self._link_values or {}).items():
             mqtt_single_out(self.mqtt_client, f"{self.mqtt_topic_prefix}/{k}", v)
 
     def publish_meters(self):
