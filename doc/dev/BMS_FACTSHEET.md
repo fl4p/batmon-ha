@@ -212,14 +212,17 @@ batmon implements the **new protocol** (`7E A1`).
 
 **Transport.** BLE: service `0xffe0`, single char `0xffe1` (notify + write, Nordic-UART style). UART @ 19200 8N1 (new) or 9600 (legacy RFCOMM dongles).
 
-**Wire protocol.** Frame: `7E A1 <func> <addr-hi> <addr-lo> <len-hi> <len-lo> [<data>] <CRC16-LE> AA 55`. CRC = CRC16-Modbus over bytes after the first header byte. Function codes: `0x01` status, `0x02` device info, `0x23` authenticate, `0x51` write register. Reply func = request + `0x10` (e.g. `0x11`, `0x12`). Settings register space `0x0000–0x017E`.
+**Wire protocol.** Frame: `7E A1 <func> <addr-lo> <addr-hi> <len> [<data>] <CRC16-LE> AA 55`; in a write (`0x51`) the `<len>` byte carries the value. CRC = CRC16-Modbus over bytes after the first header byte. Function codes: `0x01` status, `0x02` device info, `0x23` authenticate, `0x51` write register. Reply func = request + `0x10` (e.g. `0x11`, `0x12`). Settings register space `0x0000–0x017E`.
 
-**Switch writes need the `0x23` auth frame first.** `7E A1 23 6A 01 0C "123456789abc" <CRC> AA 55` (default password,
-as syssi sends it before every write). Tested 2026-11-14 on ANT-20PHB0TB120A, sw `20PHUB00-211026A`, BLE through an
+**Charge-off held only after the `0x23` auth frame (one BLE unit).** `7E A1 23 6A 01 0C "123456789abc" <CRC> AA 55`
+(default password, as syssi sends it before every write; ACKed with func `0x43`). Tested 2026-11-14 on ANT-20PHB0TB120A, sw `20PHUB00-211026A`, BLE through an
 ESPHome proxy, charge switch only (discharge not tried: live van battery):
 - without auth, charge-off (`0x51`, register `0x0004`) opened the FET (30 A to -2 A within 7 s), but the BMS closed it
   again on its own ~5 s later;
 - with auth, charge-off held for the whole 40 s window (BMS reported OFF, 0 A) until the charge-on write.
+
+One trial each; a BMS setting behind the revert is not ruled out. batmon sends the same auth frame on `ant_uart`,
+untested there.
 
 Both times the first status poll after the charge-on write went unanswered (one timeout, then normal samples; the first
 run also dropped the link once).

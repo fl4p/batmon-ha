@@ -9,7 +9,8 @@ ANT boards speak one of two protocols on the wire:
         reply    7E A1 <func|0x10> <addr lo hi> <len> <payload> <crc16 lo hi> AA 55 [extra section]
     CRC16/Modbus over bytes 1..5+len. Status: func 0x01 -> 0x11 (152 bytes for
     up to 32 cells), device info: func 0x02 @0x026C -> 0x12. Writes (MOSFET
-    switches) are func 0x51 and are ACKed with 0x61.
+    switches) are func 0x51, ACKed with 0x61, each preceded by the auth frame
+    (func 0x23 @0x016A, default password, ACKed with 0x43).
 
 ``ant_old_uart`` -- pre-2021 boards, "AA 55 AA FF" protocol
     request  5A 5A 00 00 01 01        (5A 5A = read, address 0x00, data 0x0001, sum)

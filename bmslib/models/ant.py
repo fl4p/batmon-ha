@@ -80,6 +80,9 @@ class AntBt(BtBms):
         self._last_response = None
         self._voltages = []
         self.char = None
+        # keeps a status request from landing between the auth frame and its register write
+        # (MQTT switch commands run in another task than the sampler)
+        self._write_lock = asyncio.Lock()
 
     def _notification_handler(self, sender, data: bytes):
 
@@ -157,7 +160,8 @@ class AntBt(BtBms):
             # the bond is non-trivial and we hit "Insufficient authorization
             # (8)" before any data flows. WoR is fine because the BMS
             # replies via notify on ffe1, not via the write-response.
-            await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val), response=False)
+            async with self._write_lock:
+                await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val), response=False)
             return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
 
     async def fetch_device_info(self) -> DeviceInfo:
@@ -281,8 +285,10 @@ class AntBt(BtBms):
                               buzzer=[0x001E, 0x001F])
         addr = register_onoff[switch][0 if state else 1]
         # without the auth frame ant24 (sw 20PHUB00-211026A) took a charge-off but reverted it within seconds
-        await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
-        await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0), response=False)
+        async with self._write_lock:
+            await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
+            await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0),
+                                              response=False)
 
     def debug_data(self):
         return self._last_response

@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* Fix: ANT charge/discharge switches (`ant`, `ant_uart`) turned back on by themselves seconds after switching off; batmon now authenticates with the default password before each write.
+* Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.
 
 ## [2.30]
 
