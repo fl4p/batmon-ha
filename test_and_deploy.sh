@@ -32,7 +32,21 @@ CONTAINER="addon_local_${SLUG}"
 step() { printf '\n==> %s\n' "$*"; }
 
 step "1/4 pytest (bmslib/test)"
-if ! python3 -m pytest bmslib/test -q; then
+# Test venv mirroring the image's main venv: requirements.txt pins plus
+# aiobmsble --no-deps (it would drag bleak to 3.x, #275), at the version the
+# Dockerfile pins. Rebuilt when requirements.txt or the Dockerfile change.
+# PYTHON overrides the interpreter used to create it (default python3.13).
+VENV=./venv
+if [[ ! -f "$VENV/.stamp" || requirements.txt -nt "$VENV/.stamp" || Dockerfile -nt "$VENV/.stamp" ]]; then
+  AIOBMSBLE=$(sed -nE "s/.*venv\/bin\/pip3 install --no-deps '(aiobmsble==[^']+)'.*/\1/p" Dockerfile | head -1)
+  : "${AIOBMSBLE:?aiobmsble pin not found in Dockerfile}"
+  rm -rf "$VENV"
+  "${PYTHON:-python3.13}" -m venv "$VENV"
+  "$VENV/bin/pip" install -q -r requirements.txt pytest numpy influxdb requests
+  "$VENV/bin/pip" install -q --no-deps "$AIOBMSBLE"
+  touch "$VENV/.stamp"
+fi
+if ! "$VENV/bin/python" -m pytest bmslib/test -q; then
   echo "Tests failed — aborting deploy." >&2
   exit 2
 fi
@@ -45,7 +59,7 @@ step "2/4 rsync -> ${HOST}:${REMOTE_DIR}"
 # generates on the target).
 rsync -a --delete \
   --filter=':- .gitignore' \
-  --exclude=.git --exclude=docs --exclude=.idea \
+  --exclude=.git --exclude=doc --exclude=.idea \
   --exclude=options.json --exclude=.env \
   --exclude=user_id --exclude=.github \
   --exclude=test_and_deploy.sh \

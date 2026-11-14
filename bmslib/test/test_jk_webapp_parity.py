@@ -7,7 +7,7 @@ on one side and not the other produces plausible wrong numbers, not an error.
 
 So both are run against the SAME captured frames (the #365 fixtures) and
 compared field by field. This is the shared-golden-fixture contract from
-plans/gui-and-mobile-app.md, made executable.
+doc/dev/plans/gui-and-mobile-app.md, made executable.
 
 Skipped when node is unavailable; it is a JS parity check, not a Python test.
 """

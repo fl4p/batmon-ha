@@ -22,4 +22,4 @@ __pycache__
 .pytest_cache
 .explyt
 .DS_Store
-plans
+doc

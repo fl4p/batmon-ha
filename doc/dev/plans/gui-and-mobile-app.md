@@ -365,5 +365,5 @@ app-store publishing, historical charting, impedance/qmax views.
 
 ## Note
 
-On approval, copy this plan to `plans/gui-and-mobile-app.md` in the repo as step 1.
+On approval, copy this plan to `doc/dev/plans/gui-and-mobile-app.md` in the repo as step 1.
 Full review transcript: `~/codex-reviews/batmon-gui-plan/review.log`.
