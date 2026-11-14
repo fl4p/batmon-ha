@@ -2,6 +2,7 @@
 
 * New `jk04` type for old JK active balancers (JK04 protocol, e.g. JK-B2A16S, JK-B5A24S), untested on hardware. `jk` now rejects their frames with a hint instead of decoding them as JK02.
 * Fix: a standalone or Docker `options.json` without `mqtt_user` crashed at the MQTT connect; an unset user or password now means anonymous (#202, thanks @coconup).
+* New wired types `ant_uart` (2021+ ANT boards) and `ant_old_uart` (older boards), 19200 baud, untested on hardware.
 * `soh_estimator`: new `SoC gauge error` diagnostic, the BMS's SoC minus what each full charge or rest near empty says. A gauge that never resyncs shows up there (doc/SoC.md).
 * `impedance_estimator`, `soh_estimator`: the estimator code moved to `bmslib/estimators/`, which changes the code fingerprint of saved state, so saved Cell Resistance windows and Qmax/SoH segments are discarded once and relearned.
 

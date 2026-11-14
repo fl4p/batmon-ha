@@ -43,7 +43,7 @@ batmon device connectors:
 * Renogy smart lithium batteries (`renogy_ble` over BLE via the BT-2 dongle, `renogy_uart` over RS485)
 * Felicity Solar 48 V LiFePo4 packs (FLB48314TG1, FLB48100, LPBF48/LPBA48; `felicity` over BLE, `felicity_uart` over RS485)
 * JBD / Jiabaida/ Xiaoxiang / Overkill Solar BMS (`jbd`)
-* ANT BMS (`ant`)
+* ANT BMS (`ant` over BLE, `ant_uart` / `ant_old_uart` over UART)
 * Supervolt BMS (`supervolt`)
 * SOK / ABC-BMS (`sok`, routed through the aiobmsble `abc_bms` decoder; use `sok_legacy` for the pre-2023 native driver)
 * Basen BMS (`basen`), ported from [syssi/esphome-basen-bms](https://github.com/syssi/esphome-basen-bms)
@@ -112,9 +112,10 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
 
 * `address`: the Bluetooth MAC address, or the device name as shown in discovery. Start the add-on to see a list of
   visible devices in the log.
-* `type`: `jk`, `jk_24s`, `jk_32s`, `jk04`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `daly`, `daly2`,
-  `daly_ble`, `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`, `supervolt`,
-  `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`, `victron`, or any tag listed under
+* `type`: `jk`, `jk_24s`, `jk_32s`, `jk04`, `jk_uart`, `jk_pb_uart`, `jbd`, `jbd_uart`, `ant`, `ant_uart`,
+  `ant_old_uart`, `daly`, `daly2`, `daly_ble`, `daly_uart`, `pace_uart`, `seplos_uart`, `braunpwr_uart`, `renogy_uart`,
+  `felicity_uart`, `supervolt`, `sok`, `sok_legacy`, `basen`, `basen_uart`, `litime`, `offgridtec`, `bm6`, `bm2`,
+  `victron`, or any tag listed under
   [Supported BLE Devices](#supported-ble-devices). `dummy` is a mock BMS.
   * JK: `jk_24s` for the older 24s version (firmware < 11), `jk_32s` for the 32s version (firmware ≥ 11), `jk` to
     auto-detect (may give invalid data if detection fails). `jk04` for old JK active balancers without a `P` in the
@@ -206,6 +207,9 @@ same `adapter:`, one entry each.
 * `felicity_uart` (9600): Felicity Solar 48 V packs (FLB48314TG1, FLB48100, LPBF48/LPBA48), RS485 on RJ45 pins 5/6.
   Packs without DIP switches number themselves from 1, not in wiring order: add entries from 1 until one stops
   answering, and tell packs apart by their readings ([#415](https://github.com/fl4p/batmon-ha/issues/415)).
+* `ant_uart` (19200): ANT BMS from 2021 on (16ZMB, 24AHA, 24BH, …); if it doesn't answer, try `ant_old_uart`, which
+  is also for older ANT boards. 3.3 V TTL on the 4-pin port; connect VCC to the adapter's 3.3 V, or the BMS doesn't
+  answer. Append `:9600` to the type for 9600 baud.
 
 Except for `jk_uart` and `daly_uart`, these are not yet confirmed on live hardware. Feedback welcome.
 

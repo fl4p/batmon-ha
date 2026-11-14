@@ -1,6 +1,5 @@
 * Implement old JK04
 * Read device BT info ([Device Information Service](https://www.bluetooth.com/specifications/specs/device-information-service-1-1/))
-* RS485 for ANT [#22](https://github.com/fl4p/batmon-ha/issues/22)
 * Make this a custom integration? [home-assistant-bms-tools-integration](https://github.com/ElD4n1/home-assistant-bms-tools-integration)
 * GUI: export/import BMS meter data
 * JK data push (beyond the notifications jikong.py already subscribes to?)
