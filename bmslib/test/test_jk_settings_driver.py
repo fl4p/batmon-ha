@@ -235,7 +235,9 @@ def test_write_waits_settle_after_refresh(monkeypatch):
     bms, client = _make(settle=None, readback=None)
     events = _record_timing(monkeypatch, bms, client)
     asyncio.run(bms.refresh_settings())
-    t_query = time.monotonic()
+    # the driver's own query timestamp (the read-back query moves it): a clock read here, after
+    # refresh_settings() returned, starts later and made the lower bound fail by fractions of a ms
+    t_query = bms._settings_query_t
     events.clear()
     res = asyncio.run(bms.write_setting('charge_utp', 3.0))
     elapsed = time.monotonic() - t_query
