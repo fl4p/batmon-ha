@@ -214,6 +214,12 @@ batmon implements the **new protocol** (`7E A1`).
 
 **Wire protocol.** Frame: `7E A1 <func> <addr-hi> <addr-lo> <len-hi> <len-lo> [<data>] <CRC16-LE> AA 55`. CRC = CRC16-Modbus over bytes after the first header byte. Function codes: `0x01` status, `0x02` device info, `0x23` authenticate, `0x51` write register. Reply func = request + `0x10` (e.g. `0x11`, `0x12`). Settings register space `0x0000–0x017E`.
 
+**Switch writes need no authentication.** Tested 2026-11-14 on ANT-20PHB0TB120A, sw `20PHUB00-211026A`, BLE through an
+ESPHome proxy. The charge-off write (`0x51`, register `0x0004`, no prior `0x23`) opened the charge FET: charge current
+went from 30 A to -2 A within 7 s. The FET then closed again on its own within ~5 s, so charge-off does not hold on
+this unit (unknown whether a BMS setting causes that). The link dropped 22 s after the following charge-on write and
+reconnected 5 s later. One trial; discharge-off was not tested on purpose (live van battery).
+
 **Fields decoded by batmon.** `voltage`, `current`, `charge`, `capacity`, `total_charge_throughput`, `soc`, `soh`, `temperatures` (6 probes, NaN sentinel 65496), `mos_temperature`, `switches.{charge,discharge}`, plus per-cell mV (up to 32). Device info exposes hardware + firmware strings (with UTF-8 `errors='replace'` for buggy firmware byte streams).
 
 **Known on the wire but NOT decoded by batmon.** Balancer temperature (read right after `mos_temp` but discarded via a bare `offset += 2`), balance state byte (bit-per-cell mask — currently skipped), balance enable / direction bits, reserved status byte after charge-MOS, instantaneous power register (signed i32, read but commented out — would let us populate `power` directly instead of `V·I`), 16-bit alarm / problem code, runtime / uptime seconds, ΔV (computable from cells but not emitted), serial number, settings/threshold registers from the `0x0000–0x017E` write space.
