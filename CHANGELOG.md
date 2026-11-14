@@ -21,6 +21,7 @@
 * `type: auto` now detects the `bm2` and `bm6` car battery monitors, so an Ancel BM200 finds its protocol by itself (#41).
 * Doc: the Ancel BM200 reads with `type: bm6`, not `bm2`; `bm2` now suggests `bm6` when no BM2 frame arrives. Thanks @BigDurl (#41).
 * Fix (`ble_stack: esphome`): one unreachable proxy held start-up forever, so nothing was polled. Start-up now waits at most 10 s; an offline proxy keeps reconnecting in the background (#430).
+* Fix: the 2.28 fix that saves state before an MQTT-watchdog exit almost never ran, because the event-loop check fired first; the final store now runs on that path too (#391).
 
 ## [2.28]
 
