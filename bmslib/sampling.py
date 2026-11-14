@@ -1004,7 +1004,7 @@ class BmsSampler:
             return
         connected = bool(self.bms.is_connected)
         if connected:
-            await self.link.poll_conn_info(self.bms.client)
+            await self.link.poll_conn_info(self.bms.client, getattr(self.bms, 'address', None))
         self._link_values = self.link.values(connected)
 
     def publish_link(self):

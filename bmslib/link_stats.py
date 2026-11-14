@@ -1,10 +1,12 @@
 """Link diagnostics of one BMS connection: connects since start, age of the
 current link and, where the BLE stack can read them, live RSSI and TX power.
 
-Only bluek (ble_stack: bluek) reads RSSI/TX power of a live link, through the
-kernel's mgmt GET_CONN_INFO. bleak over BlueZ D-Bus stops updating RSSI once
-connected and the ESPHome proxy API has no such message, so on those stacks the
-two values stay None and nothing is published, rather than a stale advert RSSI.
+RSSI/TX power of a live link come from bluek (ble_stack: bluek, the kernel's
+mgmt GET_CONN_INFO) or, on ble_stack: esphome, from nimble-ble-proxy's
+GET /links (bmslib/ble/esphome_proxy/links.py). bleak over BlueZ D-Bus stops
+updating RSSI once connected and the ESPHome API has no such message, so with
+those the two values stay None and nothing is published, rather than a stale
+advert RSSI.
 """
 import asyncio
 import logging
@@ -55,21 +57,22 @@ class LinkStats:
     def age_s(self) -> Optional[float]:
         return None if self._t_up is None else time.monotonic() - self._t_up
 
-    async def poll_conn_info(self, client) -> None:
-        """Read RSSI/TX power from a client that has bluek's get_conn_info().
+    async def poll_conn_info(self, client, address: Optional[str] = None) -> None:
+        """Read RSSI/TX power of the live link, from bluek's get_conn_info() or,
+        through an ESPHome proxy, from nimble-ble-proxy's GET /links.
 
-        A stack without it leaves both None. An error (not connected, no
-        CAP_NET_ADMIN, a failed HCI read, a timeout) clears both until a retry
-        CONN_INFO_RETRY_S later; it is logged as a warning once per link."""
-        get = getattr(client, 'get_conn_info', None)
-        if get is None:
+        A stack that can't tell leaves both None. An error (not connected, no
+        CAP_NET_ADMIN, a failed HCI or HTTP read, a timeout) clears both until a
+        retry CONN_INFO_RETRY_S later; it is logged as a warning once per link."""
+        read = _conn_info_reader(client, address)
+        if read is None:
             self.rssi = self.tx_power = None
             return
         if time.monotonic() < self._conn_info_retry_t:
             return  # still None from the failed read
         try:
-            ci = await asyncio.wait_for(get(), CONN_INFO_TIMEOUT)
-            rssi, tx_power = ci.rssi, ci.tx_power
+            ci = await asyncio.wait_for(read(), CONN_INFO_TIMEOUT)
+            rssi, tx_power = (ci.rssi, ci.tx_power) if ci is not None else (None, None)
         except Exception as e:
             self._conn_info_retry_t = time.monotonic() + CONN_INFO_RETRY_S
             self.rssi = self.tx_power = None
@@ -92,3 +95,16 @@ class LinkStats:
             if self.tx_power is not None:
                 v['link/tx_power'] = self.tx_power
         return v
+
+
+def _conn_info_reader(client, address):
+    """A coroutine function returning the link's (rssi, tx_power) namespace, or
+    None when this client's stack can't read them."""
+    get = getattr(client, 'get_conn_info', None)
+    if get is not None:  # bluek
+        return get
+    if address:
+        from bmslib.ble.esphome_proxy import links
+        if links.proxy_host(client) is not None:
+            return lambda: links.conn_info(client, address)
+    return None
