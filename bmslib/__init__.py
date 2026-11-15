@@ -88,13 +88,22 @@ class FuturesPool:
         if name not in self._futures:
             raise KeyError('future %s not found' % name)
 
+        # asyncio.wait() neither cancels the future on timeout nor raises when the
+        # future is cancelled, so the two cancellations stay apart (without
+        # Task.cancelling(), 3.11+, the image may run 3.10):
+        # - clear() cancels the pooled future on disconnect: callers handle that
+        #   like a timeout (retry, reconnect), so it is reported as one;
+        # - cancelling the waiting task raises CancelledError out of wait().
+        fut = self._futures[name]
         try:
-            return await asyncio.wait_for(self._futures.get(name), timeout)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            self.remove(name)
-            raise asyncio.TimeoutError("timeout waiting for %s" % name)
+            await asyncio.wait((fut,), timeout=timeout)
         finally:
             self.remove(name)
+            if not fut.done():
+                fut.cancel()  # timeout or waiter cancelled: nobody reads it any more
+        if fut.cancelled():
+            raise asyncio.TimeoutError("timeout waiting for %s" % name)
+        return fut.result()
 
 
 class FutureContext:

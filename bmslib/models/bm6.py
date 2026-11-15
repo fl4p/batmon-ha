@@ -42,17 +42,6 @@ EMPTY_REALTIME = bytes.fromhex('d15507ff000000000000000000000000')
 _STATES = {0: 'ok', 1: 'low_voltage', 2: 'charging'}
 
 
-def _cancellation_requested() -> bool:
-    """True if the running task has a pending cancellation.
-
-    FuturesPool.wait_for() catches CancelledError and re-raises it as
-    asyncio.TimeoutError, so a caller that retries on a timeout would swallow the
-    cancellation and put another request on the air.
-    """
-    task = asyncio.current_task()
-    cancelling = getattr(task, 'cancelling', None)  # 3.11+
-    return bool(cancelling and cancelling())
-
 
 # --- minimal AES-128 (single block) ------------------------------------------------
 
@@ -276,9 +265,6 @@ class Bm6Bt(BtBms):
             try:
                 return await self._q_write_before_notify(cmd, plain)
             except asyncio.TimeoutError:
-                if _cancellation_requested():
-                    # FuturesPool.wait_for reports a cancellation as a timeout
-                    raise asyncio.CancelledError from None
                 self.logger.info("%s write-before-notify stopped answering, back to the "
                                  "default ordering", self.name)
                 self._write_before_notify = False
@@ -371,8 +357,6 @@ class Bm2Bt(Bm6Bt):
             try:
                 plain = await self._fetch_futures.wait_for(0xF5, self.TIMEOUT)
             except asyncio.TimeoutError:
-                if _cancellation_requested():
-                    raise asyncio.CancelledError from None
                 # a BM6-protocol device only answers requests, so it stays silent here (#41)
                 log = self.logger.debug if self._bm6_hinted else self.logger.warning
                 self._bm6_hinted = True

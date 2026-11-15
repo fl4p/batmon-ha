@@ -15,6 +15,29 @@ from bmslib.bms import BmsSample
 from bmslib.ble.bt import BtBms, enumerate_services
 
 
+class _HexCursor:
+    """Reads consecutive ASCII-hex fields of a frame, starting after the ':' start byte."""
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self.pos = 1
+
+    def skip(self, nchars: int):
+        self.pos += nchars
+
+    def _take(self, nchars: int) -> int:
+        end = self.pos + nchars
+        v = int(self._data[self.pos:end].decode(), 16)
+        self.pos = end
+        return v
+
+    def u8(self) -> int:
+        return self._take(2)
+
+    def u16(self) -> int:
+        return self._take(4)
+
+
 class SuperVoltBt(BtBms):
     TIMEOUT = 8
 
@@ -106,240 +129,93 @@ class SuperVoltBt(BtBms):
         self._fetch_futures.clear()
         await super().disconnect()
 
-    # send request to battery for Realtime-Data
-    async def requestRealtimeData(self):
-        data = bytes(":000250000E03~", "ascii")
-        # handle = 0x0013
-        # handle = 19
-        handle = self.UUID_TX
-        # 0x0013 -> 19 -> 6e400002-b5a3-f393-e0a9-e50e24dcca9e
-        ret = await self.client.write_gatt_char(char_specifier=handle, data=data)
-        # ret = self.device.writeCharacteristic(0x0013, data)
+    async def _request(self, frame: bytes):
+        ret = await self.client.write_gatt_char(char_specifier=self.UUID_TX, data=frame)
         if self.verbose_log:
-            self.logger.debug("requestRealtimeData: " + str(ret) + " " + str(data))
-
-    # send request to battery for Capacity-Data
-    async def requestCapacity(self):
-        data = bytes(":001031000E05~", "ascii")
-        # handle = 0x0013
-        # handle = 19
-        handle = self.UUID_TX
-        # 0x0013 -> 19 -> 6e400002-b5a3-f393-e0a9-e50e24dcca9e
-        ret = await self.client.write_gatt_char(char_specifier=handle, data=data)
-        if self.verbose_log:
-            self.logger.debug("requestCapacity: " + str(ret) + " " + str(data))
+            self.logger.debug("request %s: %s", frame, ret)
 
     async def requestData(self):
         try:
-            await self.requestRealtimeData()
+            await self._request(b":000250000E03~")  # realtime data
             await self.waitForNotification(10.0)
 
-            await self.requestCapacity()
+            await self._request(b":001031000E05~")  # capacity
             await self.waitForNotification(10.0)
         except Exception as e:
             from bmslib.util import summarize_exc
             self.logger.error('supervolt connect/fetch failed: %s', summarize_exc(e))
 
-    # try to read values from data
     def parseData(self, data):
-        if self.verbose_log:
-            self.logger.debug("parseData: {}".format(len(data)))
+        """Decode one complete ASCII-hex frame: realtime (128 bytes) or capacity (30 bytes).
+        Fields are stored as they are decoded, so a garbled field leaves the earlier ones set."""
         try:
-            if data:
-                if len(data) == 128:
-                    if self.verbose_log:
-                        self.logger.info("parse Realtimedata: {}".format(type(data)))
-                    if type(data) is bytearray:
-                        data = bytes(data)
-                    if type(data) is bytes:
-                        # print("bytes")
-
-                        start = 1
-                        end = start + 2
-                        self.address = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("address: " + str(self.address))
-
-                        start = end
-                        end = start + 2
-                        self.command = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("command: " + str(self.command))
-
-                        start = end
-                        end = start + 2
-                        self.version = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("version: " + str(self.version))
-
-                        start = end
-                        end = start + 4
-                        self.length = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("length: " + str(self.length))
-
-                        start = end
-                        end = start + 14
-                        bdate = data[start: end]
-                        if self.verbose_log:
-                            self.logger.debug("date: " + str(bdate))
-
-                        start = end
-                        end = start + 16 * 4
-                        bvoltarray = data[start: end]
-                        # print("voltarray: " + str(bvoltarray))
-                        self.totalV = 0
-                        for i in range(0, 11):
-                            bvolt = data[(start + i * 4): (start + i * 4 + 4)]
-                            self.cellV[i] = int(bvolt.decode(), 16)
-                            self.totalV += self.cellV[i] * 1e-3
-                            if self.verbose_log:
-                                self.logger.debug(
-                                    "volt" + str(i) + ": " + str(bvolt) + " / " + str(self.cellV[i]) + "V")
-
-                        if self.verbose_log:
-                            self.logger.debug("totalVolt: " + str(self.totalV))
-
-                        start = end
-                        end = start + 4
-                        bcharging = data[start: end]
-                        self.chargingA = int(bcharging.decode(), 16) / 100.0
-                        if self.verbose_log:
-                            self.logger.debug("charging: " + str(bcharging) + " / " + str(self.chargingA) + "A")
-                        if self.chargingA > 500:
-                            # problem with supervolt
-                            self.logger.info("charging too big: {}".format(self.chargingA))
-                            self.chargingA = 0.0
-
-                        start = end
-                        end = start + 4
-                        bdischarging = data[start: end]
-                        self.dischargingA = int(bdischarging.decode(), 16) / 100.0
-                        if self.verbose_log:
-                            self.logger.debug(
-                                "discharging: " + str(bdischarging) + " / " + str(self.dischargingA) + "A")
-                        if self.dischargingA > 500:
-                            # problem with supervolt
-                            self.logger.info("discharging too big: {}".format(self.dischargingA))
-                            self.dischargingA = 0.0
-
-                        self.loadA = -self.chargingA + self.dischargingA
-                        if self.verbose_log:
-                            self.logger.debug("loadA:" + str(self.loadA) + "A")
-
-                        for i in range(0, 4):
-                            start = end
-                            end = start + 2
-                            btemp = data[start: end]
-                            self.tempC[i] = int(btemp.decode(), 16) - 40
-                            if self.verbose_log:
-                                self.logger.debug(
-                                    "temp" + str(i) + ": " + str(btemp) + " / " + str(self.tempC[i]) + "°C")
-
-                        start = end
-                        end = start + 4
-                        self.workingState = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("workingstate: " + str(self.workingState) + " / " + str(data[start: end])
-                                              + " / " + self.getWorkingStateTextShort() + " / " + self.getWorkingStateText())
-
-                        start = end
-                        end = start + 2
-                        self.alarm = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("alarm: " + str(self.alarm))
-
-                        start = end
-                        end = start + 4
-                        self.balanceState = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("balanceState: " + str(self.balanceState))
-
-                        start = end
-                        end = start + 4
-                        self.dischargeNumber = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("dischargeNumber: " + str(self.dischargeNumber))
-
-                        start = end
-                        end = start + 4
-                        self.chargeNumber = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("chargeNumber: " + str(self.chargeNumber))
-
-                        # State of Charge (%)
-                        start = end
-                        end = start + 2
-                        self.soc = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("soc: " + str(self.soc))
-                            self.logger.info("end of parse realtimedata")
-                            self.logger.debug("end code:" + str(int(data[end:128 - 1].decode(), 16)))
-
-                    else:
-                        self.logger.warning("no bytes")
-                elif len(data) == 30:
-                    if self.verbose_log:
-                        self.logger.debug("capacity")
-                    if type(data) is bytearray:
-                        data = bytes(data)
-                    if type(data) is bytes:
-                        start = 1
-                        end = start + 2
-                        self.address = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("address: " + str(self.address))
-
-                        start = end
-                        end = start + 2
-                        self.command = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("command: " + str(self.command))
-
-                        start = end
-                        end = start + 2
-                        self.version = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("version: " + str(self.version))
-
-                        start = end
-                        end = start + 4
-                        self.length = int(data[start: end].decode(), 16)
-                        if self.verbose_log:
-                            self.logger.debug("length: " + str(self.length))
-
-                        start = end
-                        end = start + 4
-                        breseved = data[start: end]
-                        if self.verbose_log:
-                            self.logger.debug("reseved: " + str(breseved))
-
-                        start = end
-                        end = start + 4
-                        self.remainingAh = int(data[start: end].decode(), 16) / 10.0
-                        if self.verbose_log:
-                            self.logger.debug("remainingAh: " + str(self.remainingAh) + " / " + str(data[start: end]))
-
-                        start = end
-                        end = start + 4
-                        self.completeAh = int(data[start: end].decode(), 16) / 10.0
-                        if self.verbose_log:
-                            self.logger.debug("completeAh: " + str(self.completeAh))
-
-                        start = end
-                        end = start + 4
-                        self.designedAh = int(data[start: end].decode(), 16) / 10.0
-                        if self.verbose_log:
-                            self.logger.debug("designedAh: " + str(self.designedAh))
-                            self.logger.info("end of parse capacity")
-                            self.logger.debug("end code:" + str(int(data[end:30 - 1].decode(), 16)))
-                else:
-                    self.logger.warning("wrong length: " + str(len(data)))
-            else:
+            if not data:
                 self.logger.debug("no data")
+                return
+            if len(data) not in (128, 30):
+                self.logger.warning("wrong length: " + str(len(data)))
+                return
+            if type(data) is bytearray:
+                data = bytes(data)
+            if type(data) is not bytes:
+                if len(data) == 128:
+                    self.logger.warning("no bytes")
+                return
+
+            c = _HexCursor(data)
+            self.frame_address = c.u8()  # RS485 address byte; must not clobber the BLE MAC in self.address
+            self.command = c.u8()
+            self.version = c.u8()
+            self.length = c.u16()
+
+            if len(data) == 128:
+                self._parse_realtime(c)
+                if self.verbose_log:
+                    self.logger.debug("realtime: cells=%s totalV=%s chg=%s dsg=%s load=%s temps=%s state=%s (%s) "
+                                      "alarm=%s balance=%s cycles=%s/%s soc=%s",
+                                      self.cellV[:11], self.totalV, self.chargingA, self.dischargingA, self.loadA,
+                                      self.tempC, hex(self.workingState), self.getWorkingStateText(), self.alarm,
+                                      self.balanceState, self.dischargeNumber, self.chargeNumber, self.soc)
+            else:
+                c.skip(4)  # reserved
+                self.remainingAh = c.u16() / 10.0
+                self.completeAh = c.u16() / 10.0
+                self.designedAh = c.u16() / 10.0
+                if self.verbose_log:
+                    self.logger.debug("capacity: remaining=%s complete=%s designed=%s Ah",
+                                      self.remainingAh, self.completeAh, self.designedAh)
         except Exception as e:
             from bmslib.util import summarize_exc
             self.logger.error('supervolt parseData failed: %s', summarize_exc(e))
+
+    def _parse_realtime(self, c: "_HexCursor"):
+        c.skip(14)  # date
+        # 16 cell slots on the wire; only the first 11 are read
+        self.totalV = 0
+        for i in range(11):
+            self.cellV[i] = c.u16()
+            self.totalV += self.cellV[i] * 1e-3
+        c.skip(5 * 4)
+
+        # the BMS sometimes reports a bogus > 500 A current
+        self.chargingA = c.u16() / 100.0
+        if self.chargingA > 500:
+            self.logger.info("charging too big: {}".format(self.chargingA))
+            self.chargingA = 0.0
+        self.dischargingA = c.u16() / 100.0
+        if self.dischargingA > 500:
+            self.logger.info("discharging too big: {}".format(self.dischargingA))
+            self.dischargingA = 0.0
+        self.loadA = -self.chargingA + self.dischargingA
+
+        for i in range(4):
+            self.tempC[i] = c.u8() - 40
+        self.workingState = c.u16()
+        self.alarm = c.u8()
+        self.balanceState = c.u16()
+        self.dischargeNumber = c.u16()
+        self.chargeNumber = c.u16()
+        self.soc = c.u8()
 
     def getWorkingStateTextShort(self):
         if self.workingState is None:

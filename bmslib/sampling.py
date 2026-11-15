@@ -4,7 +4,6 @@ import json
 import math
 import random
 import re
-import sys
 import threading
 import time
 from collections import defaultdict, deque
@@ -744,9 +743,12 @@ class BmsSampler:
 
                 return voltages
 
-            if self.sinks:
+            # only sinks that want cell voltages on every sample cause a fetch here;
+            # the others get them below if something else fetched them this cycle
+            voltage_sinks = [s for s in self.sinks if s.wants_voltages_every_sample]
+            if voltage_sinks:
                 voltages = await cached_fetch_voltages()
-                for sink in self.sinks:
+                for sink in voltage_sinks:
                     sink.publish_voltages(bms.name, voltages)
 
             if self.impedance is not None and self.impedance.enabled:
@@ -803,6 +805,16 @@ class BmsSampler:
                     logger.info('%s volt=[%s] temp=%s', bms.name,
                                 ','.join(map(str, voltages)) if voltages else voltages,
                                 sample.temperatures)
+
+            if voltages:
+                for sink in self.sinks:
+                    if sink.wants_voltages_every_sample:
+                        continue
+                    try:
+                        sink.publish_voltages(bms.name, voltages)
+                    except Exception as e:
+                        logger.error('sink %s publish_voltages failed: %s',
+                                     type(sink).__name__, summarize_exc(e))
 
             if self.period_discov or self.period_30s:
                 self.publish_meters()

@@ -43,19 +43,16 @@ class BaseAlgorithm:
 
 
 class SocArgs:
-    def __init__(self, charge_stop, charge_start=None, discharge_stop=None, discharge_start=None,
-                 calibration_interval_h=24 * 14):
+    def __init__(self, charge_stop, charge_start=None, *, calibration_interval_h=24 * 14):
         charge_stop = float(charge_stop.strip('%'))
         if not charge_start:
             charge_start = charge_stop
         else:
             charge_start = float(charge_start.strip('%'))
-            assert charge_stop >= charge_start
+            charge_start = min(charge_start, charge_stop)  # doc: `soc 90% 100%` == `soc 90%`
 
         self.charge_stop = charge_stop
         self.charge_start = charge_start
-        self.discharge_stop = discharge_stop
-        self.discharge_start = discharge_start
         self.calibration_interval_s = (calibration_interval_h or 0) * 3600
 
     def __str__(self):
@@ -128,15 +125,18 @@ class SocAlgorithm(BaseAlgorithm):
 
 # noinspection PyShadowingBuiltins
 def create_algorithm(repr: str, bms_name=None) -> BaseAlgorithm:
-    name, *args = repr.strip().split(' ')
+    name, *args = repr.split()
 
     from bmslib.store import store_algorithm_state
     state = store_algorithm_state(bms_name, algorithm_name=name)
     if name != 'soc':
         raise KeyError(name)
+    if len(args) > 2:
+        logger.warning('%s: algorithm "%s": extra arguments %s ignored, expected "soc CHARGE_STOP%% [CHARGE_START%%]"',
+                       bms_name, repr.strip(), ' '.join(args[2:]))
     algo = SocAlgorithm(
         name=name,
-        args=SocArgs(*args),
+        args=SocArgs(*args[:2]),
         state=SocState(**state) if state else SocState(charging=True, last_calibration_time=time.time())
     )
 
