@@ -1,5 +1,7 @@
 ## [unreleased]
 
+## [2.31]
+
 * Fix (`lipower`): ECTIVE AccuBox 120S and other BM X boxes connected but never answered, because the bundled aiobmsble lacks their device IDs `0xBA` and `0x38` (#407).
 * A stopping add-on had 3 s before it was killed, possibly before it closed its ESPHome proxy connections, so the next start could be refused (#391); it now gets 20 s.
 * Fix: entities Home Assistant had just created could show `unknown` for up to 10 s, because the states resent after discovery were held back as unchanged.
