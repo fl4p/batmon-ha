@@ -99,6 +99,11 @@ def test_recovers_r_through_a_sampling_lag():
     assert est.value == pytest.approx(R_MEDIAN, rel=0.05)
 
 
+def _ols_slope(xs, ys):
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+
+
 def test_deming_recovers_r_where_ols_is_diluted():
     """Noisy current: OLS of u on i is biased low by var(i)/(var(i)+var(noise_i)),
     Deming with the estimated noise ratio is not."""
@@ -108,7 +113,7 @@ def test_deming_recovers_r_where_ols_is_diluted():
         w = rows[s:s + 150]
         i = [-x[1] for x in w]
         u = [float(x[2][0]) for x in w]
-        ols_r.append(imp.ols(i, u)[0])
+        ols_r.append(_ols_slope(i, u))
         lam = imp.noise_ratio(imp.noise_std(u), imp.noise_std(i))
         dem_r.append(imp.deming_irls(i, u, lam)[0])
     assert imp.median(ols_r) < 0.92 * 1.2  # diluted
@@ -363,19 +368,23 @@ def _lagged_steps(lag=2, n=150, seed=3):
     return u, i
 
 
+def best_lag(u, i):
+    return imp._best_lag_diffs(imp._diffs(u), imp._diffs(i))[:2]
+
+
 def test_e_best_lag_is_nan_safe():
     u, i = _lagged_steps()
-    assert imp.best_lag(u, i)[0] == 2
+    assert best_lag(u, i)[0] == 2
     u[50] = math.nan
     i[80] = math.nan
     u[90] = None
-    assert imp.best_lag(u, i)[0] == 2  # the prototype returned 0 here
+    assert best_lag(u, i)[0] == 2  # the prototype returned 0 here
 
 
 def test_e_best_lag_without_data_is_unevaluable_not_zero():
     u, i = _lagged_steps()
-    assert imp.best_lag([math.nan] * len(u), i) == (None, pytest.approx(math.nan, nan_ok=True))
-    assert imp.best_lag([3300.0] * len(u), i)[0] is None  # flat u: nothing to correlate
+    assert best_lag([math.nan] * len(u), i) == (None, pytest.approx(math.nan, nan_ok=True))
+    assert best_lag([3300.0] * len(u), i)[0] is None  # flat u: nothing to correlate
 
 
 # --------------------------------------------------- known-bad (f): missing SoC
@@ -841,21 +850,6 @@ def test_a_split_run_with_temperature_tags_equals_the_whole_one():
     assert pub == pub_whole and _attrs(est) == _attrs(whole)
 
 
-def test_the_fingerprint_covers_the_normalisation():
-    from bmslib.estimators import common
-    base = common.code_fingerprint(vars(imp), vars(common))
-    assert base == imp.CODE_FINGERPRINT
-    for name, val in (('R_TEMP_K', 0.03), ('R_REF_C', 20.0), ('R_NORM_T_LO', 5.0), ('R_NORM_T_HI', 45.0),
-                      ('PACK_TEMP_WARMUP_S', 3600.0)):
-        assert common.code_fingerprint({**vars(imp), name: val}, vars(common)) != base, name
-
-    def window_temperature(w):  # same name, other code
-        return 25.0, 'probe', None
-
-    assert common.code_fingerprint({**vars(imp), 'window_temperature': window_temperature},
-                                             vars(common)) != base
-
-
 # ------------------------------------------------------------ MQTT discovery
 
 class _Client:
@@ -1291,28 +1285,6 @@ def test_restoring_publishes_nothing_by_itself():
     assert restored.add(t, 10.0, [3300] * 4, 60.0) is None  # no window completes: nothing goes out
 
 
-def test_changed_code_discards_the_windows_but_keeps_the_learnt_steps(caplog):
-    est, _ = run(trace())
-    st = _via_json(est.get_state())
-    st['code'] = 'something else'
-    restored = imp.CellResistanceEstimator('p')
-    with caplog.at_level('INFO'):
-        assert restored.restore(st)
-    assert not restored.windows and restored.value is None and not restored._rows
-    assert restored.q_i == est.q_i and restored.q_u == est.q_u
-    assert 'code changed' in caplog.text
-
-
-def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
-    est, _ = run(trace())
-    st = _via_json(est.get_state())
-    monkeypatch.setattr(imp, 'CODE_FINGERPRINT', None)  # source not readable
-    st['code'] = None
-    restored = imp.CellResistanceEstimator('p')
-    restored.restore(st)
-    assert not restored.windows
-
-
 def _drop(container, key=-1):
     """Remove an item and return None: a mutation that returned the popped
     value would replace the whole state with it (and fail for that reason)."""
@@ -1322,19 +1294,15 @@ def _drop(container, key=-1):
 BAD_STATES = [
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
-    ('implausible R', lambda s: s['windows'][0].update(r=50.0)),
-    ('R is NaN', lambda s: s['windows'][0].update(r=float('nan'))),
     ('t missing', lambda s: _drop(s['windows'][0], 't')),
     ('windows out of order', lambda s: s['windows'].reverse()),
-    ('negative step', lambda s: s.update(q_i=-0.1)),
     ('row garbage', lambda s: s['rows'].append('x')),
     ('row after last_t', lambda s: s.update(last_t=s['rows'][0][0] - 1)),
     ('bin missing a field', lambda s: _drop(s['bin'], 'su')),
-    ('window temp NaN', lambda s: s['windows'][0].update(temp=float('nan'))),
-    ('window temp missing', lambda s: _drop(s['windows'][0], 'temp')),
-    ('window mos_temp a string', lambda s: s['windows'][0].update(mos_temp='31')),
+    ('bin sums and counts differ', lambda s: s['bin']['nu'].append(1)),
+    ('window r a string', lambda s: s['windows'][0].update(r='1.2')),
+    ('step a string', lambda s: s.update(q_i='x')),
     ('row without mos_temp', lambda s: _drop(s['rows'][0])),
-    ('bin temp NaN', lambda s: s['bin']['temp'].append(float('nan'))),
 ]
 
 
@@ -1356,14 +1324,15 @@ def test_a_state_that_does_not_validate_starts_fresh(caplog, what, mutate):
     assert published
 
 
-def test_calibration_without_the_r_check_an_implausible_window_would_be_restored(monkeypatch):
-    est, _ = run(trace())
+def test_a_version_1_state_is_discarded():
+    # v1 (release <= 2.30) is not told apart by release without its code
+    # fingerprint, and pre-2.27 windows use another normalisation
+    est, _ = run(trace(n=2001, dt=0.4))
     st = _via_json(est.get_state())
-    for w in st['windows']:
-        w['r'] = 50.0
-    monkeypatch.setattr(imp, 'R_MOHM_HI', 1e9)
-    restored = imp.CellResistanceEstimator('p')
-    assert restored.restore(st) and restored.value == 50.0
+    assert st['version'] == imp.STATE_VERSION and st['windows']
+    st['version'], st['code'] = 1, '3f9c0e1a7b2d4c65'
+    restored = imp.CellResistanceEstimator(est.name)
+    assert restored.restore(st) is False and not restored.windows
 
 
 def test_a_chemistry_disable_survives_a_restart_an_internal_error_does_not():

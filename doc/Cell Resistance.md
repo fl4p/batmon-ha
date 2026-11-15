@@ -120,11 +120,8 @@ is unknown.
 
 Not restored:
 
-* windows saved by different estimator code (an add-on update that changed it): they would mix two definitions of R in
-  one median, so the warm-up starts again; the learnt quantisation steps are kept. What counts as a change: the
-  bytecode of any function or method in `bmslib/estimators/impedance.py` or `bmslib/estimators/common.py`, a default argument, a
-  module-level constant (every gate), or the Python version. Comments, docstrings, blank lines and where code sits in
-  the file do not,
+* windows saved before an add-on update that changed what they mean (it bumps the state version): they would mix
+  two definitions of R in one median, so the warm-up and the quantisation steps are learnt again,
 * a state file that does not validate (logged as a warning): the estimator starts fresh,
 * a switch-off after an internal error: the next start tries again. A switch-off because the pack is not LiFePO4 is
   kept.

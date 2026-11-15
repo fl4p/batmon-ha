@@ -9,6 +9,7 @@
 * Fix (`jbd_uart`): reading the BMS settings failed with a TypeError.
 * Fix (`pace_uart`, `basen_uart`): on an RS485 port shared with other packs, their requests could overlap with another pack's; they now take the bus lock like the other wired types.
 * A BMS that is out of range no longer holds up the other devices for up to 10 s, and `type: auto` connects once instead of up to three times.
+* `soh_estimator`, `impedance_estimator`: saved state no longer carries a code fingerprint, so saved Qmax/SoH segments and Cell Resistance windows are discarded once more and relearned; later updates keep them unless the saved data changes meaning.
 
 ## [2.30]
 

@@ -190,8 +190,6 @@ import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from bmslib import bms as _bms
-from bmslib.estimators import common
 from bmslib.estimators.common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite, fmt_t, locked, median,
                                      v_fin, v_int, v_opt_fin)
@@ -381,9 +379,7 @@ DRIFT_MAX_FRAC = 0.05
 MIN_DSOC = 60.0  # %, every cell
 # A capacity (the `capacity:` option, never the BMS's) is required: without one
 # the plausibility window below cannot be evaluated, and an unevaluable check
-# never counts as passed (module doc). (A switch only so that a test can show
-# what goes out without it.)
-REQUIRE_CAPACITY = True
+# never counts as passed (module doc).
 # Every cell's Qmax must be within this ratio of the capacity. A current gain
 # error goes 1:1 into Qmax (gain 0.6 / 0.9 / 1.1 published 58.5 / 87.8 / 107.3
 # Ah for a 98 Ah pack), and this window is the only thing that sees it, so it
@@ -550,7 +546,10 @@ PUBLISH_MIN_SEGMENTS = 3
 MAX_SEGMENT_AGE_S = 365 * 86400.0
 SUMMARY_PERIOD_S = 86400.0  # info-level summary of what the gates did
 
-STATE_VERSION = 1
+# Bump when the meaning of saved data changes (the OCV curve, a gate, the
+# relaxation fit, the inputs derive_charge_fields gives add_sample): restore()
+# then starts fresh instead of mixing two definitions of Qmax.
+STATE_VERSION = 2  # 2: no code fingerprint; v1 files (<= 2.30) are not told apart by release
 
 
 # ================================================================ OCV curve
@@ -616,16 +615,6 @@ class OcvCurve:
         self.slope = gradient(self.smooth)  # mV per % DOD, <= 0
         self.min_slope = min_slope  # None: MIN_SLOPE_MV_PER_PCT at call time
 
-    def fingerprint_data(self):
-        """What makes this curve this curve, for the code fingerprint
-        (estimators.common): the data and parameters it was built with, and
-        the smoothed curve and slope that soc() inverts and gates on. The
-        tables are rounded to 1 nV, so that a last-bit difference of exp() in
-        another libm does not count as another curve; anything that moves
-        them measurably does."""
-        return (tuple(self.raw), self.sigma, self.min_slope,
-                tuple(round(v, 6) for v in self.smooth), tuple(round(v, 6) for v in self.slope))
-
     def soc(self, ocv: Optional[float]) -> Tuple[Optional[float], Optional[str]]:
         """(SoC %, None) or (None, reason): 'missing', 'off_curve' (outside the
         curve: a clamp would be a guess), 'plateau' (a flat stretch, or the
@@ -677,8 +666,6 @@ def _merge(ts, vs, max_points):
             [median(vs[k:k + g]) for k in range(0, n, g)])
 
 
-# A tuple, not a list: module-level lists are state to the code fingerprint and
-# left out of it (estimators.common._is_const), and this grid is configuration.
 _TAU_GRID = tuple(FIT_TAU_MIN_S * (FIT_TAU_MAX_S / FIT_TAU_MIN_S) ** (k / (FIT_TAU_GRID - 1))
                   for k in range(FIT_TAU_GRID))
 
@@ -749,8 +736,8 @@ def charge_counter(charge, soc, capacity) -> Tuple[Optional[float], Optional[str
     (None, None). The source names the scale: a counter's resolution and its
     readings only compare with readings of the same source, so the capacity a
     SoC is scaled with is part of it -- a changed capacity setting is another
-    counter. Here and not in the sampler, so that the code fingerprint covers
-    it: the counter is saved with the state."""
+    counter. The counter is saved with the state, so what this returns is
+    part of what STATE_VERSION stands for."""
     if finite(charge):
         return float(charge), 'charge'
     if finite(soc) and finite(capacity) and capacity > 0:
@@ -765,7 +752,7 @@ def best_temperature(pack_temp, probes, mos) -> Tuple[Optional[float], bool]:
     MOSFET. The MOSFET is close to the cells at rest, which is when an OCV
     anchor reads it; a top anchor comes during or right after a charge, when
     the MOSFET runs warm from the current, so it refuses a MOSFET-only one.
-    Here and not in the sampler, so that the code fingerprint covers it."""
+    Anchors are saved with the temperature this picked (STATE_VERSION)."""
     if finite(pack_temp):
         return float(pack_temp), False
     temps = sorted(t for t in (probes or []) if finite(t) and -40 < t < 100)
@@ -803,6 +790,9 @@ class QmaxEstimator:
     def __init__(self, name: str, design_capacity: Optional[float] = None, curve: Optional[OcvCurve] = None):
         self.name = name
         self._lock = getattr(self, '_lock', None) or threading.RLock()  # kept when restore() re-inits
+        # Design capacity for SoH, the plausibility window, the rest threshold
+        # and the current bound: the per-device `capacity:` option, else
+        # unknown -- never what the BMS reports (module doc).
         self.design_capacity = float(design_capacity) if finite(design_capacity) and design_capacity > 0 else None
         self.curve = curve or DEFAULT_CURVE
         self.enabled = True
@@ -881,14 +871,6 @@ class QmaxEstimator:
 
     # ------------------------------------------------------------ properties
 
-    def capacity(self) -> Tuple[Optional[float], Optional[str]]:
-        """Design capacity for SoH, the plausibility window, the rest
-        threshold and the current bound: the per-device `capacity:` option,
-        else unknown -- never what the BMS reports (module doc)."""
-        if self.design_capacity is not None:
-            return self.design_capacity, 'option'
-        return None, None
-
     def bms_capacity(self) -> Optional[float]:
         """What the BMS reports as its capacity, the median of the last
         BMS_CAP_N hourly readings, None when it reports none. A sanity check
@@ -911,7 +893,7 @@ class QmaxEstimator:
                        self.name, what, mm[0], mm[1])
 
     def rest_current(self) -> float:
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         return min(REST_I_MAX_A, REST_C_RATE * cap) if cap else REST_I_MAX_A
 
     def _counted(self) -> List[Dict[str, Any]]:
@@ -923,7 +905,7 @@ class QmaxEstimator:
         out, never published as if it belonged to this pack."""
         if not self.segments:
             return []
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         n = len(self.segments[-1]['q_cells'])
         return [s for s in self.segments if self._counts(s, cap, n)]
 
@@ -948,9 +930,9 @@ class QmaxEstimator:
         if len(segs) < PUBLISH_MIN_SEGMENTS or self.capacity_mismatch() is not None:
             return None
         v = median([s['qmax'] for s in segs])
-        cap, src = self.capacity()
+        cap = self.design_capacity
         new = segs[-1]
-        return dict(qmax=v, soh=100.0 * v / cap if cap else None, capacity=cap, capacity_source=src,
+        return dict(qmax=v, soh=100.0 * v / cap if cap else None, capacity=cap, capacity_source='option' if cap is not None else None,
                     segments=len(segs), newest=fmt_t(new['t']), newest_t=new['t'],
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
@@ -1092,7 +1074,7 @@ class QmaxEstimator:
                 self.counts['reordered'] += 1
                 return None  # out of order or jitter: skipped, nothing dropped (REORDER_TOL_S)
             self._clock_back(t)  # before anything else: the sample then starts a new record
-        if abs(current) > current_ceiling(self.capacity()[0], I_MAX_C_RATE, I_MAX_ABS_A):
+        if abs(current) > current_ceiling(self.design_capacity, I_MAX_C_RATE, I_MAX_ABS_A):
             # Not a current, and not a sample: never integrated, never binned.
             # _last_t/_last_i stay at the last good sample, so the next good one
             # bridges the hole under the gap rule (linear up to MAX_GAP_S, a new
@@ -1398,8 +1380,8 @@ class QmaxEstimator:
     def add_sample(self, sample, current: float, voltages: Optional[Sequence[float]],
                    temp: Optional[float], temp_mos: bool = False) -> Optional[Dict[str, Any]]:
         """add() for a BmsSample: which of its fields go where. current: the
-        native (pre invert_current) current; temp: best_temperature(). Here
-        and not in the sampler, so that the code fingerprint covers it."""
+        native (pre invert_current) current; temp: best_temperature(). What
+        goes where is part of what STATE_VERSION stands for."""
         counter, counter_src = charge_counter(sample.charge, sample.soc, sample.capacity)
         return self.add(sample.timestamp, current, voltages or None, temp=temp, capacity=sample.capacity,
                         bms_charge=counter, charge_src=counter_src, bms_soc=sample.soc,
@@ -1429,7 +1411,7 @@ class QmaxEstimator:
         PLAUSIBLE_REL[1] x the capacity when one is known. Only such readings
         teach the counter's highest reading (_c_max): one garbled reading
         above it would otherwise hide the counter's real full end for good."""
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         return c >= 0.0 and (cap is None or c <= PLAUSIBLE_REL[1] * cap)
 
     def _counter_stop(self, c: float, ends: Tuple[Optional[float], ...], c_max: Optional[float],
@@ -1471,7 +1453,7 @@ class QmaxEstimator:
         open segment go on? Only on evidence that the charge the linear bridge
         counts is the charge that moved, from the BMS's own counter (see the
         module doc). Missing evidence is not agreement."""
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         assert self._last_i is not None
         bridge = 0.5 * (i + self._last_i) * dt / 3600.0
         if self._audit is not None:
@@ -1529,7 +1511,7 @@ class QmaxEstimator:
         worthless: the epoch ends there and the held pairs are dropped."""
         a = self._audit
         assert a is not None
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         if not cap or self.q_c is None or self._c_q is None or (c is not None and src != a['src']):
             return self._audit_fail(t, 'the counter it was checked with is gone')
         tol = RESUME_TOL_FRAC * cap + self.q_c
@@ -1703,7 +1685,7 @@ class QmaxEstimator:
         if not n_cells:
             self.counts['anchor_no_voltages'] += 1
             return None
-        cap, _ = self.capacity()
+        cap = self.design_capacity
         a = dict(t=t1, t0=self._rest_t0, q=self._rest_q, cov=self._rest_cov, epoch=self.epoch, temp=temp,
                  dir=self._rest_dir, i_rest=self._rest_si / self._rest_n, ocv=ocv, soc=soc, why=why, fit=fit,
                  cap=cap, kind='ocv')
@@ -1791,9 +1773,8 @@ class QmaxEstimator:
         qc = [100.0 * dq / d for d in dsoc]
         cap = b['cap']
         if cap is None:
-            if REQUIRE_CAPACITY:
-                return None, 'no_capacity'  # the plausibility check is unevaluable
-        elif not all(PLAUSIBLE_REL[0] * cap <= q <= PLAUSIBLE_REL[1] * cap for q in qc):
+            return None, 'no_capacity'  # the plausibility check is unevaluable
+        if not all(PLAUSIBLE_REL[0] * cap <= q <= PLAUSIBLE_REL[1] * cap for q in qc):
             return None, 'implausible'
         k = min(range(len(qc)), key=lambda c: qc[c])
         med = median(qc)
@@ -1869,7 +1850,7 @@ class QmaxEstimator:
         rest in progress then restarts after a crash. full=True (at shutdown)
         is everything."""
         st: Dict[str, Any] = dict(
-            version=STATE_VERSION, code=CODE_FINGERPRINT, capacity=self.design_capacity,
+            version=STATE_VERSION, capacity=self.design_capacity,
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
             last_t=self._last_t, last_i=self._last_i, last_charge=self._last_c, charge_src=self._c_src,
             q_charge=self.q_c, charge_q=self._c_q, charge_max=self._c_max, last_soc=self._last_soc,
@@ -1909,14 +1890,15 @@ class QmaxEstimator:
         return True
 
     def _restore(self, st):
+        """Fill a fresh estimator from `st` and take it over whole at the end,
+        so a state that raises anywhere (restore() starts fresh) leaves nothing
+        half-restored. Malformed fields raise on conversion; checked are only
+        the invariants between fields that the code relies on without
+        checking, where a violation would corrupt the estimate silently."""
         if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
             raise ValueError('state version %r, expected %d'
                              % (st.get('version') if isinstance(st, dict) else type(st).__name__, STATE_VERSION))
-        self.__init__(self.name, self.design_capacity, self.curve)
-        if CODE_FINGERPRINT is None or st.get('code') != CODE_FINGERPRINT:
-            logger.info('%s: Qmax/SoH estimator code changed since the state was saved: anchors, segments and the '
-                        'open coulomb count discarded', self.name)
-            return
+        new = type(self)(self.name, self.design_capacity, self.curve)
         saved_cap = v_opt_fin(st.get('capacity'), 'capacity')
         if saved_cap != self.design_capacity:
             # The option was corrected or the pack replaced: what was measured
@@ -1927,227 +1909,99 @@ class QmaxEstimator:
             logger.warning('%s: Qmax/SoH: the capacity option is %s, the saved state was measured against %s: a '
                            'corrected option or another pack, so anchors, segments and the open coulomb count are '
                            'discarded', self.name, _fmt_ah(self.design_capacity), _fmt_ah(saved_cap))
+            self._take(new)
             return
 
         reason = st.get('disabled_reason')
         if reason is not None:
-            self.enabled, self.disabled_reason, self._disable_persistent = False, str(reason), True
-            self._withdraw = 'the estimator stays disabled: %s' % reason  # add() never runs to do it
+            new.enabled, new.disabled_reason, new._disable_persistent = False, str(reason), True
+            new._withdraw = 'the estimator stays disabled: %s' % reason  # add() never runs to do it
+            self._take(new)
             logger.info('%s: Qmax/SoH estimator stays disabled (saved state): %s', self.name, reason)
             return
 
-        last_t = v_opt_fin(st.get('last_t'), 'last_t')
-        last_i = v_opt_fin(st.get('last_i'), 'last_i')
-        if (last_t is None) != (last_i is None):
-            raise ValueError('last_t/last_i %r/%r' % (last_t, last_i))
-        last_c = v_opt_fin(st.get('last_charge'), 'last_charge')
-        c_src = st.get('charge_src')
-        if c_src is not None and not _counter_src_ok(c_src):
-            raise ValueError('charge_src %r' % (c_src,))
-        q_c = v_opt_fin(st.get('q_charge'), 'q_charge')
-        if q_c is not None and not q_c > 0:
-            raise ValueError('q_charge %r' % q_c)
-        if c_src is None and (last_c is not None or q_c is not None):
-            raise ValueError('last_charge/q_charge %r/%r of no counter' % (last_c, q_c))
-        c_q = v_opt_fin(st.get('charge_q'), 'charge_q')
-        if (c_q is None) != (q_c is None):
-            raise ValueError('charge_q %r with q_charge %r' % (c_q, q_c))
-        c_max = v_opt_fin(st.get('charge_max'), 'charge_max')
-        if c_max is not None and (c_src is None or c_max < 0):
-            raise ValueError('charge_max %r of counter %r' % (c_max, c_src))
-        # Any finite SoC: one outside 0..100 (a remaining charge above the
-        # capacity) is what the BMS said, and the stop rule takes it as a stop.
-        last_soc = v_opt_fin(st.get('last_soc'), 'last_soc')
-        last_soc_raw = v_opt_fin(st.get('last_soc_raw'), 'last_soc_raw')
-        last_cfull = v_opt_fin(st.get('last_charge_full'), 'last_charge_full')
-        if last_cfull is not None and not last_cfull > 0:
-            raise ValueError('last_charge_full %r' % last_cfull)
-        last_aged = v_opt_fin(st.get('last_aged'), 'last_aged')
-        if last_aged is not None and not last_aged > 0:
-            raise ValueError('last_aged %r' % last_aged)
-        q_ah = v_fin(st.get('q_ah'), 'q_ah')
-        q_moved = v_fin(st.get('q_moved'), 'q_moved')
-        if q_moved < 0 or (c_q is not None and not 0 <= c_q <= q_moved):
-            raise ValueError('q_moved %r, charge_q %r' % (q_moved, c_q))
-        covered = v_fin(st.get('covered_s'), 'covered_s')
-        epoch = v_int(st.get('epoch'), 'epoch')
-
-        def soc_list(x, what):
-            if not isinstance(x, list):
-                raise ValueError('%s is %r' % (what, x))
-            out = []
-            for s in x:
-                if s is not None and not 0.0 <= v_fin(s, what) <= 100.0:
-                    raise ValueError('%s %r outside 0..100' % (what, s))
-                out.append(s)
-            return out
-
-        anchors, dropped = [], 0
-        for a in st.get('anchors') or []:
-            if not isinstance(a, dict):
-                raise ValueError('anchor is %r' % type(a).__name__)
-            for k in ('t', 't0', 'q', 'cov', 'i_rest'):
-                v_fin(a.get(k), 'anchor ' + k)
-            if any(f not in (None, 'rc', 'last') for f in a.get('fit') or []):
-                raise ValueError('anchor fit %r' % a.get('fit'))
-            if v_int(a.get('epoch'), 'anchor epoch') > epoch:
-                raise ValueError('anchor epoch %r after the counter %d' % (a['epoch'], epoch))
-            kind = a.get('kind')
-            lo, hi = (TOP_TEMP_LO, TOP_TEMP_HI) if kind == 'top' else (CURVE_TEMP_LO, CURVE_TEMP_HI)
-            if kind not in ANCHOR_KINDS or not lo <= v_fin(a.get('temp'), 'anchor temp') <= hi:
-                raise ValueError('anchor kind %r, temp %r' % (kind, a.get('temp')))
-            socs = soc_list(a.get('soc'), 'anchor soc')
-            if kind == 'top' and (a.get('mode') not in ('tail', 'cutoff') or not socs
-                                  or any(x != 100.0 for x in socs) or v_fin(a.get('i_rest'), 'anchor i_rest') != 0.0):
-                raise ValueError('top anchor %r' % (a,))
-            why, ocv, fit = a.get('why'), a.get('ocv'), a.get('fit')
-            if not (isinstance(why, list) and isinstance(ocv, list) and isinstance(fit, list)
-                    and len(why) == len(ocv) == len(fit) == len(socs)):
-                raise ValueError('anchor cells %r' % (a,))
-            if any((s is None) == (w is None) for s, w in zip(socs, why)):
-                raise ValueError('anchor soc/why disagree')
-            for o in ocv:
-                v_opt_fin(o, 'anchor ocv')
-            if v_opt_fin(a.get('cap'), 'anchor cap') != self.design_capacity:
-                dropped += 1  # checked against another capacity than the option (above)
-                continue
-            anchors.append(dict(a))
-        if any(x['t'] > y['t'] for x, y in zip(anchors, anchors[1:])) or \
-                any(x['epoch'] > y['epoch'] for x, y in zip(anchors, anchors[1:])) or \
-                (anchors and (last_t is None or anchors[-1]['t'] > last_t)):
-            raise ValueError('anchors not in time order')
-
-        segments = []
-        for s in st.get('segments') or []:
-            if not isinstance(s, dict):
-                raise ValueError('segment is %r' % type(s).__name__)
-            for k in ('t', 't0', 'dq', 'i_off', 'drift'):
-                v_fin(s.get(k), 'segment ' + k)
-            qc = s.get('q_cells')
-            if not isinstance(qc, list) or not qc or not all(v_fin(q, 'segment q_cells') > 0 for q in qc):
-                raise ValueError('segment q_cells %r' % (qc,))
-            if v_fin(s.get('qmax'), 'segment qmax') != min(qc):
-                raise ValueError('segment qmax %r is not its limiting cell' % s['qmax'])
-            if v_int(s.get('cell'), 'segment cell') >= len(qc) or not isinstance(s.get('dsoc'), list) \
-                    or len(s['dsoc']) != len(qc) or min(abs(v_fin(d, 'segment dsoc')) for d in s['dsoc']) < MIN_DSOC:
-                raise ValueError('segment cells %r' % (s,))
-            v_fin(s.get('spread'), 'segment spread')
-            v_fin(s.get('cov'), 'segment cov')
-            kinds = s.get('kinds')
-            if not (isinstance(kinds, list) and len(kinds) == 2 and all(k in ANCHOR_KINDS for k in kinds)
-                    and kinds != ['top', 'top']):
-                raise ValueError('segment kinds %r' % (kinds,))
-            if v_opt_fin(s.get('cap'), 'segment cap') != self.design_capacity:
-                dropped += 1
-                continue
-            segments.append(dict(s))
-        if any(x['t'] > y['t'] for x, y in zip(segments, segments[1:])) or \
-                (segments and (last_t is None or segments[-1]['t'] > last_t)):
-            raise ValueError('segments not in time order')
-        last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
-        if dropped:
-            logger.warning('%s: Qmax/SoH: %d saved anchor(s)/segment(s) checked against another capacity than the '
-                           'option (%s) discarded', self.name, dropped, _fmt_ah(self.design_capacity))
-
-        self._last_t, self._last_i, self.q_ah, self.covered_s, self.epoch = last_t, last_i, q_ah, covered, epoch
-        self.q_moved = q_moved
-        self._last_c, self._c_src, self.q_c, self._c_q, self._c_max = last_c, c_src, q_c, c_q, c_max
-        self._last_soc, self._last_soc_raw, self._last_cfull, self._last_aged = last_soc, last_soc_raw, last_cfull, \
-            last_aged
-        self._t_glitch = v_opt_fin(st.get('t_glitch'), 't_glitch')
+        new._last_t = last_t = v_opt_fin(st.get('last_t'), 'last_t')
+        new._last_i = v_opt_fin(st.get('last_i'), 'last_i')
+        new._last_c = v_opt_fin(st.get('last_charge'), 'last_charge')
+        new._c_src = st.get('charge_src')
+        new.q_c = v_opt_fin(st.get('q_charge'), 'q_charge')
+        new._c_q = v_opt_fin(st.get('charge_q'), 'charge_q')
+        new._c_max = v_opt_fin(st.get('charge_max'), 'charge_max')
+        new._last_soc = v_opt_fin(st.get('last_soc'), 'last_soc')
+        new._last_soc_raw = v_opt_fin(st.get('last_soc_raw'), 'last_soc_raw')
+        new._last_cfull = v_opt_fin(st.get('last_charge_full'), 'last_charge_full')
+        new._last_aged = v_opt_fin(st.get('last_aged'), 'last_aged')
+        new.q_ah = v_fin(st.get('q_ah'), 'q_ah')
+        new.q_moved = v_fin(st.get('q_moved'), 'q_moved')
+        new.covered_s = v_fin(st.get('covered_s'), 'covered_s')
+        new.epoch = v_int(st.get('epoch'), 'epoch')
+        new._t_glitch = v_opt_fin(st.get('t_glitch'), 't_glitch')
         nb = st.get('glitch_nb')
-        if nb is not None:
-            if not (isinstance(nb, dict) and set(nb) == {'before', 'after'} and self._t_glitch is not None
-                    and last_t is not None and all(isinstance(nb[k], list) for k in nb)
-                    and len(nb['before']) <= GLITCH_NB_N and len(nb['after']) < GLITCH_NB_N):
-                raise ValueError('glitch_nb %r' % (nb,))
-            nb = dict(before=[v_fin(v, 'glitch_nb') for v in nb['before']],
-                      after=[v_fin(v, 'glitch_nb') for v in nb['after']])
-        self._glitch_nb = nb
+        new._glitch_nb = None if nb is None else dict(before=[float(v) for v in nb['before']],
+                                                      after=[float(v) for v in nb['after']])
         au = st.get('audit')
-        if au is not None:
-            if not (isinstance(au, dict) and set(au) == {'t', 'c', 'src', 'q', 'm', 'held'} and last_t is not None
-                    and _counter_src_ok(au['src']) and isinstance(au['held'], list)
-                    and v_fin(au['t'], 'audit t') <= last_t and 0 <= v_fin(au['m'], 'audit m') <= q_moved):
-                raise ValueError('audit %r' % (au,))
-            v_fin(au['c'], 'audit c')
-            v_fin(au['q'], 'audit q')
-            au = dict(au, held=[v_fin(x, 'audit held') for x in au['held']])
-        self._audit = au
-        bc = st.get('bms_caps')
-        if not isinstance(bc, list) or len(bc) > BMS_CAP_N or not all(isinstance(x, list) and len(x) == 2 for x in bc):
-            raise ValueError('bms_caps %r' % (bc,))
-        for x in bc:
-            if not v_fin(x[1], 'bms_caps') > 0 or v_fin(x[0], 'bms_caps t') > (last_t if last_t is not None else -1e300):
-                raise ValueError('bms_caps %r' % (bc,))
-        self._bms_caps.extend([float(x[0]), float(x[1])] for x in bc)
-        rec = st.get('recent')
-        if not isinstance(rec, list) or len(rec) > GLITCH_NB_N:
-            raise ValueError('recent %r' % (rec,))
-        self._recent.extend(v_fin(v, 'recent') for v in rec)
-        self._resumed = last_t is not None  # the next sample decides whether the open segment goes on
-        self.anchors.extend(anchors[-MAX_ANCHORS:])
-        self.segments.extend(segments[-SUMMARY_K:])
-        self._last_seg_t = last_seg_t
-        self._load_ewma = v_opt_fin(st.get('load_ewma'), 'load_ewma')
+        new._audit = None if au is None else dict(au, t=float(au['t']), c=float(au['c']), q=float(au['q']),
+                                                  held=[float(x) for x in au['held']])
+        new._bms_caps.extend([float(x), float(c)] for x, c in st['bms_caps'])
+        new._recent.extend(float(v) for v in st['recent'])
+        new._resumed = last_t is not None  # the next sample decides whether the open segment goes on
+        anchors = [dict(a) for a in st.get('anchors') or []]
+        segments = [dict(s) for s in st.get('segments') or []]
+        new.anchors.extend(anchors[-MAX_ANCHORS:])
+        new.segments.extend(segments[-SUMMARY_K:])
+        new._last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
+        new._load_ewma = v_opt_fin(st.get('load_ewma'), 'load_ewma')
+
+        # The stall check takes q_moved - charge_q as the charge the counter
+        # missed: negative would read as a counter that just moved.
+        if new._c_q is not None and not 0 <= new._c_q <= new.q_moved:
+            raise ValueError('charge_q %r beyond q_moved %r' % (new._c_q, new.q_moved))
+        # Pairing, the overlap rule and the age limit take anchors and segments
+        # in time order, and anchors of one epoch as one stretch of counting.
+        if any(x['t'] > y['t'] or x['epoch'] > y['epoch'] for x, y in zip(anchors, anchors[1:])) \
+                or (anchors and anchors[-1]['epoch'] > new.epoch) \
+                or any(x['t'] > y['t'] for x, y in zip(segments, segments[1:])):
+            raise ValueError('anchors or segments not in time order')
+        timed = [x['t'] for x in anchors + segments] + ([au['t']] if au is not None else [])
 
         if 'rest_bins' in st:  # full state
             b = st.get('bin')
             if b is not None:
-                if not isinstance(b, dict) or set(b) != {'idx', 'n', 'si', 'sa', 't0', 't1', 'v', 'temp', 'q', 'cov'}:
-                    raise ValueError('bin %r' % (b,))
-                v_int(b['idx'], 'bin idx', lo=-2 ** 62)
-                v_int(b['n'], 'bin n', lo=1)
-                for k in ('si', 'sa', 't0', 't1', 'q', 'cov'):
-                    v_fin(b[k], 'bin ' + k)
-                if not (isinstance(b['v'], list) and all(isinstance(vs, list) for vs in b['v'])
-                        and isinstance(b['temp'], list)):
-                    raise ValueError('bin lists %r' % (b,))
-                for vs in b['v']:
-                    for v in vs:
-                        v_fin(v, 'bin v')
-                for v in b['temp']:
-                    v_fin(v, 'bin temp')
+                # the open bin closes on the next sample: it ends at last_t
                 if last_t is None or b['t1'] != last_t:
                     raise ValueError('open bin does not end at last_t')
-                self._bin = dict(b)
-            rb = st.get('rest_bins')
-            if not isinstance(rb, list):
-                raise ValueError('rest_bins %r' % type(rb).__name__)
-            for r in rb:
-                if not (isinstance(r, list) and len(r) == 3 and isinstance(r[1], list)):
-                    raise ValueError('rest bin %r' % (r,))
-                v_fin(r[0], 'rest bin t')
-                v_opt_fin(r[2], 'rest bin temp')
-                for v in r[1]:
-                    v_opt_fin(v, 'rest bin v')
-            if any(x[0] > y[0] for x, y in zip(rb, rb[1:])):
-                raise ValueError('rest bins not in time order')
-            r0, r1 = v_opt_fin(st.get('rest_t0'), 'rest_t0'), v_opt_fin(st.get('rest_t1'), 'rest_t1')
-            rq, rc = v_opt_fin(st.get('rest_q'), 'rest_q'), v_opt_fin(st.get('rest_cov'), 'rest_cov')
-            if (r0 is None) != (not rb) or any((x is None) != (r0 is None) for x in (r1, rq, rc)):
-                raise ValueError('rest %r/%r with %d bins' % (r0, r1, len(rb)))
-            if r0 is not None and (r1 is None or r1 < r0 or last_t is None or r1 > last_t):
-                raise ValueError('rest %r..%r' % (r0, r1))
-            rd = st.get('rest_dir')
-            if rd not in (None, 'chg', 'dch'):
-                raise ValueError('rest_dir %r' % rd)
-            rsi, rn = v_fin(st.get('rest_si'), 'rest_si'), v_int(st.get('rest_n'), 'rest_n')
-            if (rn == 0) != (r0 is None):
-                raise ValueError('rest of %d samples from %r' % (rn, r0))
-            self._rest_bins = [list(r) for r in rb]
-            self._rest_t0, self._rest_t1, self._rest_q, self._rest_cov, self._rest_dir = r0, r1, rq, rc, rd
-            self._rest_si, self._rest_n = rsi, rn
-            self._t_volt = v_opt_fin(st.get('t_volt'), 't_volt')
-            self._oob_since = v_opt_fin(st.get('oob_since'), 'oob_since')
-            self._oob_n = v_int(st.get('oob_n') or 0, 'oob_n')
-            self.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
-            self.pair_reasons.update({str(k): int(v) for k, v in (st.get('pair_reasons') or {}).items()})
-            self.n_dropped = v_int(st.get('n_dropped') or 0, 'n_dropped')
-            self._t_summary = v_opt_fin(st.get('t_summary'), 't_summary')
-        self._announced = bool(st.get('announced')) or len(self._counted()) >= PUBLISH_MIN_SEGMENTS
+                new._bin = dict(b)
+            rb = [[float(r[0]), r[1], r[2]] for r in st['rest_bins']]
+            new._rest_bins = rb
+            new._rest_t0, new._rest_t1 = v_opt_fin(st.get('rest_t0'), 'rest_t0'), v_opt_fin(st.get('rest_t1'), 'rest_t1')
+            new._rest_q, new._rest_cov = v_opt_fin(st.get('rest_q'), 'rest_q'), v_opt_fin(st.get('rest_cov'), 'rest_cov')
+            new._rest_dir = st.get('rest_dir')
+            new._rest_si, new._rest_n = v_fin(st.get('rest_si'), 'rest_si'), v_int(st.get('rest_n'), 'rest_n')
+            # one open rest or none: its bins, its start and its sample count
+            # (the anchor's rest current is rest_si / rest_n) agree
+            r0, r1 = new._rest_t0, new._rest_t1
+            if (r0 is None) != (not rb) or (r0 is None) != (new._rest_n == 0) \
+                    or (r0 is not None and (r1 is None or r1 < r0)) \
+                    or any(x[0] > y[0] for x, y in zip(rb, rb[1:])):
+                raise ValueError('rest %r..%r with %d bins and %d samples' % (r0, r1, len(rb), new._rest_n))
+            timed += [x[0] for x in rb] + ([r1] if r1 is not None else [])
+            new._t_volt = v_opt_fin(st.get('t_volt'), 't_volt')
+            new._oob_since = v_opt_fin(st.get('oob_since'), 'oob_since')
+            new._oob_n = v_int(st.get('oob_n') or 0, 'oob_n')
+            new.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
+            new.pair_reasons.update({str(k): int(v) for k, v in (st.get('pair_reasons') or {}).items()})
+            new.n_dropped = v_int(st.get('n_dropped') or 0, 'n_dropped')
+            new._t_summary = v_opt_fin(st.get('t_summary'), 't_summary')
+        # Nothing was timed after the last sample: the overlap and age rules
+        # would hold it as future (_clock_back only drops what a new sample
+        # finds after itself, and runs on a clock step, not on a restore).
+        if timed and (last_t is None or max(timed) > last_t):
+            raise ValueError('state timed after its last sample %r' % (last_t,))
 
-        v = self.value
+        v = new.value  # raises here, not on the next publish, for segments that cannot be read
+        new.result()
+        new._announced = bool(st.get('announced')) or len(new._counted()) >= PUBLISH_MIN_SEGMENTS
+        self._take(new)
         logger.info('%s: Qmax/SoH state restored: %d anchors, %d segments%s, coulomb count %s, estimate %s '
                     '(published with the next accepted segment)', self.name, len(self.anchors),
                     len(self.segments), (', newest from %s' % fmt_t(self.segments[-1]['t'])) if self.segments else '',
@@ -2155,20 +2009,9 @@ class QmaxEstimator:
                     ('%.1f Ah' % v) if v is not None else
                     'none yet (%d/%d segments)' % (len(self._counted()), PUBLISH_MIN_SEGMENTS))
 
+    def _take(self, other: 'QmaxEstimator'):
+        """Become `other` (a restored estimator), keeping this one's lock."""
+        vars(self).update({k: x for k, x in vars(other).items() if k != '_lock'})
+
 
 DEFAULT_CURVE = OcvCurve()
-
-# Anchors and segments are only restored into the code that made them: a change
-# to the curve or any gate would mix two definitions of Qmax. Computed last, over
-# the code that actually runs (estimators.common.code_fingerprint): this module,
-# the shared helpers, and the one function of bms.py that derives inputs the
-# saved state depends on (the SoC and capacities the stop rule reads; rev8). Not
-# all of bms.py and sampling.py: every unrelated change there would discard
-# months of segments. What the sampler does with a sample is add_sample() and
-# best_temperature() here.
-def code_fingerprint() -> Optional[str]:
-    return common.code_fingerprint(
-        globals(), vars(common), {'__name__': _bms.__name__, 'derive_charge_fields': _bms.derive_charge_fields})
-
-
-CODE_FINGERPRINT = code_fingerprint()

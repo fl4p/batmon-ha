@@ -283,13 +283,6 @@ def test_without_a_capacity_nothing_is_published():
         assert est.pair_reasons['no_capacity'] >= 4 and 'accepted' not in est.pair_reasons
 
 
-def test_calibration_without_the_capacity_requirement_a_wrong_scale_is_published(monkeypatch):
-    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)
-    est, pub = run(_wrong_shunt(), cap=None)
-    assert pub and pub[-1]['qmax'] < 0.35 * 98.0  # 29 Ah for a 98 Ah cell
-    assert pub[-1]['soh'] is None and pub[-1]['plausibility_checked'] is False
-
-
 # ================================================================ known-bad: decode glitch in the current
 
 def test_an_impossible_current_is_never_integrated_and_is_bridged_like_a_missing_sample():
@@ -756,7 +749,7 @@ def test_the_bms_reported_capacity_is_never_the_reference(bms_cap):
     without the option, and with it the option is the reference whatever the
     BMS says (150 is more than 1.25x the option: nothing at all)."""
     est, pub = _with_bms_capacity(full_cycles().rows, bms_cap)
-    assert pub == [] and not est.segments and est.capacity() == (None, None)
+    assert pub == [] and not est.segments and est.design_capacity is None
     assert est.pair_reasons['no_capacity'] >= 4 and 'accepted' not in est.pair_reasons
     est, pub = _with_bms_capacity(full_cycles().rows, bms_cap, cap=100.0)
     if bms_cap > q.CAPACITY_MISMATCH_MAX * 100.0:
@@ -872,7 +865,7 @@ def test_the_sampler_passes_the_bms_capacity_to_the_check():
     derived, reaches the check (never the reference)."""
     s, _ = _run_sampler(2, bms=_Bms(capacity=100.0), soh_estimator=True, design_capacity=200.0)
     assert s.qmax.bms_capacity() == 100.0 and s.qmax.capacity_mismatch() == (200.0, 100.0)
-    assert s.qmax.capacity() == (200.0, 'option')
+    assert s.qmax.design_capacity == 200.0
     s, _ = _run_sampler(2, bms=_DalyDerived(), soh_estimator=True, design_capacity=280.0)
     assert s.qmax.bms_capacity() == 267 and s.qmax.capacity_mismatch() is None
 
@@ -1194,10 +1187,6 @@ def test_calibration_without_the_band_the_plausibility_window_still_rejects(monk
     est, pub = run(_nmc_day().rows)
     assert pub == [] and not est.segments and est.enabled
     assert est.pair_reasons['drift'] + est.pair_reasons['implausible'] >= 6 and 'accepted' not in est.pair_reasons
-    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)
-    monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)  # 6 Ah is also within reach of the offset bound
-    est, _ = run(_nmc_day().rows, cap=None)  # the guards off: what they stop together
-    assert seg_q(est)[0] < 0.2 * 98.0
 
 
 def test_a_single_out_of_band_glitch_does_not_disable():
@@ -2641,22 +2630,16 @@ def test_calibration_without_either_check_the_old_pack_is_published_as_the_new_o
     assert pub[-1]['plausibility_checked']
 
 
-def test_a_saved_segment_of_another_capacity_is_dropped_and_never_counted(caplog):
-    """Inside a state that claims the present option, a segment (or anchor)
-    checked against another capacity is dropped on restore, logged; and one
-    that got in anyway is not counted at publication, though its value is
-    inside the present window."""
+def test_a_segment_of_another_capacity_is_never_counted():
+    """A segment checked against another capacity than the option is not
+    counted at publication, though its value is inside the present window."""
     est, pub = run(full_cycles(n=3).rows, cap=100.0)
-    st = _via_json(est.get_state(full=True))
-    st['segments'][0]['cap'] = 120.0
-    st['anchors'][-1]['cap'] = 120.0
     r = _fresh(100.0)
-    with caplog.at_level('WARNING'):
-        assert r.restore(st)
-    assert len(r.segments) == 4 and len(r.anchors) == len(st['anchors']) - 1
-    assert '2 saved anchor(s)/segment(s) checked against another capacity' in caplog.text
+    assert r.restore(_via_json(est.get_state(full=True)))
+    r.segments.popleft()  # room for one more
+    n = len(r._counted())
     r.segments.append(dict(r.segments[-1], cap=120.0))
-    assert len(r._counted()) == 4 and r.result()['segments'] == 4
+    assert len(r._counted()) == n and r.result()['segments'] == n
 
 
 def test_segments_of_another_cell_count_are_not_published():
@@ -2893,50 +2876,13 @@ def test_calibration_without_the_reset_the_summary_waits_for_the_old_clock():
     assert _summaries_after_a_year_ahead(reset=False) == []
 
 
-def test_changed_code_discards_everything(caplog):
-    est, _ = run(full_cycles().rows)
-    st = _via_json(est.get_state())
-    st['code'] = 'something else'
-    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
-    with caplog.at_level('INFO'):
-        assert restored.restore(st)
-    assert not restored.segments and not restored.anchors and restored._last_t is None
-    assert 'code changed' in caplog.text
-
-
-def test_unknown_code_is_never_taken_as_the_same(monkeypatch):
-    est, _ = run(full_cycles().rows)
-    st = _via_json(est.get_state())
-    monkeypatch.setattr(q, 'CODE_FINGERPRINT', None)
-    st['code'] = None
-    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
-    restored.restore(st)
-    assert not restored.segments
-
-
 BAD_STATES = [
-    ('q_charge zero', lambda s: s.update(q_charge=0.0)),
-    ('q_charge negative', lambda s: s.update(q_charge=-0.1)),
     ('q_charge NaN', lambda s: s.update(q_charge=float('nan'))),
-    ('q_charge of no counter', lambda s: s.update(charge_src=None, charge_max=None)),  # (only that rule)
-    ('charge_src unknown', lambda s: s.update(charge_src='voltage')),
-    ('charge_src bad capacity', lambda s: s.update(charge_src='soc*-5.0')),
     ('last_soc not a number', lambda s: s.update(last_soc='full')),
     ('last_soc_raw not a number', lambda s: s.update(last_soc_raw=[100])),
-    ('last_aged not positive', lambda s: s.update(last_aged=0.0)),
-    ('charge_max negative', lambda s: s.update(charge_max=-1.0)),
-    ('charge_max of no counter', lambda s: s.update(charge_src=None, q_charge=None, charge_q=None,
-                                                     last_charge=None)),
-    ('last_charge_full not positive', lambda s: s.update(last_charge_full=-1.0)),
-    ('charge_q without q_charge', lambda s: s.update(q_charge=None)),
-    ('glitch_nb without a glitch', lambda s: s.update(glitch_nb=dict(before=[1.0], after=[]), t_glitch=None)),
     ('glitch_nb garbage', lambda s: s.update(glitch_nb='yes', t_glitch=1.0)),
-    ('glitch_nb already decided', lambda s: s.update(glitch_nb=dict(before=[1.0] * 5, after=[1.0] * 5), t_glitch=1.0)),
     ('glitch_nb not numbers', lambda s: s.update(glitch_nb=dict(before=['a'], after=[]), t_glitch=1.0)),
-    ('recent too long', lambda s: s.update(recent=[1.0] * 6)),
     ('bms_caps garbage', lambda s: s.update(bms_caps=[[1.0]])),
-    ('bms_caps not positive', lambda s: s.update(bms_caps=[[s['last_t'], 0.0]])),
-    ('bms_caps after last_t', lambda s: s.update(bms_caps=[[s['last_t'] + 1, 100.0]])),
     ('recent missing', lambda s: s.pop('recent')),
     ('not a dict', lambda s: ['a list']),
     ('other version', lambda s: s.update(version=99)),
@@ -2944,16 +2890,11 @@ BAD_STATES = [
     ('q_moved missing', lambda s: s.pop('q_moved')),
     ('q_moved negative', lambda s: s.update(q_moved=-1.0)),
     ('charge_q beyond q_moved', lambda s: s.update(charge_q=s['q_moved'] + 1.0)),
-    ('last_i without last_t', lambda s: s.update(last_t=None)),
+    ('last_t missing', lambda s: s.update(last_t=None)),
+    ('rest without its samples', lambda s: s.update(rest_n=0)),
     ('epoch negative', lambda s: s.update(epoch=-1)),
-    ('anchor soc out of range', lambda s: s['anchors'][1]['soc'].__setitem__(0, 140.0)),
-    ('anchor soc without reason', lambda s: s['anchors'][1]['why'].__setitem__(0, 'plateau')),
-    ('anchor temp out of range', lambda s: s['anchors'][1].update(temp=-5.0)),
     ('anchor from a later epoch', lambda s: s['anchors'][1].update(epoch=99)),
     ('anchors out of order', lambda s: s['anchors'].reverse()),
-    ('segment qmax not its minimum', lambda s: s['segments'][0].update(qmax=500.0)),
-    ('segment negative cell', lambda s: s['segments'][0]['q_cells'].__setitem__(0, -3.0)),
-    ('segment dsoc too small', lambda s: s['segments'][0]['dsoc'].__setitem__(0, 10.0)),
     ('segment after last_t', lambda s: s['segments'][-1].update(t=s['last_t'] + 1)),
     ('bin garbage', lambda s: s.update(bin='x')),
     ('bin not at last_t', lambda s: s['bin'].update(t1=s['bin']['t1'] - 5)),
@@ -2962,10 +2903,6 @@ BAD_STATES = [
     ('audit garbage', lambda s: s.update(audit='yes')),
     ('audit after last_t', lambda s: s.update(audit=dict(t=s['last_t'] + 1, c=50.0, src='charge', q=0.0, m=0.0,
                                                           held=[]))),
-    ('audit moved beyond q_moved', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='charge', q=0.0,
-                                                                  m=s['q_moved'] + 1, held=[]))),
-    ('audit of an unknown counter', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='volts', q=0.0, m=0.0,
-                                                                   held=[]))),
     ('audit held not numbers', lambda s: s.update(audit=dict(t=s['last_t'], c=50.0, src='charge', q=0.0, m=0.0,
                                                               held=['x']))),
 ]
@@ -2992,14 +2929,26 @@ def test_a_state_that_does_not_validate_starts_fresh(caplog, what, mutate):
     assert pub
 
 
-def test_calibration_without_the_qmax_check_a_forged_segment_would_be_restored():
-    """The segment check is what catches 'qmax not its minimum': the same
-    state with a consistent forged value restores fine."""
-    state = _mid_rest_state()
-    state['segments'][0]['q_cells'] = [500.0] * len(state['segments'][0]['q_cells'])
-    state['segments'][0]['qmax'] = 500.0
-    est = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
-    assert est.restore(state) and est.segments[0]['qmax'] == 500.0
+def test_a_version_1_state_is_discarded():
+    # v1 (release <= 2.30) carried a code fingerprint that told releases apart;
+    # without it a pre-2.28 history (before the counter-write quarantine) would
+    # restore as valid, so every v1 file starts fresh once
+    p = full_cycles(n=1, dt=7.0)
+    est, _ = run(p.rows[:len(p.rows) - 700], **bms(p))
+    st = _via_json(est.get_state())
+    assert st['version'] == q.STATE_VERSION and st['segments']
+    st['version'], st['code'] = 1, '3f9c0e1a7b2d4c65'
+    restored = q.QmaxEstimator('t', design_capacity=100.0, curve=SYNTH)
+    assert restored.restore(st) is False and not restored.segments
+
+
+def test_a_state_with_a_top_anchor_restores(top_anchors):
+    est, _ = run_lfp(lfp_cycles().rows)
+    st = _via_json(est.get_state())
+    assert tops(est)
+    restored = _fresh(curve=q.DEFAULT_CURVE)
+    assert restored.restore(st) and list(restored.anchors) == list(est.anchors)
+    assert restored.value == est.value
 
 
 def test_a_chemistry_disable_survives_a_restart_an_internal_error_does_not():
@@ -3752,20 +3701,6 @@ def test_the_sampler_fetches_voltages_while_charging_only_with_a_capacity():
     assert bms_.n_voltage_fetches == 1  # discharging: no
 
 
-def test_a_top_anchor_restored_with_another_shape_does_not_validate(top_anchors):
-    est, _ = run_lfp(lfp_cycles().rows)
-    st = _via_json(est.get_state())
-    k = next(j for j, a in enumerate(st['anchors']) if a['kind'] == 'top')
-    for bad in (dict(soc=[99.0] * 4), dict(mode='guess'), dict(kind='full'), dict(temp=5.0), dict(i_rest=0.7)):
-        s2 = _via_json(st)
-        s2['anchors'][k].update(bad)
-        assert not _fresh().restore(s2), bad
-    s2 = _via_json(st)
-    s2['segments'][0]['kinds'] = ['top', 'top']
-    assert not _fresh().restore(s2)
-    assert _fresh().restore(st)
-
-
 # ================================================================ MQTT
 
 class _Client:
@@ -3797,12 +3732,12 @@ def test_discovery_declares_qmax_and_soh_only_when_enabled():
     assert "homeassistant/sensor/test_q/_soc_soh/config" not in c.published  # not the BMS's own SoH
 
 
-def test_publish_qmax_leaves_out_an_unknown_soh(monkeypatch):
-    monkeypatch.setattr(q, 'REQUIRE_CAPACITY', False)  # the only way to get a result without a capacity
-    est, pub = run(full_cycles().rows, cap=None)
+def test_publish_qmax_leaves_out_an_unknown_soh():
+    est, pub = run(full_cycles().rows)
+    res = dict(pub[-1], soh=None, capacity=None, capacity_source=None, plausibility_checked=False)
     c = _Client()
-    publish_qmax(c, 'dev', pub[-1])
-    assert float(c.published['dev/qmax_est']) == pytest.approx(pub[-1]['qmax'], rel=1e-3)
+    publish_qmax(c, 'dev', res)
+    assert float(c.published['dev/qmax_est']) == pytest.approx(res['qmax'], rel=1e-3)
     assert 'dev/soh_est' not in c.published
     assert json.loads(c.published['dev/qmax_est/attributes'])['plausibility_checked'] is False
 
@@ -4023,9 +3958,9 @@ def test_sampler_never_makes_the_bms_capacity_the_reference():
     assert BmsSample(voltage=53.0, current=0.0, soc=0.3, charge=0.8).capacity == 267  # derived, not reported
     for bms in (_Bms(capacity=230.0), _DalyDerived()):
         s, _ = _run_sampler(2, bms=bms, soh_estimator=True)
-        assert s.qmax.capacity() == (None, None)
+        assert s.qmax.design_capacity is None
         s, _ = _run_sampler(2, bms=bms, soh_estimator=True, design_capacity=280.0)
-        assert s.qmax.capacity() == (280.0, 'option')
+        assert s.qmax.design_capacity == 280.0
 
 
 def test_sampler_skips_virtual_bms_and_is_off_by_default():

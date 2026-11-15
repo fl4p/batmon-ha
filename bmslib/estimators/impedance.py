@@ -87,10 +87,9 @@ import threading
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from bmslib.estimators import common
 from bmslib.estimators.common import (CHEM_PERSIST_N, CHEM_PERSIST_S, I_MAX_ABS_A, I_MAX_C_RATE, LFP_MV_HI,
                                      LFP_MV_LO, chemistry_step, current_ceiling, finite as _finite,
-                                     fmt_t as _fmt_t, locked, median)
+                                     fmt_t as _fmt_t, locked, median, v_opt_fin)
 from bmslib.util import get_logger
 
 logger = get_logger()
@@ -201,7 +200,14 @@ R_NORM_T_LO, R_NORM_T_HI = 10.0, 40.0
 PACK_TEMP_WARMUP_S = 10 * 3600.0
 
 # --- persistence (get_state / restore) ---
-STATE_VERSION = 1
+# Bump when the meaning of saved data changes (the gates or the fit that accept
+# a window, the normalisation inputs, the row/bin layout): restore() then
+# starts fresh instead of mixing two definitions of R in one median.
+STATE_VERSION = 2  # 2: no code fingerprint; v1 files (<= 2.30) are not told apart by release
+
+
+def _opt_float(x) -> Optional[float]:
+    return None if x is None else float(x)
 
 
 def window_temperature(w) -> Tuple[Optional[float], Optional[str], Optional[str]]:
@@ -281,21 +287,6 @@ def noise_ratio(ns_u: Optional[float], ns_i: Optional[float]) -> Optional[float]
     return lam if math.isfinite(lam) and lam > 0 else None
 
 
-def ols(xs, ys):
-    """Slope and intercept of y on x, or None."""
-    n = len(xs)
-    if n < 5:
-        return None
-    mx = sum(xs) / n
-    my = sum(ys) / n
-    sxx = sum((x - mx) ** 2 for x in xs)
-    if sxx <= 0:
-        return None
-    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    b = sxy / sxx
-    return b, my - b * mx
-
-
 def deming(xs, ys, lam):
     """Deming slope and intercept of y on x, lam = var(noise_y)/var(noise_x).
     None when the fit is undefined (too few points, no covariance)."""
@@ -363,40 +354,32 @@ def deming_irls(xs, ys, lam, iters=None, k=None):
     return b, a, 1.0 - ss_res / ss_tot, len(x)
 
 
-def best_lag(u: Sequence[float], i: Sequence[float], max_lag=None, min_diffs=None):
-    """Lag in samples that maximises corr(diff u, diff i) over [-max_lag, max_lag].
-    Positive lag = u lags i, i.e. i[k] pairs with u[k + lag].
-
-    `u` and `i` are equally long, in sample order, NaN (or None) where a value
-    is missing. NaN-safe: a difference touching a missing value is dropped from
-    that candidate's pairs instead of poisoning the whole search (the prototype
-    returned lag 0 for any window with a NaN in it). Candidates are scored on
-    the SIGNED correlation (u rises with charge current), ties go to the smaller
-    |lag|. Returns (lag, corr), or (None, nan) when no candidate had min_diffs
-    finite pairs with non-zero spread -- unevaluable, not "lag 0"."""
-    lag, c, _ = _best_lag_diffs(_diffs(u), _diffs(i), max_lag, min_diffs)
-    return lag, c
-
-
 def _diffs(x):
     """First differences, NaN where either neighbour is missing or non-finite."""
     x = [float(v) if _finite(v) else math.nan for v in x]
     return [b - a for a, b in zip(x, x[1:])]  # NaN propagates
 
 
-_LAG_ORDER_CACHE = {}
-_FINGERPRINT_STATE = frozenset({'_LAG_ORDER_CACHE'})  # filled at run time: state (estimators.common)
+# lag candidates, smaller |lag| first (ties go to it), +L before -L
+_LAG_ORDER = tuple(sorted(range(-MAX_LAG, MAX_LAG + 1), key=lambda v: (abs(v), -v)))
 
 
-def _best_lag_diffs(du, di, max_lag=None, min_diffs=None):
-    max_lag = MAX_LAG if max_lag is None else max_lag
-    min_diffs = MIN_LAG_DIFFS if min_diffs is None else min_diffs
-    order = _LAG_ORDER_CACHE.get(max_lag)
-    if order is None:
-        order = _LAG_ORDER_CACHE[max_lag] = sorted(range(-max_lag, max_lag + 1), key=lambda v: (abs(v), -v))
+def _best_lag_diffs(du, di):
+    """Lag in bins that maximises corr(du, di) over [-MAX_LAG, MAX_LAG], from
+    first differences (_diffs). Positive lag = u lags i, i.e. di[k] pairs with
+    du[k + lag].
+
+    NaN-safe: a difference touching a missing value is dropped from that
+    candidate's pairs instead of poisoning the whole search (the prototype
+    returned lag 0 for any window with a NaN in it). Candidates are scored on
+    the SIGNED correlation (u rises with charge current), ties go to the smaller
+    |lag|. Returns (lag, corr, corr at lag 0), lag None and corr nan when no
+    candidate had MIN_LAG_DIFFS finite pairs with non-zero spread --
+    unevaluable, not "lag 0"."""
+    min_diffs = MIN_LAG_DIFFS
     m = min(len(du), len(di))
     best, best_c, c0 = None, -math.inf, None
-    for L in order:
+    for L in _LAG_ORDER:
         if L >= 0:
             pa, pb = du[L:m], di[:m - L]
         else:
@@ -722,7 +705,7 @@ class CellResistanceEstimator:
         full=True (at shutdown) is everything, so a restart within one window
         continues exactly where it stopped."""
         st: Dict[str, Any] = dict(
-            version=STATE_VERSION, code=CODE_FINGERPRINT,
+            version=STATE_VERSION,
             disabled_reason=self.disabled_reason if (not self.enabled and self._disable_persistent) else None,
             q_i=self.q_i, q_u=list(self.q_u),
             windows=[dict(w) for w in self.windows],
@@ -758,103 +741,67 @@ class CellResistanceEstimator:
         return True
 
     def _restore(self, st):
-        def fin(x, what):
-            if not _finite(x) or isinstance(x, bool):
-                raise ValueError('%s is %r' % (what, x))
-            return float(x)
-
-        def opt_fin(x, what):
-            return None if x is None else fin(x, what)
-
-        def step(x, what):
-            if x is not None and fin(x, what) <= 0:
-                raise ValueError('%s is %r' % (what, x))
-            return x
-
+        """Fill a fresh estimator from `st` and take it over whole at the end,
+        so a state that raises anywhere (restore() starts fresh) leaves nothing
+        half-restored. Only what would corrupt the estimate silently is checked;
+        malformed fields raise on conversion."""
         if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
             raise ValueError('state version %r, expected %d'
                              % (st.get('version') if isinstance(st, dict) else type(st).__name__, STATE_VERSION))
-        q_i = step(st.get('q_i'), 'q_i')
-        q_u = st.get('q_u') or []
-        if not isinstance(q_u, list):
-            raise ValueError('q_u is %r' % type(q_u).__name__)
-        q_u = [step(q, 'q_u') for q in q_u]
-
-        self.__init__(self.name)
-        self.q_i, self.q_u = q_i, q_u  # a property of the BMS, not of this code
-        if CODE_FINGERPRINT is None or st.get('code') != CODE_FINGERPRINT:
-            logger.info('%s: cell resistance estimator code changed since the state was saved: accepted '
-                        'windows discarded, learnt quantisation kept', self.name)
-            return
+        new = type(self)(self.name)
+        new.q_i = v_opt_fin(st.get('q_i'), 'q_i')  # a property of the BMS
+        new.q_u = [v_opt_fin(q, 'q_u') for q in st.get('q_u') or []]
 
         reason = st.get('disabled_reason')
         if reason is not None:
-            self.enabled, self.disabled_reason, self._disable_persistent = False, str(reason), True
+            new.enabled, new.disabled_reason, new._disable_persistent = False, str(reason), True
+        else:
+            windows = [dict(w) for w in st.get('windows') or []]
+            # the age limit and _drop_windows_after pop from the ends
+            if any(a['t'] > b['t'] for a, b in zip(windows, windows[1:])):
+                raise ValueError('windows not in time order')
+            new.windows.extend(windows[-ROLLING_WINDOWS:])
+
+            if 'last_t' in st:  # full state
+                new._last_t = v_opt_fin(st.get('last_t'), 'last_t')
+                new._next_end = v_opt_fin(st.get('next_end'), 'next_end')
+                for t, i, soc, volts, temp, ptemp, mtemp in st.get('rows') or []:
+                    new._rows.append((float(t), float(i), float(soc), tuple(map(float, volts)),
+                                      _opt_float(temp), _opt_float(ptemp), _opt_float(mtemp)))
+                # rows are windowed in order, and add() drops samples up to last_t
+                rows = new._rows
+                if any(a[0] > b[0] for a, b in zip(rows, list(rows)[1:])) or \
+                        (rows and (new._last_t is None or rows[-1][0] > new._last_t)):
+                    raise ValueError('rows not in time order')
+                b = st.get('bin')
+                if b is not None:
+                    nb = _Bin(0, 0)
+                    for k in _Bin.__slots__:
+                        setattr(nb, k, b[k])
+                    nb.su, nb.nu = [float(v) for v in nb.su], [int(k) for k in nb.nu]
+                    if len(nb.su) != len(nb.nu):  # row() would zip away cells
+                        raise ValueError('bin with %d sums and %d counts' % (len(nb.su), len(nb.nu)))
+                    new._bin = nb
+                new._prev_i = v_opt_fin(st.get('prev_i'), 'prev_i')
+                pu = st.get('prev_u')
+                new._prev_u = None if pu is None else tuple(float(v) for v in pu)
+                new._oob_since = v_opt_fin(st.get('oob_since'), 'oob_since')
+                new._oob_n = int(st.get('oob_n') or 0)
+                new.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
+                new.cell_reasons.update({str(k): int(v) for k, v in (st.get('cell_reasons') or {}).items()})
+                new.n_dropped = int(st.get('n_dropped') or 0)
+                new.n_i_rejected = int(st.get('n_i_rejected') or 0)
+                new.raw_reasons.update({str(k): int(v) for k, v in (st.get('raw_reasons') or {}).items()})
+                new._attrs_due = bool(st.get('attrs_due'))
+                new._t_summary = v_opt_fin(st.get('t_summary'), 't_summary')
+            v = new.value  # raises here, not on the next publish, for windows that cannot be read
+            new.raw_value, new.attributes()
+            new._announced = bool(st.get('announced')) or v is not None
+
+        vars(self).update({k: x for k, x in vars(new).items() if k != '_lock'})
+        if not self.enabled:
             logger.info('%s: cell resistance estimator stays disabled (saved state): %s', self.name, reason)
             return
-
-        windows = []
-        for w in st.get('windows') or []:
-            if not isinstance(w, dict):
-                raise ValueError('window is %r' % type(w).__name__)
-            fin(w.get('t'), 'window t')
-            if not R_MOHM_LO < fin(w.get('r'), 'window r') < R_MOHM_HI:
-                raise ValueError('window r %r outside %.1f..%.1f mOhm' % (w['r'], R_MOHM_LO, R_MOHM_HI))
-            # the temperature tags decide normalisation: each must be there,
-            # unknown (None) or a finite number -- never guessed
-            for k in ('temp', 'pack_temp', 'mos_temp'):
-                if k not in w:
-                    raise ValueError('window without %s' % k)
-                opt_fin(w[k], 'window ' + k)
-            windows.append(dict(w))
-        if any(a['t'] > b['t'] for a, b in zip(windows, windows[1:])):
-            raise ValueError('windows not in time order')
-        self.windows.extend(windows[-ROLLING_WINDOWS:])
-
-        if 'last_t' in st:  # full state
-            self._last_t = opt_fin(st.get('last_t'), 'last_t')
-            self._next_end = opt_fin(st.get('next_end'), 'next_end')
-            rows = []
-            for r in st.get('rows') or []:
-                if not isinstance(r, list) or len(r) != 7 or not isinstance(r[3], list):
-                    raise ValueError('row %r' % (r,))
-                rows.append((fin(r[0], 'row t'), fin(r[1], 'row i'), float(r[2]),
-                             tuple(float(v) for v in r[3]), opt_fin(r[4], 'row temp'), opt_fin(r[5], 'row ptemp'),
-                             opt_fin(r[6], 'row mtemp')))
-            if any(a[0] > b[0] for a, b in zip(rows, rows[1:])) or \
-                    (rows and (self._last_t is None or rows[-1][0] > self._last_t)):
-                raise ValueError('rows not in time order')
-            self._rows.extend(rows)
-            b = st.get('bin')
-            if b is not None:
-                if not isinstance(b, dict) or set(b) != set(_Bin.__slots__):
-                    raise ValueError('bin %r' % (b,))
-                nb = _Bin(int(b['idx']), len(b['su']))
-                for k in _Bin.__slots__:
-                    setattr(nb, k, b[k])
-                if not isinstance(nb.n, int) or nb.n < 1 or len(nb.su) != len(nb.nu):
-                    raise ValueError('bin %r' % (b,))
-                fin(nb.st, 'bin st'), fin(nb.si, 'bin si')
-                nb.su = [fin(v, 'bin su') for v in nb.su]
-                nb.nu = [int(k) for k in nb.nu]
-                for k in ('temp', 'ptemp', 'mtemp'):
-                    setattr(nb, k, [fin(v, 'bin ' + k) for v in getattr(nb, k)])
-                self._bin = nb
-            self._prev_i = opt_fin(st.get('prev_i'), 'prev_i')
-            pu = st.get('prev_u')
-            self._prev_u = None if pu is None else tuple(float(v) for v in pu)
-            self._oob_since = opt_fin(st.get('oob_since'), 'oob_since')
-            self._oob_n = int(st.get('oob_n') or 0)
-            self.counts.update({str(k): int(v) for k, v in (st.get('counts') or {}).items()})
-            self.cell_reasons.update({str(k): int(v) for k, v in (st.get('cell_reasons') or {}).items()})
-            self.n_dropped = int(st.get('n_dropped') or 0)
-            self.n_i_rejected = int(st.get('n_i_rejected') or 0)
-            self.raw_reasons.update({str(k): int(v) for k, v in (st.get('raw_reasons') or {}).items()})
-            self._attrs_due = bool(st.get('attrs_due'))
-            self._t_summary = opt_fin(st.get('t_summary'), 't_summary')
-        self._announced = bool(st.get('announced')) or self.value is not None
-
-        v = self.value
         logger.info('%s: cell resistance state restored: %d windows%s, estimate %s (published with the next '
                     'accepted window)', self.name, len(self.windows),
                     (', newest from %s' % _fmt_t(self.windows[-1]['t'])) if self.windows else '',
@@ -1058,9 +1005,3 @@ class CellResistanceEstimator:
         self.n_dropped = 0
         self.n_i_rejected = 0
 
-
-# Accepted windows are only restored into the code that computed them: after an
-# upgrade that changed any gate or the fit, old windows would mix two
-# definitions of R in one median. Computed last, over the code that actually
-# runs, this module's and the shared helpers' (estimators.common.code_fingerprint).
-CODE_FINGERPRINT = common.code_fingerprint(globals(), vars(common))
