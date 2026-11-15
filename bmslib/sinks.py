@@ -75,7 +75,26 @@ class InfluxDBSink(BmsSampleSink):
             target=self._flush_loop, name='InfluxDBSinkFlush', daemon=True)
         self._flush_thread.start()
 
-    def publish_voltages(self, bms_name, voltages: List[Union[int,float]], short=False, tags=None):
+    # Cells beyond this index are not written (None: all).
+    max_cells = None
+    # Write voltage_cell_min/max/mean/median next to the per-cell fields (unless `short`).
+    cell_aggregates = True
+
+    @staticmethod
+    def _cell_field(v):
+        return int(v)
+
+    def _encode_fields(self, fields):
+        """Encode flattened sample fields: ints as float, floats rounded to 3 places."""
+        for k, v in fields.items():
+            if isinstance(v, int):
+                fields[k] = float(v)
+            elif isinstance(v, float):
+                fields[k] = round(v, 3)
+        return fields
+
+    def publish_voltages(self, bms_name, voltages: List[Union[int, float]], short=False, tags=None):
+        """`short` writes only the changed per-cell fields: no aggregates, no `cells` rows."""
         if not voltages:
             return
         tags = tags or {}
@@ -86,14 +105,15 @@ class InfluxDBSink(BmsSampleSink):
         last_volt = self._last_volt[bms_name]
 
         pub_anyway = random.random() < (1 / 100)
+        n = len(voltages) if self.max_cells is None else min(len(voltages), self.max_cells)
 
         def _valid(v):
             return v is not None and not (isinstance(v, float) and not math.isfinite(v))
 
-        fields = {(f"voltage_cell%03i" % i): int(voltages[i]) for i in range(len(voltages)) if
+        fields = {"voltage_cell%03i" % i: self._cell_field(voltages[i]) for i in range(n) if
                   _valid(voltages[i]) and (voltages[i] != last_volt[i] or pub_anyway)}
 
-        if not short:
+        if not short and self.cell_aggregates:
             valid_voltages = [v for v in voltages if _valid(v)]
             if valid_voltages:
                 fields["voltage_cell_max"] = int(max(valid_voltages))
@@ -110,7 +130,7 @@ class InfluxDBSink(BmsSampleSink):
             }
             self._enqueue(point)
 
-        for i in range(len(voltages)):
+        for i in range(n):
             if not _valid(voltages[i]):
                 continue
             if voltages[i] == last_volt[i] and not pub_anyway:
@@ -127,13 +147,8 @@ class InfluxDBSink(BmsSampleSink):
                 self._enqueue(point)
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        fields = flatten({**sample.values(), "timestamp": None})
+        fields = self._encode_fields(flatten({**sample.values(), "timestamp": None}))
         remove_none_values(fields)
-        for k, v in fields.items():
-            if isinstance(v, int):
-                fields[k] = float(v)
-            elif isinstance(v, float):
-                fields[k] = round(v, 3)
         fields1 = dict(fields)
         if random.random() > (1 / 200):
             remove_equal_values(fields, self._prev_fields.get(bms_name))
@@ -156,7 +171,7 @@ class InfluxDBSink(BmsSampleSink):
         point = {
             "measurement": 'batmon',
             "time": now,
-            "fields": {(f"meter_%s" % name): round(value, 5) for name, value in readings.items()},
+            "fields": {"meter_%s" % name: round(value, 5) for name, value in readings.items()},
             "tags": dict(device=bms_name)
         }
         self._enqueue(point)
@@ -279,10 +294,6 @@ QUESTDB_FLOAT_FIELDS = frozenset({
     "num_samples", "battery_charging", "problem", "uptime", "runtime",
 })
 
-# batmon_tele_batmon has exactly 32 per-cell columns (voltage_cell000..031).
-QUESTDB_MAX_CELLS = 32
-
-
 def _qdb_finite_number(v):
     """True if v is a finite int/float (and not a bool, which we route by name)."""
     if isinstance(v, bool):
@@ -309,7 +320,15 @@ class QuestDBSink(InfluxDBSink):
     this addon currently avoids on constrained platforms.
     """
 
-    def _encode_sample_fields(self, fields):
+    max_cells = 32  # batmon_tele_batmon has exactly voltage_cell000..031
+    # The schema dropped voltage_cell_min/max/mean/median; ILP auto-create would re-add them.
+    cell_aggregates = False
+
+    @staticmethod
+    def _cell_field(v):
+        return int(round(v))
+
+    def _encode_fields(self, fields):
         """Map flattened sample fields to QuestDB-schema-typed values, dropping
         anything not in the schema."""
         out = {}
@@ -330,71 +349,6 @@ class QuestDBSink(InfluxDBSink):
                     out[k] = round(float(v), 3)          # FLOAT
             # else: not a schema column -> drop (avoid ILP auto-create).
         return out
-
-    def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        fields = self._encode_sample_fields(flatten({**sample.values(), "timestamp": None}))
-        remove_none_values(fields)
-        fields1 = dict(fields)
-        if random.random() > (1 / 200):
-            remove_equal_values(fields, self._prev_fields.get(bms_name))
-        self._prev_fields[bms_name] = fields1
-
-        if not fields:
-            return
-        point = {
-            "measurement": 'batmon',
-            "time": int(math.ceil(sample.timestamp * 1e3)),
-            "fields": fields,
-            "tags": dict(device=bms_name),
-        }
-        if tags:
-            point['tags'].update(tags)
-        self._enqueue(point)
-
-    def publish_voltages(self, bms_name, voltages: List[Union[int, float]], short=False, tags=None):
-        if not voltages:
-            return
-        tags = tags or {}
-
-        if bms_name not in self._last_volt or len(self._last_volt[bms_name]) != len(voltages):
-            self._last_volt[bms_name] = [-1] * len(voltages)
-        last_volt = self._last_volt[bms_name]
-        pub_anyway = random.random() < (1 / 100)
-        n = min(len(voltages), QUESTDB_MAX_CELLS)
-
-        def _valid(v):
-            return v is not None and not (isinstance(v, float) and not math.isfinite(v))
-
-        # Per-cell columns on batmon_tele_batmon (INT mV). No aggregates: the
-        # schema dropped voltage_cell_min/max/mean/median and ILP auto-create
-        # would re-add them.
-        fields = {}
-        for i in range(n):
-            v = voltages[i]
-            if _valid(v) and (v != last_volt[i] or pub_anyway):
-                fields["voltage_cell%03i" % i] = int(round(v))
-        if fields:
-            self._enqueue({
-                "measurement": 'batmon',
-                "time": datetime.datetime.utcnow(),
-                "fields": fields,
-                "tags": dict(device=bms_name, **tags),
-            })
-
-        # One row per changed cell on batmon_tele_cells (INT mV).
-        for i in range(n):
-            v = voltages[i]
-            if not _valid(v):
-                continue
-            if v == last_volt[i] and not pub_anyway:
-                continue
-            last_volt[i] = v
-            self._enqueue({
-                "measurement": 'cells',
-                "time": datetime.datetime.utcnow(),
-                "fields": dict(voltage=int(round(v))),
-                "tags": dict(device=bms_name, cell_index=i, **tags),
-            })
 
 
 def telemetry_address(bms) -> str:
@@ -496,76 +450,43 @@ class TelemetrySink(QuestDBSink):
         # logger.info("tele started, uid='%s' did='%s' addr=%s", self.uid, self.did, self.slug_by_name)
         self.silent = True
 
-    def _should_sample(self, bms_name, kind) -> bool:
+    def _route(self, bms_name, kind):
+        """(device, tags) to publish under, or None if this call is skipped:
+        unknown or dummy device, or its `kind` slot was used < sample_interval ago."""
+        slug = self.slug_by_name.get(bms_name)
+        if slug is None or 'dummy' in slug:
+            return None
         now = time.time()
         if now - self._last_pub.get((bms_name, kind), 0) < self.sample_interval:
-            return False
+            return None
         self._last_pub[(bms_name, kind)] = now
-        return True
+        addrh = self.addrh_by_name[bms_name]
+        return slug + '_' + addrh, dict(uid=self.uid, did=self.did, addrh=addrh, slug=slug)
+
+    # Telemetry must never disturb sampling, hence the bare excepts.
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        if bms_name not in self.slug_by_name:
-            return
-        if 'dummy' in self.slug_by_name[bms_name]:
-            return
-        if not self._should_sample(bms_name, 'sample'):
-            return
-        tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
-        tags and tags_.update(tags)
-        try:
-            QuestDBSink.publish_sample(self,
-                                       self.slug_by_name[bms_name] + '_' + self.addrh_by_name[bms_name],
-                                       sample, tags=tags_)
-        except Exception as e:
-            pass
+        route = self._route(bms_name, 'sample')
+        if route:
+            device, tags_ = route
+            tags and tags_.update(tags)
+            try:
+                super().publish_sample(device, sample, tags=tags_)
+            except Exception:
+                pass
 
-    def publish_voltages(self, bms_name, voltages: List[int], short=True, tags=None):
-        if bms_name not in self.slug_by_name:
-            return
-        if 'dummy' in self.slug_by_name[bms_name]:
-            return
+    def publish_voltages(self, bms_name, voltages: List[int], short=False, tags=None):
         if not voltages:
             return  # a failed fetch must not use up the slot
-        if not self._should_sample(bms_name, 'voltages'):
-            return
-        tags_ = dict(uid=self.uid, did=self.did, addrh=self.addrh_by_name[bms_name], slug=self.slug_by_name[bms_name])
-        tags and tags_.update(tags)
-        try:
-            # Telemetry only collects raw per-cell voltages, never the computed
-            # aggregates (voltage_cell_min/max/mean/median). QuestDBSink already
-            # drops the aggregates; short=True is kept for belt-and-suspenders.
-            QuestDBSink.publish_voltages(self, self.slug_by_name[bms_name] + '_' + self.addrh_by_name[bms_name], voltages, short=True, tags=tags_)
-        except Exception:
-            pass
+        route = self._route(bms_name, 'voltages')
+        if route:
+            device, tags_ = route
+            tags and tags_.update(tags)
+            try:
+                super().publish_voltages(device, voltages, tags=tags_)
+            except Exception:
+                pass
 
     def publish_meters(self, bms_name, readings: Dict[str, float]):
         raise NotImplementedError()
 
-
-"""
-# Telemtry
-
-v1 api https://community.influxdata.com/t/unable-to-connect-v1-clients-to-influxdbv2/21630/5
-
-
-influx config create \
-  -n open_pe \
-  -u http://tm.fabi.me:8086 \
-  -p usr:pw \
-  -o openpe
-  
-influx bucket create --org openpe --name batmon_tele -r 0
-
-influx user list
-influx user create --org openpe --name batmon_wo --password nosecret 
-
-bucket=$(influx bucket find --name batmon_tele|tail -n1| awk '{print $1}')
-influx auth create --org openpe --user batmon_wo --write-bucket $bucket
-influx v1 auth create --org openpe --username batmon_wo --password nosecret --write-bucket $bucket
-
-influx auth list | grep batmon_wo
-
-influx org create --name open_pe
-
-
-"""
