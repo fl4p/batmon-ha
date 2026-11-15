@@ -1,6 +1,10 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
 FROM $BUILD_FROM
 
+# s6-overlay sends SIGKILL 3 s after SIGTERM by default, too short for batmon's
+# graceful stop (see `timeout:` in config.yaml, which must stay above this).
+ENV S6_KILL_GRACETIME=20000
+
 WORKDIR /app
 
 # Install requirements for add-on

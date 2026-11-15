@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* A stopping add-on had 3 s before it was killed, possibly before it closed its ESPHome proxy connections, so the next start could be refused (#391); it now gets 20 s.
 * Fix: entities Home Assistant had just created could show `unknown` for up to 10 s, because the states resent after discovery were held back as unchanged.
 * New diagnostic entities for `keep_alive` links: `Link connects`, `Link age`, and the live `Link RSSI` and `Link TX power` with `ble_stack: bluek` or a nimble-ble-proxy 0.2.5+ (other stacks can't read them).
 * Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.

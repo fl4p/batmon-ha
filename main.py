@@ -680,10 +680,19 @@ async def main():
         from bmslib.ble.esphome_proxy import stop_proxies
         await stop_proxies()
 
+    if _t_stop_requested is not None:
+        logger.info('stopped %.1f s after the stop signal', time.monotonic() - _t_stop_requested)
+
+
+_t_stop_requested = None  # time.monotonic() of the first SIGTERM/SIGINT
+
 
 def on_exit(*args, **kwargs):
-    global shutdown
+    global shutdown, _t_stop_requested
     logger.debug('exit signal handler... %s, %s, shutdown was %s', args, kwargs, shutdown)
+    if args and _t_stop_requested is None:  # a signal, not atexit
+        _t_stop_requested = time.monotonic()
+        logger.info('stop signal %s received, shutting down', args[0])
     shutdown += 1
     bmslib.ble.bt.BtBms.shutdown = True
     if shutdown == 5:

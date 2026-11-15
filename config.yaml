@@ -4,6 +4,11 @@ url: https://github.com/fl4p/batmon-ha
 version: "2.30"
 slug: "batmon"
 init: false
+# Seconds the Supervisor waits after SIGTERM before it kills the container. The
+# graceful stop disconnects every BMS, saves state and closes the ESPHome proxy
+# API connections; a killed process leaves its proxy slot taken until the proxy
+# notices, so the next start can be refused (#391). Above S6_KILL_GRACETIME.
+timeout: 30
 host_dbus: true
 apparmor: true
 
