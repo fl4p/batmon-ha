@@ -2,7 +2,7 @@
 
 * New diagnostic entities for `keep_alive` links: `Link connects`, `Link age`, and the live `Link RSSI` and `Link TX power` with `ble_stack: bluek` or a nimble-ble-proxy 0.2.5+ (other stacks can't read them).
 * Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.
-* Fix: `gui: true` read the cell voltages from the BMS on every sample, adding Bluetooth/serial traffic; the GUI now shows the voltages fetched for MQTT anyway.
+* Fix: with the web GUI on (default standalone, `gui: true` under HA), cell voltages were read from the BMS every sample, adding Bluetooth/serial traffic; the GUI now shows the voltages read for MQTT.
 * Fix: `algorithm: soc` with more than two values silently ignored them, broke every sample or crashed at startup; extra values now log a warning.
 * Fix: `algorithm: soc 90% 100%` crashed at startup instead of meaning `soc 90%` as documented.
 * Fix (`supervolt`): a failed reconnect crashed with `AttributeError: 'int' object has no attribute 'upper'`; each reading overwrote the BLE address with the frame's address byte.
