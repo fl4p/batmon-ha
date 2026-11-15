@@ -112,6 +112,16 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
     _last_publish_time = now
 
 
+def forget_published(device_topic: str):
+    """Make the next mqtt_single_out() of this device's topics publish even an
+    unchanged value. After HA discovery the states must go out again: entities HA
+    just created have none, and the dedupe above would hold an unchanged value
+    back for up to MIN_VALUE_EXPIRY / 2."""
+    prefix = device_topic + '/'
+    for topic in [t for t in _last_values if t.startswith(prefix)]:
+        del _last_values[topic]
+
+
 def mqtt_last_publish_time():
     global _last_publish_time
     return _last_publish_time

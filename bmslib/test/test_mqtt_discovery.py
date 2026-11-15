@@ -545,3 +545,31 @@ def test_removals_only_when_the_entity_set_changes(monkeypatch):
     pub.exclude = frozenset({'charging_float_mode'})  # entity set changed: removals again
     pub.discovery()
     assert removals()
+
+
+def test_states_go_out_again_after_discovery_even_if_unchanged(monkeypatch):
+    """mqtt_single_out() holds an unchanged value back for MIN_VALUE_EXPIRY / 2; after
+    HA discovery that left new entities without a state until then."""
+    import bmslib.mqtt_util as mqtt_util
+    monkeypatch.setattr(mqtt_util, '_last_values', {})
+    sent = []
+
+    class Result:
+        rc = paho.MQTT_ERR_SUCCESS
+
+    class Client:
+        def publish(self, topic, payload, retain=False):
+            sent.append(topic)
+            return Result()
+
+    c = Client()
+    mqtt_util.mqtt_single_out(c, 'dev/voltage', 13.2)
+    mqtt_util.mqtt_single_out(c, 'other/voltage', 12.0)
+    mqtt_util.mqtt_single_out(c, 'dev/voltage', 13.2)
+    assert sent.count('dev/voltage') == 1  # deduped
+
+    mqtt_util.forget_published('dev')
+    mqtt_util.mqtt_single_out(c, 'dev/voltage', 13.2)
+    mqtt_util.mqtt_single_out(c, 'other/voltage', 12.0)
+    assert sent.count('dev/voltage') == 2
+    assert sent.count('other/voltage') == 1  # another device keeps its dedupe

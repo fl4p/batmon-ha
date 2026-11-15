@@ -301,3 +301,28 @@ def test_expiry_follows_expire_values_after_0():
         published.clear()
         publish_hass_discovery(Client(), "t/x", exp, sample, 4, [], link={'link/age': 3})
         assert published['homeassistant/sensor/t_x/_link_age/config'].get('expire_after', 0) == want, exp
+
+
+def test_unchanged_states_follow_a_later_discovery(monkeypatch):
+    """The real cycle: states sent just before a discovery must go out again after
+    it, or HA keeps a just-created entity at unknown for up to 10 s."""
+    import bmslib.mqtt_util as mqtt_util
+    from bmslib.models.dummy import DummyBt
+    monkeypatch.setattr(mqtt_util, '_last_values', {})
+    bms = DummyBt('dummy-disc', name='dd', keep_alive=True)
+    mqtt = _Mqtt()
+    s = _sampler(bms, mqtt_client=mqtt)
+
+    async def cycle(discovery):
+        s.period_discov.state = discovery
+        await s._sample_inner()
+
+    asyncio.run(cycle(False))  # states go out; discovery is sent every 5 min, not now
+    n = len(mqtt.log)
+    asyncio.run(cycle(True))  # discovery right after: HA creates the entities now
+    asyncio.run(cycle(False))
+    later = [t for t, _ in mqtt.log[n:]]
+    disc = later.index('homeassistant/sensor/dd/_link_connects/config')
+    assert 'dd/link/connects' in later[disc:], 'link state held back by the dedupe'
+    # capacity never changes on the dummy; the next cycle must still send it
+    assert 'dd/soc/capacity' in later[disc:], 'sample state held back by the dedupe'

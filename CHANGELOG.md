@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: entities Home Assistant had just created could show `unknown` for up to 10 s, because the states resent after discovery were held back as unchanged.
 * New diagnostic entities for `keep_alive` links: `Link connects`, `Link age`, and the live `Link RSSI` and `Link TX power` with `ble_stack: bluek` or a nimble-ble-proxy 0.2.5+ (other stacks can't read them).
 * Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.
 * Fix: with the web GUI on (default standalone, `gui: true` under HA), cell voltages were read from the BMS every sample, adding Bluetooth/serial traffic; the GUI now shows the voltages read for MQTT.

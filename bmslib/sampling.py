@@ -847,7 +847,9 @@ class BmsSampler:
                     self.settings_publisher.exclude = self._settings_excluded
                     self.settings_publisher.discovery()
 
-                # publish sample again after discovery
+                # Every state must go out again after discovery, unchanged or not: entities HA
+                # just created have none. With a fast publish period the next cycle does that.
+                mqtt_util.forget_published(self.mqtt_topic_prefix)
                 if self.period_pub.period > 2:
                     await asyncio.sleep(1)
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
