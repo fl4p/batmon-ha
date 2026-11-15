@@ -3,11 +3,12 @@
 * New diagnostic entities for `keep_alive` links: `Link connects`, `Link age`, and the live `Link RSSI` and `Link TX power` with `ble_stack: bluek` or a nimble-ble-proxy 0.2.5+ (other stacks can't read them).
 * Fix: switching off ANT charging over BLE (`ant`) turned back on by itself after a few seconds; batmon now authenticates with the default password before each switch write, on `ant_uart` too.
 * Fix: `gui: true` read the cell voltages from the BMS on every sample, adding Bluetooth/serial traffic; the GUI now shows the voltages fetched for MQTT anyway.
-* Fix: `algorithm: soc` silently ignored a 3rd and 4th value, a 5th made every sample fail and a 6th crashed at startup; extra values are now ignored with a warning, and repeated spaces no longer shift the values.
+* Fix: `algorithm: soc` with more than two values silently ignored them, broke every sample or crashed at startup; extra values now log a warning.
 * Fix: `algorithm: soc 90% 100%` crashed at startup instead of meaning `soc 90%` as documented.
 * Fix (`supervolt`): a failed reconnect crashed with `AttributeError: 'int' object has no attribute 'upper'`; each reading overwrote the BLE address with the frame's address byte.
 * Fix (`jbd_uart`): reading the BMS settings failed with a TypeError.
 * Fix (`pace_uart`, `basen_uart`): on an RS485 port shared with other packs, their requests could overlap with another pack's; they now take the bus lock like the other wired types.
+* A BMS that is out of range no longer holds up the other devices for up to 10 s, and `type: auto` connects once instead of up to three times.
 
 ## [2.30]
 

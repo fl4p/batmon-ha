@@ -37,41 +37,50 @@ except ImportError:
         pass
 
 
-# Last advertisement seen per normalized address, from every bt_discovery() run on
-# any adapter. bt_discovery() returns bare devices; `type: auto` needs the rest.
+# Last advertisement seen per normalized address, from every bt_scan() on any
+# adapter. bt_scan() returns bare devices; `type: auto` needs the rest.
 discovered_adverts: dict = {}
 
 
-@backoff.on_exception(backoff.expo, Exception, max_time=10, logger=get_logger())
-async def bt_discovery(logger, timeout: int = 5, adapter=None):
+def _scan_results(scanner) -> list:
+    """[(device, advertisement or None)] from a started scanner.
+
+    The bleak 0.13 fork in venv_bleak_pairing (`main.py pair-only`, which also runs
+    the startup scan) has no discovered_devices_and_advertisement_data; bleak 2,
+    habluetooth, bumble-bleak and bluek all have it."""
+    devices = getattr(scanner, 'discovered_devices_and_advertisement_data', None)
+    if devices is not None:
+        return list(devices.values())
+    return [(d, None) for d in scanner.discovered_devices]
+
+
+async def bt_scan(logger, timeout: float = 5, adapter=None):
+    """One scan, logged; returns the devices seen and records their adverts."""
     ad = adapter or 'default'
-    logger.info('BT Discovery (%d seconds, adapter=%s):', timeout, adapter or 'default')
+    logger.info('BT Discovery (%d seconds, adapter=%s):', timeout, ad)
     scanner = BleakScanner(adapter=adapter) if adapter else BleakScanner()
     await scanner.start()
     try:
         await asyncio.sleep(timeout)
-        if hasattr(scanner, 'discovered_devices_and_advertisement_data'):
-            devices = scanner.discovered_devices_and_advertisement_data
-            addr_len = (max(len(d.address) for d, a in devices.values()) + 1) if devices else 20
-            if not devices:
-                logger.info(' - no devices found - ')
-            else:
-                logger.info("%s %*s %26s %4s", ad, addr_len, 'addr', 'name', 'rssi')
-            for d, a in sorted(devices.values(), key=lambda t: t[0].address):
-                logger.info("%s %*s %26s %4s", ad, addr_len, d.address, d.name, a.rssi)
-                discovered_adverts[normalize_ble_address(d.address)] = a
-            return [d for d, a in devices.values()]
-        else:
-            devices = scanner.discovered_devices
-            if not devices:
-                logger.info(' - no devices found - ')
-            else:
-                logger.info("BT %18s %26s", 'addr', 'name')
-            for d in devices:
-                logger.info("BT %s %26s", d.address, d.name)
-            return devices
+        found = sorted(_scan_results(scanner), key=lambda t: t[0].address)
     finally:
-        await scanner.stop()
+        await asyncio.wait_for(scanner.stop(), SCANNER_STOP_TIMEOUT)
+    if not found:
+        logger.info(' - no devices found - ')
+        return []
+    addr_len = max(len(d.address) for d, _ in found) + 1
+    logger.info("%s %*s %26s %4s", ad, addr_len, 'addr', 'name', 'rssi')
+    for d, a in found:
+        logger.info("%s %*s %26s %4s", ad, addr_len, d.address, d.name, a.rssi if a is not None else '')
+        if a is not None:
+            discovered_adverts[normalize_ble_address(d.address)] = a
+    return [d for d, _ in found]
+
+
+# The startup scan only (main.py): it runs before any connection, so retrying an
+# adapter that is not ready yet stalls nothing. The connect path calls bt_scan()
+# once: it holds the process-wide ConnectLock, and the sampler backs off itself.
+bt_discovery = backoff.on_exception(backoff.expo, Exception, max_time=10, logger=get_logger())(bt_scan)
 
 
 def scanner_is_proxy() -> bool:
@@ -135,23 +144,12 @@ async def bt_diagnostics(address: str, adapter: Optional[str], logger, timeout: 
 
     try:
         await asyncio.sleep(timeout)
-        if hasattr(scanner, 'discovered_devices_and_advertisement_data'):
-            devices = scanner.discovered_devices_and_advertisement_data
-            result['others'] = len(devices)
-            for d, a in devices.values():
-                if d.address and d.address.upper() == target:
-                    result['seen'] = True
-                    result['rssi'] = a.rssi
-                    result['name'] = d.name
-                    break
-        else:
-            devices = scanner.discovered_devices
-            result['others'] = len(devices)
-            for d in devices:
-                if d.address and d.address.upper() == target:
-                    result['seen'] = True
-                    result['name'] = d.name
-                    break
+        found = _scan_results(scanner)
+        result['others'] = len(found)
+        for d, a in found:
+            if d.address and d.address.upper() == target:
+                result.update(seen=True, rssi=a.rssi if a is not None else None, name=d.name)
+                break
     finally:
         try:
             await scanner.stop()
@@ -605,7 +603,7 @@ class BtBms:
             if scan_on_not_found:  # _connect_with_scanner already runs a scan on this adapter
                 self.logger.error("%s, starting scanner", exc)
                 try:  # scan where we connect; the proxy stack has no local adapter (see bt_diagnostics)
-                    await bt_discovery(self.logger, adapter=None if scanner_is_proxy() else self._adapter)
+                    await bt_scan(self.logger, adapter=None if scanner_is_proxy() else self._adapter)
                 except Exception as e:  # keep the not-found semantics for the caller
                     self.logger.warning('discovery after failed connect: %s', str(e) or type(e))
             raise
@@ -678,7 +676,14 @@ class BtBms:
         scanner = BleakScanner(adapter=self._adapter) if self._adapter and not scanner_is_proxy() else BleakScanner()
         self.logger.debug("starting scan")
         try:  # a caller's timeout cancels us mid-start or mid-retry; the scan must not keep running
-            await scanner.start()
+            try:
+                await scanner.start()
+            except Exception as e:
+                # BlueZ may still be busy (InProgress/NotReady) right after a previous
+                # scan stopped; one retry, so a transient adapter error doesn't lose the device
+                self.logger.debug('scanner start failed (%s), retrying once', e)
+                await asyncio.sleep(2)
+                await scanner.start()
             attempt = 1
             while True:
                 try:
@@ -835,7 +840,7 @@ class BtBms:
         raise NotImplementedError()
 
     async def subscribe(self, callback: Callable[[BmsSample], None]):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     async def set_switch(self, switch: str, state: bool):
         """

@@ -207,6 +207,21 @@ def test_unreachable_device_is_unverified_not_negative():
     assert res.type is None and not res.connected and res.error and not res.tried
 
 
+def test_unreachable_device_is_tried_once(monkeypatch):
+    # open() already falls back to the scanner connect, which retries up to 8 times;
+    # an outer retry multiplied that to ~27 connects per device
+    opens = []
+
+    async def failing_open(self):
+        opens.append(1)
+        raise TimeoutError('no device')
+
+    monkeypatch.setattr(AutoDetectBt, 'open', failing_open)
+    dev = _FakeDevice(GATT_416, _daly_a5, connect_ok=False)
+    res = asyncio.run(detect('aa', 'x', bms_factory=_factory(dev)))
+    assert opens == [1] and not res.connected and 'no device' in res.error
+
+
 def test_resolve_rewrites_type_and_skips_failures(monkeypatch):
     async def fake_detect(addr, res=None, **kw):
         if addr == 'AA:00:00:00:00:01':
@@ -266,7 +281,7 @@ def test_timeout_keeps_what_was_learned(monkeypatch, caplog):
         await asyncio.Event().wait()  # hangs (asyncio.sleep is shortened by _fast)
 
     monkeypatch.setattr(ad, 'detect', slow_detect)
-    monkeypatch.setattr(ad, 'DETECT_TIMEOUT', 0.05)
+    monkeypatch.setattr(ad, 'detect_budget', lambda: 0.05)
     caplog.set_level('INFO')
     out, unresolved = asyncio.run(resolve_auto_devices([dict(address='AA:01', type='auto', alias='a')], {}))
     assert out[0]['address'] == '#AA:01' and 'a' in unresolved
@@ -490,8 +505,7 @@ def test_stream_buffer_is_bounded_and_keeps_the_newest_bytes():
 
 def _tiny_limits(monkeypatch):
     for name, v in (('CONNECT_TIMEOUT', 0.05), ('SCAN_CONNECT_TIMEOUT', 0.05), ('DISCOVERY_TIMEOUT', 0.05),
-                    ('GATT_OP_TIMEOUT', 0.05), ('REPLY_TIMEOUT', 0.05), ('TEARDOWN_TIMEOUT', 0.05),
-                    ('RETRY_PAUSE', 0.01)):
+                    ('GATT_OP_TIMEOUT', 0.05), ('REPLY_TIMEOUT', 0.05), ('TEARDOWN_TIMEOUT', 0.05)):
         monkeypatch.setattr(ad, name, v)
     from bmslib.ble import bt
     monkeypatch.setattr(bt, 'SCANNER_STOP_TIMEOUT', 0.05)
@@ -571,10 +585,10 @@ def test_hanging_connect_ends_within_the_budget(monkeypatch):
 
 
 def test_budget_covers_the_worst_case_with_real_limits(monkeypatch):
-    # every probe to its bound plus all connect attempts; not just "some" probes (Codex, #41)
+    # every probe to its bound plus the connect; not just "some" probes (Codex, #41)
     monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 8.0)  # undo the _fast fixture
     probes = _build_probes()
-    assert ad.detect_budget() >= (ad.CONNECT_ATTEMPTS * (ad.CONNECT_TIMEOUT + ad.SCAN_CONNECT_TIMEOUT)
+    assert ad.detect_budget() >= (ad.CONNECT_TIMEOUT + ad.SCAN_CONNECT_TIMEOUT
                                   + sum(ad.REPLY_TIMEOUT * p.wait_factor * len(p.steps) for p in probes)
                                   + sum(ad.TEARDOWN_TIMEOUT for _ in probes))
 
@@ -609,17 +623,15 @@ def test_budget_contains_every_term(monkeypatch):
     monkeypatch.setattr(ad, 'REPLY_TIMEOUT', 8.0)  # undo the _fast fixture
     from bmslib.ble import bt
     probes = _build_probes()
-    a = ad.CONNECT_ATTEMPTS
     steps = sum(len(p.steps) for p in probes)
     least = {
-        (ad, 'CONNECT_TIMEOUT'): a,
-        (ad, 'SCAN_CONNECT_TIMEOUT'): a,
-        (ad, 'DISCOVERY_TIMEOUT'): a,
-        (bt, 'SCANNER_STOP_TIMEOUT'): a,
-        (ad, 'RETRY_PAUSE'): a - 1,
+        (ad, 'CONNECT_TIMEOUT'): 1,
+        (ad, 'SCAN_CONNECT_TIMEOUT'): 1,
+        (ad, 'DISCOVERY_TIMEOUT'): 1,
+        (bt, 'SCANNER_STOP_TIMEOUT'): 1,
         (ad, 'GATT_OP_TIMEOUT'): len(probes) + steps,
         (ad, 'REPLY_TIMEOUT'): sum(p.wait_factor * len(p.steps) for p in probes),
-        (ad, 'TEARDOWN_TIMEOUT'): a * 2 + (a - 1) * 2 + len(probes) + 2,
+        (ad, 'TEARDOWN_TIMEOUT'): 2 + len(probes) + 2,
     }
     base = ad.detect_budget()
     for (mod, name), times in least.items():

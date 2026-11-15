@@ -38,7 +38,7 @@ def _run(adapter, proxy, monkeypatch):
         seen['adapter'] = adapter
         return []
 
-    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', fake_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_scan', fake_discovery)
     monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: proxy)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
@@ -67,7 +67,7 @@ def test_no_nested_scan_from_scanner_connect(monkeypatch):
     async def fake_discovery(logger, timeout=5, adapter=None):
         called.append(adapter)
 
-    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', fake_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_scan', fake_discovery)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
                                 name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')
@@ -80,7 +80,7 @@ def test_failed_scan_keeps_not_found(monkeypatch):
     async def broken_discovery(logger, timeout=5, adapter=None):
         raise RuntimeError('org.bluez.Error.InProgress')
 
-    monkeypatch.setattr(bmslib.ble.bt, 'bt_discovery', broken_discovery)
+    monkeypatch.setattr(bmslib.ble.bt, 'bt_scan', broken_discovery)
     monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: False)
     monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
     bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
@@ -114,3 +114,32 @@ def test_scanner_connect_adapter(monkeypatch, proxy, expect):
     with pytest.raises(RuntimeError):
         asyncio.run(BtBms._connect_with_scanner(bms, timeout=1))
     assert _Scanner.kwargs == expect
+
+
+def test_not_found_scans_once_even_if_the_scan_fails(monkeypatch):
+    """The not-found scan runs under the ConnectLock: no retry there (the sampler
+    backs off on its own), or a failing adapter stalls every other BMS."""
+    starts = []
+
+    class FailingScanner(_Scanner):
+        async def start(self):
+            starts.append(1)
+            raise RuntimeError('org.bluez.Error.InProgress')
+
+    monkeypatch.setattr(bmslib.ble.bt, 'BleakScanner', FailingScanner)
+    monkeypatch.setattr(bmslib.ble.bt, 'scanner_is_proxy', lambda: False)
+    monkeypatch.setattr(BtBms, 'shutdown', False, raising=False)
+    bms = types.SimpleNamespace(client=_Client(), logger=_Log(), verbose_log=False,
+                                name='ant24', address='20:A1:11:02:23:45', _adapter='hci1')
+    with pytest.raises(NotFound):
+        asyncio.run(BtBms._connect_client(bms, timeout=1))
+    assert starts == [1]
+
+
+def test_scan_results_without_advertisement_data():
+    """The pairing venv's bleak 0.13 fork only has discovered_devices."""
+    d = types.SimpleNamespace(address='AA', name='x')
+    old = types.SimpleNamespace(discovered_devices=[d])
+    assert bmslib.ble.bt._scan_results(old) == [(d, None)]
+    new = types.SimpleNamespace(discovered_devices_and_advertisement_data={'AA': (d, 'adv')})
+    assert bmslib.ble.bt._scan_results(new) == [(d, 'adv')]

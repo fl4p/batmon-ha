@@ -35,7 +35,6 @@ logger = get_logger()
 
 AUTO = 'auto'
 
-CONNECT_ATTEMPTS = 3
 CONNECT_TIMEOUT = 20
 # the scanner fallback retries up to 8 times inside; cap it as a whole
 SCAN_CONNECT_TIMEOUT = 60
@@ -44,37 +43,26 @@ GATT_OP_TIMEOUT = 10.0  # one start_notify / write / get_services
 # per request; the drivers allow 8 s (Daly, Daly2) to 16 s (JBD), a busy proxy can be slow
 REPLY_TIMEOUT = 8.0
 TEARDOWN_TIMEOUT = 5.0
-RETRY_PAUSE = 2.0
-# None: detect_budget(), the sum of every bounded step. Every await in detect() has
-# its own bound; this outer limit is a backstop. It is not a hard wall-clock bound:
-# asyncio.wait_for waits for the cancelled task's cleanup, and a backend whose
-# connect/disconnect unwinding ignores cancellation (BlueZ D-Bus) can overrun it.
-DETECT_TIMEOUT: Optional[float] = None
-
-
-def _probe_budget(probe) -> float:
-    # start_notify, then per step a write and the reply wait, then stop_notify
-    return (GATT_OP_TIMEOUT + sum(GATT_OP_TIMEOUT + REPLY_TIMEOUT * probe.wait_factor for _ in probe.steps)
-            + TEARDOWN_TIMEOUT + 0.1 * (1 + len(probe.steps)))  # 50 ms poll granularity
-
-
-def _open_budget() -> float:
-    # plain connect, teardown (disconnect + direct close), scanner connect plus the
-    # bounded scanner stop it runs when cancelled, discovery polls (each get_services
-    # bounded by the remaining discovery time, plus a 0.5 s pause)
-    from bmslib.ble import bt
-    return (CONNECT_TIMEOUT + 2 * TEARDOWN_TIMEOUT + SCAN_CONNECT_TIMEOUT + bt.SCANNER_STOP_TIMEOUT
-            + DISCOVERY_TIMEOUT + 0.5 + 0.1)
 
 
 def detect_budget(probes=None) -> float:
-    """Worst case of detect(): failed connect attempts, one that succeeds, every
-    probe in the table running to its bound (the GATT gate only ever skips some),
-    and the final teardown."""
+    """Worst case of detect(), the outer limit in _resolve_one(). Every await in
+    detect() has its own bound, so this sum is a backstop that holds by
+    construction; not a hard wall-clock bound, as asyncio.wait_for waits for the
+    cancelled task's cleanup, and a backend whose connect/disconnect unwinding
+    ignores cancellation (BlueZ D-Bus) can overrun it."""
+    from bmslib.ble import bt
     probes = probes if probes is not None else _build_probes()
-    failed_attempt = _open_budget() + 2 * TEARDOWN_TIMEOUT + RETRY_PAUSE
-    return ((CONNECT_ATTEMPTS - 1) * failed_attempt + _open_budget()
-            + sum(_probe_budget(p) for p in probes) + 2 * TEARDOWN_TIMEOUT + 1)
+    # open(): plain connect, teardown (disconnect + direct close), scanner connect
+    # plus its bounded scanner stop, discovery polls (each get_services bounded by
+    # the remaining discovery time, plus a 0.5 s pause)
+    open_ = (CONNECT_TIMEOUT + 2 * TEARDOWN_TIMEOUT + SCAN_CONNECT_TIMEOUT + bt.SCANNER_STOP_TIMEOUT
+             + DISCOVERY_TIMEOUT + 0.6)
+    # per probe: start_notify, then per step a write and the reply wait, then
+    # stop_notify, plus 50 ms poll granularity
+    probing = sum(GATT_OP_TIMEOUT + sum(GATT_OP_TIMEOUT + REPLY_TIMEOUT * p.wait_factor for _ in p.steps)
+                  + TEARDOWN_TIMEOUT + 0.1 * (1 + len(p.steps)) for p in probes)
+    return open_ + probing + 2 * TEARDOWN_TIMEOUT + 1  # final teardown
 
 
 def _uuid16(short: int) -> str:
@@ -452,20 +440,12 @@ async def detect(address: str, name: str, adapter=None, psk=None, adv=None,
 
     bms = bms_factory(address, name=name, adapter=adapter, psk=psk, _uses_pin=True)
     try:
-        last_exc = None
-        for attempt in range(CONNECT_ATTEMPTS):
-            try:
-                await bms.open()
-                res.connected = True
-                break
-            except Exception as e:
-                last_exc = e
-                logger.info('auto: %s connect attempt %d failed: %s', name, attempt + 1, str(e) or type(e).__name__)
-                await bms._force_disconnect(TEARDOWN_TIMEOUT)
-                await asyncio.sleep(RETRY_PAUSE)
-        if not res.connected:
-            res.error = 'cannot connect: %s' % (str(last_exc) or type(last_exc).__name__)
-            return res
+        try:  # one attempt: open() already falls back to the retrying scanner connect
+            await bms.open()
+            res.connected = True
+        except Exception as e:
+            res.error = 'cannot connect: %s' % (str(e) or type(e).__name__)
+            return res  # the finally drops the link
 
         for probe in probes:
             if not bms.has_chars(probe):
@@ -537,7 +517,7 @@ async def _resolve_one(dev: dict, adverts: dict, bt_discovered_devices, detect_n
     adv = adverts.get(normalize_ble_address(mac))
     logger.info('auto: detecting the BMS type of %s (%s)%s', label, mac,
                 '' if adv else ', no advertisement seen')
-    limit = DETECT_TIMEOUT if DETECT_TIMEOUT is not None else detect_budget()
+    limit = detect_budget()
     res = Result()
     try:
         await asyncio.wait_for(
