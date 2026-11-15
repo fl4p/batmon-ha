@@ -24,13 +24,10 @@ import asyncio
 import enum
 import math
 
-import crcmod as crcmod
-
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.ble.bt import BtBms
+from bmslib.uart.modbus_rtu import crc16_modbus
 from bmslib.util import to_hex_str
-
-crc16_modbus = crcmod.mkCrcFun(0x18005, rev=True, initCrc=0xFFFF, xorOut=0x0000)
 
 
 def calc_crc16(data: bytes):

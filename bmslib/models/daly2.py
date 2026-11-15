@@ -12,6 +12,7 @@ import asyncio
 
 from bmslib.bms import BmsSample
 from bmslib.ble.bt import BtBms, enumerate_services
+from bmslib.uart import modbus_rtu as mb
 
 # Daly Modbus slave address used on BLE (host->BMS). 0xD2 is what the official
 # app and ESPHome's daly_bms_ble send.
@@ -34,37 +35,16 @@ MODBUS_WRITE_SINGLE = 0x06
 SWITCH_REGISTERS = dict(charge=0x00A5, discharge=0x00A6)
 
 
-def _modbus_crc16(data: bytes) -> int:
-    """Standard Modbus RTU CRC-16 (poly 0xA001, init 0xFFFF). Appended little-endian."""
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 1:
-                crc = (crc >> 1) ^ 0xA001
-            else:
-                crc >>= 1
-    return crc
-
-
-def _frame(body: bytes) -> bytes:
-    """Append the little-endian Modbus CRC to a frame body."""
-    crc = _modbus_crc16(body)
-    return body + bytes([crc & 0xFF, crc >> 8])
+# auto_detect.py and the tests import these names from here.
+_modbus_crc16 = mb.crc16_modbus
 
 
 def _read_request(start: int, count: int) -> bytes:
-    """Build a Modbus read-holding-registers request frame with CRC."""
-    return _frame(bytes([MODBUS_ADDRESS, MODBUS_READ_HOLDING,
-                         (start >> 8) & 0xFF, start & 0xFF,
-                         (count >> 8) & 0xFF, count & 0xFF]))
+    return mb.build_read(MODBUS_ADDRESS, start, count, MODBUS_READ_HOLDING)
 
 
 def _write_request(reg: int, value: int) -> bytes:
-    """Build a Modbus write-single-register request frame with CRC."""
-    return _frame(bytes([MODBUS_ADDRESS, MODBUS_WRITE_SINGLE,
-                         (reg >> 8) & 0xFF, reg & 0xFF,
-                         (value >> 8) & 0xFF, value & 0xFF]))
+    return mb.build_write_single(MODBUS_ADDRESS, reg, value)
 
 
 class Daly2Bt(BtBms):

@@ -80,7 +80,7 @@ RUN venv/bin/pip3 install 'git+https://github.com/fl4p/bluek@04a03a8' || true
 # Best-effort install; if the venv build fails the addon warns and falls back
 # to bleak at runtime.
 RUN python3 -m venv venv_esphome \
- && venv_esphome/bin/pip3 install paho-mqtt==2.1.0 backoff crcmod pyserial \
+ && venv_esphome/bin/pip3 install paho-mqtt==2.1.0 backoff pyserial \
  && venv_esphome/bin/pip3 install 'bleak==3.0.2' 'habluetooth==6.26.11' 'bleak-esphome==4.1.0' \
     'aioesphomeapi==46.3.0' 'bleak-retry-connector==4.7.0' \
  && venv_esphome/bin/pip3 install influxdb \

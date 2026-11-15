@@ -6,9 +6,8 @@ characteristics. We round-trip the example frames through our build/parse
 helpers and decoders to lock the wire format in place.
 """
 
+from bmslib.uart.modbus_rtu import build_read, crc16_modbus
 from bmslib.models.noname_modbus import (
-    build_read,
-    crc16_modbus,
     decode_capacity,
     decode_info,
     decode_voltages,
@@ -32,9 +31,9 @@ def _with_crc(payload_hex):
 
 def test_build_read_matches_issue_examples():
     # The three request frames the reporter captured, CRC included.
-    assert build_read(REG_INFO, 4) == _h("01 03 23 1C 00 04 8E 4B")
-    assert build_read(REG_VOLTS, 38) == _h("01 03 D0 00 00 26 FC D0")
-    assert build_read(REG_CAP, 25) == _h("01 03 D0 26 00 19 5D 0B")
+    assert build_read(1, REG_INFO, 4) == _h("01 03 23 1C 00 04 8E 4B")
+    assert build_read(1, REG_VOLTS, 38) == _h("01 03 D0 00 00 26 FC D0")
+    assert build_read(1, REG_CAP, 25) == _h("01 03 D0 26 00 19 5D 0B")
 
 
 def test_parse_response_validates_crc():

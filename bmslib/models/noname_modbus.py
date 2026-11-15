@@ -20,6 +20,7 @@ import math
 
 from bmslib.bms import BmsSample
 from bmslib.ble.bt import BtBms
+from bmslib.uart import modbus_rtu as mb
 
 
 SLAVE_ID = 0x01
@@ -30,23 +31,6 @@ REG_VOLTS = 0xD000      # 38 regs
 REG_CAP = 0xD026        # 25 regs
 
 CELL_SLOT_EMPTY = 0xEE49
-
-
-def crc16_modbus(data: bytes) -> int:
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            crc = (crc >> 1) ^ 0xA001 if (crc & 1) else (crc >> 1)
-    return crc
-
-
-def build_read(addr: int, n: int, slave: int = SLAVE_ID) -> bytes:
-    body = bytes([slave, FN_READ_HOLDING,
-                  (addr >> 8) & 0xFF, addr & 0xFF,
-                  (n >> 8) & 0xFF, n & 0xFF])
-    crc = crc16_modbus(body)
-    return body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
 
 
 def parse_response(buf: bytes, slave: int = SLAVE_ID,
@@ -62,13 +46,14 @@ def parse_response(buf: bytes, slave: int = SLAVE_ID,
         raise ValueError(f"modbus frame truncated: have {len(buf)}, need {total}")
     body = bytes(buf[:3 + n])
     crc_rx = buf[3 + n] | (buf[3 + n + 1] << 8)
-    crc_calc = crc16_modbus(body)
+    crc_calc = mb.crc16_modbus(body)
     if crc_rx != crc_calc:
         raise ValueError(f"modbus CRC: got {crc_rx:04x}, want {crc_calc:04x}")
     return body[3:]
 
 
 def _u16_be(b, off):
+    # Indexing (not mb.u16_be's slice) so a short payload raises instead of decoding garbage.
     return (b[off] << 8) | b[off + 1]
 
 
@@ -146,7 +131,7 @@ class NoNameModbusBt(BtBms):
         await super().disconnect()
 
     async def _q(self, addr: int, n: int) -> bytes:
-        cmd = build_read(addr, n)
+        cmd = mb.build_read(SLAVE_ID, addr, n, FN_READ_HOLDING)
         with self._fetch_futures.acquire(FN_READ_HOLDING):
             self._buffer.clear()
             if self.verbose_log:

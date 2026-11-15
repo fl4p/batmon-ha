@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 FC_READ_COILS = 0x01
 FC_READ_HOLDING = 0x03
 FC_READ_INPUT = 0x04
+FC_WRITE_SINGLE = 0x06
 
 
 def crc16_modbus(data: bytes) -> int:
@@ -36,6 +37,11 @@ def check_crc(frame: bytes) -> bool:
 def build_read(slave: int, reg: int, count: int, fc: int = FC_READ_HOLDING) -> bytes:
     """Read-registers request (FC3 holding / FC4 input / FC1 coils)."""
     return append_crc(bytes([slave, fc, reg >> 8, reg & 0xFF, count >> 8, count & 0xFF]))
+
+
+def build_write_single(slave: int, reg: int, value: int) -> bytes:
+    """Write-single-register request (FC6). The reply echoes the request."""
+    return append_crc(bytes([slave, FC_WRITE_SINGLE, reg >> 8, reg & 0xFF, value >> 8, value & 0xFF]))
 
 
 class ModbusError(ValueError):

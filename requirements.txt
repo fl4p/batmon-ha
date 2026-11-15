@@ -8,7 +8,6 @@ bleak-retry-connector
 
 paho-mqtt==2.1.0
 backoff
-crcmod
 
 pyserial
 

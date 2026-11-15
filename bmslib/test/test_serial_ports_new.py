@@ -11,7 +11,6 @@ import pytest
 
 import bmslib.uart
 from bmslib.uart import modbus_rtu as mb
-from bmslib.models.noname_modbus import crc16_modbus as crc16_reference
 
 _DATA = os.path.join(os.path.dirname(__file__), 'data')
 
@@ -45,6 +44,19 @@ def serial_stub(monkeypatch):
 
 
 # --- modbus helper -----------------------------------------------------------
+
+def crc16_reference(data: bytes) -> int:
+    """Table-free CRC-16/MODBUS written MSB-first with the unreflected poly 0x8005,
+    so it shares no code or structure with mb.crc16_modbus."""
+    def rev(v, bits):
+        return int('{:0{}b}'.format(v, bits)[::-1], 2)
+    crc = 0xFFFF
+    for b in data:
+        crc ^= rev(b, 8) << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x8005) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return rev(crc, 16)
+
 
 def test_modbus_crc_matches_independent_implementation():
     for msg in (b'\x30\x03\x13\xb2\x00\x07', b'\x01\x10\x16\x20\x00\x01\x02\x00\x00', b'\xf7\x03\x00\x00\x00\x01'):
