@@ -34,10 +34,10 @@ Configure with:
     type:    pace_uart
     alias:   any human-readable name
 """
-from typing import List, Optional
+from typing import Iterator, Optional
 
 from bmslib.bms import BmsSample
-from bmslib.ble.bt import BtBms
+from bmslib.uart.wired import WiredBms, bus_locked
 
 SOI = 0x7E  # '~'
 EOI = 0x0D  # '\r'
@@ -84,6 +84,26 @@ def build_frame(ver: int, adr: int, cid1: int, cid2: int, info: bytes = b'', soi
     length = (_lchksum(lenid) << 12) | lenid
     body = b'%02X%02X%02X%02X%04X' % (ver, adr, cid1, cid2, length) + info
     return bytes([soi]) + body + b'%04X' % _checksum(body) + bytes([EOI])
+
+
+def split_frames(buf: bytearray, sois: tuple = (SOI,)) -> Iterator[bytes]:
+    """Pop complete SOI..EOI frames off ``buf``, dropping bytes before a SOI.
+
+    An incomplete trailing frame stays in ``buf`` for the next chunk."""
+    while True:
+        starts = [i for i in (buf.find(s) for s in sois) if i >= 0]
+        if not starts:
+            buf.clear()
+            return
+        start = min(starts)
+        if start:
+            del buf[:start]
+        end = buf.find(EOI)
+        if end < 0:
+            return  # frame still incomplete
+        frame = bytes(buf[:end + 1])
+        del buf[:end + 1]
+        yield frame
 
 
 def parse_frame(frame: bytes, sois: tuple = (SOI,)) -> dict:
@@ -259,7 +279,7 @@ def decode_status(info: bytes) -> dict:
     )
 
 
-class PaceUart(BtBms):
+class PaceUart(WiredBms):
     """PACE BMS over an RS232 / RS485 (USB-UART) adapter, ``paceic`` protocol."""
 
     # PACE serial links are 9600 8N1 (syssi docs + nkinnan default).
@@ -278,25 +298,11 @@ class PaceUart(BtBms):
 
     def __init__(self, address, **kwargs):
         super().__init__(address, **kwargs)
-        self._buffer = bytearray()
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
         self._last_charging: Optional[bool] = None  # last status-resolved current direction
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
-        while True:
-            start = self._buffer.find(SOI)
-            if start < 0:
-                self._buffer.clear()
-                return
-            if start:
-                del self._buffer[:start]
-            end = self._buffer.find(EOI)
-            if end < 0:
-                return  # frame still incomplete
-            frame = bytes(self._buffer[:end + 1])
-            del self._buffer[:end + 1]
+        for frame in split_frames(self._buffer):
             try:
                 fields = parse_frame(frame)
             except ValueError as exc:
@@ -307,23 +313,18 @@ class PaceUart(BtBms):
             # surfaced there rather than silently decoded as a reading.
             self._fetch_futures.set_result(self._KEY, fields)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("pace-uart", "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char  # the serial wrapper ignores the char on write
-
-    async def disconnect(self):
-        await self.stop_notify(self.UUID_RX)
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "pace-uart"
 
     async def _read(self, cid2: int) -> dict:
         req = build_frame(self.VER, self.ADR, self.CID1, cid2, b'%02X' % self.ADR)
-        with self._fetch_futures.acquire(self._KEY):
-            await self.client.write_gatt_char(self.UUID_TX, data=req)
-            fields = await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+
+        async def exchange():
+            with self._fetch_futures.acquire(self._KEY):
+                await self.client.write_gatt_char(self.UUID_TX, data=req)
+                return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+
+        fields = await bus_locked(self.client, exchange)
 
         # A response's CID2 field carries the return-code (0x00 == OK); a device
         # error must raise, never be decoded as if it were analog/status data.
@@ -402,13 +403,3 @@ class PaceUart(BtBms):
             problem_code=status['problem_code'] if status is not None else None,
         )
         return sample
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps

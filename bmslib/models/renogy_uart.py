@@ -29,10 +29,10 @@ Slave id: 0x30 (48) on most packs, 0xF7 on the RBT100LFP12SH-G1 per
 dbus-serialbattery. 9600 8N1. Untested on hardware.
 """
 import math
-from typing import List, Optional
+from typing import Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
-from bmslib.ble.bt import BtBms
+from bmslib.uart.wired import WiredBms, bus_locked
 from bmslib.uart.modbus_rtu import build_read, extract_read_frame, ModbusError, u16_be, u32_be, FC_READ_HOLDING
 
 REG_CELLS = 0x1388      # 5000, read 0x22 registers: count, 16 cells, temp count, 16 temps
@@ -82,7 +82,7 @@ def decode_alarm_block(data: bytes) -> dict:
     )
 
 
-class RenogyUart(BtBms):
+class RenogyUart(WiredBms):
     BAUDRATE = 9600
     SERIAL_KWARGS = dict(eol=None, timeout=1)
     TIMEOUT = 6
@@ -94,9 +94,6 @@ class RenogyUart(BtBms):
         if not 1 <= self.slave <= 0xF7:
             raise ValueError("renogy slave id must be 1..247, got %r" % (self.slave,))
         super().__init__(address, **kwargs)
-        self._buffer = bytearray()
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
@@ -112,21 +109,8 @@ class RenogyUart(BtBms):
             _slave, _fc, payload = res
             self._fetch_futures.set_result(self._KEY, payload)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        self._buffer.clear()
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("renogy-uart-%d" % self.slave, "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char
-
-    async def disconnect(self):
-        try:
-            await self.client.stop_notify(self.UUID_RX)
-        except Exception:
-            pass
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "renogy-uart-%d" % self.slave
 
     async def _read(self, reg: int, count: int) -> bytes:
         req = build_read(self.slave, reg, count, FC_READ_HOLDING)
@@ -144,11 +128,7 @@ class RenogyUart(BtBms):
                 raise ValueError(f"renogy reg 0x{reg:04X}: expected {count * 2} bytes, got {len(res)}")
             return res
 
-        lock = getattr(self.client, 'bus_lock', None)
-        if lock is None:
-            return await exchange()
-        async with lock():
-            return await exchange()
+        return await bus_locked(self.client, exchange)
 
     async def fetch(self) -> BmsSample:
         soc = decode_soc_block(await self._read(REG_SOC, 7))
@@ -174,16 +154,6 @@ class RenogyUart(BtBms):
             problem=bool(alarm['problem_code']) if alarm else None,
             problem_code=alarm['problem_code'] if alarm else None,
         )
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps
 
     async def fetch_device_info(self) -> DeviceInfo:
         d = await self._read(REG_INFO, 0x1C)

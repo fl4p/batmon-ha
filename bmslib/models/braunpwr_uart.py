@@ -62,11 +62,11 @@ Configure with:
 ``braunpwr_uart:<addr>:<baud>`` overrides the 9600 baud default.
 """
 import math
-from typing import List, Optional
+from typing import Optional
 
 from bmslib.bms import BmsSample
-from bmslib.ble.bt import BtBms
-from bmslib.models.pace import EOI, build_frame, parse_frame, _Cursor, CID2_OK
+from bmslib.uart.wired import WiredBms, bus_locked, parse_addr_baud
+from bmslib.models.pace import EOI, build_frame, parse_frame, split_frames, _Cursor, CID2_OK
 
 VER = 0x22
 CID1 = 0x4A        # LiFePO4 BMS device type (PDF section 9)
@@ -169,7 +169,7 @@ def problem_code(status: dict) -> int:
             | (fet_faults << 56))
 
 
-class BraunPwrUart(BtBms):
+class BraunPwrUart(WiredBms):
     BAUDRATE = 9600
     SERIAL_KWARGS = dict(eol=bytes([EOI]), timeout=2)
     TIMEOUT = 5  # the PDF gives the BMS 500 ms to answer
@@ -182,18 +182,13 @@ class BraunPwrUart(BtBms):
     _KEY = 'braunpwr'
 
     def __init__(self, address, **kwargs):
-        spec = kwargs.pop('type_spec', None)
-        parts = [p for p in (spec or '').split(':') if p]
-        self.pack_addr = int(parts[0], 0) if parts else 1
-        if len(parts) > 1:
-            self.BAUDRATE = int(parts[1])
+        self.pack_addr, baud = parse_addr_baud(kwargs.pop('type_spec', None), 1)
+        if baud is not None:
+            self.BAUDRATE = baud
         if not 1 <= self.pack_addr <= 254:
             raise ValueError("braunpwr pack address must be 1..254, got %r" % (self.pack_addr,))
         super().__init__(address, **kwargs)
-        self._buffer = bytearray()
         self._last_req = b''
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
         self._warned = set()
 
     def _warn_once(self, key, msg, *args):
@@ -203,19 +198,7 @@ class BraunPwrUart(BtBms):
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
-        while True:
-            starts = [i for i in (self._buffer.find(s) for s in self.RX_SOIS) if i >= 0]
-            if not starts:
-                self._buffer.clear()
-                return
-            start = min(starts)
-            if start:
-                del self._buffer[:start]
-            end = self._buffer.find(EOI)
-            if end < 0:
-                return
-            frame = bytes(self._buffer[:end + 1])
-            del self._buffer[:end + 1]
+        for frame in split_frames(self._buffer, self.RX_SOIS):
             if frame == self._last_req:
                 continue  # our own request, echoed by an adapter that hears its TX
             try:
@@ -228,21 +211,8 @@ class BraunPwrUart(BtBms):
                 continue  # another pack on the bus
             self._fetch_futures.set_result(self._KEY, fields)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        self._buffer.clear()
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("braunpwr-uart-%d" % self.pack_addr, "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char
-
-    async def disconnect(self):
-        try:
-            await self.client.stop_notify(self.UUID_RX)
-        except Exception:
-            pass
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "braunpwr-uart-%d" % self.pack_addr
 
     async def _read(self) -> dict:
         req = build_request(self.pack_addr, soi=self.SOI)
@@ -253,8 +223,7 @@ class BraunPwrUart(BtBms):
                 await self.client.write_gatt_char(self.UUID_TX, data=req)
                 return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
 
-        lock = getattr(self.client, 'bus_lock', None)
-        fields = await exchange() if lock is None else await _locked(lock, exchange)
+        fields = await bus_locked(self.client, exchange)
         return self._check_response(fields)
 
     def _check_response(self, fields: dict) -> dict:
@@ -300,18 +269,3 @@ class BraunPwrUart(BtBms):
             problem_code=problem_code(s) if s else None,
             balancing_cells=a['balancing'],
         )
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps
-
-
-async def _locked(lock, coro_fn):
-    async with lock():
-        return await coro_fn()

@@ -48,13 +48,13 @@ Sources:
 Untested on hardware here: both decoders are checked against captured frames
 only (bmslib/test/test_ant_uart.py).
 """
-import asyncio
 import math
 from typing import List, Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.ble.bt import BtBms
 from bmslib.models.ant import AntBt, AntCommandFuncs, _ant_auth_frame, _ant_command, calc_crc16
+from bmslib.uart.wired import bus_locked
 from bmslib.util import to_hex_str
 
 BAUDRATE = 19200
@@ -68,15 +68,6 @@ def _baud_from_spec(spec: Optional[str]) -> int:
     if baud not in (2400, 4800, 9600, 19200, 38400, 57600, 115200):
         raise ValueError("ANT baud rate %r is not a standard rate" % (spec,))
     return baud
-
-
-async def _locked(client, coro_fn):
-    # Half duplex: hold the bus for the whole exchange when the port is shared.
-    lock = getattr(client, 'bus_lock', None)
-    if lock is None:
-        return await coro_fn()
-    async with lock():
-        return await coro_fn()
 
 
 def feed_frames(buf: bytearray):
@@ -153,7 +144,7 @@ class AntUart(AntBt):
                 await self.client.write_gatt_char(self.char, data=_ant_command(cmd, addr, val))
                 return await self._fetch_futures.wait_for(resp_code, self.TIMEOUT)
 
-        return await _locked(self.client, exchange)
+        return await bus_locked(self.client, exchange)
 
     async def set_switch(self, switch: str, state: bool):
         register_onoff = dict(charge=[0x0006, 0x0004], discharge=[0x0003, 0x0001], balance=[0x000D, 0x000E],
@@ -165,7 +156,7 @@ class AntUart(AntBt):
             await self.client.write_gatt_char(self.char, data=_ant_auth_frame())
             await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0))
 
-        await _locked(self.client, write)
+        await bus_locked(self.client, write)
 
 
 # --- pre-2021 protocol -------------------------------------------------------
@@ -307,7 +298,7 @@ class AntOldUart(BtBms):
                 await self.client.write_gatt_char(self.char, data=OLD_REQUEST_STATUS)
                 return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
 
-        return await _locked(self.client, exchange)
+        return await bus_locked(self.client, exchange)
 
     async def fetch(self) -> BmsSample:
         d = decode_old_status(await self._q())

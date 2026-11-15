@@ -50,7 +50,7 @@ Configure with:
 from typing import List
 
 from bmslib.bms import BmsSample
-from bmslib.ble.bt import BtBms
+from bmslib.uart.wired import WiredBms, bus_locked, parse_addr_baud
 
 HEAD = b'\x3f\x55'
 TAIL = b'\x55\x3f'
@@ -139,23 +139,18 @@ def decode_short(frame: bytes) -> dict:
     )
 
 
-class JbdHvUart(BtBms):
+class JbdHvUart(WiredBms):
     BAUDRATE = 9600  # 8N1, per the reporter and the supplier's Modbus document
     SERIAL_KWARGS = dict(eol=None, timeout=1)  # binary frames, may contain 0x0A
     TIMEOUT = 5  # the vendor tool gets its replies within ~1 s
 
     def __init__(self, address, **kwargs):
-        spec = kwargs.pop('type_spec', None)
-        parts = [p for p in (spec or '').split(':') if p]
-        self.pack_addr = int(parts[0], 0) if parts else 1
-        if len(parts) > 1:
-            self.BAUDRATE = int(parts[1])
+        self.pack_addr, baud = parse_addr_baud(kwargs.pop('type_spec', None), 1)
+        if baud is not None:
+            self.BAUDRATE = baud
         if not 0 <= self.pack_addr <= 255:
             raise ValueError("jbd_hv pack address must be 0..255, got %r" % (self.pack_addr,))
         super().__init__(address, **kwargs)
-        self._buffer = bytearray()
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
         self._n_temps = 0
         self._sign_mismatches = 0
         self._warned = set()
@@ -189,21 +184,8 @@ class JbdHvUart(BtBms):
             del self._buffer[:n]
             self._fetch_futures.set_result(t, frame)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        self._buffer.clear()
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("jbd-hv-uart-%d" % self.pack_addr, "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char
-
-    async def disconnect(self):
-        try:
-            await self.client.stop_notify(self.UUID_RX)
-        except Exception:
-            pass
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "jbd-hv-uart-%d" % self.pack_addr
 
     async def _q(self, cmd: bytes, reply_type: int) -> bytes:
         req = build_request(self.pack_addr, cmd)
@@ -217,11 +199,7 @@ class JbdHvUart(BtBms):
                 await self.client.write_gatt_char(self.UUID_TX, data=req)
                 return await self._fetch_futures.wait_for(reply_type, self.TIMEOUT)
 
-        lock = getattr(self.client, 'bus_lock', None)
-        if lock is None:
-            return await exchange()
-        async with lock():
-            return await exchange()
+        return await bus_locked(self.client, exchange)
 
     def _warn_once(self, key, msg, *args):
         if key not in self._warned:
@@ -275,13 +253,3 @@ class JbdHvUart(BtBms):
                                           "state_class": "measurement", "icon": "omega"},
             },
         )
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps

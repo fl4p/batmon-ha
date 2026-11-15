@@ -35,11 +35,11 @@ Seplos V3 (BMS 3.0, Modbus RTU) is a different protocol and not covered here.
 Untested on hardware.
 """
 import math
-from typing import List, Optional
+from typing import Optional
 
 from bmslib.bms import BmsSample
-from bmslib.ble.bt import BtBms
-from bmslib.models.pace import SOI, EOI, build_frame, parse_frame, _Cursor, CID2_OK
+from bmslib.uart.wired import WiredBms, bus_locked, parse_addr_baud
+from bmslib.models.pace import EOI, build_frame, parse_frame, split_frames, _Cursor, CID2_OK
 
 VER = 0x20
 CID1 = 0x46
@@ -104,39 +104,23 @@ def decode_telesignal(info: bytes) -> dict:
                 discharge_mosfet=bool(switch & 0x01), charge_mosfet=bool(switch & 0x02))
 
 
-class SeplosUart(BtBms):
+class SeplosUart(WiredBms):
     BAUDRATE = 19200
     SERIAL_KWARGS = dict(eol=bytes([EOI]), timeout=2)
     TIMEOUT = 10
     _KEY = 'seplos'
 
     def __init__(self, address, **kwargs):
-        spec = kwargs.pop('type_spec', None)
-        parts = [p for p in (spec or '').split(':') if p]
-        self.pack_addr = int(parts[0], 0) if parts else 0
-        if len(parts) > 1:
-            self.BAUDRATE = int(parts[1])
+        self.pack_addr, baud = parse_addr_baud(kwargs.pop('type_spec', None), 0)
+        if baud is not None:
+            self.BAUDRATE = baud
         if not 0 <= self.pack_addr <= 0xFF:
             raise ValueError("seplos pack address must be 0..255, got %r" % (self.pack_addr,))
         super().__init__(address, **kwargs)
-        self._buffer = bytearray()
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
-        while True:
-            start = self._buffer.find(SOI)
-            if start < 0:
-                self._buffer.clear()
-                return
-            if start:
-                del self._buffer[:start]
-            end = self._buffer.find(EOI)
-            if end < 0:
-                return
-            frame = bytes(self._buffer[:end + 1])
-            del self._buffer[:end + 1]
+        for frame in split_frames(self._buffer):
             try:
                 fields = parse_frame(frame)
             except ValueError as exc:
@@ -146,21 +130,8 @@ class SeplosUart(BtBms):
                 continue  # another pack on the bus
             self._fetch_futures.set_result(self._KEY, fields)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        self._buffer.clear()
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("seplos-uart-%d" % self.pack_addr, "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char
-
-    async def disconnect(self):
-        try:
-            await self.client.stop_notify(self.UUID_RX)
-        except Exception:
-            pass
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "seplos-uart-%d" % self.pack_addr
 
     async def _read(self, cid2: int) -> dict:
         req = build_frame(VER, self.pack_addr, CID1, cid2, b'%02X' % self.pack_addr)
@@ -170,8 +141,7 @@ class SeplosUart(BtBms):
                 await self.client.write_gatt_char(self.UUID_TX, data=req)
                 return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
 
-        lock = getattr(self.client, 'bus_lock', None)
-        fields = await exchange() if lock is None else await _locked(lock, exchange)
+        fields = await bus_locked(self.client, exchange)
         if fields['cid2'] != CID2_OK:
             raise ValueError(f"seplos returned error code 0x{fields['cid2']:02X} for request 0x{cid2:02X}")
         if fields['cid1'] != CID1:
@@ -207,18 +177,3 @@ class SeplosUart(BtBms):
             problem=s['problem'] if s else None,
             problem_code=s['problem_code'] if s else None,
         )
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps
-
-
-async def _locked(lock, coro_fn):
-    async with lock():
-        return await coro_fn()

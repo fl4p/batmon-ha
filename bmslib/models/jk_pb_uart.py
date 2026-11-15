@@ -37,6 +37,7 @@ from bmslib.bms import BmsSample, DeviceInfo
 from bmslib.uart.modbus_rtu import append_crc
 from bmslib.ble.bt import BtBms
 from bmslib.models.jikong import JKBt, feed_frames, FRAME_SIZE
+from bmslib.uart.wired import bus_locked
 from bmslib.util import to_hex_str
 
 REG_STATUS = 0x1620
@@ -124,11 +125,7 @@ class JkPbUart(JKBt):
                 self._pending = None
                 self._settle_t = time.monotonic()
 
-        lock = getattr(self.client, 'bus_lock', None)
-        if lock is None:
-            return await exchange()
-        async with lock():
-            return await exchange()
+        return await bus_locked(self.client, exchange)
 
     # --- JKBt API on top of the RS485 exchange -------------------------------
 

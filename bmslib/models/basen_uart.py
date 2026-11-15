@@ -32,7 +32,7 @@ Configure with:
 from typing import List
 
 from bmslib.bms import BmsSample
-from bmslib.ble.bt import BtBms
+from bmslib.uart.wired import WiredBms, bus_locked
 
 SOI = 0x7E
 EOI = 0x0D
@@ -243,7 +243,7 @@ def decode_info(data: bytes) -> dict:
     return out
 
 
-class BasenUart(BtBms):
+class BasenUart(WiredBms):
     """Basen BMS over an RS232 / RS485 (USB-UART) adapter."""
 
     BAUDRATE = 9600  # 9600 8N1 per GHswitt
@@ -255,12 +255,6 @@ class BasenUart(BtBms):
     ADR = 0x01
     TIMEOUT = 16
     _KEY = 0
-
-    def __init__(self, address, **kwargs):
-        super().__init__(address, **kwargs)
-        self._buffer = bytearray()
-        self._last_cells: List[int] = []
-        self._last_temps: List[float] = []
 
     def _notification_handler(self, sender, data):
         self._buffer += bytes(data)
@@ -289,22 +283,16 @@ class BasenUart(BtBms):
             if fields['data']:
                 self._fetch_futures.set_result(self._KEY, fields)
 
-    async def connect(self, timeout=10, **kwargs):
-        await self.client.connect(timeout=timeout)
-        from bmslib.uart import SerialCharStub
-        char = SerialCharStub("basen-uart", "notify")
-        await self.client.start_notify(char, self._notification_handler)
-        self.UUID_RX = char
-        self.UUID_TX = char
-
-    async def disconnect(self):
-        await self.stop_notify(self.UUID_RX)
-        await super().disconnect()
+    def _char_name(self) -> str:
+        return "basen-uart"
 
     async def _read(self, cmd: int) -> dict:
-        with self._fetch_futures.acquire(self._KEY):
-            await self.client.write_gatt_char(self.UUID_TX, data=build_frame(self.ADR, cmd))
-            fields = await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+        async def exchange():
+            with self._fetch_futures.acquire(self._KEY):
+                await self.client.write_gatt_char(self.UUID_TX, data=build_frame(self.ADR, cmd))
+                return await self._fetch_futures.wait_for(self._KEY, self.TIMEOUT)
+
+        fields = await bus_locked(self.client, exchange)
         if fields['addr'] != self.ADR:
             raise ValueError(f"basen response address mismatch: 0x{fields['addr']:02X}")
         if fields['cmd'] != cmd:
@@ -351,13 +339,3 @@ class BasenUart(BtBms):
             problem=st['problem'],
             problem_code=st['problem_code'],
         )
-
-    async def fetch_voltages(self) -> List[int]:
-        if not self._last_cells:
-            await self.fetch()
-        return self._last_cells
-
-    async def fetch_temperatures(self) -> List[float]:
-        if not self._last_temps:
-            await self.fetch()
-        return self._last_temps

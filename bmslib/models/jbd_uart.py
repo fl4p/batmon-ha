@@ -19,6 +19,7 @@ captured frames) and the framing is the same resync-on-0xDD loop, only the port
 handling is new. Feedback welcome.
 """
 from bmslib.models.jbd import JbdBt
+from bmslib.uart.wired import bus_locked
 
 
 class JbdUart(JbdBt):
@@ -43,10 +44,6 @@ class JbdUart(JbdBt):
         self.UUID_RX = char
         self.UUID_TX = char  # the serial wrapper ignores the char on write
 
-    async def _q(self, cmd):
-        # Half duplex: hold the bus for the whole exchange when the port is shared.
-        lock = getattr(self.client, 'bus_lock', None)
-        if lock is None:
-            return await super()._q(cmd)
-        async with lock():
-            return await super()._q(cmd)
+    async def _q(self, cmd, timeout=None):
+        q = super()._q
+        return await bus_locked(self.client, lambda: q(cmd, timeout))
