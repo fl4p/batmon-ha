@@ -54,7 +54,13 @@ def summarize_exc(ex) -> str:
 
 
 def _no_retry_connector_nag(record):
-    return 'without bleak-retry-connector' not in str(record.msg)
+    msg = str(record.msg)
+    if 'without bleak-retry-connector' in msg:
+        return False
+    # one INFO line per connect attempt listing the proxy paths; kept with verbose_log
+    if 'connection path(s)' in msg and record.levelno <= logging.INFO:
+        return logging.getLogger().level <= logging.DEBUG
+    return True
 
 
 def get_logger(verbose=False):

@@ -770,8 +770,7 @@ class BmsSampler:
             PWR_CHG_HOLD = 4  # time in seconds to keep high frequency sampling after a power jump. this helps capture power transients and noise wave form
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
             if not bms.is_virtual and abs(power_chg) > 0.15 and abs(sample.power) > abs(self._last_power):
-                if bms.verbose_log or (
-                        not self.period_pub and (t_now - self._t_last_power_jump) > PWR_CHG_HOLD * 10):
+                if bms.verbose_log:
                     logger.info('%s Power jump/noise %.0f %% (prev=%.0f last=%.0f, REG=%.0f)', bms.name,
                                 power_chg * 100,
                                 self._last_power, sample.power, PWR_CHG_REG)
