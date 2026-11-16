@@ -71,6 +71,10 @@ rsync -a --delete -e "ssh ${SSH_OPTS}" \
   --exclude=test_and_deploy.sh \
   ./ "${HOST}:${REMOTE_DIR}/"
 
+# Remote clock before the restart: step 4 reads the log from here, so it can't miss
+# a sample logged before it attached, nor match one from the previous run.
+T_START=$(rsh "$HOST" date -u +%Y-%m-%dT%H:%M:%SZ)
+
 step "3/4 rebuild & restart local_${SLUG} (slow on Pi: pip installs run inside the image)"
 # `ha apps rebuild` refuses with "Version changed, use Update instead" when
 # config.yaml's version differs from the installed one, so try update first
@@ -85,7 +89,7 @@ step "4/4 verify — tailing ${CONTAINER} up to ${SAMPLE_WAIT}s for a successful
 # remote `timeout` kills the stream. awk with fflush echoes each line live AND
 # exits 0 on first match (which SIGPIPEs ssh → ends the remote command cleanly).
 set +e
-rsh "$HOST" "sudo timeout ${SAMPLE_WAIT} docker logs -f --tail 0 ${CONTAINER} 2>&1" \
+rsh "$HOST" "sudo timeout ${SAMPLE_WAIT} docker logs -f --since ${T_START} ${CONTAINER} 2>&1" \
   | awk '
       { print; fflush() }
       /: BmsSampl\(/ { found=1; exit }
