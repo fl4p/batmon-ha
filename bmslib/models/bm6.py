@@ -236,7 +236,7 @@ class Bm6Bt(BtBms):
         try:
             await super().connect(**kwargs)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", e)
+            self.logger.debug("normal connect failed (%s), connecting with scanner", e)
             await self._connect_with_scanner(**kwargs)
         # subscribe once per connection, before any request: the device answers a realtime
         # request with a single frame, and the BM2 subclass never writes at all (#408)

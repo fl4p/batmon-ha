@@ -128,7 +128,7 @@ class AntBt(BtBms):
             await super().connect(timeout=timeout)
         except Exception as e:
             from bmslib.util import summarize_exc
-            self.logger.info("%s normal connect failed (%s), connecting with scanner",
+            self.logger.debug("%s normal connect failed (%s), connecting with scanner",
                              self.name, summarize_exc(e))
             await self._connect_with_scanner(timeout=timeout)
 

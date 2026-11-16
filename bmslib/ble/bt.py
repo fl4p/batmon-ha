@@ -688,7 +688,7 @@ class BtBms:
             while True:
                 try:
                     discovered = set(b.address for b in scanner.discovered_devices)
-                    ad = f' using adapter {self._adapter}' if self._adapter else ''
+                    ad = f' using adapter {self._adapter}' if self._adapter and not scanner_is_proxy() else ''
                     # Case-insensitive: backends disagree on MAC case (the ESPHome
                     # proxy reports uppercase), and an exact membership test here
                     # would reject a device that is plainly in range (#399).

@@ -1,6 +1,7 @@
 ## [unreleased]
 
 * Fix: stopping during a sampling interval or retry backoff waits at most half a second for that sleep, leaving time for connection cleanup and state saving (#391).
+* Quieter logs while a BMS is unreachable: no habluetooth `bleak-retry-connector` warning (batmon retries itself), `normal connect failed` moved to debug, and `device not found` names no adapter with `ble_stack: esphome`.
 
 ## [2.31]
 

@@ -35,7 +35,7 @@ class LitimeBt(BtBms):
         try:
             await super().connect(**kwargs)
         except Exception as e:
-            self.logger.info("normal connect failed (%s), connecting with scanner", e)
+            self.logger.debug("normal connect failed (%s), connecting with scanner", e)
             await self._connect_with_scanner(**kwargs)
 
         await self.client.start_notify(self.UUID_RX, self._notification_handler)

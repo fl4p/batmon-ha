@@ -53,6 +53,10 @@ def summarize_exc(ex) -> str:
     return ' <- '.join(parts)
 
 
+def _no_retry_connector_nag(record):
+    return 'without bleak-retry-connector' not in str(record.msg)
+
+
 def get_logger(verbose=False):
     # log_format = '%(asctime)s %(levelname)-6s [%(filename)s:%(lineno)d] %(message)s'
     log_format = '%(asctime)s %(levelname)s [%(module)s] %(message)s'
@@ -64,6 +68,12 @@ def get_logger(verbose=False):
     logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    # habluetooth nags on every BleakClient.connect() not made through bleak_retry_connector;
+    # batmon retries and backs off itself (sampling.py, BtBms._connect_with_scanner)
+    hb = logging.getLogger('habluetooth.wrappers')
+    if _no_retry_connector_nag not in hb.filters:
+        hb.addFilter(_no_retry_connector_nag)
 
     return logger
 
