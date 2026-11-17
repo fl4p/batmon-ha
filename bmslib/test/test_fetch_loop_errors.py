@@ -27,10 +27,10 @@ def slept(monkeypatch):
     """Neutralize the backoff sleeps and record their durations."""
     durations = []
 
-    async def _fake_sleep(d):
+    async def _fake_sleep(d, should_stop):
         durations.append(d)
 
-    monkeypatch.setattr(bmslib.sampling.asyncio, 'sleep', _fake_sleep)
+    monkeypatch.setattr(bmslib.sampling, '_sleep_with_stop', _fake_sleep)
     return durations
 
 

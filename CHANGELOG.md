@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Fix: stopping during a sampling interval or retry backoff waits at most half a second for that sleep, leaving time for connection cleanup and state saving (#391).
+
 ## [2.31]
 
 * Fix (`lipower`): ECTIVE AccuBox 120S and other BM X boxes connected but never answered, because the bundled aiobmsble lacks their device IDs `0xBA` and `0x38` (#407).
