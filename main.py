@@ -119,7 +119,7 @@ def bg_checks(sampler_list, timeout, t_start):
                 logger.error("MQTT never published a message after %.0fs, exit", timeout)
             shutdown = True
             # background_thread kills the process 10 s from now; the main loop may not reach
-            # its own final store in time (it sleeps through backoff + period first, #391).
+            # its own final store in time (an in-flight read or a hung disconnect, #391).
             # Store here: both background_loop and background_thread call this.
             try:
                 store_states(sampler_list, final=True)
