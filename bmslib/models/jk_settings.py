@@ -94,8 +94,8 @@ _TABLE = [
     _num('charge_utpr', 0x19, (102, 4, T), 10, '°C', 'high', -45, 20),
     _num('mosfet_otp', 0x1A, (106, 4, T), 10, '°C', 'high', 50, 110),
     _num('mosfet_otpr', 0x1B, (110, 4, T), 10, '°C', 'high', 50, 110),
-    # JKBt.connect() rejects num_cells > 24: a larger count would lock batmon out of the BMS
-    _num('cell_count', 0x1C, (114, 1, F), 1, None, 'critical', 2, 24),
+    # JKBt.connect() rejects num_cells > 32: a larger count would lock batmon out of the BMS
+    _num('cell_count', 0x1C, (114, 1, F), 1, None, 'critical', 2, 32),
     _num('total_capacity', 0x20, (130, 4, F), 1000, 'Ah', 'high', 2, 20000),
     _num('scp_delay', 0x21, (134, 4, F), 1, 'µs', 'critical', 0, 1000000),
     _num('balance_start_voltage', 0x22, (138, 4, F), 1000, 'V', 'med', 1.2, 4.25),
@@ -337,7 +337,7 @@ def implausible_settings(settings: dict) -> Optional[str]:
     The frame CRC is an 8-bit sum, so a spliced frame (cf. #391) can pass it; validating
     against such garbage would let an inconsistent value through. Returns the reason, or None."""
     n = settings.get('cell_count')
-    if n is None or not 1 <= n <= 24:
+    if n is None or not 1 <= n <= 32:
         return 'cell count %s' % format_value('cell_count', n)
     for name in ('cell_uvp', 'cell_uvpr', 'cell_ovpr', 'cell_ovp'):
         v = settings.get(name)

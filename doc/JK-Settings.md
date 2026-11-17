@@ -116,7 +116,7 @@ so a write could not be verified; not shown and not writable. Risk is a rough gu
 | `charge_utpr` | Charge UTPR | -45 … 20 °C, step 0.1 | high | `all` |
 | `mosfet_otp` | MOSFET OTP | 50 … 110 °C, step 0.1 | high | `all` |
 | `mosfet_otpr` | MOSFET OTPR | 50 … 110 °C, step 0.1 | high | `all` |
-| `cell_count` | Cell count | 2 … 24, step 1 | critical | by name |
+| `cell_count` | Cell count | 2 … 32, step 1 | critical | by name |
 | `total_capacity` | Total capacity | 2 … 20000 Ah, step 0.001 | high | `all` |
 | `scp_delay` | SCP delay | 0 … 1000000 µs, step 1 | critical | by name |
 | `balance_start_voltage` | Balance start voltage | 1.2 … 4.25 V, step 0.001 | med | `all` |
@@ -172,7 +172,7 @@ how a failed write or read-back is handled is described below (read-back mismatc
    `unknown`). Rules against them are then skipped, and writing them is rejected as not supported (#426).
    * `cell_uvpr` < `cell_ovpr`, `cell_uvp` < `cell_ovp`, `balance_start_voltage` < `cell_ovp`
 
-   Before that, the values just read must look sane (cell count 1…24, UVP < UVPR < OVPR < OVP, all
+   Before that, the values just read must look sane (cell count 1…32, UVP < UVPR < OVPR < OVP, all
    between 1 and 4.5 V). A frame that fails this is taken as a corrupted read: the request is rejected and the
    settings are read again on the next sample.
 5. **Lock**: no write while this BMS is locked (see below).

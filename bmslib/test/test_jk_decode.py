@@ -120,6 +120,23 @@ def test_jk_new11_16s_cell_voltages():
     assert voltages == fx["expected_voltages_mv"]
 
 
+def test_jk_32s_pack_432():
+    """Discussion #432: a 32-cell JK-BD6A32S must pass the connect-time cell count check."""
+    import asyncio
+    from bmslib.models.jk_settings import decode_settings, implausible_settings
+    fx = jk_fixtures.DISC_432_BD6A32S
+    exp = fx["expected"]
+    bms = _make_jk(fx)
+    assert bms._cells_from_settings_checked(bytearray(fx["settings_frame"])) == exp["num_cells"]
+    assert implausible_settings(decode_settings(fx["settings_frame"])) is None
+    status = bytearray(fx["status_frame"])
+    assert bms._status_frame_implausible(status) is None
+    sample = bms._decode_sample(status, t_buf=time.time(), has_float_charger=False)
+    assert sample.voltage == pytest.approx(exp["voltage"], abs=0.05)
+    assert sample.current == pytest.approx(exp["current"], abs=0.01)
+    assert asyncio.run(bms.fetch_voltages()) == exp["voltages_mv"]
+
+
 def test_jk_set_soc_register_write():
     import asyncio
     from bmslib.models.jikong import JKBt, _jk_command

@@ -378,11 +378,12 @@ class JKBt(BtBms):
 
     def _cells_from_settings_checked(self, buf) -> int:
         n = self._num_cells_from_settings(buf)
-        if not 0 < n <= 24 and buf[114] in (0, 1) and 0 < buf[34] <= 24:
+        if not 0 < n <= 32 and buf[114] in (0, 1) and 0 < buf[34] <= 24:
             # JK04 keeps its cell count at byte 34 and the balancer switch at 114 (0 = off)
             raise ValueError("num_cells unexpected %s; if this is an old JK active balancer (JK-B2A16S, "
                              "JK-B2A24S, JK-B5A24S), set `type: jk04`" % n)
-        assert 0 < n <= 24, "num_cells unexpected %s" % n
+        # JK02_32S (e.g. JK-BD6A32S) carries up to 32 cells (#432)
+        assert 0 < n <= 32, "num_cells unexpected %s" % n
         return n
 
     def _num_cells_from_settings(self, buf) -> int:

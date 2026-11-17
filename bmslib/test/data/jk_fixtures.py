@@ -154,4 +154,22 @@ ISSUE_365_B2A8S20P = dict(
 )
 
 
-ALL = [LEGACY_8S, ISSUE_365_B2A8S20P, SYSSI_BLE_16S]
+DISC_432_BD6A32S = dict(
+    name="jk_432_bd6a32s15p_fw_20_19",
+    settings_frame=bytes((_DATA_DIR / "jk_432_bd6a32s_settings.bin").read_bytes()),
+    status_frame=bytes((_DATA_DIR / "jk_432_bd6a32s_status.bin").read_bytes()),
+    is_new_11fw_32s=True,
+    # JK-BD6A32S15P, hw 20H, sw 20.19, 32 cells; batmon refused num_cells > 24 (#432)
+    expected=dict(
+        num_cells=32,
+        voltage=105.9,
+        current=9.81,
+        voltages_mv=[
+            3311, 3311, 3311, 3311, 3308, 3308, 3308, 3308, 3311, 3311, 3311, 3311, 3311, 3311, 3311, 3311,
+            3306, 3311, 3311, 3311, 3311, 3311, 3311, 3311, 3306, 3308, 3306, 3311, 3311, 3311, 3311, 3311,
+        ],
+    ),
+)
+
+
+ALL = [LEGACY_8S, ISSUE_365_B2A8S20P, SYSSI_BLE_16S, DISC_432_BD6A32S]

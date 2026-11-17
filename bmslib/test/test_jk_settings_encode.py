@@ -65,7 +65,7 @@ def test_encode_switch():
     ("voltage_calibration", 13.2),
     ("rcv_time", 1.0),
     ("smart_sleep_voltage", 3.7),  # above max
-    ("cell_count", 25),  # JKBt.connect() rejects more than 24 cells
+    ("cell_count", 33),  # JKBt.connect() rejects more than 32 cells
     ("heating_start_temp", 10),
     ("heating_stop_temp", 20),
     ("discharge_utp", -10),
