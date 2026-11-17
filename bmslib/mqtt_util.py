@@ -251,12 +251,14 @@ QMAX_EXPIRE_S = 365 * 86400
 
 # offset_drift_pct is the drift of the ASSUMED offset offset_assumed_a (a tuning
 # constant or the rest reading), not a bound on the error (bmslib/estimators/qmax.py).
+# offset_fitted_a: the counting offset measured between full charges and removed
+# from the newest segment, None before offset_fit_cycles reached the minimum.
 # anchors: what the newest segment ran between ('ocv->top': a rest near empty,
 # then a charge termination, doc/SoH.md); top_anchored: how many of the counted
 # segments used a top anchor, whose 100 % is full as the charger defines it.
 QMAX_ATTRIBUTES = ('segments', 'newest', 'limiting_cell', 'cell_spread_pct', 'min_dsoc', 'offset_assumed_a',
-                   'offset_drift_pct', 'capacity', 'capacity_source', 'plausibility_checked', 'anchors',
-                   'top_anchored')
+                   'offset_drift_pct', 'offset_fitted_a', 'offset_fit_cycles', 'capacity', 'capacity_source',
+                   'plausibility_checked', 'anchors', 'top_anchored')
 
 
 # A withdrawal is sent again this often for as long as nothing may be published.

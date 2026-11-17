@@ -146,6 +146,26 @@ discharge, rests reading 0 A, published 21 % low while the segment's drift at
 the assumed 0.3 A was 3.4 %. What is published says so: offset_assumed_a and
 offset_drift_pct, the drift at that assumed offset.
 
+An offset that shows only under load is measured where it can be: between two
+consecutive top anchors (full to full, _offset_cycle) the cells gained
+nothing, so the charge counted between them is the offset x the time. From
+OFFSET_FIT_MIN_N such cycles the offset is fitted (offset_fit) and removed
+from each new segment's dQ (the fleet's JK packs carried 0.18-0.49 A, hidden
+at rest, which read charge segments high and discharge segments low; constants
+OFFSET_*). That is not the rest reading's case above: a load the BMS measures
+correctly is counted out between the two full ends like any other, so it does
+not enter the fit; only what the count adds that the cells did not get does.
+The drift budget then assumes I_OFFSET_MIN_A, OFFSET_SE_K standard errors of
+the fit, or what a rest read that the fitted offset does not explain,
+whichever is most (assumed_offset): the part of the reading the fit explains
+was removed with it, the rest of it is a load the BMS measures or an offset
+the fit did not see. Without enough
+cycles nothing changes. Not covered: a gain
+that differs between charge and discharge (it scales with the charge moved,
+not the time), an offset that changed within OFFSET_FIT_MAX_AGE_S, and a top
+anchor that is not as full as the one before (it reads as an offset over that
+one cycle; the fit through all of them dilutes it).
+
 The capacity is the per-device `capacity:` option (the nameplate) and
 nothing else. Saved anchors and segments are only restored under the option
 they were measured against (another one means a corrected option or another
@@ -374,6 +394,35 @@ MAX_SEGMENT_S = 10 * 86400.0
 # publishes 57.6 Ah for 98 on a finely resolved current (the calibration test).
 I_OFFSET_MIN_A = 0.3
 DRIFT_MAX_FRAC = 0.05
+# Offset calibration from full to full (module doc, "Current offset"). Two
+# consecutive top anchors are both full, so the charge counted between them is
+# what the current reading adds that did not go into the cells: an offset x the
+# time between them. Evidence (bat-impedance report "Qmax direction bias",
+# fleet telemetry 2026-10-11..11-14): 6 of 11 packs with >= 8 such cycles
+# carried 0.18-0.49 A, both signs, all JK reading 0 A at rest (invisible to the
+# rest reading); the time explained it with R^2 0.83-0.99, and subtracting it
+# closed the gap between charge (ocv->top) and discharge (top->ocv) segments
+# (0.924 vs 0.864 of nameplate -> 0.896 vs 0.903 on a 304 Ah pack with 0.49 A).
+# A cycle counts when it spans OFFSET_CYCLE_MIN_S..OFFSET_CYCLE_MAX_S (shorter:
+# the offset's charge drowns in how full each anchor really is, ~0.3 % of the
+# capacity p90; longer: longer than the evidence), at least OFFSET_CYCLE_MIN_OUT_C
+# of the capacity came out between them (the analysis's rule: a pack held at
+# full all day has a charger topping it up, not a cycle), in one epoch with
+# MIN_COVERAGE, and no unconfirmed restart in it.
+OFFSET_CYCLE_MIN_S = 6 * 3600.0
+OFFSET_CYCLE_MAX_S = 7 * 86400.0
+OFFSET_CYCLE_MIN_OUT_C = 0.10
+# The fit (through the origin, residual = offset x span) is used from
+# OFFSET_FIT_MIN_N cycles, over the last OFFSET_FIT_N within
+# OFFSET_FIT_MAX_AGE_S of the segment's end; the drift budget then assumes at
+# least OFFSET_SE_K standard errors of the fit (assumed_offset). A
+# current offset that is not constant (a gain that differs between charge and
+# discharge: one pack in the evidence fitted that better, -17 %) is not
+# modelled; it widens the standard error.
+OFFSET_FIT_MIN_N = 5
+OFFSET_FIT_N = 20
+OFFSET_FIT_MAX_AGE_S = 60 * 86400.0
+OFFSET_SE_K = 2.0
 
 # ---------------------------------------------------------------- segments
 MIN_DSOC = 60.0  # %, every cell
@@ -713,12 +762,43 @@ def fit_relaxation(ts: Sequence[float], vs: Sequence[float], v_end: float) -> Tu
 
 # ================================================================ estimator
 
-def assumed_offset(a, b) -> float:
+def assumed_offset(a, b, fit: Optional[Dict[str, float]] = None) -> float:
     """Current offset [A] the drift budget assumes over a segment between
     anchors a and b: I_OFFSET_MIN_A, or what the BMS read during either rest if
     that is more (see the module doc: never a correction, never below the
-    floor, and not a bound on the offset there really is)."""
-    return max(I_OFFSET_MIN_A, abs(a['i_rest']), abs(b['i_rest']))
+    floor, and not a bound on the offset there really is). With an offset fit
+    (offset_fit), which is removed from dQ, a rest reading counts only with
+    what the fitted offset does not explain: the part of it with the fit's
+    sign, up to the fit's size, was removed with it; the rest (a load the BMS
+    measures, an offset of the other sign) still widens the assumption. A rest
+    that reads 0 A while the fit says otherwise (an offset hidden at rest, the
+    case the fit exists for) adds nothing. And at least OFFSET_SE_K standard
+    errors of the fit. A top anchor has no rest reading (its i_rest is 0 by
+    construction)."""
+    rests = [x['i_rest'] for x in (a, b) if x.get('kind') != 'top']
+    if fit is None:
+        return max([I_OFFSET_MIN_A] + [abs(r) for r in rests])
+    f = fit['a']
+    return max([I_OFFSET_MIN_A, OFFSET_SE_K * fit['se']]
+               + [abs(r) - (min(abs(r), abs(f)) if r * f > 0 else 0.0) for r in rests])
+
+
+def offset_fit(cycles, t: float) -> Optional[Dict[str, float]]:
+    """The counting offset [A, charge-positive: what the count adds per hour]
+    fitted through the origin to the full-to-full cycles within
+    OFFSET_FIT_MAX_AGE_S of t (the last OFFSET_FIT_N of them), with its
+    standard error; None with fewer than OFFSET_FIT_MIN_N (unevaluable: no
+    correction, never an offset of 0 A)."""
+    cs = [c for c in cycles if abs(t - c['t']) <= OFFSET_FIT_MAX_AGE_S][-OFFSET_FIT_N:]
+    n = len(cs)
+    if n < OFFSET_FIT_MIN_N:
+        return None
+    hs = [c['span'] / 3600.0 for c in cs]
+    rs = [c['resid'] for c in cs]
+    sxx = sum(h * h for h in hs)
+    a = sum(h * r for h, r in zip(hs, rs)) / sxx
+    s2 = sum((r - a * h) ** 2 for h, r in zip(hs, rs)) / (n - 1)
+    return dict(a=a, se=math.sqrt(s2 / sxx), n=n)
 
 
 def segment_age_ok(age: float) -> bool:
@@ -849,6 +929,9 @@ class QmaxEstimator:
         # results
         self.anchors = deque(maxlen=MAX_ANCHORS)
         self.segments = deque(maxlen=SUMMARY_K)
+        # full-to-full cycles for the offset fit: {'t0', 't', 'span' [s], 'resid'
+        # [Ah, charge-positive count between two full ends], 'out' [Ah]}
+        self.offset_cycles = deque(maxlen=OFFSET_FIT_N)
         self._last_seg_t: Optional[float] = None  # segments never overlap in time
         # chemistry guard
         self._oob_since: Optional[float] = None
@@ -937,6 +1020,8 @@ class QmaxEstimator:
                     limiting_cell=new['cell'] + 1, cell_spread_pct=round(100.0 * new['spread'], 1),
                     min_dsoc=round(min(abs(d) for d in new['dsoc']), 1),
                     offset_assumed_a=round(new['i_off'], 2), offset_drift_pct=round(100.0 * new['drift'], 1),
+                    offset_fitted_a=round(new['offset_a'], 3) if new.get('offset_a') is not None else None,
+                    offset_fit_cycles=new.get('offset_n', 0),
                     plausibility_checked=new['cap'] is not None, anchors='->'.join(new['kinds']),
                     top_anchored=sum('top' in s['kinds'] for s in segs))
 
@@ -1304,7 +1389,8 @@ class QmaxEstimator:
                 self._top_refuse('top_cut_low', t, 'the highest cell peaked at %s'
                                  % ('%.0f mV' % peak if peak is not None else 'an unknown voltage'))
                 return None
-            self._top_cut = dict(t=t, t0=t, q=self.q_ah, cov=self.covered_s, epoch=self.epoch, n=self._top_v[3],
+            self._top_cut = dict(t=t, t0=t, q=self.q_ah, m=self.q_moved, cov=self.covered_s, epoch=self.epoch,
+                                 n=self._top_v[3],
                                  temps=[temp] if finite(temp) else [], mos=temp_mos)
             return None
 
@@ -1324,7 +1410,7 @@ class QmaxEstimator:
         if t - h['t0'] < TOP_HOLD_S or h['k'] < TOP_HOLD_READINGS or self._glitch_nb is not None:
             return None
         self._top_hold = None
-        return self._top_anchor(dict(t=t, t0=h['t0'], q=self.q_ah, cov=self.covered_s, epoch=self.epoch,
+        return self._top_anchor(dict(t=t, t0=h['t0'], q=self.q_ah, m=self.q_moved, cov=self.covered_s, epoch=self.epoch,
                                      n=h['n'], temps=h['temps'], mos=h['mos']), 'tail', t, [v[2], v[1]])
 
     def _top_refuse(self, why: str, t: float, detail: str):
@@ -1352,13 +1438,46 @@ class QmaxEstimator:
         if not TOP_ANCHORS:
             return None
         n = c['n']
-        a = dict(t=c['t'], t0=c['t0'], q=c['q'], cov=c['cov'], epoch=c['epoch'], temp=temp, dir='chg', i_rest=0.0,
-                 ocv=[None] * n, soc=[100.0] * n, why=[None] * n, fit=[None] * n, cap=self.design_capacity,
-                 kind='top', mode=mode)
+        a = dict(t=c['t'], t0=c['t0'], q=c['q'], m=c['m'], cov=c['cov'], epoch=c['epoch'], temp=temp, dir='chg',
+                 i_rest=0.0, ocv=[None] * n, soc=[100.0] * n, why=[None] * n, fit=[None] * n,
+                 cap=self.design_capacity, kind='top', mode=mode)
         logger.info('%s: Qmax top anchor (%s): charge end at %s, %.1f degC, cells %.0f..%.0f mV -> SoC 100 %%',
                     self.name, mode, fmt_t(c['t']), temp, lo_hi[0], lo_hi[1])
         self.counts['anchor_top'] += 1
+        self._offset_cycle(a)
         return self._pair(a, now)
+
+    def _offset_cycle(self, b):
+        """b is a new top anchor: with the previous one it makes a full-to-full
+        cycle for the offset fit if it passes the OFFSET_CYCLE_* rules."""
+        a = next((x for x in reversed(self.anchors) if x['kind'] == 'top'), None)
+        if a is None or a.get('m') is None or b['t'] <= a['t']:
+            return
+        span = b['t'] - a['t']
+        resid, moved = b['q'] - a['q'], b['m'] - a['m']
+        out = 0.5 * (moved - resid)  # moved = in + out, resid = in - out
+        cap = b['cap']
+        if a['epoch'] != b['epoch']:
+            why = 'gap'
+        elif not OFFSET_CYCLE_MIN_S <= span <= OFFSET_CYCLE_MAX_S:
+            why = 'span'
+        elif (b['cov'] - a['cov']) / span < MIN_COVERAGE:
+            why = 'coverage'
+        elif self._audit is not None and a['t'] < self._audit['t'] <= b['t']:
+            why = 'restart_held'
+        elif cap is None or out < OFFSET_CYCLE_MIN_OUT_C * cap:
+            why = 'swing'
+        else:
+            self.offset_cycles.append(dict(t0=a['t'], t=b['t'], span=span, resid=resid, out=out))
+            self.counts['offset_cycle'] += 1
+            fit = offset_fit(self.offset_cycles, b['t'])
+            logger.info('%s: Qmax full-to-full cycle %s -> %s: %+.2f Ah counted in %.1f h (%.0f Ah out), %+.3f A; '
+                        'offset fit %s', self.name, fmt_t(a['t']), fmt_t(b['t']), resid, span / 3600, out,
+                        resid / span * 3600,
+                        ('%+.3f A +- %.3f from %d cycles' % (fit['a'], fit['se'], fit['n'])) if fit else
+                        'not yet (%d/%d cycles)' % (len(self.offset_cycles), OFFSET_FIT_MIN_N))
+            return
+        self.counts['offset_cycle_' + why] += 1
 
     def _glitch_ends(self, t: float) -> Optional[str]:
         """Does an impossible reading at t end the epoch, and why: a second
@@ -1577,6 +1696,7 @@ class QmaxEstimator:
         self._reset_rest()
         self.anchors = deque((a for a in self.anchors if a['t'] <= t), maxlen=MAX_ANCHORS)
         self.segments = deque((s for s in self.segments if s['t'] <= t), maxlen=SUMMARY_K)
+        self.offset_cycles = deque((c for c in self.offset_cycles if c['t'] <= t), maxlen=OFFSET_FIT_N)
         if self._last_seg_t is not None and self._last_seg_t > t:
             self._last_seg_t = t  # no new segment may start before t; nothing after it is known
         if self._t_summary is not None and self._t_summary > t:
@@ -1760,13 +1880,15 @@ class QmaxEstimator:
             for s, w in zip(x['soc'], x['why']):
                 if s is None:
                     return None, 'endpoint_' + str(w)
-        dq = b['q'] - a['q']
+        dq_raw = b['q'] - a['q']
+        fit = offset_fit(self.offset_cycles, b['t'])
+        dq = dq_raw - (fit['a'] * span / 3600.0 if fit else 0.0)  # the fitted offset's charge removed
         dsoc = [sb - sa for sa, sb in zip(a['soc'], b['soc'])]
         if min(abs(d) for d in dsoc) < MIN_DSOC:
             return None, 'dsoc'
-        if not _same_sign(dq, dsoc):
+        if not _same_sign(dq, dsoc) or not _same_sign(dq_raw, dsoc):
             return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
-        i_off = assumed_offset(a, b)
+        i_off = assumed_offset(a, b) if fit is None else assumed_offset(a, b, fit)
         drift = i_off * span / 3600.0 / abs(dq)  # the assumed offset's charge, as a fraction of dQ
         if not drift <= DRIFT_MAX_FRAC:
             return None, 'drift'
@@ -1778,9 +1900,11 @@ class QmaxEstimator:
             return None, 'implausible'
         k = min(range(len(qc)), key=lambda c: qc[c])
         med = median(qc)
-        return dict(t=b['t'], t0=a['t'], dq=dq, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
+        return dict(t=b['t'], t0=a['t'], dq=dq, dq_raw=dq_raw, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
                     spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap,
-                    i_off=i_off, drift=drift, kinds=[a['kind'], b['kind']]), None
+                    i_off=i_off, drift=drift, offset_a=fit['a'] if fit else None,
+                    offset_se=fit['se'] if fit else None, offset_n=fit['n'] if fit else 0,
+                    kinds=[a['kind'], b['kind']]), None
 
     def _accept(self, seg, now: float) -> Optional[Dict[str, Any]]:
         """Keep a segment and return what to publish. Ages count from now, the
@@ -1806,11 +1930,14 @@ class QmaxEstimator:
             return None
         self.counts['segment'] += 1
         logger.info('%s: Qmax segment %s -> %s (%s): dQ %+.1f Ah, dSoC [%s] %%, Qmax [%s] Ah, limiting cell %d, '
-                    'spread %.1f %%, coverage %.3f, offset drift %.1f %% at an assumed %.2f A', self.name,
+                    'spread %.1f %%, coverage %.3f, offset drift %.1f %% at an assumed %.2f A%s', self.name,
                     fmt_t(seg['t0']),
                     fmt_t(seg['t']), '->'.join(seg['kinds']), seg['dq'], ', '.join('%+.1f' % d for d in seg['dsoc']),
                     ', '.join('%.1f' % q for q in seg['q_cells']), seg['cell'] + 1, 100 * seg['spread'], seg['cov'],
-                    100 * seg['drift'], seg['i_off'])
+                    100 * seg['drift'], seg['i_off'],
+                    (', fitted offset %+.3f A removed (counted %+.1f Ah, %d cycles)'
+                     % (seg['offset_a'], seg['dq_raw'], seg['offset_n'])) if seg.get('offset_a') is not None
+                    else ', no offset fit yet')
         res = self.result()
         if res is None:
             self._recheck_out('nothing would be published now')
@@ -1860,6 +1987,7 @@ class QmaxEstimator:
             bms_caps=[list(x) for x in self._bms_caps],
             q_ah=self.q_ah, q_moved=self.q_moved, covered_s=self.covered_s, epoch=self.epoch,
             anchors=[dict(a) for a in self.anchors], segments=[dict(s) for s in self.segments],
+            offset_cycles=[dict(c) for c in self.offset_cycles],
             last_seg_t=self._last_seg_t, load_ewma=self._load_ewma,
             announced=self._announced,
         )
@@ -1949,6 +2077,14 @@ class QmaxEstimator:
         segments = [dict(s) for s in st.get('segments') or []]
         new.anchors.extend(anchors[-MAX_ANCHORS:])
         new.segments.extend(segments[-SUMMARY_K:])
+        # (absent in a state from before the offset fit: no cycles yet)
+        cycles = [dict(t0=v_fin(c['t0'], 't0'), t=v_fin(c['t'], 't'), span=v_fin(c['span'], 'span'),
+                       resid=v_fin(c['resid'], 'resid'), out=v_fin(c['out'], 'out'))
+                  for c in st.get('offset_cycles') or []]
+        if any(not c['t0'] < c['t'] or c['span'] != c['t'] - c['t0'] for c in cycles) \
+                or any(x['t'] > y['t'] for x, y in zip(cycles, cycles[1:])):
+            raise ValueError('offset cycles not in time order')
+        new.offset_cycles.extend(cycles[-OFFSET_FIT_N:])
         new._last_seg_t = v_opt_fin(st.get('last_seg_t'), 'last_seg_t')
         new._load_ewma = v_opt_fin(st.get('load_ewma'), 'load_ewma')
 
@@ -1962,7 +2098,7 @@ class QmaxEstimator:
                 or (anchors and anchors[-1]['epoch'] > new.epoch) \
                 or any(x['t'] > y['t'] for x, y in zip(segments, segments[1:])):
             raise ValueError('anchors or segments not in time order')
-        timed = [x['t'] for x in anchors + segments] + ([au['t']] if au is not None else [])
+        timed = [x['t'] for x in anchors + segments + cycles] + ([au['t']] if au is not None else [])
 
         if 'rest_bins' in st:  # full state
             b = st.get('bin')

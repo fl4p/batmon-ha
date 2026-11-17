@@ -36,7 +36,8 @@ capacity (braunpwr_uart, renogy_uart, JK through the aiobmsble driver) and that 
 nameplate. Without a capacity from the BMS there is no such check. The `Qmax (est.)` sensor carries attributes: how many segments the value is
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
-not an error bound, see below), the capacity used, what the newest segment ran between (`anchors`, e.g. `ocv->top`: a
+not an error bound, see below), the offset measured between full charges and removed from the newest segment
+(`offset_fitted_a`, from `offset_fit_cycles` cycles; empty before there are 5), the capacity used, what the newest segment ran between (`anchors`, e.g. `ocv->top`: a
 rest near empty, then a charge end) and how many of the counted segments used a top anchor (`top_anchored`).
 
 ### How it relates to TI Impedance Track
@@ -84,6 +85,18 @@ gates would let through spans 48 hours with 0.72 A read during the rests: drift 
 This is a budget, not a bound on the error. An offset larger than the assumed one that shows only under load (a zero
 point that moves with the current) passes unseen, and so does a gain error (below). A 3 A offset under load during a
 6-hour discharge, with the rests reading 0 A, gave a Qmax 21 % low while the drift at the assumed 0.3 A was 3.4 %.
+
+**Offset measured between full charges.** Between two consecutive charge ends (top anchors) the cells gained nothing,
+so the charge counted between them is the offset × the time. A pair counts when it lies 6 hours to 7 days apart, at
+least 10 % of the capacity came out in between, and the record has no gap. From 5 such cycles on, the offset is fitted
+through them (the last 20 within 60 days) and removed from each new segment's counted charge. The drift budget then
+assumes 0.3 A, twice the fit's standard error, or the part of a rest reading the fitted offset does not explain,
+whichever is most (the part it explains was removed with it; a rest reading 0 A adds nothing). In the fleet
+telemetry, JK packs that
+read 0 A at rest carried 0.18–0.49 A this way, either sign. Uncorrected, it read charge segments high and discharge
+segments low: 0.924 against 0.864 of nameplate on a 304 Ah pack with 0.49 A, 0.896 against 0.903 with it removed
+(bat-impedance report, "Qmax direction bias"). A load the BMS measures is counted out like any other and does not enter
+the fit. A gain that differs between charge and discharge is not modelled; it widens the fit's error.
 
 What the assumption costs: a segment of one day needs at least 144 Ah of charge, so a 100 Ah pack can never pass a
 segment longer than about 17 hours, and the rest at its far end counts into that. 88 Ah out of a 100 Ah pack between
