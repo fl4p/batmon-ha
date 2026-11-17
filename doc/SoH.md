@@ -37,7 +37,7 @@ nameplate. Without a capacity from the BMS there is no such check. The `Qmax (es
 the median of, when the newest one ended, which cell limits, the spread between cells, the smallest SoC swing, the
 current offset the drift budget assumed and the drift that offset would cause (`offset_assumed_a`, `offset_drift_pct`;
 not an error bound, see below), the offset measured between full charges and removed from the newest segment
-(`offset_fitted_a`, from `offset_fit_cycles` cycles; empty before there are 5), the capacity used, what the newest segment ran between (`anchors`, e.g. `ocv->top`: a
+(`offset_fitted_a`, from `offset_fit_cycles` cycles; empty before there are 5 or when the fit is not used), the capacity used, what the newest segment ran between (`anchors`, e.g. `ocv->top`: a
 rest near empty, then a charge end) and how many of the counted segments used a top anchor (`top_anchored`).
 
 ### How it relates to TI Impedance Track
@@ -87,16 +87,21 @@ point that moves with the current) passes unseen, and so does a gain error (belo
 6-hour discharge, with the rests reading 0 A, gave a Qmax 21 % low while the drift at the assumed 0.3 A was 3.4 %.
 
 **Offset measured between full charges.** Between two consecutive charge ends (top anchors) the cells gained nothing,
-so the charge counted between them is the offset × the time. A pair counts when it lies 6 hours to 7 days apart, at
-least 10 % of the capacity came out in between, and the record has no gap. From 5 such cycles on, the offset is fitted
-through them (the last 20 within 60 days) and removed from each new segment's counted charge. The drift budget then
-assumes 0.3 A, twice the fit's standard error, or the part of a rest reading the fitted offset does not explain,
-whichever is most (the part it explains was removed with it; a rest reading 0 A adds nothing). In the fleet
-telemetry, JK packs that
-read 0 A at rest carried 0.18–0.49 A this way, either sign. Uncorrected, it read charge segments high and discharge
-segments low: 0.924 against 0.864 of nameplate on a 304 Ah pack with 0.49 A, 0.896 against 0.903 with it removed
-(bat-impedance report, "Qmax direction bias"). A load the BMS measures is counted out like any other and does not enter
-the fit. A gain that differs between charge and discharge is not modelled; it widens the fit's error.
+so the charge counted between them is what the current reading added. A pair counts when it lies 6 hours to 7 days
+apart, at least 10 % of the capacity came out in between, the samples cover 95 % of the time with no gap, and no restart
+is still being checked. From 5 such cycles on, the offset is fitted against their time (the last 20 within 60 days),
+and that offset × a new segment's duration is removed from its counted charge. The fit is used only when it is more
+than two standard errors from 0 A and the time explains the cycles better than the charge that came out does: a gain
+that differs between charge and discharge adds in proportion to the charge, and removing it × the time made
+discharge segments 5 % worse in a test. An offset that shows only under load is a time average in the fit; at a steady
+load current the charge out explains it as well, and the fit is not used. The drift budget then assumes 0.3 A, twice
+the fit's standard error, or the part of a rest reading the fitted offset does not explain, whichever is most (the
+part it explains was removed with it; a rest reading 0 A adds nothing; a reading of the other sign counts twice, up
+to the fit's size, since the offset may have changed), against the smaller of the raw and the corrected charge. In the
+fleet telemetry, JK packs that read 0 A at rest carried 0.18–0.49 A this way, either sign. Uncorrected, it read charge
+segments high and discharge segments low: 0.924 against 0.864 of nameplate on a 304 Ah pack with 0.49 A, 0.896
+against 0.904 with it removed (bat-impedance report, "Qmax direction bias"). A load the BMS measures is counted out
+like any other and does not enter the fit.
 
 What the assumption costs: a segment of one day needs at least 144 Ah of charge, so a 100 Ah pack can never pass a
 segment longer than about 17 hours, and the rest at its far end counts into that. 88 Ah out of a 100 Ah pack between

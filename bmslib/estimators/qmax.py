@@ -148,23 +148,34 @@ offset_drift_pct, the drift at that assumed offset.
 
 An offset that shows only under load is measured where it can be: between two
 consecutive top anchors (full to full, _offset_cycle) the cells gained
-nothing, so the charge counted between them is the offset x the time. From
-OFFSET_FIT_MIN_N such cycles the offset is fitted (offset_fit) and removed
-from each new segment's dQ (the fleet's JK packs carried 0.18-0.49 A, hidden
-at rest, which read charge segments high and discharge segments low; constants
+nothing, so the charge counted between them is what the count added. Fitted
+over OFFSET_FIT_MIN_N or more such cycles against their time (offset_fit), it
+is the offset averaged over the time, and that x a new segment's span is
+removed from its dQ (the fleet's JK packs carried 0.18-0.49 A, hidden at rest,
+which read charge segments high and discharge segments low; constants
 OFFSET_*). That is not the rest reading's case above: a load the BMS measures
 correctly is counted out between the two full ends like any other, so it does
 not enter the fit; only what the count adds that the cells did not get does.
+The correction is used only when it is the better explanation: the fit is
+OFFSET_SE_K standard errors away from 0 A, and the time explains the cycles'
+residuals better than the charge that came out does. A gain that differs
+between charge and discharge adds per cycle in proportion to the charge moved,
+not the time; taken for an offset it would be removed x the span of every
+segment, which made a discharge-only pack 5 % worse in review.
 The drift budget then assumes I_OFFSET_MIN_A, OFFSET_SE_K standard errors of
 the fit, or what a rest read that the fitted offset does not explain,
 whichever is most (assumed_offset): the part of the reading the fit explains
 was removed with it, the rest of it is a load the BMS measures or an offset
-the fit did not see. Without enough
-cycles nothing changes. Not covered: a gain
-that differs between charge and discharge (it scales with the charge moved,
-not the time), an offset that changed within OFFSET_FIT_MAX_AGE_S, and a top
-anchor that is not as full as the one before (it reads as an offset over that
-one cycle; the fit through all of them dilutes it).
+the fit did not see. A reading of the other sign may say the fit is stale
+(the offset changed): it counts twice, up to the fit's size. The drift
+is a fraction of the smaller of the raw and the corrected |dQ|. Without enough
+cycles, or with a fit not used, nothing changes. Not covered: an offset that
+shows only under load is a time average in the fit (over-corrects a segment
+that idles more than the cycles did; at a steady load current the charge out
+explains it as well and it is not used), an offset that changed within
+OFFSET_FIT_MAX_AGE_S while the rests read 0 A, and a top anchor that is not
+as full as the one before (it reads as an offset over that one cycle; the fit
+through all of them dilutes it).
 
 The capacity is the per-device `capacity:` option (the nameplate) and
 nothing else. Saved anchors and segments are only restored under the option
@@ -402,7 +413,7 @@ DRIFT_MAX_FRAC = 0.05
 # carried 0.18-0.49 A, both signs, all JK reading 0 A at rest (invisible to the
 # rest reading); the time explained it with R^2 0.83-0.99, and subtracting it
 # closed the gap between charge (ocv->top) and discharge (top->ocv) segments
-# (0.924 vs 0.864 of nameplate -> 0.896 vs 0.903 on a 304 Ah pack with 0.49 A).
+# (0.924 vs 0.864 of nameplate -> 0.896 vs 0.904 on a 304 Ah pack with 0.49 A).
 # A cycle counts when it spans OFFSET_CYCLE_MIN_S..OFFSET_CYCLE_MAX_S (shorter:
 # the offset's charge drowns in how full each anchor really is, ~0.3 % of the
 # capacity p90; longer: longer than the evidence), at least OFFSET_CYCLE_MIN_OUT_C
@@ -412,13 +423,14 @@ DRIFT_MAX_FRAC = 0.05
 OFFSET_CYCLE_MIN_S = 6 * 3600.0
 OFFSET_CYCLE_MAX_S = 7 * 86400.0
 OFFSET_CYCLE_MIN_OUT_C = 0.10
-# The fit (through the origin, residual = offset x span) is used from
+# The fit (through the origin, residual = offset x span) is made from
 # OFFSET_FIT_MIN_N cycles, over the last OFFSET_FIT_N within
-# OFFSET_FIT_MAX_AGE_S of the segment's end; the drift budget then assumes at
-# least OFFSET_SE_K standard errors of the fit (assumed_offset). A
-# current offset that is not constant (a gain that differs between charge and
-# discharge: one pack in the evidence fitted that better, -17 %) is not
-# modelled; it widens the standard error.
+# OFFSET_FIT_MAX_AGE_S of the segment's end, and used only if it is more than
+# OFFSET_SE_K standard errors from 0 A and fits the residuals better than
+# residual = g x charge out does (a gain that differs between charge and
+# discharge: one pack in the evidence fitted that better, -17 %; the 304 Ah
+# pack's offset fitted the time with R^2 0.990 vs 0.921). The drift budget
+# then assumes at least OFFSET_SE_K standard errors of it (assumed_offset).
 OFFSET_FIT_MIN_N = 5
 OFFSET_FIT_N = 20
 OFFSET_FIT_MAX_AGE_S = 60 * 86400.0
@@ -770,7 +782,12 @@ def assumed_offset(a, b, fit: Optional[Dict[str, float]] = None) -> float:
     (offset_fit), which is removed from dQ, a rest reading counts only with
     what the fitted offset does not explain: the part of it with the fit's
     sign, up to the fit's size, was removed with it; the rest (a load the BMS
-    measures, an offset of the other sign) still widens the assumption. A rest
+    measures) still widens the assumption. A reading of the other sign is a
+    load the BMS measures or an offset that changed since the fit (then the
+    error is the reading plus the fit removed): it counts as |r| + min(|r|,
+    |f|), so a reading as large as the fit takes both in full, and a small
+    standby load (q5Lw's -0.05 A: the full rule cost it its 36 h segment)
+    stays under the floor. A rest
     that reads 0 A while the fit says otherwise (an offset hidden at rest, the
     case the fit exists for) adds nothing. And at least OFFSET_SE_K standard
     errors of the fit. A top anchor has no rest reading (its i_rest is 0 by
@@ -780,7 +797,8 @@ def assumed_offset(a, b, fit: Optional[Dict[str, float]] = None) -> float:
         return max([I_OFFSET_MIN_A] + [abs(r) for r in rests])
     f = fit['a']
     return max([I_OFFSET_MIN_A, OFFSET_SE_K * fit['se']]
-               + [abs(r) - (min(abs(r), abs(f)) if r * f > 0 else 0.0) for r in rests])
+               + [abs(r) - min(abs(r), abs(f)) if r * f > 0 else abs(r) + min(abs(r), abs(f))
+                  for r in rests])
 
 
 def offset_fit(cycles, t: float) -> Optional[Dict[str, float]]:
@@ -788,17 +806,32 @@ def offset_fit(cycles, t: float) -> Optional[Dict[str, float]]:
     fitted through the origin to the full-to-full cycles within
     OFFSET_FIT_MAX_AGE_S of t (the last OFFSET_FIT_N of them), with its
     standard error; None with fewer than OFFSET_FIT_MIN_N (unevaluable: no
-    correction, never an offset of 0 A)."""
+    correction, never an offset of 0 A). 'why' is None if the fit may be used,
+    else why not: 'insignificant' (within OFFSET_SE_K standard errors of 0 A)
+    or 'throughput' (residual = g x charge out fits at least as well: a gain
+    that differs by direction, or an offset only under a steady load; the
+    two cannot be told from time then, and unevaluable is not used)."""
     cs = [c for c in cycles if abs(t - c['t']) <= OFFSET_FIT_MAX_AGE_S][-OFFSET_FIT_N:]
     n = len(cs)
     if n < OFFSET_FIT_MIN_N:
         return None
     hs = [c['span'] / 3600.0 for c in cs]
     rs = [c['resid'] for c in cs]
+    os_ = [c['out'] for c in cs]
     sxx = sum(h * h for h in hs)
     a = sum(h * r for h, r in zip(hs, rs)) / sxx
-    s2 = sum((r - a * h) ** 2 for h, r in zip(hs, rs)) / (n - 1)
-    return dict(a=a, se=math.sqrt(s2 / sxx), n=n)
+    sse = sum((r - a * h) ** 2 for h, r in zip(hs, rs))
+    se = math.sqrt(sse / (n - 1) / sxx)
+    soo = sum(o * o for o in os_)
+    g = sum(o * r for o, r in zip(os_, rs)) / soo if soo > 0 else None
+    sse_g = sum((r - g * o) ** 2 for o, r in zip(os_, rs)) if g is not None else None
+    if not abs(a) > OFFSET_SE_K * se:
+        why = 'insignificant'
+    elif sse_g is None or not sse < sse_g:
+        why = 'throughput'
+    else:
+        why = None
+    return dict(a=a, se=se, n=n, g=g, why=why)
 
 
 def segment_age_ok(age: float) -> bool:
@@ -1068,6 +1101,7 @@ class QmaxEstimator:
         self._top_reset()
         self.anchors.clear()
         self.segments.clear()
+        self.offset_cycles.clear()
 
     @locked
     def counter_write_begin(self, why: str, capacity_change: bool = False):
@@ -1474,7 +1508,9 @@ class QmaxEstimator:
             logger.info('%s: Qmax full-to-full cycle %s -> %s: %+.2f Ah counted in %.1f h (%.0f Ah out), %+.3f A; '
                         'offset fit %s', self.name, fmt_t(a['t']), fmt_t(b['t']), resid, span / 3600, out,
                         resid / span * 3600,
-                        ('%+.3f A +- %.3f from %d cycles' % (fit['a'], fit['se'], fit['n'])) if fit else
+                        ('%+.3f A +- %.3f from %d cycles%s' % (fit['a'], fit['se'], fit['n'],
+                                                               ', not used: ' + fit['why'] if fit['why'] else ''))
+                        if fit else
                         'not yet (%d/%d cycles)' % (len(self.offset_cycles), OFFSET_FIT_MIN_N))
             return
         self.counts['offset_cycle_' + why] += 1
@@ -1882,6 +1918,8 @@ class QmaxEstimator:
                     return None, 'endpoint_' + str(w)
         dq_raw = b['q'] - a['q']
         fit = offset_fit(self.offset_cycles, b['t'])
+        skip = 'cycles' if fit is None else fit['why']
+        fit = fit if skip is None else None  # a fit not used changes nothing (offset_fit)
         dq = dq_raw - (fit['a'] * span / 3600.0 if fit else 0.0)  # the fitted offset's charge removed
         dsoc = [sb - sa for sa, sb in zip(a['soc'], b['soc'])]
         if min(abs(d) for d in dsoc) < MIN_DSOC:
@@ -1889,7 +1927,9 @@ class QmaxEstimator:
         if not _same_sign(dq, dsoc) or not _same_sign(dq_raw, dsoc):
             return None, 'sign'  # charge must raise SoC: a flipped current sign lands here
         i_off = assumed_offset(a, b) if fit is None else assumed_offset(a, b, fit)
-        drift = i_off * span / 3600.0 / abs(dq)  # the assumed offset's charge, as a fraction of dQ
+        # the assumed offset's charge, as a fraction of dQ; of the smaller one: a
+        # correction that inflates |dQ| must not dilute the budget it is under
+        drift = i_off * span / 3600.0 / min(abs(dq), abs(dq_raw))
         if not drift <= DRIFT_MAX_FRAC:
             return None, 'drift'
         qc = [100.0 * dq / d for d in dsoc]
@@ -1903,7 +1943,7 @@ class QmaxEstimator:
         return dict(t=b['t'], t0=a['t'], dq=dq, dq_raw=dq_raw, dsoc=dsoc, q_cells=qc, qmax=qc[k], cell=k,
                     spread=(max(qc) - min(qc)) / med, cov=cov, temp0=a['temp'], temp1=b['temp'], cap=cap,
                     i_off=i_off, drift=drift, offset_a=fit['a'] if fit else None,
-                    offset_se=fit['se'] if fit else None, offset_n=fit['n'] if fit else 0,
+                    offset_se=fit['se'] if fit else None, offset_n=fit['n'] if fit else 0, offset_skip=skip,
                     kinds=[a['kind'], b['kind']]), None
 
     def _accept(self, seg, now: float) -> Optional[Dict[str, Any]]:
@@ -1937,7 +1977,7 @@ class QmaxEstimator:
                     100 * seg['drift'], seg['i_off'],
                     (', fitted offset %+.3f A removed (counted %+.1f Ah, %d cycles)'
                      % (seg['offset_a'], seg['dq_raw'], seg['offset_n'])) if seg.get('offset_a') is not None
-                    else ', no offset fit yet')
+                    else ', offset fit not used: %s' % seg.get('offset_skip'))
         res = self.result()
         if res is None:
             self._recheck_out('nothing would be published now')
