@@ -1,5 +1,7 @@
 ## [unreleased]
 
+## [2.32]
+
 * Fix: stopping during a sampling interval or retry backoff waits at most half a second for that sleep, leaving time for connection cleanup and state saving (#391).
 * Fix (`jk`): 32-cell BMSes such as the JK-BD6A32S failed at connect with `num_cells unexpected 32`; the cell count check stopped at 24 (#432).
 * Quieter logs: no habluetooth `bleak-retry-connector` warning or per-attempt connection-path line, `normal connect failed` and `Power jump/noise` only with `verbose_log`, and `device not found` names no adapter with `ble_stack: esphome`.
