@@ -95,6 +95,10 @@ def store_states(samplers: list[BmsSampler], final=False):
                 s.store_qmax_state(final=final)
             except Exception as e:
                 logger.error('%s: error storing Qmax/SoH state: %s', s.bms.name, e)
+            try:
+                s.store_cellcap_state(final=final)
+            except Exception as e:
+                logger.error('%s: error storing cell capacity state: %s', s.bms.name, e)
 
 
 def _runtime_kind():
@@ -494,7 +498,7 @@ async def main():
         except Exception as e:
             logger.warning('GUI state disabled: %s', e)
 
-    from bmslib.store import load_impedance_state, load_qmax_state, root_dir as store_root_dir
+    from bmslib.store import load_cellcap_state, load_impedance_state, load_qmax_state, root_dir as store_root_dir
     from bmslib.jk_settings_service import build_settings_service
 
     def design_capacity(name):
@@ -533,6 +537,8 @@ async def main():
         soh_state=user_config.get('soh_estimator') and load_qmax_state(bms.name),
         design_capacity=design_capacity(bms.name),
         settings_service=build_settings_service(bms, user_config, dev_args[bms.name], store_root_dir or '.'),
+        cell_capacity_estimator=bool(user_config.get('cell_capacity_estimator', False)),
+        cell_capacity_state=user_config.get('cell_capacity_estimator') and load_cellcap_state(bms.name),
     ) for bms in bms_list]
 
     # move groups to the end

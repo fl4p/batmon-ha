@@ -138,6 +138,10 @@ class BmsSampleSink:
     def publish_meters(self, bms_name: str, readings: Dict[str, float]):
         raise NotImplementedError()
 
+    def publish_cell_capacity(self, bms_name: str, result: Optional[dict]):
+        """Per-cell capacity estimate (CellCapacityEstimator.result()); only the GUI shows it."""
+        pass
+
 
 # SoC gauge check (BmsSampler._check_gauge): how much BMS SoC history is kept (a rest
 # anchor comes out when the rest ends, a cut-off one ~2 min after the cut), how old the
@@ -172,6 +176,8 @@ class BmsSampler:
                  soh_state=None,
                  design_capacity=None,
                  settings_service=None,
+                 cell_capacity_estimator=False,
+                 cell_capacity_state=None,
                  ):
 
         self.bms = bms
@@ -290,6 +296,18 @@ class BmsSampler:
             if soh_state:
                 self.qmax.restore(soh_state)
         self._qmax_saved = None
+
+        # Experimental per-cell capacity estimator (cell_capacity_estimator, off
+        # by default), real packs only. Shown in the GUI only.
+        self.cellcap = None
+        if cell_capacity_estimator and not bms.is_virtual:
+            from bmslib.estimators.cell_capacity import CellCapacityEstimator
+            self.cellcap = CellCapacityEstimator(bms.name, capacity=design_capacity)
+            logger.info('%s: per-cell capacity estimator enabled (experimental)', bms.name)
+            if cell_capacity_state:
+                self.cellcap.restore(cell_capacity_state)
+        self._cellcap_saved = None
+        self._cellcap_rev = None
         # SoC gauge check (_check_gauge): anchors up to this time were already compared
         # (restored ones are history); the BMS's SoC of the last minutes, (t, soc)
         self._gauge_seen_t = max((a['t'] for a in self.qmax.anchors), default=None) if self.qmax else None
@@ -388,6 +406,18 @@ class BmsSampler:
             from bmslib.store import store_qmax_state
             store_qmax_state(self.bms.name, state)
             self._qmax_saved = js
+
+    def store_cellcap_state(self, final=False):
+        """Save the per-cell capacity estimator, when it changed."""
+        if self.cellcap is None:
+            return
+        state = self.cellcap.get_state(full=final)
+        js = json.dumps(state, sort_keys=True)
+        if js == self._cellcap_saved:
+            return
+        from bmslib.store import store_cellcap_state
+        store_cellcap_state(self.bms.name, state)
+        self._cellcap_saved = js
 
     async def counter_write(self, why: str, write, capacity_change: bool = False):
         """Run `write()` (a coroutine function) that moves the BMS's charge
@@ -766,6 +796,11 @@ class BmsSampler:
             elif self.qmax is not None:
                 self._withdraw_qmax()  # disabled (also restored disabled): clear what an earlier run published
 
+            if self.cellcap is not None and self.cellcap.enabled:
+                if not voltages and self.cellcap.wants_voltages(sample.timestamp, current_native):
+                    voltages = await cached_fetch_voltages(optional=True)
+                self._feed_cellcap(sample, current_native, voltages)
+
             PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
             PWR_CHG_HOLD = 4  # time in seconds to keep high frequency sampling after a power jump. this helps capture power transients and noise wave form
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
@@ -906,6 +941,24 @@ class BmsSampler:
         if r is not None or attrs is not None:
             publish_cell_resistance(self.mqtt_client, device_topic=self.mqtt_topic_prefix, value_mohm=r,
                                     attributes=attrs)
+
+    def _feed_cellcap(self, sample: BmsSample, current: float, voltages):
+        est = self.cellcap
+        try:
+            est.add(sample.timestamp, current, voltages or None, counter=sample.charge)
+        except Exception as e:
+            # an estimator bug must not kill sampling
+            logger.error('%s: cell capacity estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
+                         exc_info=True)
+            est.disable('internal error')
+        if est.rev != self._cellcap_rev:
+            self._cellcap_rev = est.rev
+            res = est.result()
+            for sink in self.sinks:
+                try:
+                    sink.publish_cell_capacity(self.bms.name, res)
+                except Exception as e:
+                    logger.error('sink %s publish_cell_capacity failed: %s', type(sink).__name__, summarize_exc(e))
 
     async def _qmax_temperature(self, sample: BmsSample):
         """(best cell temperature known or None, whether it is the MOSFET's):

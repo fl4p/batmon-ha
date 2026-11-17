@@ -202,6 +202,14 @@ configuration:
       BMS-Fühler, oder pack_temp_estimator, wenn das BMS nur eine
       MOSFET-Temperatur meldet. Schaltet sich bei Akkus ab, die nicht LiFePO4
       sind.
+  cell_capacity_estimator:
+    name: Kapazität je Zelle schätzen (experimentell)
+    description: >-
+      Schätzt die Kapazität jeder Zelle in Ah, mit Unsicherheit, bei
+      LiFePO4-Akkus aus den Zellspannungen am Ende voller Ladungen und
+      tiefer Entladungen, bei denen eine Zelle fast leer wird. Nur in der
+      Web-Oberfläche. Liest die Zellspannungen öfter, solange Strom fließt.
+      Siehe doc/Cell Capacity.md.
   soh_estimator:
     name: Kapazität / SoH schätzen (experimentell)
     description: >-

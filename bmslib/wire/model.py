@@ -153,7 +153,7 @@ def _clean_array(values, scale=1.0):
 
 
 def node_state(node_id, sample=None, voltages_mv=None, temperatures_c=None,
-               meters=None, link=None, now=None) -> dict:
+               meters=None, link=None, now=None, cell_capacity=None) -> dict:
     now = time.time() if now is None else now
     st = {'link': link or {'status': 'never'}}
 
@@ -192,6 +192,10 @@ def node_state(node_id, sample=None, voltages_mv=None, temperatures_c=None,
         m = {k: _round_num(v, 5) for k, v in meters.items() if not is_none_or_nan(v)}
         if m:
             st['meters'] = m
+
+    if cell_capacity:
+        # CellCapacityEstimator.result(): per-cell Ah with sigma, or a lower bound
+        st['cell_capacity'] = cell_capacity
 
     st['stale'] = bool((link or {}).get('status') == 'stale')
     return st

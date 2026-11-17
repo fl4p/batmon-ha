@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* New experimental `cell_capacity_estimator` (off by default): each cell's capacity in Ah with its uncertainty, from the voltage knees at full charge and deep discharge, shown in the web GUI (doc/Cell Capacity.md).
+
 ## [2.32]
 
 * Fix: stopping during a sampling interval or retry backoff waits at most half a second for that sleep, leaving time for connection cleanup and state saving (#391).

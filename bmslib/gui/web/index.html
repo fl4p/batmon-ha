@@ -31,6 +31,9 @@
   .sw { font-size: 11px; margin-top: 6px; }
   .sw b { font-weight: 600; }
   .prob { color: #c33; font-weight: 600; font-size: 12px; margin-top: 4px; }
+  .cap { font-size: 11px; margin-top: 6px; }
+  .cap .cells .cell { font-size: 10px; }
+  .cap .cell.weak { border-color: #c33; color: #c33; }
 </style>
 
 <h1>batmon</h1>
@@ -91,6 +94,7 @@ function renderPack(id) {
     }).join('') + '</div>';
     if (cs.delta_mv !== undefined) h += `<div style="font-size:11px;opacity:.7">Δ ${esc(cs.delta_mv)} mV</div>`;
   }
+  if (n.cell_capacity) h += renderCapacity(n.cell_capacity);
   if (n.temperatures_c && n.temperatures_c.length)
     h += `<div style="font-size:11px;opacity:.7">temps: ${esc(n.temperatures_c.map(t => t === null ? '?' : t).join(', '))} °C</div>`;
   if (n.switches)
@@ -100,6 +104,30 @@ function renderPack(id) {
 
   el.innerHTML = h;
   return el;
+}
+
+// Per-cell capacity (experimental estimator): Ah ± sigma, ">x" a lower bound.
+function renderCapacity(cc) {
+  const cells = cc.cells || [];
+  const known = cells.filter(c => c && !c.bound).map(c => c.ah);
+  const weakest = known.length ? Math.min(...known) : null;
+  let h = '<div class="cap"><div style="opacity:.65">cell capacity (Ah)</div>';
+  if (cc.pack_ah !== undefined && cells.some(c => c)) {
+    h += '<div class="cells">' + cells.map((c, i) => {
+      const t = 'cell ' + (i + 1);
+      if (!c) return `<span class="cell" title="${esc(t + ': not known yet')}">?</span>`;
+      const cls = (!c.bound && c.ah === weakest) ? ' weak' : '';
+      const txt = c.bound ? '&gt;' + esc(c.ah.toFixed(0)) : esc(c.ah.toFixed(0) + '±' + c.sigma.toFixed(0));
+      const tip = c.bound ? t + ': at least ' + c.ah.toFixed(1) + ' Ah (it never reached a knee)'
+                          : t + ': ' + c.ah.toFixed(1) + ' ± ' + c.sigma.toFixed(1) + ' Ah';
+      return `<span class="cell${cls}" title="${esc(tip)}">${txt}</span>`;
+    }).join('') + '</div>';
+    h += `<div style="opacity:.6">full charge → first empty cell ${esc(cc.pack_ah.toFixed(1))} ± ${esc(cc.pack_sigma.toFixed(1))} Ah`;
+  } else {
+    h += '<div style="opacity:.6">collecting';
+  }
+  h += ` · ${esc(cc.n_top)} full charges, ${esc(cc.n_bottom)} knee discharges, ${esc(cc.n_cycle)} cycles</div></div>`;
+  return h;
 }
 
 function render() {

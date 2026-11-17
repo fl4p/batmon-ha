@@ -209,6 +209,11 @@ schema:
   # how rarely that gives a value.
   soh_estimator: "bool?"
 
+  # Experimental: per-cell capacity of LiFePO4 packs from the knees of the cell
+  # voltage curves at the end of a full charge and of a deep discharge, shown in
+  # the web GUI only. See doc/Cell Capacity.md.
+  cell_capacity_estimator: "bool?"
+
   # Read the settings of JK BMSes (BLE, JK02_32S protocol, firmware >= 11) and
   # show them in HA. Read-only unless a device sets `settings_write`. See
   # doc/JK-Settings.md.

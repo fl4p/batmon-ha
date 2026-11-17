@@ -204,6 +204,14 @@ configuration:
       in Ah and "SoH (est.)" in %. Needs rests of 90 minutes and more near
       empty and near full, so it may take weeks to never before a value
       appears. Turns itself off for packs that are not LiFePO4.
+  cell_capacity_estimator:
+    name: Per-cell capacity estimator (experimental)
+    description: >-
+      Estimate each cell's capacity in Ah, with its uncertainty, of LiFePO4
+      packs from the cell voltages at the end of full charges and of
+      discharges deep enough that a cell nears empty. Shown in the web GUI
+      only. Reads cell voltages more often while current flows. See
+      doc/Cell Capacity.md.
   jk_settings:
     name: JK settings
     description: >-

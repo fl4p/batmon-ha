@@ -212,6 +212,14 @@ configuration:
       una temperatura de celda: una sonda del BMS, o pack_temp_estimator si el
       BMS solo informa la temperatura del MOSFET. Se desactiva sola en
       baterías que no son LiFePO4.
+  cell_capacity_estimator:
+    name: Estimar capacidad por celda (experimental)
+    description: >-
+      Estima la capacidad de cada celda en Ah, con su incertidumbre, en
+      baterías LiFePO4 a partir de las tensiones de celda al final de cargas
+      completas y de descargas profundas en las que una celda queda casi
+      vacía. Solo en la interfaz web. Lee las tensiones de celda más a menudo
+      mientras circula corriente. Ver doc/Cell Capacity.md.
   soh_estimator:
     name: Estimar capacidad / SoH (experimental)
     description: >-

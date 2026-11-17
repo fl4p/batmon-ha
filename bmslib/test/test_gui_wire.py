@@ -177,6 +177,20 @@ def test_sink_updates_and_change_tracking():
     assert doc['nodes']['p2']['link']['status'] == 'never'
 
 
+def test_cell_capacity_reaches_the_node_document():
+    st = GuiState(app_version='t', runtime='standalone')
+    st.register_node('p1', kind='pack')
+    sink = GuiStateSink(st)
+    rev = st.revision
+    res = dict(n_top=2, n_bottom=1, n_cycle=1, pack_ah=240.0, pack_sigma=1.0,
+               cells=[dict(ah=241.5, sigma=3.0, bound=False), None, dict(ah=263.0, sigma=0.0, bound=True)])
+    sink.publish_cell_capacity('p1', res)
+    assert st.changed_since(rev) == {'p1'}
+    assert st.state_doc()['data']['nodes']['p1']['cell_capacity'] == res
+    sink.publish_cell_capacity('p1', None)  # estimator disabled: nothing shown
+    assert 'cell_capacity' not in st.state_doc()['data']['nodes']['p1']
+
+
 def test_state_never_raises_from_a_bad_update():
     """A sink must not be able to break sampling."""
     st = GuiState(app_version='t', runtime='standalone')
