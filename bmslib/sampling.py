@@ -1106,6 +1106,22 @@ class Downsampler:
         return s
 
 
+async def _sleep_with_stop(delay, should_stop):
+    """Leave idle waits promptly so shutdown can disconnect and store state."""
+    if should_stop is None:
+        await asyncio.sleep(delay)
+        return
+
+    deadline = time.monotonic() + delay
+    while not should_stop():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            # Preserve the scheduling point even for a zero sampling interval.
+            await asyncio.sleep(0)
+            return
+        await asyncio.sleep(min(remaining, 0.5))
+
+
 async def fetch_loop(fn, period, max_errors, should_stop=None, max_backoff=60):
     """Drive `fn` every `period` seconds, aborting after `max_errors` consecutive failures.
 
@@ -1149,5 +1165,5 @@ async def fetch_loop(fn, period, max_errors, should_stop=None, max_backoff=60):
                 logger.warning('too many errors, abort')
                 break
             # clamp the exponent: 1.1 ** 7448 raises OverflowError and kills the loop
-            await asyncio.sleep(min(1.1 ** min(num_errors_row, 100), max_backoff))
-        await asyncio.sleep(period)
+            await _sleep_with_stop(min(1.1 ** min(num_errors_row, 100), max_backoff), should_stop)
+        await _sleep_with_stop(period, should_stop)
