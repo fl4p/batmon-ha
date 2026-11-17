@@ -183,7 +183,7 @@ class BMS():
         self._last_sample: Optional[BMSSample] = None
 
         self.is_virtual = False
-        self.verbose_log = False
+        self.verbose_log = bool(kwargs.get('verbose_log'))
 
         self.connect_time = time.time()
 

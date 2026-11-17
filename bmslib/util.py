@@ -73,7 +73,9 @@ def get_logger(verbose=False):
 
     logging.basicConfig(level=level, format=log_format, datefmt='%H:%M:%S')
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    # only ever more verbose: modules call get_logger() at import, some lazily after a
+    # verbose BMS was built, and must not switch its debug output off again
+    logger.setLevel(min(level, logger.level or logging.WARNING))
 
     # habluetooth nags on every BleakClient.connect() not made through bleak_retry_connector;
     # batmon retries and backs off itself (sampling.py, BtBms._connect_with_scanner)
