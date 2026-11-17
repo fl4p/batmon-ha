@@ -33,7 +33,7 @@ class BmsGroup:
             missing = set(self.bms_names) - set(self.samples.keys())
             raise GroupNotReady("group %s missing %s" % (self.name, missing))
         fn = sum_series if self.kind == 'series' else sum_parallel
-        return fn(self.samples.values())
+        return fn(self.samples[name] for name in self.bms_names)
 
     def fetch_voltages(self):
         try:
@@ -119,7 +119,8 @@ class VirtualGroupBms:
         self.members.append(bms)
 
     def get_member_refs(self):
-        return set(filter(bool, self.address.split(',')))
+        # Cell and temperature indices follow the configured pack order.
+        return list(dict.fromkeys(ref.strip() for ref in self.address.split(',') if ref.strip()))
 
     def get_member_names(self):
         return self.group.bms_names
