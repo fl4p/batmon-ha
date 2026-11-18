@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* Fix: the web GUI showed nothing for a `cell_capacity_estimator` that was already disabled when the add-on started, instead of the reason it is off.
+
 ## [2.34]
 
 * Fix: the experimental `cell_capacity_estimator` disconnected any BMS it was enabled for: it crashed on the first sample after a restart, and its own failure path raised instead of disabling the estimator.

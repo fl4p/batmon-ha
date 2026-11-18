@@ -817,6 +817,11 @@ class BmsSampler:
                 if not voltages and self.cellcap.wants_voltages(sample.timestamp, current_native):
                     voltages = await cached_fetch_voltages(optional=True)
                 self._feed_cellcap(sample, current_native, voltages)
+            elif self.cellcap is not None:
+                # disabled, including restored disabled: publish the reason once, so the
+                # GUI says why nothing is coming rather than nothing at all. qmax has
+                # _withdraw_qmax() for the same job.
+                self._publish_cellcap()
 
             self._publish_estimates()
 
@@ -973,6 +978,12 @@ class BmsSampler:
             logger.error('%s: cell capacity estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
                          exc_info=True)
             est.disable('internal error', persistent=False)
+        self._publish_cellcap()
+
+    def _publish_cellcap(self):
+        """Publish the estimator's current result when it has changed: the per-cell
+        values, or {'disabled': why} once it is off."""
+        est = self.cellcap
         if est.rev != self._cellcap_rev:
             self._cellcap_rev = est.rev
             res = est.result()
