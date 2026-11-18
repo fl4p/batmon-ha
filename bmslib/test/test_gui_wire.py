@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from bmslib.bms import BmsSample
 from bmslib.gui.state import GuiState, GuiStateSink, link_status
 from bmslib.gui import server as gsrv
+from bmslib.test._sampler_helpers import make_sampler
 from bmslib.wire import model, topology
 
 
@@ -364,3 +366,41 @@ def test_a_sample_in_flight_is_not_an_error():
         asyncio.run(s())
     st = link_status(s.status(), None, 0, 0)
     assert st['status'] == 'error' and st['errors'] == 1 and 'boom' in st['detail']
+
+
+# doc/GUI.md: an unknown scalar is an absent key, never null. The only nulls are inside
+# positional arrays, where the index is the cell or sensor number.
+POSITIONAL_ARRAYS = ('cells_mv', 'cells')  # cells: cell_capacity's per-cell list
+
+
+def _null_paths(node, path=()):
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if v is None:
+                out.append(path + (k,))
+            else:
+                out.extend(_null_paths(v, path + (k,)))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            if v is None:
+                out.append(path + (i,))
+            else:
+                out.extend(_null_paths(v, path + (i,)))
+    return out
+
+
+def test_the_document_carries_no_null_scalars():
+    """Driven through a real sampler with every estimator on and no `capacity:` option,
+    which is where the optional fields (capacity, soh) stay unknown. The cell capacity
+    estimator first emitted `capacity: null` here, and `soh: {soh: null}`."""
+    st = GuiState(app_version='t', runtime='standalone')
+    st.register_node('fake', kind='pack')
+    sampler = make_sampler(GuiStateSink(st), soh_estimator=True, impedance_estimator=True,
+                           cell_capacity_estimator=True)  # no design_capacity on purpose
+    asyncio.run(sampler())
+
+    doc = st.state_doc()['data']
+    assert doc['nodes']['fake']['values']['voltage'] == 13.0  # the sample did reach the doc
+    offenders = [p for p in _null_paths(doc) if p[-2] not in POSITIONAL_ARRAYS]
+    assert offenders == [], 'an unknown scalar must be an absent key, not null: %s' % (offenders,)
