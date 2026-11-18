@@ -357,8 +357,15 @@ class SerialBleakClientWrapper(object):
                     logger.exception('closing cancelled serial connection %s', self.address)
 
             def release_if_acquired(done):
-                if not done.cancelled() and done.exception() is None:
+                if done.cancelled() or done.exception() is not None:
+                    return
+                # Normally off the loop thread (release() blocks in t.close()).
+                # During shutdown the loop's default executor is already gone,
+                # so fall back to a bare thread rather than leaking the ref.
+                try:
                     loop.run_in_executor(None, release_port)
+                except RuntimeError:
+                    threading.Thread(target=release_port, daemon=True).start()
 
             pending.add_done_callback(release_if_acquired)
             raise

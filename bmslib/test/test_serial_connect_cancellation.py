@@ -89,3 +89,77 @@ def test_cancelled_additional_handle_preserves_connected_sibling(monkeypatch):
         assert a.port.users == 0
         assert not a.t.is_open
     asyncio.run(run())
+
+
+def test_failed_open_after_cancellation_keeps_a_sibling_reference(monkeypatch):
+    """The release runs only for an acquire that *succeeded*. When a cancelled
+    connect's open then fails, an unconditional release would drop the sibling's
+    reference and close the shared port under the still-connected handle."""
+    async def run():
+        a = wired.SerialBleakClientWrapper('/dev/test-sibling-fail', baudrate=9600)
+        await a.connect()
+        assert a.port.users == 1
+        a.port.t.close()  # the reader gave up while a still holds the port
+
+        b = wired.SerialBleakClientWrapper('/dev/test-sibling-fail', baudrate=9600)
+        entered, finish = threading.Event(), threading.Event()
+        original_open = a.port.t.open
+
+        def failing_open():
+            entered.set()
+            assert finish.wait(2)
+            raise OSError('gateway unavailable')
+
+        monkeypatch.setattr(a.port.t, 'open', failing_open)
+        task = asyncio.create_task(b.connect())
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            finish.set()
+        for _ in range(100):
+            if not b.is_connected and a.port.users == 1:
+                break
+            await asyncio.sleep(.01)
+        assert a.port.users == 1       # the sibling's reference survives
+        assert not b.is_connected
+        monkeypatch.setattr(a.port.t, 'open', original_open)
+        await a.disconnect()
+        assert a.port.users == 0
+    asyncio.run(run())
+
+
+def test_cancelled_open_releases_after_the_executor_is_shut_down(monkeypatch):
+    """During shutdown the loop's default executor is already gone when the
+    cancelled open finishes, so run_in_executor raises. The reference must still
+    be released -- from a bare thread."""
+    async def run():
+        client = wired.SerialBleakClientWrapper('/dev/test-shutdown-release', baudrate=9600)
+        entered, finish = threading.Event(), threading.Event()
+        original_open = client.t.open
+
+        def slow_open():
+            entered.set()
+            assert finish.wait(2)
+            original_open()
+
+        monkeypatch.setattr(client.t, 'open', slow_open)
+        task = asyncio.create_task(client.connect())
+        assert await asyncio.to_thread(entered.wait, 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # let the open finish while the executor is being shut down, as asyncio.run does
+        threading.Timer(0.1, finish.set).start()
+        await asyncio.get_running_loop().shutdown_default_executor()
+
+        for _ in range(200):
+            if client.port.users == 0:
+                break
+            await asyncio.sleep(.01)
+        assert client.port.users == 0
+        assert not client.t.is_open
+    asyncio.run(run())

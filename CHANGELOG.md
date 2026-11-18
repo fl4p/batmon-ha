@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: a serial port could stay open for the rest of the process when a cancelled connect finished during shutdown; the reference is now released without the event loop's executor.
 * Fix: a backwards clock correction could postpone the no-data-flowing reconnect watchdog and the settings re-send after a discovery; both now measure elapsed time.
 * Fix: a backwards clock correction could hold off InfluxDB retries for the length of the step; the retry backoff now measures elapsed time, like the cache and MQTT expiry.
 * Fix: group cell and temperature indices follow configured pack order, rather than changing with process hash order or which pack responds first.
