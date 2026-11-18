@@ -1,6 +1,9 @@
 ## [unreleased]
 
-* New experimental `cell_capacity_estimator` (off by default): each cell's capacity and SoH with its uncertainty, from the voltage knees at full charge and deep discharge, shown in the web GUI (doc/Cell Capacity.md).
+## [2.34]
+
+* Fix: the experimental `cell_capacity_estimator` disconnected any BMS it was enabled for: it crashed on the first sample after a restart, and its own failure path raised instead of disabling the estimator.
+* `cell_capacity_estimator`: each cell's capacity is now also shown as SoH, a percentage of the device's `capacity:` option.
 * The web GUI shows the estimated SoH/Qmax, SoC gauge error, cell resistance and pack temperature when their estimators are on; hover a row for what it rests on.
 
 ## [2.33]
