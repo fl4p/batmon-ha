@@ -1,31 +1,29 @@
 name: Tests
 
-# The full bmslib/test suite. Until this existed, CI ran only test_changelog.py and
-# test_release_versions.py on their own paths, so a change that broke the suite merged
-# green -- 2.33 shipped a defect (a missing disable() argument) that the suite could not
-# have caught but no run would have reported either.
+# The full bmslib/test suite, on every push to master and every pull request.
 #
-# The venv mirrors the image's main venv: requirements.txt pins, plus aiobmsble installed
-# --no-deps at the version the Dockerfile pins (a plain install drags bleak to 3.x, #275).
-# The pin is read out of the Dockerfile so it cannot drift from the image.
+# Until this existed, CI ran only test_changelog.py and test_release_versions.py on their
+# own paths, so the suite never ran in CI at all. docker.yml gates the published image on
+# this suite through the same composite action; the HA release itself is a submodule pin
+# bump in fl4p/home-assistant-addons, which is a manual step -- check the Tests run for
+# the commit you are pinning before bumping.
+#
+# What this does NOT cover: the image's other venvs (venv_esphome's bleak 3.0.2 /
+# habluetooth set, the bumble and bluek stacks) are not installed here, and the image is
+# musl while this is glibc. A change that only breaks those paths stays green here.
 on:
   push:
     branches: [master]
   pull_request:
 
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install the pinned test dependencies
-        run: |
-          AIOBMSBLE=$(sed -nE "s/.*venv\/bin\/pip3 install --no-deps '(aiobmsble==[^']+)'.*/\1/p" Dockerfile | head -1)
-          if [ -z "$AIOBMSBLE" ]; then echo "aiobmsble pin not found in Dockerfile" >&2; exit 1; fi
-          echo "aiobmsble pin: $AIOBMSBLE"
-          pip install -r requirements.txt pytest numpy influxdb requests
-          pip install --no-deps "$AIOBMSBLE"
-      - run: python -m pytest -q -p no:cacheprovider bmslib/test
+      - uses: ./.github/actions/run-tests

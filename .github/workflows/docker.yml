@@ -46,6 +46,15 @@ env:
   BASE_IMAGE: alpine:3.21
 
 jobs:
+  # The published image is only as good as the suite, so the suite gates it: merge
+  # waits for this job. Without it a red suite still published to ghcr.
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/run-tests
+
   # Cheap regression guard: a Dockerfile change must not break the add-on build.
   # Native amd64, never pushed.
   validate-addon:
@@ -138,7 +147,7 @@ jobs:
   # Join the per-platform digests into one multi-arch manifest under the real tags.
   merge:
     runs-on: ubuntu-latest
-    needs: [build, validate-addon]
+    needs: [build, validate-addon, tests]
     # Only ever push from master. `push` is already branch-scoped, but
     # workflow_dispatch is not — without the ref check, dispatching from a
     # feature branch would publish a `sha-` tag to the public registry (the

@@ -1,0 +1,23 @@
+name: Run the test suite
+description: >
+  The bmslib/test suite with the image's pinned dependencies. The aiobmsble pin is read
+  out of the Dockerfile so CI cannot drift from what the add-on runs (a plain install
+  drags bleak to 3.x, #275). Used by tests.yml and, as a gate, by docker.yml.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Install the pinned test dependencies
+      shell: bash
+      run: |
+        AIOBMSBLE=$(sed -nE "s/.*venv\/bin\/pip3 install --no-deps '(aiobmsble==[^']+)'.*/\1/p" Dockerfile | head -1)
+        if [ -z "$AIOBMSBLE" ]; then echo "aiobmsble pin not found in Dockerfile" >&2; exit 1; fi
+        echo "aiobmsble pin: $AIOBMSBLE"
+        pip install -r requirements.txt pytest numpy influxdb requests
+        pip install --no-deps "$AIOBMSBLE"
+    - name: pytest
+      shell: bash
+      run: python -m pytest -q -p no:cacheprovider bmslib/test

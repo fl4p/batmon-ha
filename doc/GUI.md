@@ -60,8 +60,9 @@ Two documents, same shape over REST and WebSocket, enveloped as
 Conventions worth knowing before writing a client:
 
 - An unknown **scalar** is an **absent key**, never `null`. Unknown inside a
-  positional **array** (`cells_mv`, `temperatures_c`, and `cell_capacity.cells`) is `null`,
-  because the index is the cell or sensor number. Those are the only `null`s you will see.
+  positional **array** (`cells_mv`, `temperatures_c`, and `cell_capacity`'s `cells`,
+  `top_ah`, `bottom_ah`) is `null`, because the index is the cell or sensor number.
+  Those are the only `null`s you will see.
 - A `state` frame is **whole-node replacement**, not a merge. An absent field means
   "not reported now"; merging would resurrect a stale reading.
 - Numbers are JSON numbers, rounded to the same significant digits as the MQTT values.

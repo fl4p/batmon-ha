@@ -21,8 +21,12 @@ The protocol:
   about the pack, and a restart may be onto fixed code);
 * get_state() is a fixed point across a restore, apart from `epoch`, which restore
   bumps on purpose while the coulomb counter is missing (the hole since the save
-  cannot be bridged).
+  cannot be bridged). The comparison is between the state that went in and the state
+  that comes back: comparing the state after one restore with the state after two
+  cannot see a field that the first restore already dropped.
 """
+import json
+
 import pytest
 
 from bmslib.estimators.cell_capacity import CellCapacityEstimator
@@ -35,6 +39,11 @@ ESTIMATORS = {
     'cell_capacity': CellCapacityEstimator,
 }
 parametrize = pytest.mark.parametrize('cls', ESTIMATORS.values(), ids=list(ESTIMATORS))
+
+
+def _via_json(state):
+    """The store writes JSON, so compare what a reload would see (1 vs 1.0)."""
+    return json.loads(json.dumps(state))
 
 
 @parametrize
@@ -67,18 +76,21 @@ def test_an_internal_error_does_not_survive_a_restart(cls):
 
 
 @parametrize
-def test_state_is_a_fixed_point_across_a_restore(cls):
-    """Whatever restore() forgets to carry shows up here: the save after a restore
-    must equal the next one."""
+def test_state_survives_a_save_restore_save_round_trip(cls):
+    """Comparing the state that went in with the state that comes back is what catches a
+    restore() that drops a field. Comparing the state after one restore with the state
+    after two does not: the field is already missing from both, which is exactly how the
+    restore-flag defect got past an earlier version of this test."""
     est = cls('t')
     est.disable('chemistry verdict', persistent=True)
+    before = _via_json(est.get_state())
 
-    second = cls('t')
-    second.restore(est.get_state())
-    third = cls('t')
-    third.restore(second.get_state())
+    reloaded = cls('t')
+    assert reloaded.restore(est.get_state())
+    after = _via_json(reloaded.get_state())
 
-    s2, s3 = second.get_state(), third.get_state()
-    without_epoch = {k: v for k, v in s2.items() if k != 'epoch'}
-    assert without_epoch == {k: v for k, v in s3.items() if k != 'epoch'}
-    assert s3.get('epoch', 0) >= s2.get('epoch', 0)
+    def without_epoch(state):
+        return {k: v for k, v in state.items() if k != 'epoch'}
+
+    assert without_epoch(after) == without_epoch(before)
+    assert after.get('epoch', 0) >= before.get('epoch', 0)

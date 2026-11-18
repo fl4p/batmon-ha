@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 
 import pytest
 
@@ -368,32 +369,44 @@ def test_a_sample_in_flight_is_not_an_error():
     assert st['status'] == 'error' and st['errors'] == 1 and 'boom' in st['detail']
 
 
-# doc/GUI.md: an unknown scalar is an absent key, never null. The only nulls are inside
-# positional arrays, where the index is the cell or sensor number.
-POSITIONAL_ARRAYS = ('cells_mv', 'cells')  # cells: cell_capacity's per-cell list
+# The wire rule (wire/model.py, doc/GUI.md): an unknown SCALAR is an absent key, never
+# null. Only a positional ARRAY may hold a null, because the index is the cell or sensor
+# number and an array cannot have holes. The arrays are declared, so this reads them from
+# the model rather than listing names: extra_desc entries marked array, plus the arrays
+# CellCapacityEstimator.result() emits.
+POSITIONAL_ARRAYS = ({name for name, desc in model.extra_desc.items() if desc.get('array')}
+                     | {'cells', 'top_ah', 'bottom_ah'})
 
 
-def _null_paths(node, path=()):
+def _null_violations(node, path=(), positional=False):
+    """Paths where the document carries a null it must not.
+
+    A dict value that is None is always a violation -- that is the scalar case the rule
+    forbids. A list element may be None only when the array it sits in is declared
+    positional, which is checked by the key holding the list, not by the path.
+    """
     out = []
     if isinstance(node, dict):
         for k, v in node.items():
             if v is None:
                 out.append(path + (k,))
             else:
-                out.extend(_null_paths(v, path + (k,)))
+                out.extend(_null_violations(v, path + (k,), k in POSITIONAL_ARRAYS))
     elif isinstance(node, list):
         for i, v in enumerate(node):
             if v is None:
-                out.append(path + (i,))
+                if not positional:
+                    out.append(path + (i,))
             else:
-                out.extend(_null_paths(v, path + (i,)))
+                out.extend(_null_violations(v, path + (i,), positional))
     return out
 
 
 def test_the_document_carries_no_null_scalars():
     """Driven through a real sampler with every estimator on and no `capacity:` option,
     which is where the optional fields (capacity, soh) stay unknown. The cell capacity
-    estimator first emitted `capacity: null` here, and `soh: {soh: null}`."""
+    estimator first emitted `capacity: null` here, and `_estimates()` passed `soh: null`
+    through the same way."""
     st = GuiState(app_version='t', runtime='standalone')
     st.register_node('fake', kind='pack')
     sampler = make_sampler(GuiStateSink(st), soh_estimator=True, impedance_estimator=True,
@@ -402,5 +415,41 @@ def test_the_document_carries_no_null_scalars():
 
     doc = st.state_doc()['data']
     assert doc['nodes']['fake']['values']['voltage'] == 13.0  # the sample did reach the doc
-    offenders = [p for p in _null_paths(doc) if p[-2] not in POSITIONAL_ARRAYS]
+    offenders = _null_violations(doc)
     assert offenders == [], 'an unknown scalar must be an absent key, not null: %s' % (offenders,)
+
+
+def test_a_rich_document_may_only_hold_nulls_in_positional_arrays():
+    """The fixture the rule is really about: every array that legitimately has holes, plus
+    the per-cell and per-term values a real pack eventually produces. A NaN probe is a
+    null inside temperatures_c, and top_ah/bottom_ah hold a null per term that is not
+    known yet -- all three are positional. Anything else is a violation."""
+    st = GuiState(app_version='t', runtime='standalone')
+    st.register_node('p1', kind='pack')
+    sink = GuiStateSink(st)
+    sink.publish_sample('p1', BmsSample(13.0, 1.0, temperatures=[20.0, math.nan, 21.0]))
+    sink.publish_voltages('p1', [3300, None, 3302])
+    sink.publish_cell_capacity('p1', dict(
+        n_top=2, n_bottom=1, n_cycle=1, capacity=280.0,
+        cells=[dict(ah=240.0, sigma=1.0, bound=False, soh=85.7, soh_sigma=0.4), None],
+        top_ah=[dict(v=0.5, s=0.1, bound=False), None],
+        bottom_ah=[None, dict(v=-0.4, s=0.2, bound=True)]))
+
+    doc = st.state_doc()['data']
+    node = doc['nodes']['p1']
+    # the fixture really does carry the nulls the rule has to tolerate
+    assert None in node['temperatures_c'] and None in node['cells_mv']
+    assert None in node['cell_capacity']['top_ah']
+    assert _null_violations(doc) == []
+
+
+def test_estimates_omit_unknown_scalars(monkeypatch):
+    """_estimates() is the other producer of these dicts: it copies fields out of
+    qmax.result(), and on a device without a `capacity:` option soh and capacity are
+    None there. They must arrive as absent keys, not nulls."""
+    sampler = make_sampler(soh_estimator=True)  # no design_capacity: soh/capacity unknown
+    monkeypatch.setattr(type(sampler.qmax), 'result',
+                        lambda self: dict(qmax=271.3, soh=None, capacity=None, segments=3,
+                                          newest_t=None, limiting_cell=None))
+
+    assert sampler._estimates()['soh'] == dict(qmax=271.3, segments=3)
