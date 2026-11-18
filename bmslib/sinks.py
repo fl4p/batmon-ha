@@ -201,8 +201,11 @@ class InfluxDBSink(BmsSampleSink):
         _flush_loop is the backoff-gated periodic entry point."""
         now = time.time()
         batch = []
-        while not self.Q.empty() and len(batch) < 20_000:
-            batch.append(self.Q.get())
+        while len(batch) < 20_000:
+            try:
+                batch.append(self.Q.get_nowait())
+            except queue.Empty:
+                break
         if batch:
             try:
                 res = self.influxdb_client.write_points(batch, time_precision='ms')

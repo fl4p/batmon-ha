@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: overlapping shutdown and periodic InfluxDB flushes cannot wait indefinitely for a point already removed by the other flusher.
 * New experimental `cell_capacity_estimator` (off by default): each cell's capacity in Ah with its uncertainty, from the voltage knees at full charge and deep discharge, shown in the web GUI (doc/Cell Capacity.md).
 * Qmax/SoH: a current offset the BMS hides at rest (0.2–0.5 A on JK packs) read charge segments high and discharge segments low; it is measured between full charges (from 5 cycles) and removed.
 
