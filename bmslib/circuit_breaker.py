@@ -11,6 +11,10 @@ class CircuitBreaker:
     seconds. Batches are worth buffering only after at least one successful
     write (keep_batch_on_failure) -- before that the server may be permanently
     unreachable for this user, so callers should drop instead of accumulate.
+
+    The clock is monotonic: a wall-clock correction must not stretch a backoff
+    window (the same reason the async cache and the MQTT dedupe use elapsed
+    time). Callers may still pass an explicit ``now`` for tests.
     """
 
     def __init__(self, backoff_interval: float = 0):
@@ -26,7 +30,7 @@ class CircuitBreaker:
         if not self.enabled:
             return True
         if now is None:
-            now = time.time()
+            now = time.monotonic()
         return now >= self.backoff_until
 
     def on_success(self, now: float = None) -> None:
@@ -37,7 +41,7 @@ class CircuitBreaker:
         if not self.enabled:
             return
         if now is None:
-            now = time.time()
+            now = time.monotonic()
         self.backoff_until = now + self.backoff_interval
 
     @property

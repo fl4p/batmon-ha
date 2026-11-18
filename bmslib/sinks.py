@@ -199,7 +199,7 @@ class InfluxDBSink(BmsSampleSink):
         """Drain the queue and attempt one write. Always attempts regardless of
         the circuit breaker (callers like shutdown want a final flush);
         _flush_loop is the backoff-gated periodic entry point."""
-        now = time.time()
+        now = time.monotonic()
         batch = []
         while len(batch) < 20_000:
             try:

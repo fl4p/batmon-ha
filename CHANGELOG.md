@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: a backwards clock correction could hold off InfluxDB retries for the length of the step; the retry backoff now measures elapsed time, like the cache and MQTT expiry.
 * Fix: group cell and temperature indices follow configured pack order, rather than changing with process hash order or which pack responds first.
 * Fix: cancelling a slow serial connection releases the port if its background open succeeds later, preventing leaked references from keeping the shared connection open indefinitely.
 * Fix: overlapping shutdown and periodic InfluxDB flushes cannot wait indefinitely for a point already removed by the other flusher.

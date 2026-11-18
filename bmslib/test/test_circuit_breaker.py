@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from bmslib import circuit_breaker
 from bmslib.circuit_breaker import CircuitBreaker
 
 
@@ -35,3 +38,18 @@ def test_success_resets_backoff():
     assert cb.should_attempt(now=200) is False
     cb.on_success(now=250)
     assert cb.should_attempt(now=251) is True
+
+
+def test_backoff_follows_elapsed_time_not_wall_time(monkeypatch):
+    """A wall-clock correction must not stretch or shorten the backoff window."""
+    state = SimpleNamespace(wall=10000., elapsed=100.)
+    clock = SimpleNamespace(time=lambda: state.wall, monotonic=lambda: state.elapsed)
+    monkeypatch.setattr(circuit_breaker, 'time', clock)
+
+    cb = CircuitBreaker(60)
+    cb.on_failure()                       # no explicit now: uses the clock
+    state.elapsed += 30
+    state.wall -= 3600                    # backwards correction
+    assert cb.should_attempt() is False   # still inside the window
+    state.elapsed += 31
+    assert cb.should_attempt() is True    # elapsed time decides, not wall time
