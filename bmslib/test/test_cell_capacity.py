@@ -177,3 +177,22 @@ def test_soh_against_the_capacity_option_and_counts_before_anything():
         assert c['soh_sigma'] == pytest.approx(100 * c['sigma'] / 110, abs=0.06)
     run(est2 := CellCapacityEstimator('t'), Pack([100.0, 104.0], q0=[60.0, 63.5], r_mohm=[1.0, 1.0]))
     assert all('soh' not in c for c in est2.result()['cells'] if c)  # no capacity: Ah only
+
+
+def test_a_chemistry_verdict_survives_two_restarts():
+    """get_state() must keep writing the reason it restored. With _disable_persistent
+    left False the second save wrote disabled_reason=None, and the restart after that
+    re-enabled an estimator the pack had already ruled out."""
+    est = CellCapacityEstimator('t')
+    est.disable('chemistry verdict', persistent=True)
+    second = CellCapacityEstimator('t')
+    assert second.restore(est.get_state()) and not second.enabled
+    third = CellCapacityEstimator('t')
+    assert third.restore(second.get_state()) and not third.enabled
+    assert third.disabled_reason == 'chemistry verdict'
+
+
+def test_result_omits_an_unknown_capacity():
+    """doc/GUI.md: an unknown scalar is an absent key, never null."""
+    est = CellCapacityEstimator('t')
+    assert 'capacity' not in est.result()

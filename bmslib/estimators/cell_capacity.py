@@ -458,8 +458,9 @@ class CellCapacityEstimator:
         when disabled. 'bound': the value is a lower bound. 'soh': ah in % of the `capacity:` option."""
         if not self.enabled:
             return dict(disabled=self.disabled_reason)
-        out = dict(n_top=len(self.tops), n_bottom=len(self.bottoms), n_cycle=len(self.packs),
-                   capacity=self.capacity)
+        out = dict(n_top=len(self.tops), n_bottom=len(self.bottoms), n_cycle=len(self.packs))
+        if self.capacity:
+            out['capacity'] = self.capacity
         n = self.n_cells
         if not n or not (self.tops or self.bottoms):
             return out
@@ -515,7 +516,10 @@ class CellCapacityEstimator:
             if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
                 raise ValueError('state version %r' % (st.get('version') if isinstance(st, dict) else st))
             if st.get('disabled_reason'):
-                new.enabled, new.disabled_reason = False, str(st['disabled_reason'])
+                # persistent, so get_state() keeps writing it: with the flag left
+                # False the next save wrote disabled_reason=None and the restart
+                # after that re-enabled an estimator the pack had ruled out
+                new.enabled, new.disabled_reason, new._disable_persistent = False, str(st['disabled_reason']), True
             n = st.get('n_cells')
             new.n_cells = None if n is None else v_int(n, 'n_cells', 2)
             for name, dq in (('tops', new.tops), ('bottoms', new.bottoms), ('packs', new.packs)):

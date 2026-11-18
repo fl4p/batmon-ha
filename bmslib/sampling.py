@@ -990,7 +990,9 @@ class BmsSampler:
         if q is not None and q.enabled:
             r = q.result()
             if r is not None:
-                out['soh'] = {k: r[k] for k in ('qmax', 'soh', 'capacity', 'segments', 'newest_t', 'limiting_cell')}
+                # an unknown scalar is an absent key, never null (doc/GUI.md)
+                out['soh'] = {k: r[k] for k in ('qmax', 'soh', 'capacity', 'segments', 'newest_t', 'limiting_cell')
+                              if r.get(k) is not None}
         if self._gauge_last is not None and q is not None and q.enabled:
             out['soc_gauge_error'] = self._gauge_last
         imp = self.impedance
