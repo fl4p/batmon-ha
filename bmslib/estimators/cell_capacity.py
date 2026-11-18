@@ -111,6 +111,12 @@ class _Cell:
         self.prev = None                 # (t, I, V) of the last voltage sample
 
 
+# The arrays result() emits: the index is the cell or the charge/discharge term, so an
+# unknown entry is null rather than absent (wire rule 1, see doc/GUI.md). Declared
+# here so the GUI contract test reads them from the producer, not from a copy.
+RESULT_ARRAYS = ('cells', 'top_ah', 'bottom_ah')
+
+
 class CellCapacityEstimator:
     def __init__(self, name: str, capacity: Optional[float] = None):
         self.name = name

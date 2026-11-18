@@ -33,12 +33,17 @@ def link_status(status: Optional[dict], sample_ts, now, expire_after) -> dict:
 
     if s.get('is_virtual') and s.get('last_error_type') == 'GroupNotReady':
         out['status'] = 'waiting'
-        out['detail'] = s.get('debug_data') or s.get('last_error')
+        detail = s.get('debug_data') or s.get('last_error')
+        if detail:
+            out['detail'] = detail
         return out
 
     if errors:
         out['status'] = 'error'
-        out['detail'] = s.get('last_error')
+        # no key rather than a null: an unknown scalar is an absent key (wire rule 1),
+        # and a node can error before it has any error text to show
+        if s.get('last_error'):
+            out['detail'] = s['last_error']
         return out
 
     if not s.get('connected'):

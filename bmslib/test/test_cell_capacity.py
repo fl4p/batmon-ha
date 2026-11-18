@@ -134,6 +134,10 @@ def test_state_roundtrip():
     est2 = CellCapacityEstimator('t')
     assert est2.restore(st)
     assert est2.result() == est.result()
+    # the state itself has to survive too, not just the result: a restore() that drops a
+    # field (q, t, last_cut) leaves result() identical here, and only the state shows it
+    back = json.loads(json.dumps(est2.get_state()))
+    assert {k: v for k, v in back.items() if k != 'epoch'} == {k: v for k, v in st.items() if k != 'epoch'}
     # and it runs on: restore() sets the cell count but not the per-cell buffers
     t = est2._t + 10
     for k in range(5):

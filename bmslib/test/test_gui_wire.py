@@ -5,6 +5,7 @@ import math
 import pytest
 
 from bmslib.bms import BmsSample
+from bmslib.estimators import cell_capacity
 from bmslib.gui.state import GuiState, GuiStateSink, link_status
 from bmslib.gui import server as gsrv
 from bmslib.test._sampler_helpers import make_sampler
@@ -157,6 +158,21 @@ def test_link_status_precedence_error_beats_disconnected():
     the actionable part."""
     s = _st(connected=False, num_errors=2, last_error='no route')
     assert link_status(s, NOW, NOW, 20)['status'] == 'error'
+
+
+def test_link_status_omits_detail_it_does_not_have():
+    """A node can error, or wait on its group, before there is any text to show. The key
+    is then absent rather than null: an unknown scalar is an absent key (wire rule 1).
+    The GUI reads it as `if (link.detail)`, so both render the same."""
+    waiting = link_status(_st(is_virtual=True, last_error_type='GroupNotReady', num_errors=1),
+                          NOW, NOW, 20)
+    assert waiting['status'] == 'waiting' and 'detail' not in waiting
+
+    erroring = link_status(_st(num_errors=1), NOW, NOW, 20)
+    assert erroring['status'] == 'error' and 'detail' not in erroring
+
+    # and it is still there when there is something to say
+    assert link_status(_st(num_errors=1, last_error='boom'), NOW, NOW, 20)['detail'] == 'boom'
 
 
 # ---------------- GuiState / sink ----------------
@@ -375,7 +391,7 @@ def test_a_sample_in_flight_is_not_an_error():
 # the model rather than listing names: extra_desc entries marked array, plus the arrays
 # CellCapacityEstimator.result() emits.
 POSITIONAL_ARRAYS = ({name for name, desc in model.extra_desc.items() if desc.get('array')}
-                     | {'cells', 'top_ah', 'bottom_ah'})
+                     | set(cell_capacity.RESULT_ARRAYS))
 
 
 def _null_violations(node, path=(), positional=False):
@@ -434,6 +450,9 @@ def test_a_rich_document_may_only_hold_nulls_in_positional_arrays():
         cells=[dict(ah=240.0, sigma=1.0, bound=False, soh=85.7, soh_sigma=0.4), None],
         top_ah=[dict(v=0.5, s=0.1, bound=False), None],
         bottom_ah=[None, dict(v=-0.4, s=0.2, bound=True)]))
+    # a node that is erroring before it has any error text: link.detail must be absent,
+    # not null (link_status used to set it to None)
+    st.set_status_source(lambda node_id: dict(num_errors=1, num_samples=3))
 
     doc = st.state_doc()['data']
     node = doc['nodes']['p1']

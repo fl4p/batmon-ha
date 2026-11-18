@@ -18,7 +18,9 @@ on:
 
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  # master runs are not cancelled: two quick pushes would otherwise leave the first
+  # commit with no green run to check before pinning it (see the note above)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pytest:

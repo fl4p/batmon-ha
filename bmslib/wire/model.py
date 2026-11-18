@@ -9,7 +9,9 @@ Two rules matter more than the field list:
 1. An unknown SCALAR is an ABSENT KEY, never null. Unknown inside a positional
    ARRAY is null, because the index is the cell or sensor number and an array cannot
    have holes: cells_mv, temperatures_c, and the per-cell and per-term arrays of
-   cell_capacity (cells, top_ah, bottom_ah). Those are the only nulls a client sees.
+   cell_capacity (its RESULT_ARRAYS: cells, top_ah, bottom_ah). Those are the only
+   nulls a client sees in a state frame; the system document's field catalog, which
+   carries null for an absent icon/device_class/precision, is a different shape.
 2. A state frame is WHOLE-NODE REPLACEMENT, not a merge. An absent field means
    "not reported now"; merging would resurrect a stale reading forever.
 
