@@ -108,6 +108,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
 
     _last_values[topic] = time.monotonic(), data
     global _last_publish_time
+    # Wall time, not elapsed: main.py's publish watchdog compares it with time.time().
     _last_publish_time = time.time()
 
 

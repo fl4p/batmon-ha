@@ -49,8 +49,8 @@ def resolve_member_ref(bms_by_name: dict, ref: str):
     address, so it never goes through normalize_ble_address() -- while a real BMS
     is indexed under its *canonical* address. A group referring to its members by
     lower-case MAC (which was the only spelling that worked before #399) would
-    otherwise miss and abort the whole add-on. Refs are also stripped, since
-    `get_member_refs()` splits on ',' without trimming.
+    otherwise miss and abort the whole add-on. The ref is stripped here too, so a
+    caller handing over raw config text still resolves.
 
     Names are matched first and exactly, so a device whose alias happens to be
     MAC-shaped still wins over normalization.
