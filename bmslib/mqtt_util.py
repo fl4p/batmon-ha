@@ -97,7 +97,7 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
         return
 
     lv = _last_values.get(topic, None)
-    if lv and lv[1] == data and (time.time() - lv[0]) < (MIN_VALUE_EXPIRY / 2):
+    if lv and lv[1] == data and (time.monotonic() - lv[0]) < (MIN_VALUE_EXPIRY / 2):
         logger.debug('topic %s data not changed', topic)
         return False
 
@@ -106,10 +106,9 @@ def mqtt_single_out(client: paho.Client, topic, data, retain=False):
         logger.warning('mqtt publish %s failed: %s %s', topic, mqi.rc, mqi)
         return False
 
-    now = time.time()
-    _last_values[topic] = now, data
+    _last_values[topic] = time.monotonic(), data
     global _last_publish_time
-    _last_publish_time = now
+    _last_publish_time = time.time()
 
 
 def forget_published(device_topic: str):
