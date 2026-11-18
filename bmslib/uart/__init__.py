@@ -344,7 +344,24 @@ class SerialBleakClientWrapper(object):
         if self._connected:
             await loop.run_in_executor(None, self.port.ensure_open)
             return
-        await loop.run_in_executor(None, self.port.acquire)
+        pending = loop.run_in_executor(None, self.port.acquire)
+        try:
+            await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            # Cancelling the await cannot stop an executor's port open. If it
+            # succeeds later, release its reference without touching siblings.
+            def release_port():
+                try:
+                    self.port.release()
+                except Exception:
+                    logger.exception('closing cancelled serial connection %s', self.address)
+
+            def release_if_acquired(done):
+                if not done.cancelled() and done.exception() is None:
+                    loop.run_in_executor(None, release_port)
+
+            pending.add_done_callback(release_if_acquired)
+            raise
         self._connected = True
 
     async def disconnect(self):
