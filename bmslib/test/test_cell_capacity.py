@@ -134,6 +134,11 @@ def test_state_roundtrip():
     est2 = CellCapacityEstimator('t')
     assert est2.restore(st)
     assert est2.result() == est.result()
+    # and it runs on: restore() sets the cell count but not the per-cell buffers
+    t = est2._t + 10
+    for k in range(5):
+        est2.add(t + 10 * k, 5.0, [3300, 3301, 3299])
+    assert est2.enabled and est2.result() == est.result()
     assert not CellCapacityEstimator('t').restore(dict(st, version=99))
 
 
@@ -143,7 +148,16 @@ def test_not_lfp_disables():
     for k in range(400):
         t += 10
         est.add(t, 5.0, [3900, 3910, 3905] if est.wants_voltages(t, 5.0) else None)
-    assert not est.enabled and est.result() is None
+    assert not est.enabled and est.result() == dict(disabled=est.disabled_reason)
+    est2 = CellCapacityEstimator('t')
+    assert est2.restore(est.get_state()) and not est2.enabled  # a chemistry verdict is kept
+
+
+def test_an_internal_error_is_not_kept_across_a_restart():
+    est = CellCapacityEstimator('t')
+    est.disable('internal error', persistent=False)
+    est2 = CellCapacityEstimator('t')
+    assert est2.restore(est.get_state()) and est2.enabled
 
 
 @pytest.mark.parametrize('bad', [math.nan, 1e7])
@@ -152,3 +166,14 @@ def test_bad_current_ignored(bad):
     est.add(1.7e9, 1.0, None)
     est.add(1.7e9 + 10, bad, None)
     assert est.q == pytest.approx(0.0)
+
+
+def test_soh_against_the_capacity_option_and_counts_before_anything():
+    est = CellCapacityEstimator('t', capacity=110)
+    assert est.result() == dict(n_top=0, n_bottom=0, n_cycle=0, capacity=110.0)  # the GUI shows "collecting"
+    run(est, Pack([100.0, 104.0], q0=[60.0, 63.5], r_mohm=[1.0, 1.0]))
+    for c in est.result()['cells']:
+        assert c['soh'] == pytest.approx(100 * c['ah'] / 110, abs=0.06)
+        assert c['soh_sigma'] == pytest.approx(100 * c['sigma'] / 110, abs=0.06)
+    run(est2 := CellCapacityEstimator('t'), Pack([100.0, 104.0], q0=[60.0, 63.5], r_mohm=[1.0, 1.0]))
+    assert all('soh' not in c for c in est2.result()['cells'] if c)  # no capacity: Ah only

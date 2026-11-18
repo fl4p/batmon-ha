@@ -1,5 +1,8 @@
 ## [unreleased]
 
+* New experimental `cell_capacity_estimator` (off by default): each cell's capacity and SoH with its uncertainty, from the voltage knees at full charge and deep discharge, shown in the web GUI (doc/Cell Capacity.md).
+* The web GUI shows the estimated SoH/Qmax, SoC gauge error, cell resistance and pack temperature when their estimators are on; hover a row for what it rests on.
+
 ## [2.33]
 
 * Fix: a serial port could stay open for the rest of the process when a cancelled connect finished during shutdown; the reference is now released without the event loop's executor.

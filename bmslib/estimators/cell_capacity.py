@@ -118,6 +118,7 @@ class CellCapacityEstimator:
         self._lock = threading.RLock()
         self.enabled = True
         self.disabled_reason = None
+        self._disable_persistent = False
         self.n_cells = None
         self.rev = 0          # bumped when the published result changes
 
@@ -231,13 +232,14 @@ class CellCapacityEstimator:
             return
         if verdict == 'drop':
             return
-        if self.n_cells != len(v):
-            if self.n_cells is not None:
+        if self.n_cells != len(v) or len(self._cells) != len(v):  # restore() sets n_cells, not the buffers
+            if self.n_cells is not None and self.n_cells != len(v):
                 logger.info('%s: cell capacity: cell count %s -> %d, starting over', self.name, self.n_cells, len(v))
                 self.tops.clear(), self.bottoms.clear(), self.packs.clear()
                 self.rev += 1
             self.n_cells = len(v)
             self._cells = [_Cell() for _ in v]
+            self._sm = None
             self._bot = self._top = None
         self._t_volt = t
         self._v_min, self._v_max = min(v), max(v)
@@ -451,12 +453,16 @@ class CellCapacityEstimator:
 
     @locked
     def result(self) -> Optional[Dict[str, Any]]:
-        """{'cells': [{'ah', 'sigma', 'bound'} | None], 'pack_ah', 'pack_sigma', 'n_top', 'n_bottom', 'n_cycle'},
-        or None before anything is known. 'bound': the value is a lower bound."""
+        """{'cells': [{'ah', 'sigma', 'bound'[, 'soh', 'soh_sigma']} | None], 'pack_ah', 'pack_sigma',
+        'n_top', 'n_bottom', 'n_cycle', 'capacity'}; only the counts before anything is known, {'disabled': why}
+        when disabled. 'bound': the value is a lower bound. 'soh': ah in % of the `capacity:` option."""
+        if not self.enabled:
+            return dict(disabled=self.disabled_reason)
+        out = dict(n_top=len(self.tops), n_bottom=len(self.bottoms), n_cycle=len(self.packs),
+                   capacity=self.capacity)
         n = self.n_cells
-        if not self.enabled or not n or not (self.tops or self.bottoms):
-            return None
-        out = dict(n_top=len(self.tops), n_bottom=len(self.bottoms), n_cycle=len(self.packs))
+        if not n or not (self.tops or self.bottoms):
+            return out
         if self.packs:
             ps = [p['ah'] for p in self.packs]
             out['pack_ah'], out['pack_sigma'] = round(median(ps), 1), round(_sigma(ps), 1)
@@ -469,7 +475,10 @@ class CellCapacityEstimator:
                 continue
             v = out['pack_ah'] + a[0] + b[0]
             s = math.sqrt(out['pack_sigma'] ** 2 + a[1] ** 2 + b[1] ** 2)
-            cells.append(dict(ah=round(v, 1), sigma=round(s, 1), bound=bool(a[2] or b[2])))
+            c = dict(ah=round(v, 1), sigma=round(s, 1), bound=bool(a[2] or b[2]))
+            if self.capacity:
+                c['soh'], c['soh_sigma'] = round(100 * v / self.capacity, 1), round(100 * s / self.capacity, 1)
+            cells.append(c)
         out['cells'] = cells
         out['top_ah'] = [None if x is None else dict(v=round(x[0], 2), s=round(x[1], 2), bound=x[2])
                          for x in terms[0]]
@@ -478,10 +487,12 @@ class CellCapacityEstimator:
         return out
 
     @locked
-    def disable(self, why: str):
+    def disable(self, why: str, persistent: bool = True):
+        """persistent=False for an internal error: that says nothing about the pack, and a restart (maybe onto
+        fixed code) should try again."""
         if self.enabled:
             logger.warning('%s: cell capacity estimator disabled: %s', self.name, why)
-        self.enabled, self.disabled_reason = False, why
+        self.enabled, self.disabled_reason, self._disable_persistent = False, why, persistent
         self.rev += 1
 
     # ------------------------------------------------------------ persistence
@@ -492,7 +503,7 @@ class CellCapacityEstimator:
         restart bridges to the next sample; without one the count breaks
         there). A charge or discharge in progress is not saved."""
         return dict(version=STATE_VERSION, n_cells=self.n_cells,
-                    disabled_reason=None if self.enabled else self.disabled_reason,
+                    disabled_reason=None if self.enabled or not self._disable_persistent else self.disabled_reason,
                     tops=list(self.tops), bottoms=list(self.bottoms), packs=list(self.packs),
                     q=self.q, epoch=self.epoch, t=self._t, counter=self._counter,
                     last_cut=None if self._last_cut is None else list(self._last_cut))

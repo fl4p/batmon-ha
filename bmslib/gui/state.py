@@ -70,6 +70,7 @@ class GuiState:
         self._meters = {}
         self._device_info = {}
         self._cell_capacity = {}
+        self._estimates = {}
         self._status_source = None
         self._rev = 0
         self._node_rev = {}       # id -> revision of its last change
@@ -125,6 +126,13 @@ class GuiState:
         except Exception as e:
             logger.debug('gui update_cell_capacity %s: %s', node_id, e)
 
+    def update_estimates(self, node_id, estimates):
+        try:
+            self._estimates[node_id] = dict(estimates or {})
+            self._bump(node_id)
+        except Exception as e:
+            logger.debug('gui update_estimates %s: %s', node_id, e)
+
     def update_device_info(self, node_id, info):
         try:
             self._device_info[node_id] = info
@@ -157,6 +165,7 @@ class GuiState:
             voltages_mv=self._voltages.get(node_id),
             meters=self._meters.get(node_id),
             cell_capacity=self._cell_capacity.get(node_id),
+            estimates=self._estimates.get(node_id),
             link=link, now=now)
 
     def system_doc(self):
@@ -204,6 +213,9 @@ class GuiStateSink(BmsSampleSink):
 
     def publish_cell_capacity(self, bms_name, result):
         self.state.update_cell_capacity(bms_name, result)
+
+    def publish_estimates(self, bms_name, estimates):
+        self.state.update_estimates(bms_name, estimates)
 
     def close(self):
         pass

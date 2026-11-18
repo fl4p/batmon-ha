@@ -5,18 +5,22 @@ shows it in the [web GUI](GUI.md) under the cell voltages. Nothing goes to Home 
 
 ## What it shows
 
-One chip per cell:
+One chip per cell, in % of the device's `capacity:` option (cell SoH), or in Ah without that option. Hover a chip for
+its Ah.
 
-* `250±3`: the cell's capacity and its uncertainty (one sigma) in Ah.
-* `>263`: a lower bound. The cell never reached a knee before the charge or discharge ended, so it holds at least this.
+* `89±1`: the cell's SoH (or capacity) and its uncertainty (one sigma).
+* `>96`: a lower bound. The cell never reached a knee before the charge or discharge ended, so it holds at least this.
 * `?`: not known yet.
 * Red: the weakest cell with an estimate.
+
+Before the first full charge or knee discharge it shows "collecting" and the counts.
 
 Below the chips: the charge counted from the end of a full charge to the first cell reaching the discharge knee, and
 how many full charges, knee discharges and complete cycles the values rest on.
 
 The values are each cell's capacity between where this charger stops (the first cell full) and 2.95 V under load.
-Every cell holds somewhat more than that; the differences between cells are what the numbers are for. A cell much
+Every cell holds somewhat more than that, so the SoH reads a few % below a full capacity test; the differences between
+cells are what the numbers are for. A cell much
 larger than the weakest is capacity no balancer can recover.
 
 ## What it needs

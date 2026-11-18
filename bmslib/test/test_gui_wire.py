@@ -191,6 +191,21 @@ def test_cell_capacity_reaches_the_node_document():
     assert 'cell_capacity' not in st.state_doc()['data']['nodes']['p1']
 
 
+def test_estimates_reach_the_node_document():
+    st = GuiState(app_version='t', runtime='standalone')
+    st.register_node('p1', kind='pack')
+    sink = GuiStateSink(st)
+    est = dict(soh=dict(qmax=95.2, soh=95.2, capacity=100.0, segments=4, newest_t=1.7e9, limiting_cell=3),
+               cell_resistance=dict(mohm=0.42, windows=12), pack_temp=dict(c=18.3),
+               soc_gauge_error=dict(pp=-4.1, anchor='top', t=1.7e9, bms_soc=95.9, soc=100.0))
+    rev = st.revision
+    sink.publish_estimates('p1', est)
+    assert st.changed_since(rev) == {'p1'}
+    assert st.state_doc()['data']['nodes']['p1']['estimates'] == est
+    sink.publish_estimates('p1', {})  # all withdrawn
+    assert 'estimates' not in st.state_doc()['data']['nodes']['p1']
+
+
 def test_state_never_raises_from_a_bad_update():
     """A sink must not be able to break sampling."""
     st = GuiState(app_version='t', runtime='standalone')
@@ -321,3 +336,31 @@ def test_ui_escapes_every_interpolation():
     bad = [l.strip() for l in src.splitlines()
            if '${' in l and 'esc(' not in l and '${cls}' not in l]
     assert not bad, "unescaped interpolation reaching innerHTML: %s" % bad
+
+
+def test_a_sample_in_flight_is_not_an_error():
+    """__call__ counts the cycle as failed until it succeeds; the GUI read that
+    mid-cycle as an error with no detail."""
+    import asyncio
+    from bmslib.sampling import BmsSampler
+    from bmslib.test.test_qmax import _Bms
+    s = BmsSampler(_Bms(), mqtt_client=None, dt_max_seconds=120, expire_after_seconds=60)
+    seen = []
+
+    async def inner():
+        seen.append(link_status(s.status(), None, 0, 0))
+        return object()
+
+    s._sample_inner = inner
+    asyncio.run(s())
+    assert seen[0].get('errors') == 0 and seen[0]['status'] != 'error'
+
+    async def failing():
+        raise RuntimeError('boom')
+
+    s._sample_inner = failing
+    s.num_samples = 1  # else it is 'never'
+    with pytest.raises(RuntimeError):  # the caller handles it
+        asyncio.run(s())
+    st = link_status(s.status(), None, 0, 0)
+    assert st['status'] == 'error' and st['errors'] == 1 and 'boom' in st['detail']

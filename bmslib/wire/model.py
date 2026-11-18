@@ -153,7 +153,8 @@ def _clean_array(values, scale=1.0):
 
 
 def node_state(node_id, sample=None, voltages_mv=None, temperatures_c=None,
-               meters=None, link=None, now=None, cell_capacity=None) -> dict:
+               meters=None, link=None, now=None, cell_capacity=None,
+               estimates=None) -> dict:
     now = time.time() if now is None else now
     st = {'link': link or {'status': 'never'}}
 
@@ -196,6 +197,10 @@ def node_state(node_id, sample=None, voltages_mv=None, temperatures_c=None,
     if cell_capacity:
         # CellCapacityEstimator.result(): per-cell Ah with sigma, or a lower bound
         st['cell_capacity'] = cell_capacity
+
+    if estimates:
+        # BmsSampler._estimates(): soh, soc_gauge_error, cell_resistance, pack_temp, each only when known
+        st['estimates'] = estimates
 
     st['stale'] = bool((link or {}).get('status') == 'stale')
     return st

@@ -13,7 +13,7 @@
   .group { border: 1px solid #8884; border-radius: 6px; padding: 8px; margin: 0 0 12px; }
   .group > .glabel { font-size: 12px; opacity: .7; margin-bottom: 6px; }
   .packs { display: flex; flex-wrap: wrap; gap: 8px; }
-  .pack { border: 1px solid #8884; border-radius: 6px; padding: 8px; min-width: 210px; flex: 1 1 210px; }
+  .pack { border: 1px solid #8884; border-radius: 6px; padding: 8px; flex: 0 1 300px; min-width: 210px; max-width: 340px; }
   .pack h2 { font-size: 14px; margin: 0 0 4px; font-weight: 600; }
   .st { font-size: 11px; padding: 1px 5px; border-radius: 3px; background: #8883; }
   .st.connected { background: #2a02; color: #2a7; }
@@ -83,6 +83,7 @@ function renderPack(id) {
 
   h += '<table>';
   for (const f of ROWS) if (v[f] !== undefined) h += `<tr><td class="k">${esc(f)}</td><td class="v">${esc(fmt(f, v[f]))}</td></tr>`;
+  if (n.estimates) h += renderEstimates(n.estimates);
   h += '</table>';
 
   if (n.cells_mv && n.cells_mv.length) {
@@ -106,25 +107,61 @@ function renderPack(id) {
   return el;
 }
 
-// Per-cell capacity (experimental estimator): Ah ± sigma, ">x" a lower bound.
+function ago(t) {
+  const d = Date.now() / 1000 - t;
+  return d < 3600 ? Math.round(d / 60) + ' min ago' : d < 172800 ? Math.round(d / 3600) + ' h ago'
+                                                                  : Math.round(d / 86400) + ' d ago';
+}
+
+// The experimental estimators' values (BmsSampler._estimates), as extra rows; a tooltip says what each rests on.
+function renderEstimates(e) {
+  const row = (k, val, tip) =>
+    `<tr title="${esc(tip)}"><td class="k">${esc(k)}</td><td class="v">${esc(val)}</td></tr>`;
+  let h = '';
+  const q = e.soh;
+  if (q) h += row(q.soh != null ? 'SoH (est.)' : 'Qmax (est.)',
+                  (q.soh != null ? q.soh.toFixed(1) + ' % · ' : '') + q.qmax.toFixed(1) + ' Ah',
+                  'Qmax ' + q.qmax.toFixed(1) + ' Ah' + (q.capacity ? ' of ' + q.capacity + ' Ah' : '') +
+                  ', median of ' + q.segments + ' segments, newest ' + ago(q.newest_t) +
+                  ' (limited by cell ' + q.limiting_cell + ')');
+  const g = e.soc_gauge_error;
+  if (g) h += row('SoC gauge error', (g.pp > 0 ? '+' : '') + g.pp.toFixed(1) + ' pp',
+                  'BMS read ' + g.bms_soc + ' % at ' + (g.anchor === 'top' ? 'a full charge' : 'a rest near empty') +
+                  ' that says ' + g.soc + ' %, ' + ago(g.t));
+  const r = e.cell_resistance;
+  if (r) h += row('cell R (est.)', r.mohm.toFixed(2) + ' mΩ',
+                  'median per cell at 25 °C over ' + r.windows + ' current steps');
+  const p = e.pack_temp;
+  if (p) h += row('pack temp (est.)', p.c.toFixed(1) + ' °C', 'estimated from the MOSFET probe and the ambient temperatures');
+  return h;
+}
+
+// Per-cell capacity (experimental estimator): SoH in % of the capacity option (Ah without one) ± sigma,
+// ">x" a lower bound.
 function renderCapacity(cc) {
+  if (cc.disabled) return '<div class="cap" style="opacity:.6">cell capacity: off (' + esc(cc.disabled) + ')</div>';
   const cells = cc.cells || [];
+  const pct = !!cc.capacity;
   const known = cells.filter(c => c && !c.bound).map(c => c.ah);
   const weakest = known.length ? Math.min(...known) : null;
-  let h = '<div class="cap"><div style="opacity:.65">cell capacity (Ah)</div>';
+  const head = pct ? 'cell SoH (% of ' + cc.capacity + ' Ah)' : 'cell capacity (Ah)';
+  let h = '<div class="cap"><div style="opacity:.65" title="' +
+    esc('each cell from the end of a full charge to 2.95 V under load; reads a few % below a full capacity test') +
+    '">' + esc(head) + '</div>';
   if (cc.pack_ah !== undefined && cells.some(c => c)) {
     h += '<div class="cells">' + cells.map((c, i) => {
       const t = 'cell ' + (i + 1);
       if (!c) return `<span class="cell" title="${esc(t + ': not known yet')}">?</span>`;
       const cls = (!c.bound && c.ah === weakest) ? ' weak' : '';
-      const txt = c.bound ? '&gt;' + esc(c.ah.toFixed(0)) : esc(c.ah.toFixed(0) + '±' + c.sigma.toFixed(0));
+      const v = pct ? c.soh : c.ah, sg = pct ? c.soh_sigma : c.sigma;
+      const txt = c.bound ? '&gt;' + esc(v.toFixed(0)) : esc(v.toFixed(0) + '±' + sg.toFixed(sg < 1 ? 1 : 0));
       const tip = c.bound ? t + ': at least ' + c.ah.toFixed(1) + ' Ah (it never reached a knee)'
                           : t + ': ' + c.ah.toFixed(1) + ' ± ' + c.sigma.toFixed(1) + ' Ah';
       return `<span class="cell${cls}" title="${esc(tip)}">${txt}</span>`;
     }).join('') + '</div>';
     h += `<div style="opacity:.6">full charge → first empty cell ${esc(cc.pack_ah.toFixed(1))} ± ${esc(cc.pack_sigma.toFixed(1))} Ah`;
   } else {
-    h += '<div style="opacity:.6">collecting';
+    h += '<div style="opacity:.6">collecting: needs a full charge and a discharge to 2.95 V';
   }
   h += ` · ${esc(cc.n_top)} full charges, ${esc(cc.n_bottom)} knee discharges, ${esc(cc.n_cycle)} cycles</div></div>`;
   return h;
@@ -142,9 +179,9 @@ function render() {
       const g = document.createElement('div');
       g.className = 'group';
       g.innerHTML = `<div class="glabel">${esc(rid)} — ${esc(meta.group_kind || 'group')}</div>`;
-      g.appendChild(renderPack(rid));
       const inner = document.createElement('div');
-      inner.className = 'packs';
+      inner.className = 'packs';  // the group's own card first, its members next to it
+      inner.appendChild(renderPack(rid));
       for (const c of childrenOf[rid] || []) inner.appendChild(renderPack(c));
       g.appendChild(inner);
       root.appendChild(g);

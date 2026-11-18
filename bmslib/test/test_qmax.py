@@ -4343,3 +4343,28 @@ def test_the_gauge_error_entity_is_announced_with_the_soh_estimator():
     publish_hass_discovery(_C(), 'dev/x', 60, BmsSample(voltage=53.0, current=1.0, soc=50.0), 4, [],
                            soh_est=True)
     assert any('soc_gauge_error' in t for t in msgs)
+
+
+@pytest.mark.parametrize('cap', [100.0, 280.0])
+def test_the_gui_shows_what_home_assistant_shows(cap, monkeypatch):
+    """The GUI reads the estimate off the estimator each sample: a restored
+    one shows from the first sample, a withdrawn one (the capacity option
+    corrected) not at all."""
+    from bmslib.gui.state import GuiState, GuiStateSink
+    import bmslib.mqtt_util as mu
+    monkeypatch.setattr(mu, '_last_values', {})
+    gui = GuiState(app_version='t', runtime='standalone')
+    gui.register_node('q_fake', kind='pack')
+    bms = _Bms(current=0.0)
+    s = BmsSampler(bms, mqtt_client=_Client(), dt_max_seconds=120, expire_after_seconds=60, publish_period=3600,
+                   soh_estimator=True, design_capacity=cap, soh_state=_published_state()[1],
+                   sinks=[GuiStateSink(gui)])
+    s.num_samples = 1
+    s._last_power = 0.0
+    asyncio.run(s())
+    est = gui.state_doc()['data']['nodes'][bms.name].get('estimates') or {}
+    if cap == 100.0:
+        assert est['soh']['qmax'] == pytest.approx(s.qmax.result()['qmax'])
+        assert est['soh']['soh'] == pytest.approx(est['soh']['qmax'])  # 100 Ah nameplate
+    else:
+        assert 'soh' not in est
