@@ -1,11 +1,14 @@
 ## [unreleased]
 
+## [2.33]
+
 * Fix: a serial port could stay open for the rest of the process when a cancelled connect finished during shutdown; the reference is now released without the event loop's executor.
 * Fix: a backwards clock correction could postpone the no-data-flowing reconnect watchdog and the settings re-send after a discovery; both now measure elapsed time.
 * Fix: a backwards clock correction could hold off InfluxDB retries for the length of the step; the retry backoff now measures elapsed time, like the cache and MQTT expiry.
 * Fix: group cell and temperature indices follow configured pack order, rather than changing with process hash order or which pack responds first.
 * Fix: cancelling a slow serial connection releases the port if its background open succeeds later, preventing leaked references from keeping the shared connection open indefinitely.
 * Fix: overlapping shutdown and periodic InfluxDB flushes cannot wait indefinitely for a point already removed by the other flusher.
+* Fix: `verbose_log: true` was undone as soon as a later module imported its logger, and was ignored by `_ble` (aiobmsble) devices.
 * Fix: system clock corrections cannot prolong cached BMS readings or suppress unchanged MQTT refreshes until the clock catches up; both expiry timers use elapsed time.
 * New experimental `cell_capacity_estimator` (off by default): each cell's capacity in Ah with its uncertainty, from the voltage knees at full charge and deep discharge, shown in the web GUI (doc/Cell Capacity.md).
 * Qmax/SoH: a current offset the BMS hides at rest (0.2–0.5 A on JK packs) read charge segments high and discharge segments low; it is measured between full charges (from 5 cycles) and removed.
