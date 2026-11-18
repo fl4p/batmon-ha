@@ -22,13 +22,13 @@ def mem_cache_deco(ttl):
         @wraps(target)
         async def wrapper(*args):
             hit = cache.get(args)
-            if hit is not None and hit[1] >= time.time():
+            if hit is not None and hit[1] >= time.monotonic():
                 return hit[0]
             ret = await target(*args)
             if ret is not None:
-                if args in cache and cache[args][1] >= time.time():
+                if args in cache and cache[args][1] >= time.monotonic():
                     logger.warning("overwrite key %s", (target, args))
-                cache[args] = ret, time.time() + ttl
+                cache[args] = ret, time.monotonic() + ttl
             return ret
 
         wrapper.invalidate = invalidate
