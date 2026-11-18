@@ -571,7 +571,7 @@ class BtBms:
 
     def _on_disconnect(self, _client):
         if self.keep_alive and self._connect_time:
-            self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.time() - self._connect_time)
+            self.logger.warning('BMS %s disconnected after %.1fs!', self.__str__(), time.monotonic() - self._connect_time)
 
         if self._connect_time:
             self._connect_time = 0
@@ -608,7 +608,7 @@ class BtBms:
                     self.logger.warning('discovery after failed connect: %s', str(e) or type(e))
             raise
 
-        self._connect_time = time.time()
+        self._connect_time = time.monotonic()
 
         # NOTE: do NOT unconditionally call client.pair() on the esphome
         # proxy path. For BMSes that don't actually implement SMP (like

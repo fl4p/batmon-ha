@@ -142,6 +142,10 @@ class BmsSampleSink:
         """Per-cell capacity estimate (CellCapacityEstimator.result()); only the GUI shows it."""
         pass
 
+    def publish_estimates(self, bms_name: str, estimates: dict):
+        """The other estimators' current values (BmsSampler._estimates()), on change; only the GUI shows them."""
+        pass
+
 
 # SoC gauge check (BmsSampler._check_gauge): how much BMS SoC history is kept (a rest
 # anchor comes out when the rest ends, a cut-off one ~2 min after the cut), how old the
@@ -213,13 +217,14 @@ class BmsSampler:
         self.period_discov = PeriodicBoolSignal(60 * 5)
         self.period_30s = PeriodicBoolSignal(period=30)
 
-        self._t_wd_reset = time.time()  # watchdog
+        self._t_wd_reset = time.monotonic()  # watchdog
         self._last_time_log = 0
 
         self._last_power = 0
         self._t_last_power_jump = 0
 
         self._num_errors = 0
+        self._in_call = 0  # 1 while __call__ runs (status())
         self._num_not_found = 0  # consecutive device-not-found, drives the retry backoff
         self._num_error_disconnects = 0  # consecutive error-forced reconnects, drives the power cycle
         self._time_next_retry = 0
@@ -328,6 +333,8 @@ class BmsSampler:
         # ignores a None client), so the impedance windows still get the tag.
         self._pack_temp_publisher = None
         self._pack_temp = None  # this iteration's estimate, None when it had no MOS reading
+        self._gauge_last = None  # the last SoC gauge check (_check_gauge), for the GUI
+        self._estimates_sent = None  # what publish_estimates last sent
         if ambient_cache is not None and not bms.is_virtual:
             from functools import partial
             from bmslib.estimators.pack_temp_publisher import PackTempRCPublisher
@@ -368,7 +375,8 @@ class BmsSampler:
         return dict(
             connected=self.bms.is_connected,
             num_samples=self.num_samples,
-            num_errors=self._num_errors,
+            # __call__ counts a cycle as failed until it succeeds: one in flight is not an error
+            num_errors=max(0, self._num_errors - self._in_call),
             t_next_retry=self._time_next_retry,
             last_error=self._last_error,
             last_error_type=self._last_error_type,
@@ -448,6 +456,13 @@ class BmsSampler:
         return {meter.name: dict(reading=meter.get()) for meter in self.meters}
 
     async def __call__(self):
+        self._in_call = 1
+        try:
+            return await self._call()
+        finally:
+            self._in_call = 0
+
+    async def _call(self):
         self._num_errors += 1
         t_now = time.time()
 
@@ -465,6 +480,8 @@ class BmsSampler:
             # also counts the cycles spent waiting in _sample_inner(), so the wait fed
             # itself and hit the 291 s cap after 3 failures (#391).
             self._num_not_found += 1
+            self._last_error_type = type(e).__name__
+            self._last_error = 'device not found'
             t_wait = 1.5 ** min(self._num_not_found + 4, 14)
             logger.error("%s device not found, retry in %d seconds (%s)", self.bms, t_wait, str(e) or type(e).__name__)
             self._time_next_retry = time.time() + t_wait
@@ -522,7 +539,7 @@ class BmsSampler:
 
             bms = self.bms
             t_interact = max(self._t_wd_reset, self.bms.connect_time)
-            if bms.is_connected and time.time() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
+            if bms.is_connected and time.monotonic() - t_interact > 2 * max(MIN_VALUE_EXPIRY, self.expire_after_seconds):
                 logger.warning('%s disconnect because no data has been flowing for some time', bms.name)
                 await bms.disconnect()
 
@@ -801,6 +818,8 @@ class BmsSampler:
                     voltages = await cached_fetch_voltages(optional=True)
                 self._feed_cellcap(sample, current_native, voltages)
 
+            self._publish_estimates()
+
             PWR_CHG_REG = 120  # regularisation to suppress changes when power is low
             PWR_CHG_HOLD = 4  # time in seconds to keep high frequency sampling after a power jump. this helps capture power transients and noise wave form
             power_chg = (sample.power - self._last_power) / (abs(self._last_power) + PWR_CHG_REG)
@@ -898,7 +917,10 @@ class BmsSampler:
 
         self.num_samples += 1
         t_disc = time.time()
-        self._t_wd_reset = sample.timestamp or t_disc
+        # Elapsed time, not the sample's own (wall) timestamp: the watchdog below
+        # asks whether data is still arriving, which a clock correction must not
+        # answer differently.
+        self._t_wd_reset = time.monotonic()
 
         self.period_pub.set_time(t_now)
         self.period_30s.set_time(t_now)
@@ -950,7 +972,7 @@ class BmsSampler:
             # an estimator bug must not kill sampling
             logger.error('%s: cell capacity estimator failed, disabled: %s', self.bms.name, summarize_exc(e),
                          exc_info=True)
-            est.disable('internal error')
+            est.disable('internal error', persistent=False)
         if est.rev != self._cellcap_rev:
             self._cellcap_rev = est.rev
             res = est.result()
@@ -959,6 +981,45 @@ class BmsSampler:
                     sink.publish_cell_capacity(self.bms.name, res)
                 except Exception as e:
                     logger.error('sink %s publish_cell_capacity failed: %s', type(sink).__name__, summarize_exc(e))
+
+    def _estimates(self) -> dict:
+        """What the estimators would publish now, for the GUI: read off their state each sample, so a
+        restored, withdrawn or disabled estimate shows the same as in Home Assistant."""
+        out = {}
+        q = self.qmax
+        if q is not None and q.enabled:
+            r = q.result()
+            if r is not None:
+                out['soh'] = {k: r[k] for k in ('qmax', 'soh', 'capacity', 'segments', 'newest_t', 'limiting_cell')}
+        if self._gauge_last is not None and q is not None and q.enabled:
+            out['soc_gauge_error'] = self._gauge_last
+        imp = self.impedance
+        if imp is not None and imp.enabled:
+            v = imp.value
+            if v is not None:
+                from bmslib.estimators.impedance import normalised_r
+                out['cell_resistance'] = dict(mohm=round(v, 3),
+                                              windows=sum(normalised_r(w) is not None for w in imp.windows))
+        if self._pack_temp is not None and math.isfinite(self._pack_temp):
+            out['pack_temp'] = dict(c=round(self._pack_temp, 1))
+        return out
+
+    def _publish_estimates(self):
+        if not self.sinks:
+            return
+        try:
+            est = self._estimates()
+        except Exception as e:
+            logger.error('%s: reading the estimates failed: %s', self.bms.name, summarize_exc(e), exc_info=True)
+            return
+        if est == self._estimates_sent:
+            return
+        self._estimates_sent = est
+        for sink in self.sinks:
+            try:
+                sink.publish_estimates(self.bms.name, est)
+            except Exception as e:
+                logger.error('sink %s publish_estimates failed: %s', type(sink).__name__, summarize_exc(e))
 
     async def _qmax_temperature(self, sample: BmsSample):
         """(best cell temperature known or None, whether it is the MOSFET's):
@@ -1021,6 +1082,8 @@ class BmsSampler:
             (logger.warning if abs(err) >= GAUGE_WARN_PP else logger.info)(
                 '%s: the BMS reads SoC %.1f %% at %s that says %.1f %% (gauge error %+.1f pp)%s', self.bms.name,
                 bms_soc, what, soc, err, '; set SOC can correct it' if abs(err) >= GAUGE_WARN_PP else '')
+            self._gauge_last = dict(pp=round(err, 1), anchor=a['kind'], t=a['t'], bms_soc=round(bms_soc, 1),
+                                    soc=round(soc, 1))
             publish_soc_gauge_error(self.mqtt_client, device_topic=self.mqtt_topic_prefix, error_pp=err,
                                     attributes=dict(anchor=a['kind'], anchor_time=a['t'], anchor_soc=round(soc, 1),
                                                     bms_soc=round(bms_soc, 1)))

@@ -99,6 +99,7 @@ def test_display_and_temperature_names_keep_topics_and_ids():
 
 import asyncio  # noqa: E402
 import time  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -140,6 +141,12 @@ class _Recorder:
 
 DEV = "test/jk"
 NODE = "test_jk"
+
+
+def _fake_clock(clock):
+    """Stand-in for the time module; wall and elapsed advance together so a test
+    can move the clock the module reads without touching the real one."""
+    return SimpleNamespace(time=lambda: clock[0], monotonic=lambda: clock[0])
 
 
 def _settings_discovery(writable=(), exclude=()):
@@ -500,7 +507,7 @@ def test_states_sent_again_shortly_after_a_discovery(monkeypatch):
     """States right behind the configs can reach the broker before HA subscribed to the new
     entities' state topics (not retained: lost); they go out once more a moment later."""
     clock = [1000.0]
-    monkeypatch.setattr(mqtt_util.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(mqtt_util, 'time', _fake_clock(clock))
     c = _Recorder()
     pub = MqttSettingsPublisher(c, DEV, writable=frozenset(), expire_after_seconds=30)
     settings = {'cell_ovp': 3.65}
@@ -517,9 +524,27 @@ def test_states_sent_again_shortly_after_a_discovery(monkeypatch):
     assert [t for t, _, _ in c.log].count(topic) == 2
 
 
+def test_settings_resend_ignores_a_backwards_clock_step(monkeypatch):
+    """The re-send after a discovery waits for elapsed time, not wall time: a
+    backwards clock correction must not postpone it past the discovery."""
+    wall, elapsed = [1000.0], [100.0]
+    monkeypatch.setattr(mqtt_util, 'time',
+                        SimpleNamespace(time=lambda: wall[0], monotonic=lambda: elapsed[0]))
+    c = _Recorder()
+    pub = MqttSettingsPublisher(c, DEV, writable=frozenset(), expire_after_seconds=30)
+    settings = {'cell_ovp': 3.65}
+    pub.states(settings)
+    topic = f"{DEV}/settings/cell_ovp"
+    assert [t for t, _, _ in c.log].count(topic) == 1
+    elapsed[0] += mqtt_util.SETTINGS_RESEND_AFTER_DISCOVERY_S
+    wall[0] -= 3600
+    pub.resend_after_discovery(settings)
+    assert [t for t, _, _ in c.log].count(topic) == 2
+
+
 def test_sampler_resends_settings_states_after_discovery(_no_sleep, monkeypatch):
     clock = [time.time()]
-    monkeypatch.setattr(mqtt_util.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(mqtt_util, 'time', _fake_clock(clock))
     c = _Recorder()
     s = _jk_sampler(_JkBms(False), c)
     asyncio.run(s())

@@ -677,7 +677,7 @@ class MqttSettingsPublisher:
         self.device_json = device_json
         self._discovered = None  # (exclude, writable) of the last discovery
         self._force_states = False  # next states() goes past the dedup (after a discovery)
-        self._resend_at = None  # time.time() for the one-time re-send after a discovery
+        self._resend_at = None  # monotonic deadline for the one-time re-send after a discovery
 
     def discovery(self):
         """Publish the settings discovery now; the next states() is forced."""
@@ -691,13 +691,13 @@ class MqttSettingsPublisher:
                                       removals=self._discovered != entity_set)
         self._discovered = entity_set
         self._force_states = True
-        self._resend_at = time.time() + SETTINGS_RESEND_AFTER_DISCOVERY_S
+        self._resend_at = time.monotonic() + SETTINGS_RESEND_AFTER_DISCOVERY_S
 
     def resend_after_discovery(self, settings: dict):
         """Called every sample: states sent right behind the configs can reach the broker before
         HA subscribed to the new entities' state topics (not retained, so lost); send them once
         more a moment after each discovery."""
-        if self._resend_at is None or not settings or time.time() < self._resend_at:
+        if self._resend_at is None or not settings or time.monotonic() < self._resend_at:
             return
         self._resend_at = None
         self.states(settings, force=True)

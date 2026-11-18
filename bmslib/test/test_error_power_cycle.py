@@ -63,7 +63,7 @@ def _forced_reconnect(sampler):
 
     sampler._sample_inner = _sample_inner
     sampler.bms.is_connected = True
-    sampler._t_wd_reset = time.time()  # not the "no data flowing" disconnect path
+    sampler._t_wd_reset = time.monotonic()  # not the "no data flowing" disconnect path
     sampler._num_errors = 20  # __call__ increments to 21, tripping the > 20 branch
 
     with pytest.raises(TimeoutError):  # __call__ re-raises; fetch_loop catches it
@@ -94,7 +94,7 @@ def test_power_cycle_fires_when_the_host_never_lets_us_connect(bt_power_calls):
         raise TimeoutError("Operation already in progress")
 
     sampler._sample_inner = _sample_inner
-    sampler._t_wd_reset = time.time()
+    sampler._t_wd_reset = time.monotonic()
 
     for _ in range(50):
         with pytest.raises(TimeoutError):
@@ -184,7 +184,7 @@ def test_a_downstream_error_does_not_power_cycle(bt_power_calls):
         raise ValueError("bug in a downstream sink")
 
     sampler._sample_inner = _sample_inner
-    sampler._t_wd_reset = time.time()
+    sampler._t_wd_reset = time.monotonic()
 
     for _ in range(50):
         with pytest.raises(ValueError):
@@ -242,3 +242,4 @@ def test_power_cycle_survives_a_failing_bt_power(monkeypatch):
 
     monkeypatch.setattr(bmslib.ble.bt, "bt_power", _boom)
     assert asyncio.run(sampling.bt_power_cycle("fake")) is False
+

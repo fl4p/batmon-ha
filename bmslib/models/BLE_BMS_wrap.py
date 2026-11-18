@@ -185,7 +185,7 @@ class BMS():
         self.is_virtual = False
         self.verbose_log = bool(kwargs.get('verbose_log'))
 
-        self.connect_time = time.time()
+        self.connect_time = time.monotonic()
 
         from aiobmsble.basebms import BaseBMS
         self.ble_bms: Optional[BaseBMS] = None
