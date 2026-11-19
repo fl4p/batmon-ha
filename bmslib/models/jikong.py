@@ -138,6 +138,7 @@ class JKBt(BtBms):
     CHAR_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
     TIMEOUT = 12
+    REARM_TIMEOUT = 3  # wait for 0x02 after re-sending 0x96 on a stalled stream, see fetch()
 
     SOC_NOT_FULL_YET = 99.0  # when the gauge reaches 100% but no OV yet
     TEMPERATURE_STEP = 0.1
@@ -397,7 +398,8 @@ class JKBt(BtBms):
             self.logger.debug('%s stop_notify failed: %s', self.name, e)
         await super().disconnect()
 
-    async def _q(self, cmd, resp):
+    async def _q(self, cmd, resp, timeout=None):
+        timeout = timeout or self.TIMEOUT
         await asyncio.sleep(.1)
         with await self._fetch_futures.acquire_timeout(resp, timeout=self.TIMEOUT / 2):
             frame = _jk_command(cmd, [])
@@ -406,7 +408,7 @@ class JKBt(BtBms):
                 # also when the answer never comes (timeout): the BMS may be busy with it anyway
                 self._settings_query_t = time.monotonic()
             await self.client.write_gatt_char(self.char_handle_write, data=frame)
-            res = await self._fetch_futures.wait_for(resp, self.TIMEOUT)
+            res = await self._fetch_futures.wait_for(resp, timeout)
             if cmd == 0x96:
                 self._settings_query_t = time.monotonic()
             return res
@@ -536,14 +538,17 @@ class JKBt(BtBms):
                 with await self._fetch_futures.acquire_timeout(0x02, timeout=self.TIMEOUT / 2):
                     await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
             except asyncio.TimeoutError:
-                # The 0x02 stream can stop on a live link: a JK-B2A20S20P sw 19.31 goes quiet
-                # ~18,050 s into every connection (#391). A fresh 0x96 query restarts it; if
-                # that times out too, the sampler's no-data watchdog reconnects as before.
+                # The 0x02 stream can stop on a live link: a JK-B2A20S20P sw 19.31 stops it
+                # ~18,050 s into every connection and floods 'AT\r\n' instead (#391), as if
+                # re-initialising its BLE module. Try one fresh 0x96 query, unproven to help
+                # there. Its wait is short: 0x96 is answered within ~1 s, and a long one would
+                # stall serial sampling of the other BMSs past expire_after. If it times out,
+                # the sampler's no-data watchdog reconnects as before.
                 if not self.is_connected:
                     raise
                 self.logger.warning('%s no status frame for %d s, re-sending the 0x96 query',
                                     self.name, self.TIMEOUT)
-                await self._q(cmd=0x96, resp=0x02)
+                await self._q(cmd=0x96, resp=0x02, timeout=self.REARM_TIMEOUT)
 
         if 0x01 not in self._resp_table:
             await self._q(cmd=0x96, resp=0x01)  # query settings

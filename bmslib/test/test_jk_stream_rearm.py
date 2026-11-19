@@ -1,7 +1,8 @@
 """JKBt.fetch: when the 0x02 status stream stops on a live link, re-send 0x96 once (#391).
 
 A JK-B2A20S20P sw 19.31 stops notifying 0x02 frames ~18,050 s into every connection while
-the link stays up; a fresh 0x96 query restarts the stream.
+the link stays up. Whether a fresh 0x96 restarts it there is unproven; these tests pin the
+mechanism: one re-send, then the timeout reaches the sampler's watchdog as before.
 """
 
 import asyncio
@@ -33,6 +34,7 @@ class _QuietJK(JKDummy):
 def _make(rearm: bool):
     bms = JKBt("00:11:22:33:44:55", name="jk")
     bms.TIMEOUT = 0.3
+    bms.REARM_TIMEOUT = 0.3
     client = _QuietJK(rearm)
     bms.client = client
     bms.char_handle_write = JKBt.CHAR_UUID
@@ -45,7 +47,7 @@ def _make(rearm: bool):
 def test_stalled_stream_is_rearmed_by_0x96():
     bms, client = _make(rearm=True)
     sample = asyncio.run(bms.fetch())
-    assert client.queries_96 >= 1
+    assert client.queries_96 == 1
     assert sample.voltage > 0
 
 
@@ -63,3 +65,15 @@ def test_no_rearm_when_disconnected():
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(bms.fetch())
     assert client.queries_96 == 0
+
+
+def test_rearm_wait_is_short():
+    # a long re-send wait would stall serial sampling of the other BMSs past expire_after
+    import time
+    bms, client = _make(rearm=False)
+    bms.TIMEOUT = 0.2
+    bms.REARM_TIMEOUT = 0.05
+    t = time.monotonic()
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(bms.fetch())
+    assert time.monotonic() - t < 0.2 + 0.1 + 0.05 + 0.15
