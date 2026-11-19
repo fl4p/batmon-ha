@@ -1,6 +1,7 @@
 ## [unreleased]
 
 * Fix: the web GUI showed nothing for a `cell_capacity_estimator` that was already disabled when the add-on started, instead of the reason it is off.
+* Fix: some JK BMS (seen on a JK-B2A20S20P sw 19.31) stop sending status about 5 h into a connection, so batmon dropped the link and reconnected; batmon now re-sends the status query first, which restarts the stream (#391).
 
 ## [2.34]
 

@@ -532,8 +532,18 @@ class JKBt(BtBms):
         """
 
         if wait:
-            with await self._fetch_futures.acquire_timeout(0x02, timeout=self.TIMEOUT / 2):
-                await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
+            try:
+                with await self._fetch_futures.acquire_timeout(0x02, timeout=self.TIMEOUT / 2):
+                    await self._fetch_futures.wait_for(0x02, self.TIMEOUT)
+            except asyncio.TimeoutError:
+                # The 0x02 stream can stop on a live link: a JK-B2A20S20P sw 19.31 goes quiet
+                # ~18,050 s into every connection (#391). A fresh 0x96 query restarts it; if
+                # that times out too, the sampler's no-data watchdog reconnects as before.
+                if not self.is_connected:
+                    raise
+                self.logger.warning('%s no status frame for %d s, re-sending the 0x96 query',
+                                    self.name, self.TIMEOUT)
+                await self._q(cmd=0x96, resp=0x02)
 
         if 0x01 not in self._resp_table:
             await self._q(cmd=0x96, resp=0x01)  # query settings
