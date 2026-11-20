@@ -78,6 +78,15 @@ def store_impedance_state(bms_name, state):
     _store_estimator_state('impedance_', bms_name, state)
 
 
+def load_pack_temp_state(bms_name):
+    """The saved pack temperature estimator state, or None."""
+    return _load_estimator_state('packtemp_', bms_name, 'pack temperature estimator')
+
+
+def store_pack_temp_state(bms_name, state):
+    _store_estimator_state('packtemp_', bms_name, state)
+
+
 def load_qmax_state(bms_name):
     """The saved Qmax/SoH estimator state, or None."""
     return _load_estimator_state('qmax_', bms_name, 'Qmax/SoH estimator')

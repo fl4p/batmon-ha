@@ -148,6 +148,28 @@ class PackTempRCEstimator:
         self._state.last_update_s = t
         return T
 
+    STATE_VERSION = 1
+
+    def get_state(self) -> dict:
+        st = self._state
+        return dict(version=self.STATE_VERSION, t_pack_c=st.t_pack_c, last_update_s=st.last_update_s,
+                    since_s=st.since_s)
+
+    def restore(self, st) -> bool:
+        """Continue from a saved state, so a restart does not start the warm-up (since_s) over. update()
+        re-initialises anyway when the saved state is older than max_gap_s. False (and a fresh start)
+        for anything that does not fit."""
+        try:
+            if not isinstance(st, dict) or st.get('version') != self.STATE_VERSION:
+                return False
+            t, last, since = (float(st[k]) for k in ('t_pack_c', 'last_update_s', 'since_s'))
+            if not (_valid(t) and math.isfinite(last) and math.isfinite(since) and since <= last):
+                return False
+        except (KeyError, TypeError, ValueError):
+            return False
+        self._state = PackTempState(t_pack_c=t, last_update_s=last, since_s=since)
+        return True
+
     def _initial(self,
                  mos_c: float,
                  room_c: Optional[float],

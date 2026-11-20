@@ -92,6 +92,10 @@ def store_states(samplers: list[BmsSampler], final=False):
             except Exception as e:
                 logger.error('%s: error storing cell resistance state: %s', s.bms.name, e)
             try:
+                s.store_pack_temp_state(final=final)
+            except Exception as e:
+                logger.error('%s: error storing pack temperature state: %s', s.bms.name, e)
+            try:
                 s.store_qmax_state(final=final)
             except Exception as e:
                 logger.error('%s: error storing Qmax/SoH state: %s', s.bms.name, e)
@@ -498,7 +502,8 @@ async def main():
         except Exception as e:
             logger.warning('GUI state disabled: %s', e)
 
-    from bmslib.store import load_cellcap_state, load_impedance_state, load_qmax_state, root_dir as store_root_dir
+    from bmslib.store import load_cellcap_state, load_impedance_state, load_pack_temp_state, load_qmax_state, \
+        root_dir as store_root_dir
     from bmslib.jk_settings_service import build_settings_service
 
     def design_capacity(name):
@@ -533,6 +538,7 @@ async def main():
         impedance_estimator=bool(user_config.get('impedance_estimator', False)),
         impedance_state=user_config.get('impedance_estimator') and load_impedance_state(bms.name),
         ambient_cache=ambient_cache,
+        pack_temp_state=ambient_cache is not None and load_pack_temp_state(bms.name),
         soh_estimator=bool(user_config.get('soh_estimator', False)),
         soh_state=user_config.get('soh_estimator') and load_qmax_state(bms.name),
         design_capacity=design_capacity(bms.name),

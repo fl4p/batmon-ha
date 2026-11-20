@@ -262,3 +262,24 @@ def test_a_failed_voltage_fetch_for_the_estimator_alone_is_not_a_cycle_error():
     assert s._num_errors == 1
     assert asyncio.run(s()) is not None  # later: estimator-only, the sample is still good
     assert s._num_errors == 0
+
+
+def test_a_restart_keeps_the_pack_temp_warm_up(monkeypatch):
+    """The cell resistance estimator only uses the pack temp after PACK_TEMP_WARMUP_S of it; every restart
+    used to start that over."""
+    import bmslib.store as store
+    saved = []
+    monkeypatch.setattr(store, 'store_pack_temp_state', lambda name, st: saved.append((name, st)))
+    s = _sampler(_Bms(mos=(40.0,)), _Client(), ambient_cache=AmbientCache())
+    asyncio.run(s())
+    since = s._pack_temp_publisher.estimator.state.since_s
+    s.store_pack_temp_state(final=True)
+    s.store_pack_temp_state()  # within PACK_TEMP_SAVE_S of the last write: skipped
+    assert len(saved) == 1 and saved[0][0] == 'pt_fake'
+
+    bms = _Bms(mos=(41.0,))
+    bms.t0 += 120  # restarted two minutes later
+    s2 = _sampler(bms, _Client(), ambient_cache=AmbientCache(), pack_temp_state=saved[0][1])
+    asyncio.run(s2())
+    assert s2._pack_temp_publisher.estimator.state.since_s == since
+    assert s2._pack_temp == pytest.approx(40.0, abs=0.5)  # continued, not re-seeded at 41

@@ -169,3 +169,42 @@ def test_persistent_state_survives_serialisation():
     s = est.state
     assert s.t_pack_c is not None
     assert (s.since_s, s.last_update_s) == (0, 60)
+
+
+def test_state_roundtrip_continues_the_warm_up():
+    import json
+    est = PackTempRCEstimator()
+    t0 = 1.7e9
+    for k in range(600):  # 10 h at 60 s
+        est.update(mos_c=30.0 + (k % 7), t=t0 + 60 * k)
+    st = json.loads(json.dumps(est.get_state()))
+    est2 = PackTempRCEstimator()
+    assert est2.restore(st)
+    t_last = est.state.last_update_s
+    a = est.update(mos_c=33.0, t=t_last + 300)
+    b = est2.update(mos_c=33.0, t=t_last + 300)  # a 5-minute restart: the same step
+    assert b == pytest.approx(a) and est2.state.since_s == t0
+
+
+def test_a_restore_older_than_the_gap_limit_starts_the_warm_up_over():
+    est = PackTempRCEstimator()
+    est.update(mos_c=30.0, t=1.7e9)
+    est.update(mos_c=30.0, t=1.7e9 + 60)
+    est2 = PackTempRCEstimator()
+    assert est2.restore(est.get_state())
+    est2.update(mos_c=25.0, t=1.7e9 + 60 + est2.max_gap_s + 1)
+    assert est2.state.since_s == 1.7e9 + 60 + est2.max_gap_s + 1
+
+
+@pytest.mark.parametrize('bad', [
+    None, [], {}, dict(version=99, t_pack_c=20.0, last_update_s=1.0, since_s=1.0),
+    dict(version=1, t_pack_c=None, last_update_s=1.0, since_s=1.0),
+    dict(version=1, t_pack_c=1648.0, last_update_s=1.0, since_s=1.0),
+    dict(version=1, t_pack_c=20.0, last_update_s=float('nan'), since_s=1.0),
+    dict(version=1, t_pack_c=20.0, last_update_s=1.0, since_s=2.0),  # warm-up started after the last update
+    dict(version=1, t_pack_c='x', last_update_s=1.0, since_s=1.0),
+])
+def test_a_bad_state_is_refused_and_leaves_a_fresh_estimator(bad):
+    est = PackTempRCEstimator()
+    assert not est.restore(bad)
+    assert est.state.t_pack_c is None and est.state.since_s is None

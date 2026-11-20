@@ -147,6 +147,8 @@ class BmsSampleSink:
         pass
 
 
+PACK_TEMP_SAVE_S = 300.0  # store_pack_temp_state between shutdowns
+
 # SoC gauge check (BmsSampler._check_gauge): how much BMS SoC history is kept (a rest
 # anchor comes out when the rest ends, a cut-off one ~2 min after the cut), how old the
 # reading may be at the anchor's time, and from what error on the log warns.
@@ -191,6 +193,7 @@ class BmsSampler:
                  impedance_estimator=False,
                  impedance_state=None,
                  ambient_cache=None,
+                 pack_temp_state=None,
                  soh_estimator=False,
                  soh_state=None,
                  design_capacity=None,
@@ -360,6 +363,11 @@ class BmsSampler:
             self._pack_temp_publisher = PackTempRCPublisher(
                 device_topic=self.mqtt_topic_prefix, ambient=ambient_cache,
                 publish_fn=partial(mqtt_single_out, mqtt_client))
+            if pack_temp_state:
+                ok = self._pack_temp_publisher.estimator.restore(pack_temp_state)
+                logger.info('%s: pack temp estimate %s', bms.name, 'restored, warm-up continues' if ok else
+                            'state not usable, starts fresh')
+        self._pack_temp_saved = None  # time.time() of the last write
 
         temp_step = getattr(bms, 'TEMPERATURE_STEP', 0)
         temp_smooth = getattr(bms, 'TEMPERATURE_SMOOTH', 10)
@@ -418,6 +426,22 @@ class BmsSampler:
         from bmslib.store import store_impedance_state
         store_impedance_state(self.bms.name, state)
         self._impedance_saved = js
+
+    def store_pack_temp_state(self, final=False):
+        """Save the pack temperature estimate, so a restart continues its warm-up (the cell resistance
+        estimator waits PACK_TEMP_WARMUP_S for it)."""
+        if self._pack_temp_publisher is None:
+            return
+        state = self._pack_temp_publisher.estimator.get_state()
+        if state['t_pack_c'] is None:
+            return
+        now = time.time()
+        # it changes every sample: write every PACK_TEMP_SAVE_S (restore() bridges up to an hour) and at shutdown
+        if not final and self._pack_temp_saved is not None and now - self._pack_temp_saved < PACK_TEMP_SAVE_S:
+            return
+        from bmslib.store import store_pack_temp_state
+        store_pack_temp_state(self.bms.name, state)
+        self._pack_temp_saved = now
 
     def store_qmax_state(self, final=False):
         """Save the Qmax/SoH estimator; same scheme as store_impedance_state.
