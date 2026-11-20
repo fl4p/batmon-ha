@@ -1668,20 +1668,20 @@ class QmaxEstimator:
         assert a is not None
         cap = self.design_capacity
         if not cap or self.q_c is None or self._c_q is None or (c is not None and src != a['src']):
-            return self._audit_fail(t, 'the counter it was checked with is gone')
+            return self._audit_fail(t, 'BMS counter gone')
         tol = RESUME_TOL_FRAC * cap + self.q_c
         stale = self.q_moved - self._c_q
         if stale > tol:
-            return self._audit_fail(t, 'the BMS counter has not moved while %.2f Ah did' % stale)
+            return self._audit_fail(t, 'BMS counter stuck while %.2f Ah flowed' % stale)
         if c is None:
             return None
         d_bms, d_q = c - a['c'], self.q_ah - a['q']
         if abs(d_bms - d_q) > tol:
-            return self._audit_fail(t, 'the BMS counted %+.2f Ah since it, batmon %+.2f Ah' % (d_bms, d_q))
+            return self._audit_fail(t, 'BMS counter %+.2f Ah, batmon %+.2f Ah' % (d_bms, d_q))
         if abs(d_bms) >= 2 * self.q_c and d_bms * d_q > 0:
-            logger.info('%s: Qmax: the BMS counter moves with the current again (%+.2f Ah, counted %+.2f Ah) since '
-                        'the restart at %s: %d anchor(s) held back may pair across it', self.name, d_bms, d_q,
-                        fmt_t(a['t']), len(a['held']))
+            held = len(a['held'])
+            logger.info('%s: Qmax: restart check passed, since %s BMS counter %+.2f Ah, batmon %+.2f Ah%s', self.name,
+                        fmt_t(a['t']), d_bms, d_q, ', releasing %d held anchor(s)' % held if held else '')
             self._audit = None
             new = None
             for bt in a['held']:
@@ -1694,8 +1694,9 @@ class QmaxEstimator:
     def _audit_fail(self, t: float, why: str) -> Optional[Dict[str, Any]]:
         a = self._audit
         assert a is not None
-        logger.info('%s: Qmax: the restart at %s continued the open segment, but %s: segment ended, %d anchor(s) '
-                    'held back not paired across it', self.name, fmt_t(a['t']), why, len(a['held']))
+        held = len(a['held'])
+        logger.info('%s: Qmax: restart check failed, %s since %s: segment ended%s', self.name, why, fmt_t(a['t']),
+                    ', dropping %d held anchor(s)' % held if held else '')
         return self._gap(t, 'restart_audit')  # (pairs across it stay held while it closes the open rest)
 
     def _gap(self, t, why) -> Optional[Dict[str, Any]]:
