@@ -4423,3 +4423,21 @@ def test_the_charge_limit_sets_batmons_own_soc(monkeypatch):
     for k in range(1, 7):  # 1 min at -60 A on 100 Ah: -1 pp
         s._count_soc(BmsSample(voltage=27.0, current=-60.0, soc=90.0, timestamp=T0 + 190 + 10 * k))
     assert math.isclose(s._soc_count.soc, 99.0, abs_tol=0.2) and pub
+
+
+def test_batmons_soc_counts_against_the_qmax_estimate_once_there_is_one(monkeypatch):
+    import bmslib.sampling as smp
+    s, out = _gauge_sampler(monkeypatch)
+    attrs = []
+    monkeypatch.setattr(smp, 'publish_soc_count', lambda client, device_topic, soc, attributes: attrs.append(attributes))
+    from bmslib.estimators.soc_count import SocCounter
+    s._soc_count = SocCounter(100.0)
+    s._soc_count.set(T0, 50.0, 'ocv')
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0))
+    assert attrs[-1]['capacity'] == 100.0 and attrs[-1]['capacity_source'] == 'option'
+    monkeypatch.setattr(s.qmax, 'result', lambda: dict(qmax=90.0))
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 60))
+    assert attrs[-1]['capacity'] == 90.0 and attrs[-1]['capacity_source'] == 'qmax'
+    monkeypatch.setattr(s.qmax, 'result', lambda: None)  # withdrawn: back to the option
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 120))
+    assert attrs[-1]['capacity'] == 100.0 and attrs[-1]['capacity_source'] == 'option'

@@ -1128,9 +1128,14 @@ class BmsSampler:
         if v is None or (self._soc_count_pub is not None and sample.timestamp - self._soc_count_pub < SOC_COUNT_PUBLISH_S):
             return
         self._soc_count_pub = sample.timestamp
+        res = self.qmax.result() if self.qmax.enabled else None
+        if res is not None and res.get('qmax'):
+            sc.set_capacity(res['qmax'], 'qmax')
+        else:
+            sc.set_capacity(self.qmax.design_capacity, 'option')
         publish_soc_count(self.mqtt_client, device_topic=self.mqtt_topic_prefix, soc=v, attributes=dict(
             set_by=sc.anchor and sc.anchor['kind'], set_at=sc.anchor and sc.anchor['t'],
-            set_to=sc.anchor and sc.anchor['soc'], capacity=sc.capacity))
+            set_to=sc.anchor and sc.anchor['soc'], capacity=round(sc.capacity, 1), capacity_source=sc.capacity_source))
 
     def store_soc_count_state(self, final=False):
         if self._soc_count is None:

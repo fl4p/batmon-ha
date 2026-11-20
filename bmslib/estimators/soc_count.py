@@ -1,6 +1,7 @@
 """batmon's own SoC: set at each SoC gauge check point (BmsSampler._gauge_report:
 a charge that ends with the highest cell held full = 100 %, a Qmax anchor) and
-counted from there with the current against the `capacity:` option.
+counted from there with the current against the published Qmax estimate, or the
+`capacity:` option while there is none (BmsSampler._count_soc sets it).
 
 Unknown until the first such point, after a gap it cannot bridge, and once
 SOC_COUNT_MAX_AGE_S passed without a new point: counting drifts (doc/SoC.md
@@ -28,7 +29,13 @@ class SocCounter:
         self.capacity = float(capacity) if _finite(capacity) and capacity > 0 else None
         self.soc: Optional[float] = None
         self.anchor: Optional[dict] = None  # kind, t, soc of the last set point
+        self.capacity_source = 'option'
         self._t = self._i = self._c = None
+
+    def set_capacity(self, capacity: Optional[float], source: str):
+        """What the count runs against from now on; the SoC so far stays."""
+        if _finite(capacity) and capacity > 0:
+            self.capacity, self.capacity_source = float(capacity), source
 
     def set(self, t: float, soc: float, kind: str):
         self.soc = min(100.0, max(0.0, float(soc)))
@@ -65,8 +72,8 @@ class SocCounter:
 
     def restore(self, st: dict):
         """A saved count, continued across the restart under the gap rules
-        above, and only for the same capacity."""
-        if not isinstance(st, dict) or st.get('capacity') != self.capacity or not _finite(st.get('soc')):
+        above (the capacity is not state: the sampler sets it)."""
+        if not isinstance(st, dict) or not _finite(st.get('soc')):
             return
         self.soc, self.anchor = float(st['soc']), st.get('anchor')
         self._t, self._i, self._c = st.get('t'), st.get('i'), st.get('c')

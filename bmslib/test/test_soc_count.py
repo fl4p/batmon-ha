@@ -57,6 +57,17 @@ def test_state_round_trip_and_capacity_change():
     d = SocCounter(100.0)
     d.restore(st)
     assert math.isclose(d.add(T0 + 3600, -1.0, 39.0), 39.0)  # restart: bridged by the counter
-    e = SocCounter(200.0)
+    e = SocCounter(200.0)  # another capacity (a Qmax estimate came): the SoC carries over
     e.restore(st)
-    assert e.soc is None
+    assert e.soc == 40.0
+
+
+def test_a_new_capacity_changes_the_rate_not_the_soc():
+    c = SocCounter(100.0)
+    c.add(T0, -10.0, None)
+    c.set(T0, 50.0, 'ocv')
+    c.set_capacity(200.0, 'qmax')
+    assert c.soc == 50.0 and c.capacity_source == 'qmax'
+    assert math.isclose(c.add(T0 + 72, -10.0, None), 49.9)  # 0.2 Ah of 200 Ah
+    c.set_capacity(None, 'qmax')
+    assert c.capacity == 200.0
