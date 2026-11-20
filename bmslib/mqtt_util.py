@@ -301,6 +301,15 @@ def publish_soc_gauge_error(client, device_topic, error_pp: float, attributes: d
     mqtt_single_out(client, f"{device_topic}/soc_gauge_error", round(error_pp, 1))
 
 
+SOC_COUNT_EXPIRE_S = 600  # published every 30 s while known; unknown goes unavailable
+
+
+def publish_soc_count(client, device_topic, soc: float, attributes: dict):
+    """batmon's own SoC (bmslib/estimators/soc_count.py) [%]."""
+    mqtt_single_out(client, f"{device_topic}/soc_batmon/attributes", json.dumps(attributes))
+    mqtt_single_out(client, f"{device_topic}/soc_batmon", round(soc, 1))
+
+
 LINK_EXPIRE_S = 120  # 4 publish periods of BmsSampler.publish_link; more if samples are further apart
 LINK_DESC = {
     'link/connects': dict(name="Link connects", state_class="total_increasing", icon="connection"),
@@ -443,6 +452,9 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                         name="SoC gauge error", precision=1, expire_after=SOC_GAUGE_EXPIRE_S,
                         entity_category="diagnostic",
                         json_attributes_topic=f"{device_topic}/soc_gauge_error/attributes")
+        _hass_discovery('soc_batmon', "battery", "%", state_class="measurement",
+                        name="SoC (batmon)", precision=1, expire_after=SOC_COUNT_EXPIRE_S,
+                        json_attributes_topic=f"{device_topic}/soc_batmon/attributes")
 
     # keep_alive link diagnostics (bmslib/link_stats.py), published every 30 s. The age and
     # RSSI expire while the link is down instead of showing the last link's values.

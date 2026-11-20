@@ -4409,3 +4409,17 @@ def test_the_gui_shows_what_home_assistant_shows(cap, monkeypatch):
         assert est['soh']['soh'] == pytest.approx(est['soh']['qmax'])  # 100 Ah nameplate
     else:
         assert 'soh' not in est
+
+
+def test_the_charge_limit_sets_batmons_own_soc(monkeypatch):
+    import bmslib.sampling as smp
+    s, out = _gauge_sampler(monkeypatch)
+    pub = []
+    monkeypatch.setattr(smp, 'publish_soc_count', lambda client, device_topic, soc, attributes: pub.append(soc))
+    from bmslib.estimators.soc_count import SocCounter
+    s._soc_count = SocCounter(100.0)  # _run_sampler's own samples carry today's clock, these T0
+    _hold(s, T0, 20)
+    assert s._soc_count.soc == 100.0
+    for k in range(1, 7):  # 1 min at -60 A on 100 Ah: -1 pp
+        s._count_soc(BmsSample(voltage=27.0, current=-60.0, soc=90.0, timestamp=T0 + 190 + 10 * k))
+    assert math.isclose(s._soc_count.soc, 99.0, abs_tol=0.2) and pub

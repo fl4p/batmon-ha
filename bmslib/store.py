@@ -96,6 +96,15 @@ def store_qmax_state(bms_name, state):
     _store_estimator_state('qmax_', bms_name, state)
 
 
+def load_soc_count_state(bms_name):
+    """batmon's own SoC count (estimators/soc_count.py), or None."""
+    return _load_estimator_state('soccount_', bms_name, 'SoC count')
+
+
+def store_soc_count_state(bms_name, state):
+    _store_estimator_state('soccount_', bms_name, state)
+
+
 def load_cellcap_state(bms_name):
     """The saved per-cell capacity estimator state, or None."""
     return _load_estimator_state('cellcap_', bms_name, 'cell capacity estimator')

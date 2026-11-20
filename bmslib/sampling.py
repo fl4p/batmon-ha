@@ -23,7 +23,8 @@ from bmslib.jk_settings_service import NullSettingsPublisher
 from bmslib.link_stats import LinkStats
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
-    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings, publish_soc_gauge_error
+    QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings, publish_soc_gauge_error, \
+    publish_soc_count
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -170,6 +171,7 @@ GAUGE_FULL_GAP_S = 60.0
 GAUGE_FULL_I_MAX_C = 0.075
 GAUGE_FULL_REARM_MV = 3400.0
 GAUGE_FULL_TEMP = (15.0, 45.0)
+SOC_COUNT_PUBLISH_S = 30.0
 
 class BmsSampler:
     """
@@ -196,6 +198,7 @@ class BmsSampler:
                  pack_temp_state=None,
                  soh_estimator=False,
                  soh_state=None,
+                 soc_count_state=None,
                  design_capacity=None,
                  settings_service=None,
                  cell_capacity_estimator=False,
@@ -339,6 +342,13 @@ class BmsSampler:
         # last t] and whether this charge may still give one
         self._full_hold: Optional[list] = None
         self._full_armed = True
+        # batmon's own SoC (soc_count.py): set at each gauge check point, counted between
+        from bmslib.estimators.soc_count import SocCounter
+        self._soc_count = SocCounter(self.qmax.design_capacity) if self.qmax else None
+        if self._soc_count is not None and soc_count_state:
+            self._soc_count.restore(soc_count_state)
+        self._soc_count_pub = None  # when it was last published
+        self._soc_count_saved = None
         # store_qmax_state runs on the loop and on the background thread; a
         # periodic save that took its snapshot before a counter write must not
         # land after the write's own save (rev3 review, F1)
@@ -1103,11 +1113,35 @@ class BmsSampler:
             r = None
         self._check_gauge(sample)
         self._gauge_full(sample, voltages, temp if not temp_mos else None)
+        self._count_soc(sample)
         if r is not None:
             self._qmax_clear = None  # a new estimate replaces the cleared one
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
         else:
             self._withdraw_qmax()
+
+    def _count_soc(self, sample: BmsSample):
+        sc = self._soc_count
+        if sc is None:
+            return
+        v = sc.add(sample.timestamp, sample.current, sample.charge)
+        if v is None or (self._soc_count_pub is not None and sample.timestamp - self._soc_count_pub < SOC_COUNT_PUBLISH_S):
+            return
+        self._soc_count_pub = sample.timestamp
+        publish_soc_count(self.mqtt_client, device_topic=self.mqtt_topic_prefix, soc=v, attributes=dict(
+            set_by=sc.anchor and sc.anchor['kind'], set_at=sc.anchor and sc.anchor['t'],
+            set_to=sc.anchor and sc.anchor['soc'], capacity=sc.capacity))
+
+    def store_soc_count_state(self, final=False):
+        if self._soc_count is None:
+            return
+        state = self._soc_count.get_state()
+        js = json.dumps(state, sort_keys=True)
+        if js == self._soc_count_saved:
+            return
+        from bmslib.store import store_soc_count_state
+        store_soc_count_state(self.bms.name, state)
+        self._soc_count_saved = js
 
     def _check_gauge(self, sample: BmsSample):
         """Compare the BMS's SoC with every new anchor of the Qmax estimator (a
@@ -1135,7 +1169,11 @@ class BmsSampler:
                             self.bms.name, a['kind'], a['t'])
                 continue
             what = 'a full charge' if a['kind'] == 'top' else 'a rest near empty'
-            self._gauge_report(a['kind'], what, a['t'], before[-1][1], min(a['soc']))
+            soc = min(a['soc'])
+            self._gauge_report(a['kind'], what, a['t'], before[-1][1], soc)
+            if self._soc_count is not None and est.design_capacity and a.get('epoch') == est.epoch and 'q' in a:
+                # the anchor lies in the past (a rest is known when it ends): count on from it
+                self._soc_count.set(t, soc + 100.0 * (est.q_ah - a['q']) / est.design_capacity, a['kind'])
 
     def _gauge_report(self, kind: str, what: str, t: float, bms_soc: float, soc: float, **extra):
         err = bms_soc - soc
@@ -1175,6 +1213,8 @@ class BmsSampler:
         if t - h[0] < GAUGE_FULL_HOLD_S:
             return
         self._full_armed, self._full_hold = False, None
+        if self._soc_count is not None:
+            self._soc_count.set(t, 100.0, 'charge_limit')
         lo = min(cells)
         self._gauge_report('charge_limit', 'the end of a charge (highest cell %.0f mV held, lowest %.0f mV)' % (hi, lo),
                            t, float(soc), 100.0, cell_high_mv=round(hi), cell_low_mv=round(lo),

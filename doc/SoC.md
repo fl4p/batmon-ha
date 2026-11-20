@@ -77,3 +77,15 @@ of its lowest cell, the one that ends a discharge.
 - **Charge limit.** A charge that ends with the highest cell held at 3.45 V or more for 3 minutes, at 0.075C or less and 15–45 °C, is also checked, as 100 %, whatever the other cells read (attribute `anchor: charge_limit`, with both cells' voltages). On a pack that is not balanced at the top the charger stops on that cell, so this is where the pack is full in use, the way a Victron monitor syncs. Once per charge.
 - A full-charge anchor is full as the charger defines it, which can be a few percent below the
   cells' own full (doc/SoH.md). An error of a few pp there is noise.
+
+## batmon's own SoC
+
+`SoC (batmon)` (with `soh_estimator: true`) starts at each point the gauge check uses: 100 % at a
+charge limit or a full-charge anchor, the anchor's SoC at a rest near empty. Between them it counts
+the current against the `capacity:` option (`bmslib/estimators/soc_count.py`).
+
+- Unknown until the first such point, and 7 days after the last one: the replay above measured
+  a count drifting 10–16 pp a day near empty.
+- Link gaps up to 2 minutes are bridged linearly, up to 6 hours by the BMS's own charge counter if
+  it moved by no more than 1C could have; a longer gap loses the count until the next point.
+- Its attributes give what set it, when and to what.
