@@ -25,10 +25,22 @@ def test_a_gap_is_bridged_by_the_bms_counter_or_lost():
     c = SocCounter(100.0)
     c.add(T0, -5.0, 80.0)
     c.set(T0, 80.0, 'ocv')
-    assert math.isclose(c.add(T0 + 3600, -5.0, 75.0), 75.0)  # 1 h link loss, the BMS counted 5 Ah
-    assert c.add(T0 + 7200, -5.0, 275.0) is None  # +200 Ah in 1 h at 100 Ah: a resync, not charge
-    c.set(T0 + 7200, 50.0, 'ocv')
-    assert c.add(T0 + 7200 + BRIDGE_MAX_S + 1, -5.0, 75.0) is None
+    assert math.isclose(c.add(T0 + 1200, -5.0, 78.33), 78.33)  # 20 min link loss, the BMS counted 1.67 Ah
+    assert c.add(T0 + 2400, -5.0, 88.0) is None  # +9.7 Ah while the currents say -1.7: a resync
+    c.set(T0 + 2400, 50.0, 'ocv')
+    assert c.add(T0 + 2400 + BRIDGE_MAX_S + 1, -5.0, 75.0) is None
+
+
+def test_a_resync_at_rest_is_not_bridged():
+    """Review: a 2 h gap at 0 A with a +40 Ah counter resync moved 60 % to 100 %."""
+    c = SocCounter(100.0)
+    c.add(T0, 0.0, 60.0)
+    c.set(T0, 60.0, 'ocv')
+    assert c.add(T0 + 1200, 0.0, 100.0) is None
+    d = SocCounter(100.0)
+    d.add(T0, 0.0, 60.0)
+    d.set(T0, 60.0, 'ocv')
+    assert math.isclose(d.add(T0 + 1200, 0.0, 60.2), 60.2)  # a rest: the counter barely moved
 
 
 def test_a_gap_without_a_bms_counter_loses_the_count():
@@ -56,7 +68,7 @@ def test_state_round_trip_and_capacity_change():
     st = c.get_state()
     d = SocCounter(100.0)
     d.restore(st)
-    assert math.isclose(d.add(T0 + 3600, -1.0, 39.0), 39.0)  # restart: bridged by the counter
+    assert math.isclose(d.add(T0 + 600, -1.0, 39.833), 39.833)  # a 10 min restart: bridged by the counter
     e = SocCounter(200.0)  # another capacity (a Qmax estimate came): the SoC carries over
     e.restore(st)
     assert e.soc == 40.0

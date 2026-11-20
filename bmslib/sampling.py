@@ -172,6 +172,7 @@ GAUGE_FULL_I_MAX_C = 0.075
 GAUGE_FULL_REARM_MV = 3400.0
 GAUGE_FULL_TEMP = (15.0, 45.0)
 SOC_COUNT_PUBLISH_S = 30.0
+GAUGE_SAME_CHARGE_S = 3600.0  # a Qmax full-charge anchor this close to a charge limit is the same charge
 
 class BmsSampler:
     """
@@ -342,6 +343,7 @@ class BmsSampler:
         # last t] and whether this charge may still give one
         self._full_hold: Optional[list] = None
         self._full_armed = True
+        self._full_reported_t: Optional[float] = None  # the last charge limit reported
         # batmon's own SoC (soc_count.py): set at each gauge check point, counted between
         from bmslib.estimators.soc_count import SocCounter
         self._soc_count = SocCounter(self.qmax.design_capacity) if self.qmax else None
@@ -1111,28 +1113,35 @@ class BmsSampler:
                          exc_info=True)
             est.disable('internal error', persistent=False)
             r = None
+        # charge-positive, from the native current: sample.current is after invert_current
+        i_chg = -float(current) if current is not None and math.isfinite(current) else None
         self._check_gauge(sample)
-        self._gauge_full(sample, voltages, temp if not temp_mos else None)
-        self._count_soc(sample)
+        self._gauge_full(sample, i_chg, voltages, temp if not temp_mos else None)
+        self._count_soc(sample, i_chg)
         if r is not None:
             self._qmax_clear = None  # a new estimate replaces the cleared one
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
         else:
             self._withdraw_qmax()
 
-    def _count_soc(self, sample: BmsSample):
+    def _count_soc(self, sample: BmsSample, i_chg: Optional[float]):
+        """i_chg: the charge-positive current [A]."""
         sc = self._soc_count
         if sc is None:
             return
-        v = sc.add(sample.timestamp, sample.current, sample.charge)
-        if v is None or (self._soc_count_pub is not None and sample.timestamp - self._soc_count_pub < SOC_COUNT_PUBLISH_S):
+        t = sample.timestamp
+        if self._soc_count_pub is not None and t < self._soc_count_pub:  # the clock stepped back
+            self._soc_count_pub = None
+        if self._soc_count_pub is None or t - self._soc_count_pub >= SOC_COUNT_PUBLISH_S:
+            res = self.qmax.result() if self.qmax.enabled else None
+            if res is not None and res.get('qmax'):
+                sc.set_capacity(res['qmax'], 'qmax')
+            else:
+                sc.set_capacity(self.qmax.design_capacity, 'option')
+        v = sc.add(t, i_chg, sample.charge)
+        if v is None or sc.capacity is None or (self._soc_count_pub is not None and t - self._soc_count_pub < SOC_COUNT_PUBLISH_S):
             return
-        self._soc_count_pub = sample.timestamp
-        res = self.qmax.result() if self.qmax.enabled else None
-        if res is not None and res.get('qmax'):
-            sc.set_capacity(res['qmax'], 'qmax')
-        else:
-            sc.set_capacity(self.qmax.design_capacity, 'option')
+        self._soc_count_pub = t
         publish_soc_count(self.mqtt_client, device_topic=self.mqtt_topic_prefix, soc=v, attributes=dict(
             set_by=sc.anchor and sc.anchor['kind'], set_at=sc.anchor and sc.anchor['t'],
             set_to=sc.anchor and sc.anchor['soc'], capacity=round(sc.capacity, 1), capacity_source=sc.capacity_source))
@@ -1175,10 +1184,18 @@ class BmsSampler:
                 continue
             what = 'a full charge' if a['kind'] == 'top' else 'a rest near empty'
             soc = min(a['soc'])
-            self._gauge_report(a['kind'], what, a['t'], before[-1][1], soc)
-            if self._soc_count is not None and est.design_capacity and a.get('epoch') == est.epoch and 'q' in a:
+            if a['kind'] == 'top' and self._full_reported_t is not None \
+                    and abs(a['t'] - self._full_reported_t) <= GAUGE_SAME_CHARGE_S:
+                # the charge limit of the same charge was already reported (also 100 %)
+                logger.info('%s: SoC gauge: the full-charge anchor of %s is the charge limit already reported',
+                            self.bms.name, a['t'])
+            else:
+                self._gauge_report(a['kind'], what, a['t'], before[-1][1], soc)
+            sc = self._soc_count
+            if sc is not None and sc.capacity and a.get('epoch') == est.epoch and 'q' in a:
                 # the anchor lies in the past (a rest is known when it ends): count on from it
-                self._soc_count.set(t, soc + 100.0 * (est.q_ah - a['q']) / est.design_capacity, a['kind'])
+                # with qmax's own count since (charge-positive, the same samples)
+                sc.set(t, soc + 100.0 * (est.q_ah - a['q']) / sc.capacity, a['kind'])
 
     def _gauge_report(self, kind: str, what: str, t: float, bms_soc: float, soc: float, **extra):
         err = bms_soc - soc
@@ -1190,21 +1207,26 @@ class BmsSampler:
                                 attributes=dict(anchor=kind, anchor_time=t, anchor_soc=round(soc, 1),
                                                 bms_soc=round(bms_soc, 1), **extra))
 
-    def _gauge_full(self, sample: BmsSample, voltages, temp: Optional[float]):
+    def _gauge_full(self, sample: BmsSample, i: Optional[float], voltages, temp: Optional[float]):
         """The charge-limit check (GAUGE_FULL_*): the highest cell held full in
-        CV is 100 %, whatever the other cells read. Unknown current, cells,
-        capacity, SoC or temperature never count as full; they end a hold."""
-        t, i, cap, soc = sample.timestamp, sample.current, self.qmax.design_capacity, sample.soc
+        CV is 100 %, whatever the other cells read. i: the charge-positive
+        current [A]. Unknown current, capacity, SoC or temperature never count
+        as full; they end a hold. Cell voltages come every ~10 s at most (qmax
+        wants_voltages), so a sample without them only checks the rest; the
+        hold is measured between cell readings (GAUGE_FULL_GAP_S)."""
+        t, cap, soc = sample.timestamp, self.qmax.design_capacity, sample.soc
         cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
+        ok = (self._full_armed and cap and i is not None and 0 < i <= GAUGE_FULL_I_MAX_C * cap
+              and temp is not None and GAUGE_FULL_TEMP[0] <= temp <= GAUGE_FULL_TEMP[1]
+              and soc is not None and math.isfinite(soc))
         if not cells:
-            self._full_hold = None
+            if not ok:
+                self._full_hold = None
             return
         hi = max(cells)
         if hi < GAUGE_FULL_REARM_MV:
-            self._full_armed = True
-        ok = (self._full_armed and hi >= GAUGE_FULL_CELL_MV and cap and i is not None and math.isfinite(i)
-              and 0 < i <= GAUGE_FULL_I_MAX_C * cap and temp is not None
-              and GAUGE_FULL_TEMP[0] <= temp <= GAUGE_FULL_TEMP[1] and soc is not None and math.isfinite(soc))
+            self._full_armed = True  # (below GAUGE_FULL_CELL_MV: not ok anyway)
+        ok = ok and hi >= GAUGE_FULL_CELL_MV
         h = self._full_hold
         if not ok or (h is not None and t - h[3] > GAUGE_FULL_GAP_S):
             self._full_hold = h = None
@@ -1218,6 +1240,7 @@ class BmsSampler:
         if t - h[0] < GAUGE_FULL_HOLD_S:
             return
         self._full_armed, self._full_hold = False, None
+        self._full_reported_t = t
         if self._soc_count is not None:
             self._soc_count.set(t, 100.0, 'charge_limit')
         lo = min(cells)

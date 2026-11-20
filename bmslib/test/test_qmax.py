@@ -4335,7 +4335,8 @@ def test_no_bms_soc_from_the_anchor_time_means_no_check(monkeypatch):
 def _hold(s, t0, n, hi=3505.0, lo=3385.0, i=4.0, soc=92.0, temp=20.0, dt=10.0):
     """n samples dt apart: an unbalanced pack held at its highest cell (100 Ah, so 4 A = 0.04C)."""
     for k in range(n):
-        s._gauge_full(BmsSample(voltage=27.0, current=i, soc=soc, timestamp=t0 + dt * k), [hi, lo, 3390.0, 3395.0], temp)
+        s._gauge_full(BmsSample(voltage=27.0, current=-i, soc=soc, timestamp=t0 + dt * k), i,
+                      [hi, lo, 3390.0, 3395.0], temp)
 
 
 def test_the_highest_cell_held_full_reads_100_whatever_the_low_cells_read(monkeypatch, caplog):
@@ -4365,7 +4366,7 @@ def test_no_charge_limit_check_outside_a_cv_hold(monkeypatch, bad):
 def test_a_rising_cell_or_a_gap_restarts_the_hold(monkeypatch):
     s, out = _gauge_sampler(monkeypatch)
     for k in range(20):  # 3450 -> 3640 mV in 190 s: a cell still climbing, not held
-        s._gauge_full(BmsSample(voltage=27.0, current=4.0, soc=90.0, timestamp=T0 + 10 * k),
+        s._gauge_full(BmsSample(voltage=27.0, current=-4.0, soc=90.0, timestamp=T0 + 10 * k), 4.0,
                       [3450.0 + 10 * k, 3380.0], 20.0)
     assert out == []
     _hold(s, T0 + 1000, 10)
@@ -4421,7 +4422,7 @@ def test_the_charge_limit_sets_batmons_own_soc(monkeypatch):
     _hold(s, T0, 20)
     assert s._soc_count.soc == 100.0
     for k in range(1, 7):  # 1 min at -60 A on 100 Ah: -1 pp
-        s._count_soc(BmsSample(voltage=27.0, current=-60.0, soc=90.0, timestamp=T0 + 190 + 10 * k))
+        s._count_soc(BmsSample(voltage=27.0, current=60.0, soc=90.0, timestamp=T0 + 190 + 10 * k), -60.0)
     assert math.isclose(s._soc_count.soc, 99.0, abs_tol=0.2) and pub
 
 
@@ -4433,11 +4434,92 @@ def test_batmons_soc_counts_against_the_qmax_estimate_once_there_is_one(monkeypa
     from bmslib.estimators.soc_count import SocCounter
     s._soc_count = SocCounter(100.0)
     s._soc_count.set(T0, 50.0, 'ocv')
-    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0))
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0), 0.0)
     assert attrs[-1]['capacity'] == 100.0 and attrs[-1]['capacity_source'] == 'option'
     monkeypatch.setattr(s.qmax, 'result', lambda: dict(qmax=90.0))
-    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 60))
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 60), 0.0)
     assert attrs[-1]['capacity'] == 90.0 and attrs[-1]['capacity_source'] == 'qmax'
     monkeypatch.setattr(s.qmax, 'result', lambda: None)  # withdrawn: back to the option
-    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 120))
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 120), 0.0)
     assert attrs[-1]['capacity'] == 100.0 and attrs[-1]['capacity_source'] == 'option'
+
+
+def _count_sampler(monkeypatch):
+    import bmslib.sampling as smp
+    from bmslib.estimators.soc_count import SocCounter
+    s, out = _gauge_sampler(monkeypatch)
+    pub = []
+    monkeypatch.setattr(smp, 'publish_soc_count', lambda client, device_topic, soc, attributes: pub.append(soc))
+    s._soc_count = SocCounter(100.0)  # _run_sampler's own samples carry today's clock, these T0
+    return s, out, pub
+
+
+def test_the_new_features_take_the_charge_sign_from_the_native_current(monkeypatch):
+    """Review: sample.current is after invert_current; the native current is
+    discharge-positive (BmsSample). Charging 10 A for 6 min on 100 Ah from 50 %
+    is 51 % whatever the display sign."""
+    for display_sign in (+1, -1):
+        s, out, pub = _count_sampler(monkeypatch)
+        s._soc_count.set(T0, 50.0, 'ocv')
+        s._soc_count._t = None
+        for k in range(37):
+            smp_ = BmsSample(voltage=27.0, current=display_sign * 10.0, soc=50.0, timestamp=T0 + 10 * k)
+            asyncio.run(s._feed_qmax(smp_, -10.0, None))
+        assert math.isclose(s._soc_count.soc, 51.0, abs_tol=0.05), display_sign
+
+
+def test_the_charge_limit_fires_with_cells_only_every_10_s(monkeypatch):
+    """Review: at a 1 s sample period qmax fetches cells every ~10 s; a sample
+    without them must not end the hold."""
+    s, out, pub = _count_sampler(monkeypatch)
+    for k in range(200):
+        cells = [3505.0, 3385.0] if k % 10 == 0 else None
+        s._gauge_full(BmsSample(voltage=27.0, current=-4.0, soc=92.0, timestamp=T0 + k), 4.0, cells, 20.0)
+    assert len(out) == 1 and out[0][1]['anchor'] == 'charge_limit'
+
+
+def test_a_bulk_current_between_cell_readings_ends_the_hold(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    for k in range(200):
+        cells = [3505.0, 3385.0] if k % 10 == 0 else None
+        i = 40.0 if k % 10 == 5 else 4.0  # every 10 s a bulk second the cell readings never see
+        s._gauge_full(BmsSample(voltage=27.0, current=-i, soc=92.0, timestamp=T0 + k), i, cells, 20.0)
+    assert out == []
+
+
+def test_no_capacity_means_no_soc_and_no_exception(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    from bmslib.estimators.soc_count import SocCounter
+    s._soc_count = SocCounter(None)
+    s._soc_count.restore(dict(soc=60.0, anchor=dict(kind='ocv', t=T0, soc=60.0), t=T0, i=0.0, c=None))
+    s.qmax.design_capacity = None
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0 + 10), 0.0)
+    assert pub == [] and s._soc_count.soc is None
+
+
+def test_a_rest_anchor_sets_batmons_soc_counted_on_from_the_anchor(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    est = s.qmax
+    s._check_gauge(_soc_sample(T0, 30.0))
+    est.q_ah = 7.0
+    est.anchors.append(dict(t=T0 + 30, kind='ocv', soc=[10.0, 12.0], q=5.0, epoch=est.epoch))  # +2 Ah since
+    s._check_gauge(_soc_sample(T0 + 60, 30.0))
+    assert math.isclose(s._soc_count.soc, 12.0) and s._soc_count.anchor['kind'] == 'ocv'
+    est.anchors.append(dict(t=T0 + 90, kind='ocv', soc=[10.0], q=5.0, epoch=est.epoch - 1))  # another epoch
+    s._soc_count.soc = 33.0
+    s._check_gauge(_soc_sample(T0 + 100, 30.0))
+    assert s._soc_count.soc == 33.0
+
+
+def test_a_charge_is_reported_once_by_the_limit_and_the_full_charge_anchor(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    _hold(s, T0, 20)
+    assert len(out) == 1
+    s._check_gauge(_soc_sample(T0 + 200, 92.0))
+    s.qmax.anchors.append(dict(t=T0 + 250, kind='top', soc=[100.0, 100.0]))
+    s._check_gauge(_soc_sample(T0 + 260, 92.0))
+    assert len(out) == 1
+    s._check_gauge(_soc_sample(T0 + 8000, 95.0))
+    s.qmax.anchors.append(dict(t=T0 + 8000, kind='top', soc=[100.0, 100.0]))  # another charge
+    s._check_gauge(_soc_sample(T0 + 8010, 95.0))
+    assert len(out) == 2

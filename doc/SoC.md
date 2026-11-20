@@ -87,6 +87,8 @@ the current against the Qmax estimate once one is published, the `capacity:` opt
 
 - Unknown until the first such point, and 7 days after the last one: the replay above measured
   a count drifting 10–16 pp a day near empty.
-- Link gaps up to 2 minutes are bridged linearly, up to 6 hours by the BMS's own charge counter if
-  it moved by no more than 1C could have; a longer gap loses the count until the next point.
+- Link gaps up to 2 minutes are bridged linearly. Up to 30 minutes the BMS's own charge counter
+  bridges them if its step matches the currents on either side of the gap (a resync or a set SOC
+  does not); otherwise, and after a longer gap, the count is lost until the next point.
+- A full-charge anchor in the same charge as a charge limit is not reported a second time.
 - Its attributes give what set it, when and to what.

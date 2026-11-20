@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* With `soh_estimator`: a `SoC (batmon)` sensor, set at each SoC gauge check point and counted with the current between them; unknown before the first one and 7 days after the last.
+* With `soh_estimator`: a `SoC (batmon)` sensor, set at each SoC gauge check point and counted between them against the Qmax estimate, or `capacity:` until there is one.
 * SoC gauge error: also checked, as 100 %, when a charge ends with the highest cell held at 3.45 V or more for 3 min, so packs not balanced at the top get it too.
 * `pack_temp_estimator` keeps its estimate across a restart, so `impedance_estimator` on packs with only a MOSFET probe no longer waits another 10 h after each restart.
 
