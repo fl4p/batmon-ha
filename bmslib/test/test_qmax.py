@@ -4332,6 +4332,47 @@ def test_no_bms_soc_from_the_anchor_time_means_no_check(monkeypatch):
     assert out == [(45.0, dict(anchor='ocv', anchor_time=T0 + 450, anchor_soc=5.0, bms_soc=50.0))]
 
 
+def _hold(s, t0, n, hi=3505.0, lo=3385.0, i=4.0, soc=92.0, temp=20.0, dt=10.0):
+    """n samples dt apart: an unbalanced pack held at its highest cell (100 Ah, so 4 A = 0.04C)."""
+    for k in range(n):
+        s._gauge_full(BmsSample(voltage=27.0, current=i, soc=soc, timestamp=t0 + dt * k), [hi, lo, 3390.0, 3395.0], temp)
+
+
+def test_the_highest_cell_held_full_reads_100_whatever_the_low_cells_read(monkeypatch, caplog):
+    s, out = _gauge_sampler(monkeypatch)
+    _hold(s, T0, 18)  # 170 s: not yet
+    assert out == []
+    _hold(s, T0 + 180, 3)
+    assert len(out) == 1 and out[0][0] == -8.0 and out[0][1]['anchor'] == 'charge_limit'
+    assert out[0][1]['cell_low_mv'] == 3385
+    _hold(s, T0 + 300, 30)
+    assert len(out) == 1  # once per charge
+    _hold(s, T0 + 700, 2, hi=3340.0, i=-2.0)  # discharged: re-armed
+    _hold(s, T0 + 800, 20)
+    assert len(out) == 2
+
+
+@pytest.mark.parametrize('bad', [dict(i=10.0), dict(i=-1.0), dict(hi=3440.0), dict(temp=None), dict(temp=5.0),
+                                 dict(soc=math.nan)])
+def test_no_charge_limit_check_outside_a_cv_hold(monkeypatch, bad):
+    """Bulk current, discharge, below the full voltage, unknown or cold
+    temperature, no SoC: never full, however long."""
+    s, out = _gauge_sampler(monkeypatch)
+    _hold(s, T0, 60, **bad)
+    assert out == []
+
+
+def test_a_rising_cell_or_a_gap_restarts_the_hold(monkeypatch):
+    s, out = _gauge_sampler(monkeypatch)
+    for k in range(20):  # 3450 -> 3640 mV in 190 s: a cell still climbing, not held
+        s._gauge_full(BmsSample(voltage=27.0, current=4.0, soc=90.0, timestamp=T0 + 10 * k),
+                      [3450.0 + 10 * k, 3380.0], 20.0)
+    assert out == []
+    _hold(s, T0 + 1000, 10)
+    _hold(s, T0 + 1000 + 90 + 70, 10)  # 70 s without a reading in between
+    assert out == []
+
+
 def test_the_gauge_error_entity_is_announced_with_the_soh_estimator():
     msgs = {}
 

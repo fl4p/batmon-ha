@@ -153,6 +153,21 @@ class BmsSampleSink:
 GAUGE_SOC_KEEP_S = 30 * 60.0
 GAUGE_SOC_MAX_AGE_S = 120.0
 GAUGE_WARN_PP = 10.0
+# The charge-limit check (_gauge_full): the highest cell held in CV at the top. On a pack
+# whose cells are not balanced at the top it is the only full charge there is: the
+# charger stops on that cell, the others never reach the Qmax anchor's every-cell
+# floor, so 100 % is where the highest cell is full (as a Victron monitor syncs).
+# Full: at GAUGE_FULL_CELL_MV or more, within GAUGE_FULL_BAND_MV, for GAUGE_FULL_HOLD_S
+# (no gap over GAUGE_FULL_GAP_S), while charging at GAUGE_FULL_I_MAX_C x capacity or
+# less (at 0.06C an LFP cell reads 3.45 V only in its last few %), 15-45 degC known (a
+# cold cell reads high early). Once per charge: re-armed below GAUGE_FULL_REARM_MV.
+GAUGE_FULL_CELL_MV = 3450.0
+GAUGE_FULL_BAND_MV = 25.0
+GAUGE_FULL_HOLD_S = 180.0
+GAUGE_FULL_GAP_S = 60.0
+GAUGE_FULL_I_MAX_C = 0.075
+GAUGE_FULL_REARM_MV = 3400.0
+GAUGE_FULL_TEMP = (15.0, 45.0)
 
 class BmsSampler:
     """
@@ -317,6 +332,10 @@ class BmsSampler:
         # (restored ones are history); the BMS's SoC of the last minutes, (t, soc)
         self._gauge_seen_t = max((a['t'] for a in self.qmax.anchors), default=None) if self.qmax else None
         self._soc_hist = deque()
+        # charge-limit check (_gauge_full): the hold in progress [start, min mV, max mV,
+        # last t] and whether this charge may still give one
+        self._full_hold: Optional[list] = None
+        self._full_armed = True
         # store_qmax_state runs on the loop and on the background thread; a
         # periodic save that took its snapshot before a counter write must not
         # land after the write's own save (rev3 review, F1)
@@ -1048,6 +1067,7 @@ class BmsSampler:
         est = self.qmax
         if est is None:
             return
+        temp, temp_mos = None, False
         try:
             temp, temp_mos = await self._qmax_temperature(sample)
             r = est.add_sample(sample, current, voltages, temp, temp_mos)
@@ -1058,6 +1078,7 @@ class BmsSampler:
             est.disable('internal error', persistent=False)
             r = None
         self._check_gauge(sample)
+        self._gauge_full(sample, voltages, temp if not temp_mos else None)
         if r is not None:
             self._qmax_clear = None  # a new estimate replaces the cleared one
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
@@ -1089,17 +1110,51 @@ class BmsSampler:
                 logger.info('%s: SoC gauge not checked at the %s anchor of %s: no BMS SoC from then',
                             self.bms.name, a['kind'], a['t'])
                 continue
-            bms_soc, soc = before[-1][1], min(a['soc'])
-            err = bms_soc - soc
             what = 'a full charge' if a['kind'] == 'top' else 'a rest near empty'
-            (logger.warning if abs(err) >= GAUGE_WARN_PP else logger.info)(
-                '%s: the BMS reads SoC %.1f %% at %s that says %.1f %% (gauge error %+.1f pp)%s', self.bms.name,
-                bms_soc, what, soc, err, '; set SOC can correct it' if abs(err) >= GAUGE_WARN_PP else '')
-            self._gauge_last = dict(pp=round(err, 1), anchor=a['kind'], t=a['t'], bms_soc=round(bms_soc, 1),
-                                    soc=round(soc, 1))
-            publish_soc_gauge_error(self.mqtt_client, device_topic=self.mqtt_topic_prefix, error_pp=err,
-                                    attributes=dict(anchor=a['kind'], anchor_time=a['t'], anchor_soc=round(soc, 1),
-                                                    bms_soc=round(bms_soc, 1)))
+            self._gauge_report(a['kind'], what, a['t'], before[-1][1], min(a['soc']))
+
+    def _gauge_report(self, kind: str, what: str, t: float, bms_soc: float, soc: float, **extra):
+        err = bms_soc - soc
+        (logger.warning if abs(err) >= GAUGE_WARN_PP else logger.info)(
+            '%s: the BMS reads SoC %.1f %% at %s that says %.1f %% (gauge error %+.1f pp)%s', self.bms.name,
+            bms_soc, what, soc, err, '; set SOC can correct it' if abs(err) >= GAUGE_WARN_PP else '')
+        self._gauge_last = dict(pp=round(err, 1), anchor=kind, t=t, bms_soc=round(bms_soc, 1), soc=round(soc, 1))
+        publish_soc_gauge_error(self.mqtt_client, device_topic=self.mqtt_topic_prefix, error_pp=err,
+                                attributes=dict(anchor=kind, anchor_time=t, anchor_soc=round(soc, 1),
+                                                bms_soc=round(bms_soc, 1), **extra))
+
+    def _gauge_full(self, sample: BmsSample, voltages, temp: Optional[float]):
+        """The charge-limit check (GAUGE_FULL_*): the highest cell held full in
+        CV is 100 %, whatever the other cells read. Unknown current, cells,
+        capacity, SoC or temperature never count as full; they end a hold."""
+        t, i, cap, soc = sample.timestamp, sample.current, self.qmax.design_capacity, sample.soc
+        cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
+        if not cells:
+            self._full_hold = None
+            return
+        hi = max(cells)
+        if hi < GAUGE_FULL_REARM_MV:
+            self._full_armed = True
+        ok = (self._full_armed and hi >= GAUGE_FULL_CELL_MV and cap and i is not None and math.isfinite(i)
+              and 0 < i <= GAUGE_FULL_I_MAX_C * cap and temp is not None
+              and GAUGE_FULL_TEMP[0] <= temp <= GAUGE_FULL_TEMP[1] and soc is not None and math.isfinite(soc))
+        h = self._full_hold
+        if not ok or (h is not None and t - h[3] > GAUGE_FULL_GAP_S):
+            self._full_hold = h = None
+            if not ok:
+                return
+        if h is None:
+            self._full_hold = h = [t, hi, hi, t]
+        h[1], h[2], h[3] = min(h[1], hi), max(h[2], hi), t
+        if h[2] - h[1] > GAUGE_FULL_BAND_MV:  # still rising (or a spike): the hold starts again
+            self._full_hold = h = [t, hi, hi, t]
+        if t - h[0] < GAUGE_FULL_HOLD_S:
+            return
+        self._full_armed, self._full_hold = False, None
+        lo = min(cells)
+        self._gauge_report('charge_limit', 'the end of a charge (highest cell %.0f mV held, lowest %.0f mV)' % (hi, lo),
+                           t, float(soc), 100.0, cell_high_mv=round(hi), cell_low_mv=round(lo),
+                           current=round(float(i), 1))
 
     def _withdraw_qmax(self):
         """Clear what may no longer be published (the estimator says why, once)

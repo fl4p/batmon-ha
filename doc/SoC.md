@@ -74,5 +74,6 @@ of its lowest cell, the one that ends a discharge.
 - The BMS's SoC must come from at most 2 minutes before the anchor. If there is none, that anchor
   is skipped and not counted as a zero error.
 - Anchors restored from the saved state are not checked again.
+- **Charge limit.** A charge that ends with the highest cell held at 3.45 V or more for 3 minutes, at 0.075C or less and 15–45 °C, is also checked, as 100 %, whatever the other cells read (attribute `anchor: charge_limit`, with both cells' voltages). On a pack that is not balanced at the top the charger stops on that cell, so this is where the pack is full in use, the way a Victron monitor syncs. Once per charge.
 - A full-charge anchor is full as the charger defines it, which can be a few percent below the
   cells' own full (doc/SoH.md). An error of a few pp there is noise.
