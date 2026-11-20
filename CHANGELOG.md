@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* SoC gauge error: also checked at the end of a charge where the highest cell is held full (at least 3.45 V for 3 min at 0.075C or less, 15-45 °C), as 100 %. On a pack that is not top-balanced the charger stops on that cell, so the Qmax full-charge anchor, which needs every cell full, never comes.
+* SoC gauge error: also checked when a charge ends with the highest cell held full (3.45 V or more for 3 min), as 100 %; on a pack not balanced at the top the full-charge anchor never comes.
 
 ## [2.35]
 
