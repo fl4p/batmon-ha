@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* SoC gauge error: also checked when a charge ends with the highest cell held full (3.45 V or more for 3 min), as 100 %; on a pack not balanced at the top the full-charge anchor never comes.
+* SoC gauge error: also checked, as 100 %, when a charge ends with the highest cell held at 3.45 V or more for 3 min, so packs not balanced at the top get it too.
 
 ## [2.35]
 
