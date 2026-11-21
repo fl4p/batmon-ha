@@ -26,7 +26,8 @@ SOC_COUNT_MAX_AGE_S = 7 * 86400.0
 # discharge limit (0 %), either way round: what the pack delivers from its highest
 # cell full to its lowest empty. Median of the last USABLE_N spans; a span outside
 # USABLE_REL x the configured capacity is not kept (a count that drifted, or a
-# limit that was not one).
+# limit that was not one). Other set points (Qmax anchors) between two limits
+# neither start nor end a span: the count since the last limit carries on.
 LIMITS = ('charge_limit', 'discharge_limit')
 USABLE_N = 5
 USABLE_REL = (0.5, 1.2)
@@ -43,8 +44,10 @@ class SocCounter:
         self.anchor: Optional[dict] = None  # kind, t, soc of the last set point
         self.capacity_source = 'option'
         self._t = self._i = self._c = None
-        self.ah = 0.0  # counted since the last set point (charge-positive)
+        self.limit: Optional[str] = None  # the last limit's kind, None after a broken count
+        self.ah = 0.0  # counted since that limit (charge-positive)
         self.spans: list = []  # usable capacity spans [Ah], newest last
+        self.armed = {}  # the sampler's once-per-charge/discharge flags, kept across restarts
 
     def usable(self) -> Optional[float]:
         if not self.spans:
@@ -60,17 +63,17 @@ class SocCounter:
 
     def set(self, t: float, soc: float, kind: str, ref: Optional[float] = None) -> Optional[float]:
         """The SoC at t (what came before t is in it: the next add counts from t).
-        A limit right after the opposite one, counted unbroken in between, adds
-        a usable capacity span (returned) if within USABLE_REL x ref."""
+        A limit after the opposite one, counted unbroken since, adds a usable
+        capacity span (returned) if within USABLE_REL x ref."""
         span = None
-        prev = self.anchor['kind'] if self.anchor else None
-        if kind in LIMITS and prev in LIMITS and kind != prev and self.soc is not None:
-            span = abs(self.ah)
-            if _finite(ref) and ref > 0 and USABLE_REL[0] * ref <= span <= USABLE_REL[1] * ref:
-                self.spans = (self.spans + [round(span, 2)])[-USABLE_N:]
-            else:
-                span = None
-        self.ah = 0.0
+        if kind in LIMITS:
+            if self.limit is not None and self.limit != kind and self.soc is not None:
+                span = abs(self.ah)
+                if _finite(ref) and ref > 0 and USABLE_REL[0] * ref <= span <= USABLE_REL[1] * ref:
+                    self.spans = (self.spans + [round(span, 2)])[-USABLE_N:]
+                else:
+                    span = None
+            self.limit, self.ah = kind, 0.0
         self.soc = min(100.0, max(0.0, float(soc)))
         self.anchor = dict(kind=kind, t=t, soc=round(self.soc, 1))
         if self._t is not None and t >= self._t:
@@ -83,7 +86,7 @@ class SocCounter:
         i = float(i) if _finite(i) else None
         c = float(charge) if _finite(charge) else None
         if not self.capacity:  # nothing to count against: no SoC
-            self.soc = None
+            self.soc = self.limit = None
         if self.soc is not None and self._t is not None:
             dt = t - self._t
             dq = None
@@ -98,12 +101,12 @@ class SocCounter:
                 if abs((c - self._c) - est) <= tol:
                     dq = c - self._c
             if dq is None:
-                self.soc = None
+                self.soc = self.limit = None
             else:
                 self.ah += dq
                 self.soc = min(100.0, max(0.0, self.soc + 100.0 * dq / self.capacity))
         if self.soc is not None and (self.anchor is None or t - self.anchor['t'] > SOC_COUNT_MAX_AGE_S):
-            self.soc = None
+            self.soc = self.limit = None
         if i is not None:
             self._t, self._i = t, i
             self._c = c
@@ -111,7 +114,7 @@ class SocCounter:
 
     def get_state(self) -> dict:
         return dict(soc=self.soc, anchor=self.anchor, t=self._t, i=self._i, c=self._c, capacity=self.capacity,
-                    ah=self.ah, spans=self.spans)
+                    ah=self.ah, limit=self.limit, spans=self.spans, armed=self.armed)
 
     def restore(self, st: dict):
         """A saved count, continued across the restart under the gap rules
@@ -121,12 +124,17 @@ class SocCounter:
         spans = st.get('spans')
         if isinstance(spans, list):
             self.spans = [float(x) for x in spans if _finite(x) and x > 0][-USABLE_N:]
+        if isinstance(st.get('armed'), dict):
+            self.armed = {k: bool(v) for k, v in st['armed'].items()}
         if not _finite(st.get('soc')):
             return
-        if _finite(st.get('ah')):
-            self.ah = float(st['ah'])
-        elif isinstance(st.get('anchor'), dict) and _finite(st['anchor'].get('soc')) and self.capacity:
-            # a state from before `ah` was kept: what the SoC moved since its set point
-            self.ah = (float(st['soc']) - float(st['anchor']['soc'])) * self.capacity / 100.0
-        self.soc, self.anchor = float(st['soc']), st.get('anchor')
+        anchor = st.get('anchor') if isinstance(st.get('anchor'), dict) else None
+        if st.get('limit') in LIMITS and _finite(st.get('ah')):
+            self.limit, self.ah = st['limit'], float(st['ah'])
+        elif 'limit' not in st and anchor and anchor.get('kind') in LIMITS and _finite(anchor.get('soc')) \
+                and self.capacity and 0.0 < float(st['soc']) < 100.0:
+            # a state from before the span was kept: the SoC moved since its limit, if never clamped
+            self.limit = anchor['kind']
+            self.ah = (float(st['soc']) - float(anchor['soc'])) * self.capacity / 100.0
+        self.soc, self.anchor = float(st['soc']), anchor
         self._t, self._i, self._c = st.get('t'), st.get('i'), st.get('c')

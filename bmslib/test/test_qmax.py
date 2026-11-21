@@ -4555,16 +4555,26 @@ def _rest(s, t0, n, lo=2800.0, i=-0.5, temp=20.0, soc=13.2, cells_every=10):
 
 def test_a_rest_with_the_lowest_cell_below_the_curve_reads_0(monkeypatch):
     s, out, pub = _count_sampler(monkeypatch)
-    _rest(s, T0, 590)
-    assert out == []
-    _rest(s, T0 + 590, 20)
+    _rest(s, T0, 1790)
+    assert out == []  # 30 min not yet
+    _rest(s, T0 + 1790, 20)
     assert len(out) == 1 and out[0][0] == 13.2 and out[0][1]['anchor'] == 'discharge_limit'
     assert out[0][1]['cell_low_mv'] == 2800 and s._soc_count.soc == 0.0
-    _rest(s, T0 + 700, 900)
+    _rest(s, T0 + 1810, 2000)
     assert len(out) == 1  # once per discharge
-    _rest(s, T0 + 2000, 20, lo=3300.0)  # charged: re-armed
-    _rest(s, T0 + 3000, 700)
+    _rest(s, T0 + 4000, 20, lo=3300.0)  # charged: re-armed
+    _rest(s, T0 + 5000, 1900)
     assert len(out) == 2
+
+
+def test_one_garbled_low_reading_in_a_rest_is_not_empty(monkeypatch):
+    """Review (data): single 1118-1500 mV readings on full packs fired."""
+    s, out, pub = _count_sampler(monkeypatch)
+    for k in range(3000):  # three single garbled readings a minute apart, good ones between
+        cells = ([1118.0, 3340.0, 3345.0] if k in (2500, 2560, 2620) else [3330.0, 3340.0, 3345.0]) \
+            if k % 10 == 0 else None
+        s._gauge_empty(BmsSample(voltage=26.7, current=0.0, soc=90.0, timestamp=T0 + k), 0.0, cells, 20.0)
+    assert out == []
 
 
 @pytest.mark.parametrize('bad', [dict(lo=2960.0), dict(i=-5.0), dict(i=5.0), dict(temp=None), dict(temp=5.0),
@@ -4595,25 +4605,26 @@ def _load(s, t0, n, lo=2550.0, i=-30.0, temp=20.0, soc=8.0, cells_every=10):
 
 def test_a_load_with_the_lowest_cell_empty_reads_0(monkeypatch):
     s, out, pub = _count_sampler(monkeypatch)
-    _load(s, T0, 25, i=-15.0)
+    _load(s, T0, 25, i=-8.0)
     assert out == []  # 30 s not yet held
-    _load(s, T0 + 25, 20, i=-15.0)
-    assert len(out) == 1 and out[0][1]['anchor'] == 'discharge_limit' and out[0][1]['current'] == -15.0
+    _load(s, T0 + 25, 20, i=-8.0)
+    assert len(out) == 1 and out[0][1]['anchor'] == 'discharge_limit' and out[0][1]['current'] == -8.0
     assert s._soc_count.soc == 0.0
-    _load(s, T0 + 100, 600, i=-15.0)
-    _rest(s, T0 + 800, 900)
+    _load(s, T0 + 100, 600, i=-8.0)
+    _rest(s, T0 + 800, 2500)
     assert len(out) == 1  # once per discharge, the rest after it included
 
 
 @pytest.mark.parametrize('bad', [dict(lo=2610.0), dict(i=-25.0), dict(i=-0.0), dict(i=5.0), dict(temp=None),
-                                 dict(temp=5.0), dict(soc=math.nan), dict(lo=2600.0, i=-19.0)])
+                                 dict(temp=5.0), dict(soc=math.nan), dict(lo=2600.0, i=-15.0),
+                                 dict(lo=2600.0, i=-10.0)])
 def test_no_empty_reading_under_load_outside_the_bound(monkeypatch, bad):
     """Above 2600 mV; over 0.2C; no discharge; charging; temperature; SoC;
-    and 2600 mV at 19 A, whose bound 2600 + 95 is still 2695 (passes) -- so
-    that last one must fire: it is the control."""
+    2600 mV at 15 A on 100 Ah: R = 25 mOhm, bound 2975 mV > 2950. The last,
+    10 A (bound 2850 mV), is the control and must fire."""
     s, out, pub = _count_sampler(monkeypatch)
     _load(s, T0, 200, **bad)
-    if bad == dict(lo=2600.0, i=-19.0):
+    if bad == dict(lo=2600.0, i=-10.0):
         assert len(out) == 1
     else:
         assert out == []
@@ -4629,7 +4640,96 @@ def test_the_bound_refuses_a_low_reading_under_a_big_load(monkeypatch):
 
 def test_one_reading_above_ends_the_load_hold(monkeypatch):
     s, out, pub = _count_sampler(monkeypatch)
-    _load(s, T0, 25, i=-15.0)
-    s._gauge_empty(BmsSample(voltage=24.0, current=15.0, soc=8.0, timestamp=T0 + 25), -15.0, [2700.0, 3000.0], 20.0)
-    _load(s, T0 + 26, 25, i=-15.0)
+    _load(s, T0, 25, i=-8.0)
+    s._gauge_empty(BmsSample(voltage=24.0, current=8.0, soc=8.0, timestamp=T0 + 25), -8.0, [2700.0, 3000.0], 20.0)
+    _load(s, T0 + 26, 25, i=-8.0)
+    assert out == []
+
+
+def test_the_load_hold_needs_its_readings_too(monkeypatch):
+    """Review: cells every 20 s give only 2 readings in 30 s; the third, at
+    40 s, fires."""
+    s, out, pub = _count_sampler(monkeypatch)
+    for k in range(45):  # cell readings at 0 and 31 s: 31 s held, but two readings
+        cells = [2550.0, 2900.0] if k in (0, 31, 40) else None
+        s._gauge_empty(BmsSample(voltage=24.0, current=8.0, soc=8.0, timestamp=T0 + k), -8.0, cells, 20.0)
+        if k == 39:
+            assert out == []
+    assert len(out) == 1
+
+
+def test_cells_are_fetched_for_the_limit_checks_under_a_discharge(monkeypatch):
+    """Review: qmax wants no cells under a discharge, so the load variant
+    never saw any."""
+    s, out, pub = _count_sampler(monkeypatch)
+    s._gauge_cells = None  # (_run_sampler's samples saw some)
+    assert s._gauge_wants_voltages(T0)  # none seen yet
+    s._gauge_cells = (T0, 2700.0, 2900.0)
+    assert not s._gauge_wants_voltages(T0 + 5) and s._gauge_wants_voltages(T0 + 10)
+    s._gauge_cells = (T0, 3300.0, 3320.0)  # mid-SoC: not needed
+    assert not s._gauge_wants_voltages(T0 + 60)
+    s._gauge_cells = (T0, 3300.0, 3420.0)  # near the top
+    assert s._gauge_wants_voltages(T0 + 60)
+
+
+def test_a_qmax_anchor_between_two_limits_keeps_the_span(monkeypatch):
+    """Review: the same charge's top anchor reset the count the span stands on."""
+    s, out, pub = _count_sampler(monkeypatch)
+    sc = s._soc_count
+    sc.add(T0, 0.0, None)
+    sc.set(T0, 100.0, 'charge_limit', ref=100.0)
+    sc.set(T0 + 60, 100.0, 'top', ref=100.0)  # the Qmax anchor of the same charge
+    t = T0 + 60
+    for k in range(87 * 6):
+        t += 10
+        sc.add(t, -60.0, None)
+    sc.set(t, 5.0, 'ocv', ref=100.0)  # a rest on the way down
+    assert math.isclose(sc.set(t + 1, 0.0, 'discharge_limit', ref=100.0), 87.0, abs_tol=0.2)
+
+
+def test_two_limits_of_the_same_kind_make_no_span(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    sc = s._soc_count
+    sc.add(T0, 0.0, None)
+    sc.set(T0, 0.0, 'discharge_limit', ref=100.0)
+    t = T0
+    for k in range(87 * 6):  # 87 Ah charged in between: a plausible size, but empty to empty
+        t += 10
+        sc.add(t, 60.0, None)
+    assert sc.set(t, 0.0, 'discharge_limit', ref=100.0) is None and sc.spans == []
+
+
+def test_the_count_runs_against_the_usable_capacity_without_qmax(monkeypatch):
+    import bmslib.sampling as smp
+    s, out, pub = _count_sampler(monkeypatch)
+    attrs = []
+    monkeypatch.setattr(smp, 'publish_soc_count', lambda client, device_topic, soc, attributes: attrs.append(attributes))
+    s._soc_count.spans = [80.0, 95.0, 70.0]  # median 80, mean 81.7
+    s._soc_count.set(T0, 50.0, 'ocv')
+    s._count_soc(BmsSample(voltage=27.0, current=0.0, soc=50.0, timestamp=T0), 0.0)
+    assert attrs[-1]['capacity'] == 80.0 and attrs[-1]['capacity_source'] == 'usable'
+
+
+def test_the_once_per_end_flags_survive_a_restart(monkeypatch):
+    import bmslib.store as store
+    saved = {}
+    monkeypatch.setattr(store, 'store_soc_count_state', lambda name, st: saved.update(st))
+    s, out, pub = _count_sampler(monkeypatch)
+    s._soc_count.set(T0, 0.0, 'discharge_limit')
+    s._empty_armed = False
+    s.store_soc_count_state()
+    r, _ = _run_sampler(0, soh_estimator=True, design_capacity=100.0, soc_count_state=dict(saved))
+    assert r._empty_armed is False and r._full_armed is True
+
+
+def test_a_high_cell_over_a_low_median_is_not_full(monkeypatch):
+    """Review (data): the van, Dec 2025: two cells with ~10 mOhm more read
+    3.45 V under charge mid-SoC. By the median cell (3350 mV) that is no
+    full, in Qmax and in the charge limit."""
+    assert not q.top_full((0.0, 3500.0, 3300.0, 8, 3320.0))
+    assert q.top_full((0.0, 3500.0, 3300.0, 8, 3360.0)) and q.top_full((0.0, 3420.0, 3405.0, 8, 3410.0))
+    s, out, pub = _count_sampler(monkeypatch)
+    for k in range(30):
+        s._gauge_full(BmsSample(voltage=27.0, current=-4.0, soc=60.0, timestamp=T0 + 10 * k), 4.0,
+                      [3505.0, 3480.0, 3320.0, 3310.0, 3300.0], 20.0)
     assert out == []

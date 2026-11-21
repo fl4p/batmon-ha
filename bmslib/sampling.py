@@ -172,6 +172,7 @@ GAUGE_FULL_I_MAX_C = 0.075
 GAUGE_FULL_REARM_MV = 3400.0
 GAUGE_FULL_TEMP = (15.0, 45.0)
 SOC_COUNT_PUBLISH_S = 30.0
+GAUGE_VOLT_PERIOD_S = 10.0  # _gauge_wants_voltages, as qmax's VOLTAGE_PERIOD_S
 # The empty end (_gauge_empty): a rest with the lowest cell at GAUGE_EMPTY_CELL_MV or
 # less. The OCV curve ends at ~3080 mV (its 0 %), and after a discharge a resting cell
 # only recovers upwards, by tens of mV: one still below 2950 mV after
@@ -181,19 +182,25 @@ SOC_COUNT_PUBLISH_S = 30.0
 # curve's range starts at 10 degC; a cold cell reads low). Once per discharge:
 # re-armed above GAUGE_EMPTY_REARM_MV.
 GAUGE_EMPTY_CELL_MV = 2950.0
-GAUGE_EMPTY_REST_S = 600.0
+# 30 min, and the lowest cell at or under it for GAUGE_EMPTY_LOW_S in GAUGE_EMPTY_LOW_READINGS
+# readings: after 0.25C a 10 min rest still left 4 %, and single garbled readings
+# (1118-1500 mV) on full packs fired (bat-impedance report/empty_limit_check.md: with
+# these, p95 2.1 % and at most 3.4 % left, 119 rests on 19 packs).
+GAUGE_EMPTY_REST_S = 30 * 60.0
+GAUGE_EMPTY_LOW_S = 60.0
+GAUGE_EMPTY_LOW_READINGS = 3
 GAUGE_EMPTY_TEMP_MIN = 10.0
 GAUGE_EMPTY_REARM_MV = 3200.0
 # ... or under load: a cell reads its resting voltage less I x R, so at rest it would
 # read at most the loaded value plus I x GAUGE_EMPTY_R_MAX_OHM. Empty when that bound
 # is GAUGE_EMPTY_CELL_MV or less while the lowest cell stands at GAUGE_EMPTY_LOAD_MV
 # or less, discharging at up to GAUGE_EMPTY_LOAD_I_MAX_C, for GAUGE_EMPTY_LOAD_S
-# (GAUGE_EMPTY_LOAD_READINGS cell readings). 5 mOhm: the van's 280 Ah cells measure
-# ~1.4 mOhm (cell resistance estimator) and ~2 mOhm on the plateau (doc/SoH.md); the
-# knee and the polarisation of a long load add, so 2.5-3.5x that. At 0.2C on 280 Ah
-# (56 A) 2600 mV bounds 2880 mV.
+# (GAUGE_EMPTY_LOAD_READINGS cell readings). R = GAUGE_EMPTY_R_OHM_AH / capacity: the
+# recovery after loads that ended in the bottom knee measured 1.15 Ohm*Ah median, 2.9
+# p95, 4.0 max (14 packs, report/empty_limit_check.md); 2.5 keeps all 21 fires there,
+# each with at most 0.66 % left. A fixed resistance was ~3x low on 100 Ah packs.
 GAUGE_EMPTY_LOAD_MV = 2600.0
-GAUGE_EMPTY_R_MAX_OHM = 0.005
+GAUGE_EMPTY_R_OHM_AH = 2.5
 GAUGE_EMPTY_LOAD_I_MAX_C = 0.2
 GAUGE_EMPTY_LOAD_S = 30.0
 GAUGE_EMPTY_LOAD_READINGS = 3
@@ -369,14 +376,18 @@ class BmsSampler:
         self._full_hold: Optional[list] = None
         self._full_armed = True
         self._full_reported_t: Optional[float] = None  # the last charge limit reported
-        self._empty_rest: Optional[list] = None  # _gauge_empty: [rest start, last t]
+        self._empty_rest: Optional[list] = None  # _gauge_empty: [rest start, last t, low since, low readings]
         self._empty_load: Optional[list] = None  # ... under load: [start, last cell reading t, readings]
         self._empty_armed = True
+        self._gauge_cells: Optional[tuple] = None  # the last cell reading seen: t, lowest, highest
         # batmon's own SoC (soc_count.py): set at each gauge check point, counted between
         from bmslib.estimators.soc_count import SocCounter
         self._soc_count = SocCounter(self.qmax.design_capacity) if self.qmax else None
         if self._soc_count is not None and soc_count_state:
             self._soc_count.restore(soc_count_state)
+            # a restart in a deep rest or a long charge must not report the same end again
+            self._full_armed = self._soc_count.armed.get('full', True)
+            self._empty_armed = self._soc_count.armed.get('empty', True)
         self._soc_count_pub = None  # when it was last published
         self._soc_count_saved = None
         # store_qmax_state runs on the loop and on the background thread; a
@@ -890,7 +901,8 @@ class BmsSampler:
             if self.qmax is not None and self.qmax.enabled:
                 # cell voltages are only needed near rest, and at most every
                 # 10 s; use them when they were fetched anyway
-                if not voltages and self.qmax.wants_voltages(sample.timestamp, current_native):
+                if not voltages and (self.qmax.wants_voltages(sample.timestamp, current_native)
+                                     or self._gauge_wants_voltages(sample.timestamp)):
                     voltages = await cached_fetch_voltages(optional=True)
                 await self._feed_qmax(sample, current_native, voltages)
             elif self.qmax is not None:
@@ -1143,6 +1155,9 @@ class BmsSampler:
             r = None
         # charge-positive, from the native current: sample.current is after invert_current
         i_chg = -float(current) if current is not None and math.isfinite(current) else None
+        cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
+        if cells:
+            self._gauge_cells = (sample.timestamp, min(cells), max(cells))
         self._check_gauge(sample)
         self._gauge_full(sample, i_chg, voltages, temp if not temp_mos else None)
         self._gauge_empty(sample, i_chg, voltages, temp if not temp_mos else None)
@@ -1152,6 +1167,17 @@ class BmsSampler:
             publish_qmax(self.mqtt_client, device_topic=self.mqtt_topic_prefix, res=r)
         else:
             self._withdraw_qmax()
+
+    def _gauge_wants_voltages(self, t: float) -> bool:
+        """Cell voltages for the limit checks every GAUGE_VOLT_PERIOD_S near
+        either end (the last reading's lowest cell at GAUGE_EMPTY_REARM_MV or
+        less, or highest at GAUGE_FULL_REARM_MV or more), or when none was
+        seen yet. qmax fetches them only near rest and while charging, not
+        under a discharge, where the load variant needs them."""
+        c = self._gauge_cells
+        if c is not None and 0 <= t - c[0] < GAUGE_VOLT_PERIOD_S:
+            return False
+        return c is None or c[1] <= GAUGE_EMPTY_REARM_MV or c[2] >= GAUGE_FULL_REARM_MV
 
     def _count_soc(self, sample: BmsSample, i_chg: Optional[float]):
         """i_chg: the charge-positive current [A]."""
@@ -1181,6 +1207,7 @@ class BmsSampler:
     def store_soc_count_state(self, final=False):
         if self._soc_count is None:
             return
+        self._soc_count.armed = dict(full=self._full_armed, empty=self._empty_armed)
         state = self._soc_count.get_state()
         js = json.dumps(state, sort_keys=True)
         if js == self._soc_count_saved:
@@ -1256,9 +1283,11 @@ class BmsSampler:
                 self._full_hold = None
             return
         hi = max(cells)
+        from bmslib.estimators.qmax import median as _median, TOP_MEDIAN_MIN_MV
+        med = _median(cells)
         if hi < GAUGE_FULL_REARM_MV:
             self._full_armed = True  # (below GAUGE_FULL_CELL_MV: not ok anyway)
-        ok = ok and hi >= GAUGE_FULL_CELL_MV
+        ok = ok and hi >= GAUGE_FULL_CELL_MV and med >= TOP_MEDIAN_MIN_MV
         h = self._full_hold
         if not ok or (h is not None and t - h[3] > GAUGE_FULL_GAP_S):
             self._full_hold = h = None
@@ -1311,9 +1340,17 @@ class BmsSampler:
         if not ok:
             return
         if r is None:
-            self._empty_rest = r = [t, t]
+            self._empty_rest = r = [t, t, None, 0]
         r[1] = t
-        if not cells or t - r[0] < GAUGE_EMPTY_REST_S or min(cells) > GAUGE_EMPTY_CELL_MV:
+        if not cells:
+            return
+        if min(cells) > GAUGE_EMPTY_CELL_MV:
+            r[2], r[3] = None, 0  # one reading above ends the low run (a garbled low one cannot fire alone)
+            return
+        if r[2] is None:
+            r[2] = t
+        r[3] += 1
+        if t - r[0] < GAUGE_EMPTY_REST_S or t - r[2] < GAUGE_EMPTY_LOW_S or r[3] < GAUGE_EMPTY_LOW_READINGS:
             return
         self._empty_armed, self._empty_rest = False, None
         lo, hi = min(cells), max(cells)
@@ -1332,7 +1369,7 @@ class BmsSampler:
         cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
         if cells and ok:
             lo = min(cells)
-            ok = lo <= GAUGE_EMPTY_LOAD_MV and lo + 1000.0 * abs(i) * GAUGE_EMPTY_R_MAX_OHM <= GAUGE_EMPTY_CELL_MV
+            ok = lo <= GAUGE_EMPTY_LOAD_MV and lo + 1000.0 * abs(i) * GAUGE_EMPTY_R_OHM_AH / cap <= GAUGE_EMPTY_CELL_MV
         if not ok or (r is not None and t - r[1] > GAUGE_FULL_GAP_S):
             self._empty_load = None
             return

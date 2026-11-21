@@ -535,12 +535,18 @@ TOP_CELL_MIN_MV = 3400.0
 # reached). 3450 mV: TOP_CELL_MIN_MV's evidence by the highest cell left up to 7.9
 # / 18.6 % to go at 3400-3420 mV.
 TOP_HIGH_MIN_MV = 3450.0
+# ... with the median cell at TOP_MEDIAN_MIN_MV or more: a cell whose resistance rose
+# reads high under charge mid-SoC (the van, Dec 2025: ~10 mOhm more on two cells, a
+# "full" by the highest cell with 4-11 % to go; 5 of those 6 below 3350 mV by the
+# median cell, no fleet charge end lost; bat-impedance report/empty_limit_check.md).
+TOP_MEDIAN_MIN_MV = 3350.0
 
 
 def top_full(v) -> bool:
-    """A reading (t, highest, lowest, n) that stands for full: every cell at
-    TOP_CELL_MIN_MV or more (a balanced pack), or the highest at TOP_HIGH_MIN_MV."""
-    return v[2] >= TOP_CELL_MIN_MV or v[1] >= TOP_HIGH_MIN_MV
+    """A reading (t, highest, lowest, n, median) that stands for full: every
+    cell at TOP_CELL_MIN_MV or more (a balanced pack), or the highest at
+    TOP_HIGH_MIN_MV with the median at TOP_MEDIAN_MIN_MV."""
+    return v[2] >= TOP_CELL_MIN_MV or (v[1] >= TOP_HIGH_MIN_MV and v[4] >= TOP_MEDIAN_MIN_MV)
 # A bulk phase: TOP_BULK_SUSTAIN_S of minute means in a row, each a charge
 # current of TOP_BULK_C x capacity or more, ending within the last
 # TOP_BULK_S; and the tail must have fallen to TOP_TAPER x the lowest of them
@@ -1347,7 +1353,7 @@ class QmaxEstimator:
         self._top_min: Optional[list] = None  # the minute in progress: [index, sum of charge currents, samples]
         self._top_run: deque = deque()  # the last minutes in a row: (index, mean charge current)
         self._top_peak: deque = deque()  # (t, highest cell), decreasing: the max over the last TOP_PEAK_S
-        self._top_v: Optional[Tuple[float, float, float, int]] = None  # last reading: t, highest, lowest, cells
+        self._top_v: Optional[Tuple[float, float, float, int, float]] = None  # last reading: t, highest, lowest, cells, median
         self._top_hold: Optional[Dict[str, Any]] = None  # a tail termination in progress
         self._top_cut: Optional[Dict[str, Any]] = None  # a cut-off waiting for its check
         self._top_prev: Optional[Tuple[float, float]] = None  # the last sample: t, charge current
@@ -1397,7 +1403,7 @@ class QmaxEstimator:
             while pk and pk[-1][1] <= hi:
                 pk.pop()
             pk.append((t, hi))
-            self._top_v = (t, hi, lo, len(vt))
+            self._top_v = (t, hi, lo, len(vt), median(vt))
         elif vt is not None or dropped:
             self._top_v = None  # a cell missing, or out of band: no reading to stand on
         while self._top_peak and self._top_peak[0][0] < t - TOP_PEAK_S:

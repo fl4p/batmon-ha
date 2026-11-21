@@ -167,7 +167,8 @@ that moment as an anchor at which every cell is at SoC 100 %. A charge ends one 
   1–2 minutes later must still show the pack full (below). A cut at a voltage short of full (a temperature or
   current protection at 3.38 V) is not an end.
 
-Either way the pack must read full: **every cell** at 3400 mV or more, or **the highest cell** at 3450 mV or more. The
+Either way the pack must read full: **every cell** at 3400 mV or more, or **the highest cell** at 3450 mV or more
+with the median cell at 3350 mV or more (a cell whose resistance rose reads high under charge long before full). The
 anchor gives every cell 100 %. On a pack that is not balanced at the top the charger stops on its highest cell and the
 others never reach 3400 mV, so there the end of the charge is taken as full: Qmax and SoH then show what the pack
 delivers from its highest cell full to its lowest empty, less than its cells hold by the imbalance. The cells must
