@@ -197,9 +197,11 @@ GAUGE_EMPTY_REARM_MV = 3200.0
 # or less, discharging at up to GAUGE_EMPTY_LOAD_I_MAX_C, for GAUGE_EMPTY_LOAD_S
 # (GAUGE_EMPTY_LOAD_READINGS cell readings). R = GAUGE_EMPTY_R_OHM_AH / capacity: the
 # recovery after loads that ended in the bottom knee measured 1.15 Ohm*Ah median, 2.9
-# p95, 4.0 max (14 packs, report/empty_limit_check.md); 2.5 keeps all 21 fires there,
-# each with at most 0.66 % left. A fixed resistance was ~3x low on 100 Ah packs.
-GAUGE_EMPTY_LOAD_MV = 2600.0
+# p95, 4.0 max (14 packs, report/empty_limit_check.md). A fixed resistance was ~3x low
+# on 100 Ah packs. 2750 mV, so that a load cut at 2.75 V still sets 0 %: 58 fires on 16
+# packs, 0.44 % left median, 2.1 % p95, 7.5 % max (a cell still recovering from a heavy
+# load, read at a light one); 2600 mV left at most 0.66 % but never fired before such a cut.
+GAUGE_EMPTY_LOAD_MV = 2750.0
 GAUGE_EMPTY_R_OHM_AH = 2.5
 GAUGE_EMPTY_LOAD_I_MAX_C = 0.2
 GAUGE_EMPTY_LOAD_S = 30.0

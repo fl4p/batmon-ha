@@ -4615,16 +4615,17 @@ def test_a_load_with_the_lowest_cell_empty_reads_0(monkeypatch):
     assert len(out) == 1  # once per discharge, the rest after it included
 
 
-@pytest.mark.parametrize('bad', [dict(lo=2610.0), dict(i=-25.0), dict(i=-0.0), dict(i=5.0), dict(temp=None),
-                                 dict(temp=5.0), dict(soc=math.nan), dict(lo=2600.0, i=-15.0),
-                                 dict(lo=2600.0, i=-10.0)])
+@pytest.mark.parametrize('bad', [dict(lo=2760.0, i=-1.0), dict(i=-25.0), dict(i=-0.0), dict(i=5.0),
+                                 dict(temp=None), dict(temp=5.0), dict(soc=math.nan), dict(lo=2600.0, i=-15.0),
+                                 dict(lo=2750.0, i=-9.0), dict(lo=2750.0, i=-8.0)])
 def test_no_empty_reading_under_load_outside_the_bound(monkeypatch, bad):
-    """Above 2600 mV; over 0.2C; no discharge; charging; temperature; SoC;
-    2600 mV at 15 A on 100 Ah: R = 25 mOhm, bound 2975 mV > 2950. The last,
-    10 A (bound 2850 mV), is the control and must fire."""
+    """Above 2750 mV; over 0.2C; no discharge; charging; temperature; SoC;
+    on 100 Ah (R = 25 mOhm) 2600 mV at 15 A bounds at 2975 mV and 2750 mV at
+    9 A at 2975 mV, both > 2950. The last, 2750 mV at 8 A (2950 mV), is the
+    control and must fire."""
     s, out, pub = _count_sampler(monkeypatch)
     _load(s, T0, 200, **bad)
-    if bad == dict(lo=2600.0, i=-10.0):
+    if bad == dict(lo=2750.0, i=-8.0):
         assert len(out) == 1
     else:
         assert out == []
@@ -4641,7 +4642,7 @@ def test_the_bound_refuses_a_low_reading_under_a_big_load(monkeypatch):
 def test_one_reading_above_ends_the_load_hold(monkeypatch):
     s, out, pub = _count_sampler(monkeypatch)
     _load(s, T0, 25, i=-8.0)
-    s._gauge_empty(BmsSample(voltage=24.0, current=8.0, soc=8.0, timestamp=T0 + 25), -8.0, [2700.0, 3000.0], 20.0)
+    s._gauge_empty(BmsSample(voltage=24.0, current=8.0, soc=8.0, timestamp=T0 + 25), -8.0, [2760.0, 3000.0], 20.0)
     _load(s, T0 + 26, 25, i=-8.0)
     assert out == []
 
