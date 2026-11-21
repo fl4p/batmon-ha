@@ -492,11 +492,11 @@ MAX_ANCHORS = 16
 # cells' 0-100 %. A charge ends one of two ways:
 #  * tail: after a bulk phase the charge current stays at most the tail while
 #    the highest cell holds (CV: not rising, within a band of its recent
-#    peak), for TOP_HOLD_S, every cell at TOP_CELL_MIN_MV or more;
+#    peak), for TOP_HOLD_S, full by top_full();
 #  * cut-off: the current drops in one sample from above the tail to about 0
 #    (a BMS cell-overvoltage cut, a charger that terminates) after the highest
-#    cell peaked at TOP_CUTOFF_MV or more, and TOP_CUT_SETTLE_S later every
-#    cell is still at TOP_CELL_MIN_MV or more.
+#    cell peaked at TOP_CUTOFF_MV or more, and TOP_CUT_SETTLE_S later still
+#    full by top_full().
 # Unevaluable is never full: no capacity (the tail and bulk are fractions of
 # it), cell voltages missing, older than TOP_VOLT_GAP_S or dropped by the
 # chemistry guard, a cell count that changes, no temperature, a gap, a clock
@@ -525,6 +525,22 @@ TOP_TAIL_C = 0.05
 # (aTTx, 16 cells) a BMS cut at a 3671 mV runner left a cell at 3362 mV a
 # minute later: not full.
 TOP_CELL_MIN_MV = 3400.0
+# ... which a pack that is not balanced at the top never reaches: the charger stops
+# on its highest cell, and the others stay on the plateau (the van, 2026-11-20:
+# 3525 / 3396 mV). The anchor goes by the highest cell, TOP_HIGH_MIN_MV or more:
+# the pack is full where its charge ends, as a Victron monitor syncs. Qmax is then
+# what the pack delivers between its highest cell full and its lowest empty (less
+# than the cells hold, by the imbalance), and SoH follows the imbalance too
+# (maintainer's call, 2026-11-21: without active balancing every-cell is never
+# reached). 3450 mV: TOP_CELL_MIN_MV's evidence by the highest cell left up to 7.9
+# / 18.6 % to go at 3400-3420 mV.
+TOP_HIGH_MIN_MV = 3450.0
+
+
+def top_full(v) -> bool:
+    """A reading (t, highest, lowest, n) that stands for full: every cell at
+    TOP_CELL_MIN_MV or more (a balanced pack), or the highest at TOP_HIGH_MIN_MV."""
+    return v[2] >= TOP_CELL_MIN_MV or v[1] >= TOP_HIGH_MIN_MV
 # A bulk phase: TOP_BULK_SUSTAIN_S of minute means in a row, each a charge
 # current of TOP_BULK_C x capacity or more, ending within the last
 # TOP_BULK_S; and the tail must have fallen to TOP_TAPER x the lowest of them
@@ -1405,9 +1421,9 @@ class QmaxEstimator:
                 self._top_cut = None
                 if v[3] != c['n']:
                     self._top_refuse('top_cells', c['t'], 'the cell count changed')
-                elif v[2] < TOP_CELL_MIN_MV:
-                    self._top_refuse('top_cut_not_full', c['t'], 'a cell at %.0f mV %.0f s after it'
-                                     % (v[2], t - c['t']))
+                elif not top_full(v):
+                    self._top_refuse('top_cut_not_full', c['t'], 'the highest cell at %.0f mV %.0f s after it'
+                                     % (v[1], t - c['t']))
                 else:
                     return self._top_anchor(c, 'cutoff', t, [v[2], v[1]])
             return None
@@ -1430,7 +1446,7 @@ class QmaxEstimator:
 
         h = self._top_hold
         taper = TOP_TAPER * self._top_bulk_i if bulk and self._top_bulk_i is not None else -math.inf
-        if not (-rest <= i <= min(tail, taper) and bulk and v is not None and peak is not None and v[2] >= TOP_CELL_MIN_MV
+        if not (-rest <= i <= min(tail, taper) and bulk and v is not None and peak is not None and top_full(v)
                 and v[1] >= peak - TOP_CV_BAND_MV):
             self._top_hold = None
             return None

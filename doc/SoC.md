@@ -83,7 +83,9 @@ of its lowest cell, the one that ends a discharge.
 
 `SoC (batmon)` (with `soh_estimator: true`) starts at each point the gauge check uses: 100 % at a
 charge limit or a full-charge anchor, the anchor's SoC at a rest near empty. Between them it counts
-the current against the Qmax estimate once one is published, the `capacity:` option until then
+the current against the Qmax estimate once one is published; until then against the usable capacity, the
+median of the last 5 spans counted between a charge limit and a discharge limit (either way round, kept if within
+0.5–1.2 × `capacity:`); without either, the `capacity:` option
 (`bmslib/estimators/soc_count.py`). The attribute `capacity_source` says which.
 
 - Unknown until the first such point, and 7 days after the last one: the replay above measured

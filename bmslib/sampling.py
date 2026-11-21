@@ -1151,6 +1151,8 @@ class BmsSampler:
             res = self.qmax.result() if self.qmax.enabled else None
             if res is not None and res.get('qmax'):
                 sc.set_capacity(res['qmax'], 'qmax')
+            elif sc.usable() is not None:
+                sc.set_capacity(sc.usable(), 'usable')
             else:
                 sc.set_capacity(self.qmax.design_capacity, 'option')
         v = sc.add(t, i_chg, sample.charge)
@@ -1159,7 +1161,8 @@ class BmsSampler:
         self._soc_count_pub = t
         publish_soc_count(self.mqtt_client, device_topic=self.mqtt_topic_prefix, soc=v, attributes=dict(
             set_by=sc.anchor and sc.anchor['kind'], set_at=sc.anchor and sc.anchor['t'],
-            set_to=sc.anchor and sc.anchor['soc'], capacity=round(sc.capacity, 1), capacity_source=sc.capacity_source))
+            set_to=sc.anchor and sc.anchor['soc'], capacity=round(sc.capacity, 1), capacity_source=sc.capacity_source,
+            usable_capacity=sc.usable(), usable_spans=len(sc.spans)))
 
     def store_soc_count_state(self, final=False):
         if self._soc_count is None:
@@ -1256,12 +1259,21 @@ class BmsSampler:
             return
         self._full_armed, self._full_hold = False, None
         self._full_reported_t = t
-        if self._soc_count is not None:
-            self._soc_count.set(t, 100.0, 'charge_limit')
+        self._limit_set(t, 100.0, 'charge_limit')
         lo = min(cells)
         self._gauge_report('charge_limit', 'the end of a charge (highest cell %.0f mV held, lowest %.0f mV)' % (hi, lo),
                            t, float(soc), 100.0, cell_high_mv=round(hi), cell_low_mv=round(lo),
                            current=round(float(i), 1))
+
+    def _limit_set(self, t: float, soc: float, kind: str):
+        sc = self._soc_count
+        if sc is None:
+            return
+        span = sc.set(t, soc, kind, ref=self.qmax.design_capacity)
+        if span is not None:
+            logger.info('%s: usable capacity: %.1f Ah from the last %s to this %s (median of %d: %.1f Ah)',
+                        self.bms.name, span, 'discharge limit' if kind == 'charge_limit' else 'charge limit',
+                        kind.replace('_', ' '), len(sc.spans), sc.usable())
 
     def _gauge_empty(self, sample: BmsSample, i: Optional[float], voltages, temp: Optional[float]):
         """The empty end (GAUGE_EMPTY_*): a rest with the lowest cell below the
@@ -1289,8 +1301,7 @@ class BmsSampler:
             return
         self._empty_armed, self._empty_rest = False, None
         lo, hi = min(cells), max(cells)
-        if self._soc_count is not None:
-            self._soc_count.set(t, 0.0, 'discharge_limit')
+        self._limit_set(t, 0.0, 'discharge_limit')
         self._gauge_report('discharge_limit', 'a rest with the lowest cell empty (%.0f mV, highest %.0f mV)' % (lo, hi),
                            t, float(soc), 0.0, cell_low_mv=round(lo), cell_high_mv=round(hi))
 

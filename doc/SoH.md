@@ -164,10 +164,13 @@ that moment as an anchor at which every cell is at SoC 100 %. A charge ends one 
 * **Cut-off.** After a bulk phase, the current drops in one sample from above the tail to about zero (at most the rest
   threshold of charge, or a load of up to C/20) after the highest cell peaked at 3550 mV or more: a BMS's
   cell-overvoltage cut, or a charger that terminates. The cut must come from at most C/4, and a cell reading taken
-  1–2 minutes later must show every cell still at 3400 mV or more. A cut at a voltage short of full (a temperature
-  or current protection at 3.38 V) is not an end.
+  1–2 minutes later must still show the pack full (below). A cut at a voltage short of full (a temperature or
+  current protection at 3.38 V) is not an end.
 
-Either way **every cell** must stand at 3400 mV or more, because the anchor gives every cell 100 %, and the cells must
+Either way the pack must read full: **every cell** at 3400 mV or more, or **the highest cell** at 3450 mV or more. The
+anchor gives every cell 100 %. On a pack that is not balanced at the top the charger stops on its highest cell and the
+others never reach 3400 mV, so there the end of the charge is taken as full: Qmax and SoH then show what the pack
+delivers from its highest cell full to its lowest empty, less than its cells hold by the imbalance. The cells must
 be at **15 °C or more**, by a temperature probe or `pack_temp_estimator`. The MOSFET temperature alone does not count
 here: during and right after a charge it runs warm from the current. The evidence is in
 `bat-impedance/top_floor_stat.py`. It looks at the maintainer's van pack (280 Ah, two cells logged, 11 charges to a top

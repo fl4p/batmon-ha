@@ -83,3 +83,46 @@ def test_a_new_capacity_changes_the_rate_not_the_soc():
     assert math.isclose(c.add(T0 + 72, -10.0, None), 49.9)  # 0.2 Ah of 200 Ah
     c.set_capacity(None, 'qmax')
     assert c.capacity == 200.0
+
+
+def test_usable_capacity_from_full_to_empty_and_back():
+    c = SocCounter(100.0)
+    c.add(T0, 0.0, None)
+    assert c.set(T0, 100.0, 'charge_limit', ref=100.0) is None
+    t = T0
+    for k in range(87 * 6):  # 87 Ah out at 60 A, 10 s apart
+        t += 10
+        c.add(t, -60.0, None)
+    assert math.isclose(c.set(t, 0.0, 'discharge_limit', ref=100.0), 87.0, abs_tol=0.2)
+    for k in range(85 * 6):
+        t += 10
+        c.add(t, 60.0, None)
+    assert math.isclose(c.set(t, 100.0, 'charge_limit', ref=100.0), 85.0, abs_tol=0.2)
+    assert math.isclose(c.usable(), 86.0, abs_tol=0.2)
+    d = SocCounter(100.0)
+    d.restore(c.get_state())
+    assert d.spans == c.spans
+
+
+def test_no_span_across_a_broken_count_an_ocv_point_or_an_implausible_one():
+    c = SocCounter(100.0)
+    c.add(T0, 0.0, None)
+    c.set(T0, 100.0, 'charge_limit', ref=100.0)
+    c.add(T0 + 10, -60.0, None)
+    c.add(T0 + 1000, -60.0, None)  # a gap: count lost
+    c.set(T0 + 1000, 0.0, 'discharge_limit', ref=100.0)
+    assert c.spans == []
+    c.add(T0 + 1010, 60.0, None)
+    c.set(T0 + 1010, 10.0, 'ocv', ref=100.0)  # not a limit
+    c.add(T0 + 1020, 60.0, None)
+    c.set(T0 + 1020, 100.0, 'charge_limit', ref=100.0)
+    assert c.spans == []
+    c.add(T0 + 1030, -60.0, None)
+    assert c.set(T0 + 1030, 0.0, 'discharge_limit', ref=100.0) is None  # 0.2 Ah: no span
+    assert c.spans == []
+
+
+def test_a_state_without_the_count_since_its_set_point_takes_it_from_the_soc():
+    c = SocCounter(280.0)
+    c.restore(dict(soc=13.3, anchor=dict(kind='charge_limit', t=T0, soc=100.0), t=T0, i=0.0, c=None, capacity=280.0))
+    assert math.isclose(c.ah, -242.76, abs_tol=0.01)

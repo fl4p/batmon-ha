@@ -22,6 +22,14 @@ BRIDGE_MAX_S = 30 * 60.0
 BRIDGE_TOL_REL = 0.5
 BRIDGE_TOL_C = 0.02
 SOC_COUNT_MAX_AGE_S = 7 * 86400.0
+# Usable capacity: the Ah counted, unbroken, between a charge limit (100 %) and a
+# discharge limit (0 %), either way round: what the pack delivers from its highest
+# cell full to its lowest empty. Median of the last USABLE_N spans; a span outside
+# USABLE_REL x the configured capacity is not kept (a count that drifted, or a
+# limit that was not one).
+LIMITS = ('charge_limit', 'discharge_limit')
+USABLE_N = 5
+USABLE_REL = (0.5, 1.2)
 
 
 def _finite(x) -> bool:
@@ -35,18 +43,39 @@ class SocCounter:
         self.anchor: Optional[dict] = None  # kind, t, soc of the last set point
         self.capacity_source = 'option'
         self._t = self._i = self._c = None
+        self.ah = 0.0  # counted since the last set point (charge-positive)
+        self.spans: list = []  # usable capacity spans [Ah], newest last
+
+    def usable(self) -> Optional[float]:
+        if not self.spans:
+            return None
+        v = sorted(self.spans)
+        n = len(v)
+        return v[n // 2] if n % 2 else 0.5 * (v[n // 2 - 1] + v[n // 2])
 
     def set_capacity(self, capacity: Optional[float], source: str):
         """What the count runs against from now on; the SoC so far stays."""
         if _finite(capacity) and capacity > 0:
             self.capacity, self.capacity_source = float(capacity), source
 
-    def set(self, t: float, soc: float, kind: str):
-        """The SoC at t (what came before t is in it: the next add counts from t)."""
+    def set(self, t: float, soc: float, kind: str, ref: Optional[float] = None) -> Optional[float]:
+        """The SoC at t (what came before t is in it: the next add counts from t).
+        A limit right after the opposite one, counted unbroken in between, adds
+        a usable capacity span (returned) if within USABLE_REL x ref."""
+        span = None
+        prev = self.anchor['kind'] if self.anchor else None
+        if kind in LIMITS and prev in LIMITS and kind != prev and self.soc is not None:
+            span = abs(self.ah)
+            if _finite(ref) and ref > 0 and USABLE_REL[0] * ref <= span <= USABLE_REL[1] * ref:
+                self.spans = (self.spans + [round(span, 2)])[-USABLE_N:]
+            else:
+                span = None
+        self.ah = 0.0
         self.soc = min(100.0, max(0.0, float(soc)))
         self.anchor = dict(kind=kind, t=t, soc=round(self.soc, 1))
         if self._t is not None and t >= self._t:
             self._t = t
+        return span
 
     def add(self, t: float, i: Optional[float], charge: Optional[float]) -> Optional[float]:
         """One sample (i: charge-positive current [A], charge: the BMS's
@@ -71,6 +100,7 @@ class SocCounter:
             if dq is None:
                 self.soc = None
             else:
+                self.ah += dq
                 self.soc = min(100.0, max(0.0, self.soc + 100.0 * dq / self.capacity))
         if self.soc is not None and (self.anchor is None or t - self.anchor['t'] > SOC_COUNT_MAX_AGE_S):
             self.soc = None
@@ -80,12 +110,23 @@ class SocCounter:
         return self.soc
 
     def get_state(self) -> dict:
-        return dict(soc=self.soc, anchor=self.anchor, t=self._t, i=self._i, c=self._c, capacity=self.capacity)
+        return dict(soc=self.soc, anchor=self.anchor, t=self._t, i=self._i, c=self._c, capacity=self.capacity,
+                    ah=self.ah, spans=self.spans)
 
     def restore(self, st: dict):
         """A saved count, continued across the restart under the gap rules
         above (the capacity is not state: the sampler sets it)."""
-        if not isinstance(st, dict) or not _finite(st.get('soc')):
+        if not isinstance(st, dict):
             return
+        spans = st.get('spans')
+        if isinstance(spans, list):
+            self.spans = [float(x) for x in spans if _finite(x) and x > 0][-USABLE_N:]
+        if not _finite(st.get('soc')):
+            return
+        if _finite(st.get('ah')):
+            self.ah = float(st['ah'])
+        elif isinstance(st.get('anchor'), dict) and _finite(st['anchor'].get('soc')) and self.capacity:
+            # a state from before `ah` was kept: what the SoC moved since its set point
+            self.ah = (float(st['soc']) - float(st['anchor']['soc'])) * self.capacity / 100.0
         self.soc, self.anchor = float(st['soc']), st.get('anchor')
         self._t, self._i, self._c = st.get('t'), st.get('i'), st.get('c')

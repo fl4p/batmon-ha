@@ -3425,10 +3425,11 @@ def _imbalanced(offset, cut=False, n=3):
 
 
 @pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
-def test_a_cell_short_of_full_refuses_the_top_anchor(top_anchors, cut):
-    """5 % below the others: at the tail it sits on the plateau, under 3400
-    mV; after a BMS cut (aTTx: a runner at 3671 mV) it falls there within a
-    minute."""
+def test_a_cell_short_of_full_refuses_the_top_anchor(top_anchors, cut, monkeypatch):
+    """By every cell (TOP_CELL_MIN_MV; the highest-cell rule off): 5 % below
+    the others, at the tail it sits on the plateau, under 3400 mV; after a BMS
+    cut (aTTx: a runner at 3671 mV) it falls there within a minute."""
+    monkeypatch.setattr(q, 'TOP_HIGH_MIN_MV', math.inf)
     est, pub = run_lfp(_imbalanced(5.0, cut=cut))
     assert not tops(est) and not est.segments and pub == []
     assert est.counts['top_cut_not_full' if cut else 'anchor_top'] == (3 if cut else 0)
@@ -3442,7 +3443,25 @@ def test_calibration_with_the_floor_on_the_highest_cell_only_the_low_cell_is_tak
     assert pub and pub[-1]['qmax'] < 0.95 * 100.0 and pub[-1]['limiting_cell'] == 3
 
 
-def test_monotone_in_how_far_a_cell_is_short_of_full(top_anchors):
+@pytest.mark.parametrize('cut', [False, True], ids=['tail', 'cut-off'])
+def test_a_pack_not_balanced_at_the_top_is_full_by_its_highest_cell(top_anchors, cut):
+    """The same pack by TOP_HIGH_MIN_MV: its charge ends with the highest cell
+    full, and that is where it is full (2026-11-21)."""
+    est, pub = run_lfp(_imbalanced(5.0, cut=cut))
+    assert tops(est)
+
+
+def test_monotone_in_the_highest_cell_floor(top_anchors, monkeypatch):
+    def ok(floor):
+        monkeypatch.setattr(q, 'TOP_HIGH_MIN_MV', floor)
+        return bool(tops(run_lfp(_imbalanced(5.0, n=1))[0]))
+    verdicts = [ok(f) for f in (3400.0, 3450.0, 3500.0, 3700.0, math.inf)]
+    _monotone(verdicts)
+    assert verdicts[0] and not verdicts[-1]
+
+
+def test_monotone_in_how_far_a_cell_is_short_of_full(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_HIGH_MIN_MV', math.inf)  # the every-cell rule alone
     verdicts = [bool(tops(run_lfp(_imbalanced(off, n=1))[0])) for off in (0.0, 0.1, 0.3, 0.5, 1.0, 2.0, 5.0, 30.0)]
     _monotone(verdicts)
     assert verdicts[0] and not verdicts[-1]
@@ -3483,7 +3502,8 @@ def _fast_relaxing_cut(offset=3.0, i_cut=20.0, r1=4.0):
                       socs=[99.6, 99.6, 99.6 - offset, 99.6]).rows
 
 
-def test_a_cut_off_is_judged_a_minute_after_the_cut(top_anchors):
+def test_a_cut_off_is_judged_a_minute_after_the_cut(top_anchors, monkeypatch):
+    monkeypatch.setattr(q, 'TOP_HIGH_MIN_MV', math.inf)  # the every-cell rule alone
     est, _ = run_lfp(_fast_relaxing_cut())
     assert not tops(est) and est.counts['top_cut_not_full'] == 1
 
@@ -3578,10 +3598,11 @@ def test_a_top_anchor_needs_a_known_temperature(top_anchors):
     assert not tops(est) and est.counts['top_temp_range'] == 1
 
 
-def test_a_cut_off_is_judged_on_a_reading_taken_after_it(top_anchors):
+def test_a_cut_off_is_judged_on_a_reading_taken_after_it(top_anchors, monkeypatch):
     """Rev9 (M4): with the voltage fetches failing after the cut, the reading
     at the cut (polarised, the short cell still at 3415 mV) must not stand in
     for the check a minute later."""
+    monkeypatch.setattr(q, 'TOP_HIGH_MIN_MV', math.inf)  # the every-cell rule alone
     rows = _fast_relaxing_cut()
     k = next(j for j in range(1, len(rows)) if rows[j - 1][1] < -5 and abs(rows[j][1]) < 1.5
              and max(rows[j - 1][2]) > 3550)

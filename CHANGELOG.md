@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* `soh_estimator`: a charge also ends full with only the highest cell at 3.45 V or more, so Qmax and SoH include a pack's imbalance.
+* `SoC (batmon)` counts against the usable capacity measured between a charge limit and a discharge limit until there is a Qmax estimate.
 * SoC gauge error and `SoC (batmon)`: also 0 % at a rest of 10 min or more with the lowest cell at 2.95 V or less, below the end of the OCV curve.
 * With `soh_estimator`: a `SoC (batmon)` sensor, set at each SoC gauge check point and counted between them against the Qmax estimate, or `capacity:` until there is one.
 * SoC gauge error: also checked, as 100 %, when a charge ends with the highest cell held at 3.45 V or more for 3 min, so packs not balanced at the top get it too.
