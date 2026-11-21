@@ -107,3 +107,27 @@ def test_a_reply_for_another_setting_is_refused():
     _answering(bms, REPLY_CELL_UVP_2900)
     with pytest.raises(ValueError):
         asyncio.run(bms.read_setting(0x009E))
+
+
+def test_a_reply_starting_in_the_previous_notification_is_kept():
+    """ant24 (sw 20PHUB00-211026A) through an ESPHome proxy: the 0x42 reply to a
+    capacity write began with the last two bytes of the auth reply's notification."""
+    bms = _bms()
+    bms._notification_handler(None, bytes.fromhex('7ea1436a010205001e5cff0500002031aa557ea1'))
+    bms._notification_handler(None, bytes.fromhex('42a20004 40679a0e 47ff ff0a00001032aa55'))
+    from bmslib.models.ant import _ant_setting_value
+    assert _ant_setting_value(bms._last_response, 0x00A2) == 245_000_000
+
+
+def test_write_setting_reply_split_after_the_auth_reply():
+    bms = _bms()
+    w = bms.client.write_gatt_char
+
+    async def write(char, data, response=True):
+        await w(char, data, response)
+        if bytes(data) != AUTH:
+            bms._notification_handler(None, bytes.fromhex('7ea1436a010205001e5cff0500002031aa557ea1'))
+            bms._notification_handler(None, bytes.fromhex('42a2000440679a0e47ffff0a00001032aa55'))
+
+    bms.client.write_gatt_char = write
+    assert asyncio.run(bms.write_setting(0x00A2, 245_000_000)) == 245_000_000

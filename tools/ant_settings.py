@@ -54,14 +54,20 @@ def _parse_writes(items):
     return out
 
 
-async def run(address, writes, adapter=None):
-    proxies = _proxies()
+async def run(address, writes, proxies, adapter=None, trace=False):
     if proxies is not None:
         from bmslib.ble.esphome_proxy import start_proxies
         await start_proxies(proxies)
         await asyncio.sleep(5)  # let the proxies report advertisements
     from bmslib.models.ant import AntBt, ANT_SETTINGS
     bms = AntBt(address, name='ant', keep_alive=False, verbose_log=False, adapter=adapter)
+    if trace:
+        handler = bms._notification_handler
+
+        def traced(sender, data):
+            print('RX', bytes(data).hex(' '))
+            handler(sender, data)
+        bms._notification_handler = traced
     try:
         await bms.connect()
         print(await bms.fetch_device_info())
@@ -92,9 +98,11 @@ def main():
     ap.add_argument('address', help='BMS MAC address')
     ap.add_argument('--write', action='append', metavar='NAME=RAW',
                     help='register name (or address) = raw value; repeatable')
+    ap.add_argument('--trace', action='store_true', help='print every frame the BMS sends')
     args = ap.parse_args()
-    sys.exit(asyncio.run(run(args.address, _parse_writes(args.write),
-                             adapter=os.environ.get('BATMON_ADAPTER') or None)))
+    proxies = _proxies()  # before anything imports bleak (bmslib.models.ant does)
+    sys.exit(asyncio.run(run(args.address, _parse_writes(args.write), proxies,
+                             adapter=os.environ.get('BATMON_ADAPTER') or None, trace=args.trace)))
 
 
 if __name__ == '__main__':

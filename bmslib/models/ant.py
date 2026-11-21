@@ -160,12 +160,18 @@ class AntBt(BtBms):
         crc_exp = list(buf[frame_len - 4:frame_len - 2])
 
         self._last_response = buf[:]
+        # the next frame can start in the same notification, after this one's tail
+        # (ant24 sent its 0x42 write reply's first two bytes after the 0x43 auth reply)
+        nxt = buf.find(b'\x7E\xA1', frame_len - 2)
+        rest = bytes(buf[nxt:]) if nxt >= 0 else b''
         self._buffer.clear()
 
         if crc != crc_exp:
             self.logger.warning('CRC16 error: %s != %s (expected)', crc, crc_exp)
         else:
             self._fetch_futures.set_result(func, self._last_response)
+        if rest:
+            self._notification_handler(sender, rest)
 
     async def connect(self, timeout=20, **kwargs):
         # await super().connect(**kwargs)
