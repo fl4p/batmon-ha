@@ -37,8 +37,53 @@ def calc_crc16(data: bytes):
 
 class AntCommandFuncs(enum.Enum):
     Status = 0x01
-    DeviceInfo = 0x02
+    DeviceInfo = 0x02  # also reads a settings register (len = its size), answered with 0x12
+    WriteSetting = 0x22  # answered with 0x42 echoing the value
     WriteRegister = 0x51
+
+
+# Settings registers of the 7E A1 protocol, u16 unless listed in ANT_SETTING_U32
+# (syssi/esphome-ant-bms issue #18 and components/ant_bms_ble/ant_bms_ble.cpp).
+ANT_SETTINGS = dict(
+    cell_ovp=0x0000,  # mV
+    cell_ovp_recovery=0x0002,
+    cell_uvp=0x000C,
+    cell_uvp_recovery=0x000E,
+    cell_uvp_l2=0x0010,
+    cell_uvp_l2_recovery=0x0012,
+    pack_uvp=0x0014,  # 0.1 V
+    pack_uvp_recovery=0x0016,
+    cell_uv_warning=0x0028,
+    soc_low_warning_1=0x0084,
+    soc_low_warning_2=0x0086,
+    shutdown_voltage=0x009E,  # mV
+    nominal_capacity=0x00A2,
+    remaining_capacity=0x00A6,
+    cycle_capacity=0x00AA,
+    soc_method=0x00C4,
+)
+ANT_SETTING_U32 = (0x00A2, 0x00A6, 0x00AA)
+
+
+def _ant_setting_size(addr: int) -> int:
+    return 4 if addr in ANT_SETTING_U32 else 2
+
+
+def _ant_write_setting_frame(addr: int, value: int) -> bytes:
+    """7E A1 22 <addr LE> <len> <value LE> <crc16> AA 55, as the ANT app sends it."""
+    n = _ant_setting_size(addr)
+    frame = bytes([0x7e, 0xa1, AntCommandFuncs.WriteSetting.value, addr & 0xff, (addr >> 8) & 0xff, n]) \
+        + int(value).to_bytes(n, 'little', signed=value < 0)
+    return frame + bytes(calc_crc16(frame[1:]) + [0xaa, 0x55])
+
+
+def _ant_setting_value(buf: bytes, addr: int) -> int:
+    """The value of a 0x12 (read) or 0x42 (write) reply for addr; ValueError if it is not one."""
+    n = _ant_setting_size(addr)
+    if len(buf) < 6 + n or buf[2] not in (0x12, 0x42) or int.from_bytes(buf[3:5], 'little') != addr \
+            or buf[5] != n:
+        raise ValueError('not a reply for setting 0x%04X: %s' % (addr, to_hex_str(bytes(buf))))
+    return int.from_bytes(buf[6:6 + n], 'little')
 
 
 def _ant_command(func: AntCommandFuncs, addr, value):
@@ -283,6 +328,23 @@ class AntBt(BtBms):
             await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
             await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0),
                                               response=False)
+
+    async def read_setting(self, addr: int) -> int:
+        """A settings register (ANT_SETTINGS), raw."""
+        buf = await self._q(AntCommandFuncs.DeviceInfo, addr, _ant_setting_size(addr), resp_code=0x12)
+        return _ant_setting_value(buf, addr)
+
+    async def write_setting(self, addr: int, value: int) -> int:
+        """Write a settings register (raw) after the auth frame; returns the value
+        the BMS echoes. The reply's trailing error code reads 0x0A whether or not
+        the write took (issue #18), so read it back to check."""
+        with await self._fetch_futures.acquire_timeout(0x42, timeout=self.TIMEOUT / 2):
+            async with self._write_lock:
+                await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
+                await self.client.write_gatt_char(self.char, data=_ant_write_setting_frame(addr, value),
+                                                  response=False)
+            buf = await self._fetch_futures.wait_for(0x42, self.TIMEOUT)
+        return _ant_setting_value(buf, addr)
 
     def debug_data(self):
         return self._last_response
