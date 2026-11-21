@@ -4523,3 +4523,43 @@ def test_a_charge_is_reported_once_by_the_limit_and_the_full_charge_anchor(monke
     s.qmax.anchors.append(dict(t=T0 + 8000, kind='top', soc=[100.0, 100.0]))  # another charge
     s._check_gauge(_soc_sample(T0 + 8010, 95.0))
     assert len(out) == 2
+
+
+def _rest(s, t0, n, lo=2800.0, i=-0.5, temp=20.0, soc=13.2, cells_every=10):
+    """n 1 s samples of a rest after a deep discharge (100 Ah: rest current 1 A, x2 allowed)."""
+    for k in range(n):
+        cells = [lo, lo + 300.0, lo + 100.0] if k % cells_every == 0 else None
+        s._gauge_empty(BmsSample(voltage=24.0, current=-i, soc=soc, timestamp=t0 + k), i, cells, temp)
+
+
+def test_a_rest_with_the_lowest_cell_below_the_curve_reads_0(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    _rest(s, T0, 590)
+    assert out == []
+    _rest(s, T0 + 590, 20)
+    assert len(out) == 1 and out[0][0] == 13.2 and out[0][1]['anchor'] == 'discharge_limit'
+    assert out[0][1]['cell_low_mv'] == 2800 and s._soc_count.soc == 0.0
+    _rest(s, T0 + 700, 900)
+    assert len(out) == 1  # once per discharge
+    _rest(s, T0 + 2000, 20, lo=3300.0)  # charged: re-armed
+    _rest(s, T0 + 3000, 700)
+    assert len(out) == 2
+
+
+@pytest.mark.parametrize('bad', [dict(lo=2960.0), dict(i=-5.0), dict(i=5.0), dict(temp=None), dict(temp=5.0),
+                                 dict(soc=math.nan)])
+def test_no_empty_reading_without_a_rest_below_the_curve(monkeypatch, bad):
+    s, out, pub = _count_sampler(monkeypatch)
+    _rest(s, T0, 1200, **bad)
+    assert out == []
+
+
+def test_a_load_or_a_gap_restarts_the_empty_rest(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    _rest(s, T0, 500)
+    _rest(s, T0 + 500, 1, i=-30.0)  # a load in between
+    _rest(s, T0 + 501, 500)
+    assert out == []
+    _rest(s, T0 + 2000, 500)
+    _rest(s, T0 + 2570, 300)  # 70 s without a sample
+    assert out == []

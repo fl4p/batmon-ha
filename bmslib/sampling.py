@@ -172,6 +172,18 @@ GAUGE_FULL_I_MAX_C = 0.075
 GAUGE_FULL_REARM_MV = 3400.0
 GAUGE_FULL_TEMP = (15.0, 45.0)
 SOC_COUNT_PUBLISH_S = 30.0
+# The empty end (_gauge_empty): a rest with the lowest cell at GAUGE_EMPTY_CELL_MV or
+# less. The OCV curve ends at ~3080 mV (its 0 %), and after a discharge a resting cell
+# only recovers upwards, by tens of mV: one still below 2950 mV after
+# GAUGE_EMPTY_REST_S has at most a percent or two left. 0 % from there, until a
+# deeper discharge says otherwise. Rest: every sample within REST_ABS_FACTOR x qmax's
+# rest current, no gap over GAUGE_FULL_GAP_S; at least GAUGE_EMPTY_TEMP_MIN (the
+# curve's range starts at 10 degC; a cold cell reads low). Once per discharge:
+# re-armed above GAUGE_EMPTY_REARM_MV.
+GAUGE_EMPTY_CELL_MV = 2950.0
+GAUGE_EMPTY_REST_S = 600.0
+GAUGE_EMPTY_TEMP_MIN = 10.0
+GAUGE_EMPTY_REARM_MV = 3200.0
 GAUGE_SAME_CHARGE_S = 3600.0  # a Qmax full-charge anchor this close to a charge limit is the same charge
 
 class BmsSampler:
@@ -344,6 +356,8 @@ class BmsSampler:
         self._full_hold: Optional[list] = None
         self._full_armed = True
         self._full_reported_t: Optional[float] = None  # the last charge limit reported
+        self._empty_rest: Optional[list] = None  # _gauge_empty: [rest start, last t]
+        self._empty_armed = True
         # batmon's own SoC (soc_count.py): set at each gauge check point, counted between
         from bmslib.estimators.soc_count import SocCounter
         self._soc_count = SocCounter(self.qmax.design_capacity) if self.qmax else None
@@ -1117,6 +1131,7 @@ class BmsSampler:
         i_chg = -float(current) if current is not None and math.isfinite(current) else None
         self._check_gauge(sample)
         self._gauge_full(sample, i_chg, voltages, temp if not temp_mos else None)
+        self._gauge_empty(sample, i_chg, voltages, temp if not temp_mos else None)
         self._count_soc(sample, i_chg)
         if r is not None:
             self._qmax_clear = None  # a new estimate replaces the cleared one
@@ -1247,6 +1262,37 @@ class BmsSampler:
         self._gauge_report('charge_limit', 'the end of a charge (highest cell %.0f mV held, lowest %.0f mV)' % (hi, lo),
                            t, float(soc), 100.0, cell_high_mv=round(hi), cell_low_mv=round(lo),
                            current=round(float(i), 1))
+
+    def _gauge_empty(self, sample: BmsSample, i: Optional[float], voltages, temp: Optional[float]):
+        """The empty end (GAUGE_EMPTY_*): a rest with the lowest cell below the
+        OCV curve's foot is 0 %, whatever the other cells read. i: the
+        charge-positive current [A]. Unknown current, SoC or temperature end
+        the rest; samples without cell voltages only check those."""
+        t, soc = sample.timestamp, sample.soc
+        est = self.qmax
+        from bmslib.estimators.qmax import REST_ABS_FACTOR
+        rest = REST_ABS_FACTOR * est.rest_current()
+        ok = (self._empty_armed and i is not None and abs(i) <= rest and temp is not None
+              and temp >= GAUGE_EMPTY_TEMP_MIN and soc is not None and math.isfinite(soc))
+        r = self._empty_rest
+        if not ok or (r is not None and t - r[1] > GAUGE_FULL_GAP_S):
+            self._empty_rest = r = None
+        cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
+        if cells and min(cells) > GAUGE_EMPTY_REARM_MV:
+            self._empty_armed = True
+        if not ok:
+            return
+        if r is None:
+            self._empty_rest = r = [t, t]
+        r[1] = t
+        if not cells or t - r[0] < GAUGE_EMPTY_REST_S or min(cells) > GAUGE_EMPTY_CELL_MV:
+            return
+        self._empty_armed, self._empty_rest = False, None
+        lo, hi = min(cells), max(cells)
+        if self._soc_count is not None:
+            self._soc_count.set(t, 0.0, 'discharge_limit')
+        self._gauge_report('discharge_limit', 'a rest with the lowest cell empty (%.0f mV, highest %.0f mV)' % (lo, hi),
+                           t, float(soc), 0.0, cell_low_mv=round(lo), cell_high_mv=round(hi))
 
     def _withdraw_qmax(self):
         """Clear what may no longer be published (the estimator says why, once)
