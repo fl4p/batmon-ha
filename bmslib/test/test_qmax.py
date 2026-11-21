@@ -4584,3 +4584,52 @@ def test_a_load_or_a_gap_restarts_the_empty_rest(monkeypatch):
     _rest(s, T0 + 2000, 500)
     _rest(s, T0 + 2570, 300)  # 70 s without a sample
     assert out == []
+
+
+def _load(s, t0, n, lo=2550.0, i=-30.0, temp=20.0, soc=8.0, cells_every=10):
+    """n 1 s samples of a discharge with the lowest cell low (100 Ah: 0.2C = 20 A)."""
+    for k in range(n):
+        cells = [lo, lo + 400.0, lo + 200.0] if k % cells_every == 0 else None
+        s._gauge_empty(BmsSample(voltage=24.0, current=-i, soc=soc, timestamp=t0 + k), i, cells, temp)
+
+
+def test_a_load_with_the_lowest_cell_empty_reads_0(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    _load(s, T0, 25, i=-15.0)
+    assert out == []  # 30 s not yet held
+    _load(s, T0 + 25, 20, i=-15.0)
+    assert len(out) == 1 and out[0][1]['anchor'] == 'discharge_limit' and out[0][1]['current'] == -15.0
+    assert s._soc_count.soc == 0.0
+    _load(s, T0 + 100, 600, i=-15.0)
+    _rest(s, T0 + 800, 900)
+    assert len(out) == 1  # once per discharge, the rest after it included
+
+
+@pytest.mark.parametrize('bad', [dict(lo=2610.0), dict(i=-25.0), dict(i=-0.0), dict(i=5.0), dict(temp=None),
+                                 dict(temp=5.0), dict(soc=math.nan), dict(lo=2600.0, i=-19.0)])
+def test_no_empty_reading_under_load_outside_the_bound(monkeypatch, bad):
+    """Above 2600 mV; over 0.2C; no discharge; charging; temperature; SoC;
+    and 2600 mV at 19 A, whose bound 2600 + 95 is still 2695 (passes) -- so
+    that last one must fire: it is the control."""
+    s, out, pub = _count_sampler(monkeypatch)
+    _load(s, T0, 200, **bad)
+    if bad == dict(lo=2600.0, i=-19.0):
+        assert len(out) == 1
+    else:
+        assert out == []
+
+
+def test_the_bound_refuses_a_low_reading_under_a_big_load(monkeypatch):
+    import bmslib.sampling as smp
+    monkeypatch.setattr(smp, 'GAUGE_EMPTY_LOAD_I_MAX_C', 10.0)
+    s, out, pub = _count_sampler(monkeypatch)
+    _load(s, T0, 200, lo=2550.0, i=-90.0)  # 2550 + 450 = 3000 mV > 2950: could be a loaded cell with charge left
+    assert out == []
+
+
+def test_one_reading_above_ends_the_load_hold(monkeypatch):
+    s, out, pub = _count_sampler(monkeypatch)
+    _load(s, T0, 25, i=-15.0)
+    s._gauge_empty(BmsSample(voltage=24.0, current=15.0, soc=8.0, timestamp=T0 + 25), -15.0, [2700.0, 3000.0], 20.0)
+    _load(s, T0 + 26, 25, i=-15.0)
+    assert out == []

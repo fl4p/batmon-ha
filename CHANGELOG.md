@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* The discharge limit (0 %) also fires under load: the lowest cell at 2.6 V or less for 30 s at up to 0.2C.
 * `soh_estimator`: a charge also ends full with only the highest cell at 3.45 V or more, so Qmax and SoH include a pack's imbalance.
 * `SoC (batmon)` counts against the usable capacity measured between a charge limit and a discharge limit until there is a Qmax estimate.
 * SoC gauge error and `SoC (batmon)`: also 0 % at a rest of 10 min or more with the lowest cell at 2.95 V or less, below the end of the OCV curve.

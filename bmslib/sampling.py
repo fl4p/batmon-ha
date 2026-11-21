@@ -184,6 +184,19 @@ GAUGE_EMPTY_CELL_MV = 2950.0
 GAUGE_EMPTY_REST_S = 600.0
 GAUGE_EMPTY_TEMP_MIN = 10.0
 GAUGE_EMPTY_REARM_MV = 3200.0
+# ... or under load: a cell reads its resting voltage less I x R, so at rest it would
+# read at most the loaded value plus I x GAUGE_EMPTY_R_MAX_OHM. Empty when that bound
+# is GAUGE_EMPTY_CELL_MV or less while the lowest cell stands at GAUGE_EMPTY_LOAD_MV
+# or less, discharging at up to GAUGE_EMPTY_LOAD_I_MAX_C, for GAUGE_EMPTY_LOAD_S
+# (GAUGE_EMPTY_LOAD_READINGS cell readings). 5 mOhm: the van's 280 Ah cells measure
+# ~1.4 mOhm (cell resistance estimator) and ~2 mOhm on the plateau (doc/SoH.md); the
+# knee and the polarisation of a long load add, so 2.5-3.5x that. At 0.2C on 280 Ah
+# (56 A) 2600 mV bounds 2880 mV.
+GAUGE_EMPTY_LOAD_MV = 2600.0
+GAUGE_EMPTY_R_MAX_OHM = 0.005
+GAUGE_EMPTY_LOAD_I_MAX_C = 0.2
+GAUGE_EMPTY_LOAD_S = 30.0
+GAUGE_EMPTY_LOAD_READINGS = 3
 GAUGE_SAME_CHARGE_S = 3600.0  # a Qmax full-charge anchor this close to a charge limit is the same charge
 
 class BmsSampler:
@@ -357,6 +370,7 @@ class BmsSampler:
         self._full_armed = True
         self._full_reported_t: Optional[float] = None  # the last charge limit reported
         self._empty_rest: Optional[list] = None  # _gauge_empty: [rest start, last t]
+        self._empty_load: Optional[list] = None  # ... under load: [start, last cell reading t, readings]
         self._empty_armed = True
         # batmon's own SoC (soc_count.py): set at each gauge check point, counted between
         from bmslib.estimators.soc_count import SocCounter
@@ -1279,7 +1293,9 @@ class BmsSampler:
         """The empty end (GAUGE_EMPTY_*): a rest with the lowest cell below the
         OCV curve's foot is 0 %, whatever the other cells read. i: the
         charge-positive current [A]. Unknown current, SoC or temperature end
-        the rest; samples without cell voltages only check those."""
+        the rest; samples without cell voltages only check those. Under load:
+        _gauge_empty_load."""
+        self._gauge_empty_load(sample, i, voltages, temp)
         t, soc = sample.timestamp, sample.soc
         est = self.qmax
         from bmslib.estimators.qmax import REST_ABS_FACTOR
@@ -1304,6 +1320,35 @@ class BmsSampler:
         self._limit_set(t, 0.0, 'discharge_limit')
         self._gauge_report('discharge_limit', 'a rest with the lowest cell empty (%.0f mV, highest %.0f mV)' % (lo, hi),
                            t, float(soc), 0.0, cell_low_mv=round(lo), cell_high_mv=round(hi))
+
+    def _gauge_empty_load(self, sample: BmsSample, i: Optional[float], voltages, temp: Optional[float]):
+        """The empty end under load (GAUGE_EMPTY_LOAD_*, GAUGE_EMPTY_R_MAX_OHM).
+        Every cell reading must pass; one that does not, a current outside the
+        band, an unknown SoC or temperature, or a gap ends it."""
+        t, soc, cap = sample.timestamp, sample.soc, self.qmax.design_capacity
+        ok = (self._empty_armed and cap and i is not None and -GAUGE_EMPTY_LOAD_I_MAX_C * cap <= i < 0
+              and temp is not None and temp >= GAUGE_EMPTY_TEMP_MIN and soc is not None and math.isfinite(soc))
+        r = self._empty_load
+        cells = [v for v in (voltages or ()) if v is not None and math.isfinite(v) and v > 0]
+        if cells and ok:
+            lo = min(cells)
+            ok = lo <= GAUGE_EMPTY_LOAD_MV and lo + 1000.0 * abs(i) * GAUGE_EMPTY_R_MAX_OHM <= GAUGE_EMPTY_CELL_MV
+        if not ok or (r is not None and t - r[1] > GAUGE_FULL_GAP_S):
+            self._empty_load = None
+            return
+        if not cells:
+            return  # (the current was checked; the hold runs from cell reading to cell reading)
+        if r is None:
+            self._empty_load = r = [t, t, 0]
+        r[1], r[2] = t, r[2] + 1
+        if t - r[0] < GAUGE_EMPTY_LOAD_S or r[2] < GAUGE_EMPTY_LOAD_READINGS:
+            return
+        self._empty_armed, self._empty_load, self._empty_rest = False, None, None
+        lo, hi = min(cells), max(cells)
+        self._limit_set(t, 0.0, 'discharge_limit')
+        self._gauge_report('discharge_limit', 'a load with the lowest cell empty (%.0f mV at %.1f A, highest %.0f mV)'
+                           % (lo, -i, hi), t, float(soc), 0.0, cell_low_mv=round(lo), cell_high_mv=round(hi),
+                           current=round(float(i), 1))
 
     def _withdraw_qmax(self):
         """Clear what may no longer be published (the estimator says why, once)

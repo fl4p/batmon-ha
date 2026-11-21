@@ -75,7 +75,7 @@ of its lowest cell, the one that ends a discharge.
   is skipped and not counted as a zero error.
 - Anchors restored from the saved state are not checked again.
 - **Charge limit.** A charge that ends with the highest cell held at 3.45 V or more for 3 minutes, at 0.075C or less and 15–45 °C, is also checked, as 100 %, whatever the other cells read (attribute `anchor: charge_limit`, with both cells' voltages). On a pack that is not balanced at the top the charger stops on that cell, so this is where the pack is full in use, the way a Victron monitor syncs. Once per charge.
-- **Discharge limit.** A rest of 10 minutes or more (current within twice the Qmax rest current, 10 °C or warmer) that ends with the lowest cell at 2.95 V or less is checked as 0 % (attribute `anchor: discharge_limit`). The OCV curve ends at about 3.08 V, and a resting cell only recovers upwards, so such a cell has a percent or two left at most. Once per discharge.
+- **Discharge limit.** A rest of 10 minutes or more (current within twice the Qmax rest current, 10 °C or warmer) that ends with the lowest cell at 2.95 V or less is checked as 0 % (attribute `anchor: discharge_limit`). The OCV curve ends at about 3.08 V, and a resting cell only recovers upwards, so such a cell has a percent or two left at most. Under load it also fires when the lowest cell stands at 2.6 V or less for 30 s at a discharge of up to 0.2C, if its voltage plus the current times 5 mΩ is 2.95 V or less: a loaded cell reads its resting voltage less I × R, so at rest it would read no more than that. Once per discharge.
 - A full-charge anchor is full as the charger defines it, which can be a few percent below the
   cells' own full (doc/SoH.md). An error of a few pp there is noise.
 
