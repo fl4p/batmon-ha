@@ -28,7 +28,8 @@ OCV curve is one fixed table, not a per-chemistry-ID database.
 
 Anchors (relaxed rests) -- each rule exists because the prototype produced a
 plausible wrong number without it:
- * |I| stays below the rest threshold for at least MIN_REST_S (90 min). LFP
+ * |I| stays below the rest threshold for at least MIN_REST_S (90 min; 60
+   near empty, MIN_REST_BOTTOM_S). LFP
    relaxes slowly; at 30 min the top of the charge was still polarised, and
    the curve built from those rests biased Qmax to 210 Ah instead of the
    280-300 Ah four independent methods agree on (WHITEPAPER 8.3).
@@ -279,6 +280,14 @@ MIN_SLOPE_MV_PER_PCT = 5.0  # both ends on a steep knee (prototype TODO, tighten
 # ---------------------------------------------------------------- anchors
 REST_BIN_S = 60.0  # rest detection and the relaxation fit work on minute bins
 MIN_REST_S = 90 * 60.0
+# Near empty 60 min is enough: every cell ending a rest below BOTTOM_REST_MAX_MV
+# (the curve at 30 % SoC, below the plateau) is on the bottom knee, where a
+# fleet replay found p95 |SoC error| <= 2 % from 60 min on in every subgroup,
+# also after a discharge over C/10 (bat-impedance report/rest_duration_bottom.md,
+# 197 rests on 28 packs and the van; 30 min failed after heavy discharge, 45 on
+# the van). The top keeps 90 min: the charge polarisation above.
+MIN_REST_BOTTOM_S = 60 * 60.0
+BOTTOM_REST_MAX_MV = OCV_RAW_MV[70]
 # Rest threshold: min(REST_I_MAX_A, capacity / 100). 1.5 A is the prototype's
 # rest threshold, the one the curve above was built with, on a 280 Ah pack
 # (C/190): an anchor must not be looser than its curve. C/100 for smaller
@@ -1816,7 +1825,7 @@ class QmaxEstimator:
         assert self._rest_t1 is not None
         dur = self._rest_t1 - self._rest_t0
         new = None
-        if dur >= MIN_REST_S:
+        if dur >= MIN_REST_S or (dur >= MIN_REST_BOTTOM_S and self._rest_at_bottom()):
             anchor = self._make_anchor(dur)
             if anchor is not None:
                 new = self._pair(anchor, now)
@@ -1824,6 +1833,14 @@ class QmaxEstimator:
             self.counts['rest_short'] += 1
         self._reset_rest()
         return new
+
+    def _rest_at_bottom(self) -> bool:
+        """Every cell's last reading of the rest below BOTTOM_REST_MAX_MV."""
+        for b in reversed(self._rest_bins):
+            vs = [v for v in b[1] if v is not None]
+            if vs:
+                return len(vs) == len(b[1]) and max(vs) < BOTTOM_REST_MAX_MV
+        return False
 
     def _make_anchor(self, dur) -> Optional[Dict[str, Any]]:
         bins = self._rest_bins

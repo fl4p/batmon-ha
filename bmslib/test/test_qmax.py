@@ -3144,12 +3144,13 @@ def test_calibration_without_the_taper_rule_the_warmed_cold_morning_is_a_full(to
 
 
 def test_real_daly_three_nights_give_anchors_but_no_segment():
-    """Four rests of 2-7 h: three on the plateau, the last near empty and
-    evaluable for both cells. No segment: an outage of 7 min, and without it,
-    the plateau."""
+    """Five rests of 1-7 h: three on the plateau, two near empty and evaluable
+    for both cells (the 1.1 h one, at the bottom, needs only 60 min: [6.1, 10.2]
+    against [6.0, 9.0] % 4.7 h later). No segment: an outage of 7 min, and
+    without it, the plateau."""
     est, pub = _run_real()
     assert pub == [] and not est.segments and est.enabled
-    assert est.counts['anchor_plateau'] == 3 and est.counts['anchor'] == 1
+    assert est.counts['anchor_plateau'] == 3 and est.counts['anchor'] == 2
     assert max(est.anchors[-1]['soc']) < 11 and est.anchors[-1]['epoch'] == 2  # two outages before it
     assert est.counts['gap'] == 2
 
@@ -3162,7 +3163,7 @@ def test_calibration_real_daly_with_the_gap_slope_and_drift_gates_relaxed_a_segm
     est, _ = _run_real()
     # 48 h, -190.5 Ah, and the Daly read 0.72 A during the rests (a standby
     # load or an offset, it cannot tell): offset x span is 18 % of dQ
-    assert not est.segments and est.pair_reasons['drift'] == 1
+    assert not est.segments and est.pair_reasons['drift'] >= 1
     monkeypatch.setattr(q, 'DRIFT_MAX_FRAC', math.inf)
     est, _ = _run_real()
     assert len(est.segments) == 1
@@ -4734,3 +4735,21 @@ def test_a_high_cell_over_a_low_median_is_not_full(monkeypatch):
         s._gauge_full(BmsSample(voltage=27.0, current=-4.0, soc=60.0, timestamp=T0 + 10 * k), 4.0,
                       [3505.0, 3480.0, 3320.0, 3310.0, 3300.0], 20.0)
     assert out == []
+
+
+@pytest.mark.parametrize('cells,minutes,anchored', [
+    ([2990.0, 3120.0], 65, True),  # every cell below the plateau: 60 min is enough
+    ([2990.0, 3300.0], 65, False),  # one cell on the plateau: still 90
+    ([3330.0, 3340.0], 65, False),  # the top: 90 min (charge polarisation)
+    ([3330.0, 3340.0], 95, True),
+    ([2990.0, 3120.0], 55, False),
+    ([2990.0, None], 65, False),  # a cell unread at the end: not known to be at the bottom
+])
+def test_a_rest_near_empty_anchors_after_60_min(monkeypatch, cells, minutes, anchored):
+    est = q.QmaxEstimator('b', design_capacity=100.0, curve=q.OcvCurve())
+    made = []
+    monkeypatch.setattr(est, '_make_anchor', lambda dur: made.append(dur))
+    est._rest_t0, est._rest_t1 = T0, T0 + minutes * 60.0
+    est._rest_bins = [[T0 + 30.0, [3000.0, 3330.0], 20.0], [T0 + minutes * 60.0 - 30.0, cells, 20.0]]
+    est._end_rest(T0 + minutes * 60.0)
+    assert bool(made) == anchored

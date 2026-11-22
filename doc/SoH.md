@@ -51,7 +51,7 @@ bat-impedance project (WHITEPAPER §2.1, §6, §8), which this is a port of.
 
 ## What counts
 
-A **rest** is at least 90 minutes with the current below min(1.5 A, capacity/100).
+A **rest** is at least 90 minutes with the current below min(1.5 A, capacity/100); 60 minutes when every cell ends it below the plateau (under about 3.26 V), where a fleet replay found 60 minutes enough (`bat-impedance/report/rest_duration_bottom.md`).
 1.5 A is what the OCV curve was measured with, on a 280 Ah pack. At capacity/100 an LFP cell sits within about 6 mV
 of its OCV. The C/20 usually quoted for TI gauges would leave ~28 mV, 5 % of SoC at the steepest part the gates accept.
 Per cell, the relaxed voltage is extrapolated from the rest with an exponential fit when that fit is trustworthy (it saw
