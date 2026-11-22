@@ -85,7 +85,9 @@ of its lowest cell, the one that ends a discharge.
 charge limit or a full-charge anchor, the anchor's SoC at a rest near empty. Between them it counts
 the current against the Qmax estimate once one is published; until then against the usable capacity, the
 median of the last 5 spans counted between a charge limit and a discharge limit (either way round, kept if within
-0.5–1.2 × `capacity:`); without either, the `capacity:` option
+0.5–1.2 × `capacity:`); without either, the `capacity:` option. A limit fires at the first point that passes its
+check, so a span runs from the furthest point the count reached past one limit (deeper after a 0 %, higher on a
+charge after a 100 %) to the furthest point past the next
 (`bmslib/estimators/soc_count.py`). The attribute `capacity_source` says which.
 
 - Unknown until the first such point, and 7 days after the last one: the replay above measured
