@@ -189,3 +189,16 @@ def test_a_second_limit_of_the_same_kind_keeps_the_first_reference():
     assert c.set(t, 100.0, 'charge_limit', ref=100.0) is None
     t = _run(c, t, 85 * 6, -60.0)
     assert math.isclose(c.set(t, 0.0, 'discharge_limit', ref=100.0), 87.0, abs_tol=0.3)
+
+
+def test_a_state_without_the_extreme_takes_it_from_the_clamped_soc():
+    """ant24, 2026-11-22: saved 2.70 Ah past the 0 % (the SoC sat at 0 % meanwhile)."""
+    st = {"soc": 9.766018743210667, "anchor": {"kind": "discharge_limit", "t": T0, "soc": 0.0}, "t": T0 + 11000,
+          "i": 16.7, "c": 59.8, "capacity": 238.34, "ah": 20.575221850504462, "limit": "discharge_limit",
+          "spans": [238.34], "armed": {"full": True, "empty": True}}
+    c = SocCounter(280.0)
+    c.restore(st)
+    assert math.isclose(c.ext, -2.70, abs_tol=0.01) and c.grow is None
+    d = SocCounter(280.0)
+    d.restore(dict(st, soc=20.575221850504462 * 100 / 238.34))  # never clamped: no extreme
+    assert math.isclose(d.ext, 0.0, abs_tol=1e-9)

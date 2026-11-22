@@ -159,6 +159,13 @@ class SocCounter:
             sign = -1.0 if self.limit == 'discharge_limit' else 1.0
             if _finite(ext) and sign * ext >= 0:
                 self.ext = float(ext)
+            elif 'ext' not in st and anchor and anchor.get('kind') == self.limit and _finite(anchor.get('soc')) \
+                    and _finite(st.get('capacity')) and st['capacity'] > 0:
+                # a state from before the extreme was kept: the SoC clamped at its limit while the
+                # count went further, so the count and the SoC differ by how far
+                d = self.ah - (float(st['soc']) - float(anchor['soc'])) * float(st['capacity']) / 100.0
+                if 0.0 <= sign * d <= 0.2 * float(st['capacity']):
+                    self.ext = d
             g = st.get('grow')
             if isinstance(g, (list, tuple)) and len(g) == 2 and all(_finite(x) and x > 0 for x in g) and self.spans:
                 self.grow = (float(g[0]), float(g[1]))
