@@ -54,7 +54,7 @@ def _parse_writes(items):
     return out
 
 
-async def run(address, writes, proxies, adapter=None, trace=False):
+async def run(address, writes, proxies, adapter=None, trace=False, commands=()):
     if proxies is not None:
         from bmslib.ble.esphome_proxy import start_proxies
         await start_proxies(proxies)
@@ -85,6 +85,12 @@ async def run(address, writes, proxies, adapter=None, trace=False):
                   % (k, a, before.get(k, '?'), v, echo, back, 'OK' if back == v else 'NOT TAKEN'))
             if back != v:
                 return 2
+        if commands:
+            print('status before: capacity %.1f Ah, charge %.1f Ah, SoC %.1f %%' % _status(await bms.fetch()))
+        for a in commands:
+            print('COMMAND 0x%04X: reply %s' % (a, await bms.command(a)))
+            await asyncio.sleep(3)
+            print('status after: capacity %.1f Ah, charge %.1f Ah, SoC %.1f %%' % _status(await bms.fetch()))
         return 0
     finally:
         await bms.force_disconnect()
@@ -93,16 +99,22 @@ async def run(address, writes, proxies, adapter=None, trace=False):
             await stop_proxies()
 
 
+def _status(s):
+    return s.capacity, s.charge, s.soc
+
+
 def main():
     ap = argparse.ArgumentParser(description='Read (and with --write change) ANT BMS settings registers')
     ap.add_argument('address', help='BMS MAC address')
     ap.add_argument('--write', action='append', metavar='NAME=RAW',
                     help='register name (or address) = raw value; repeatable')
+    ap.add_argument('--command', action='append', metavar='ADDR', type=lambda x: int(x, 0), default=[],
+                    help='send a 0x51 command register (e.g. 0x002C save, 0x0009 restart), after the writes')
     ap.add_argument('--trace', action='store_true', help='print every frame the BMS sends')
     args = ap.parse_args()
     proxies = _proxies()  # before anything imports bleak (bmslib.models.ant does)
     sys.exit(asyncio.run(run(args.address, _parse_writes(args.write), proxies,
-                             adapter=os.environ.get('BATMON_ADAPTER') or None, trace=args.trace)))
+                             adapter=os.environ.get('BATMON_ADAPTER') or None, trace=args.trace, commands=args.command)))
 
 
 if __name__ == '__main__':

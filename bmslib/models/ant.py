@@ -63,6 +63,7 @@ ANT_SETTINGS = dict(
     soc_method=0x00C4,
 )
 ANT_SETTING_U32 = (0x00A2, 0x00A6, 0x00AA)
+# 0x51 command registers (syssi components/ant_bms_ble/button): restart 0x0009, save customer data 0x002C
 
 
 def _ant_setting_size(addr: int) -> int:
@@ -334,6 +335,18 @@ class AntBt(BtBms):
             await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
             await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0),
                                               response=False)
+
+    async def command(self, addr: int):
+        """A 0x51 command register (see ANT_SETTING_U32 note) after the auth frame; the 0x61 reply, or None if none came."""
+        with await self._fetch_futures.acquire_timeout(0x61, timeout=self.TIMEOUT / 2):
+            async with self._write_lock:
+                await self.client.write_gatt_char(self.char, data=_ant_auth_frame(), response=False)
+                await self.client.write_gatt_char(self.char, data=_ant_command(AntCommandFuncs.WriteRegister, addr, 0),
+                                                  response=False)
+            try:
+                return to_hex_str(bytes(await self._fetch_futures.wait_for(0x61, self.TIMEOUT)))
+            except asyncio.TimeoutError:
+                return None
 
     async def read_setting(self, addr: int) -> int:
         """A settings register (ANT_SETTINGS), raw."""
