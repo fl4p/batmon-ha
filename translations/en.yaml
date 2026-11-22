@@ -239,3 +239,34 @@ configuration:
     description: >-
       An ambient reading older than this counts as missing. Default 600. Set
       it above the update interval of your temperature sensors.
+  ble_request_timeout:
+    name: BLE request timeout (s)
+    description: >-
+      Seconds an aiobmsble device (felicity, daly_ble and other library types)
+      gets to answer one request. Default 5. Raise it (e.g. 12) if a device
+      times out. Applies to all such devices.
+  reconnect_interval_minutes:
+    name: Reconnect interval (min)
+    description: >-
+      Drop each keep_alive connection every N minutes (±20 %) and connect
+      again. Lets the next connect pick another ESPHome proxy, or avoids a BMS
+      that stalls after a fixed connection time. Each reconnect costs a few
+      seconds of data. Off by default.
+  gui:
+    name: Web UI
+    description: >-
+      Serve the batmon web UI (sidebar panel). Off under Home Assistant by
+      default. See doc/GUI.md.
+  gui_port:
+    name: Web UI port
+    description: >-
+      Port for standalone use. Ignored under Home Assistant, where the
+      Supervisor serves the UI through ingress.
+  gui_push_period:
+    name: Web UI update period (s)
+    description: Seconds between live updates in the web UI. Defaults to the publish period.
+  gui_allow_direct:
+    name: Web UI direct access
+    description: >-
+      Also allow connections that don't come through Home Assistant ingress.
+      Off by default; turning it on exposes battery data to your network.

@@ -256,3 +256,42 @@ configuration:
     description: >-
       Una lectura ambiente más antigua cuenta como ausente. Por defecto 600.
       Elija un valor mayor que el intervalo de envío de sus sensores.
+  mqtt_json_topics:
+    name: Topics MQTT JSON
+    description: >-
+      Publicar además cada muestra, los voltajes de celda, las temperaturas y
+      los contadores de energía como un objeto JSON por dispositivo bajo
+      <alias>/json/. Desactivado por defecto.
+  ble_request_timeout:
+    name: Tiempo de espera BLE (s)
+    description: >-
+      Segundos que un dispositivo aiobmsble (felicity, daly_ble y otros tipos
+      de la biblioteca) tiene para responder. Por defecto 5. Auméntelo (p. ej.
+      12) si un dispositivo agota el tiempo. Se aplica a todos esos
+      dispositivos.
+  reconnect_interval_minutes:
+    name: Intervalo de reconexión (min)
+    description: >-
+      Cerrar cada conexión keep_alive cada N minutos (±20 %) y volver a
+      conectar. Permite que la siguiente conexión elija otro proxy ESPHome, o
+      evita un BMS que se bloquea tras un tiempo de conexión fijo. Cada
+      reconexión cuesta unos segundos de datos. Desactivado por defecto.
+  gui:
+    name: Interfaz web
+    description: >-
+      Servir la interfaz web de batmon (panel lateral). Desactivada por defecto
+      en Home Assistant. Ver doc/GUI.md.
+  gui_port:
+    name: Puerto de la interfaz web
+    description: >-
+      Puerto para uso sin Home Assistant. Se ignora en Home Assistant, donde el
+      Supervisor sirve la interfaz a través de ingress.
+  gui_push_period:
+    name: Intervalo de actualización de la interfaz web (s)
+    description: Segundos entre actualizaciones en vivo de la interfaz web. Por defecto, el intervalo de publicación.
+  gui_allow_direct:
+    name: Acceso directo a la interfaz web
+    description: >-
+      Permitir también conexiones que no pasan por el ingress de Home
+      Assistant. Desactivado por defecto; activado, los datos de la batería
+      quedan visibles en la red.

@@ -246,3 +246,41 @@ configuration:
     description: >-
       Ein älterer Umgebungswert gilt als fehlend. Standard 600. Größer als das
       Sendeintervall der Temperatursensoren wählen.
+  mqtt_json_topics:
+    name: MQTT-JSON-Topics
+    description: >-
+      Jede Messung, die Zellspannungen, Temperaturen und Energiezähler
+      zusätzlich als ein JSON-Objekt pro Gerät unter <alias>/json/
+      veröffentlichen. Standardmäßig aus.
+  ble_request_timeout:
+    name: BLE-Anfrage-Timeout (s)
+    description: >-
+      Sekunden, die ein aiobmsble-Gerät (felicity, daly_ble und andere
+      Bibliothekstypen) für eine Antwort bekommt. Standard 5. Erhöhen (z. B.
+      12), wenn ein Gerät in Timeouts läuft. Gilt für alle solchen Geräte.
+  reconnect_interval_minutes:
+    name: Neuverbindungsintervall (min)
+    description: >-
+      Jede keep_alive-Verbindung alle N Minuten (±20 %) trennen und neu
+      aufbauen. So kann die nächste Verbindung einen anderen ESPHome-Proxy
+      wählen, oder ein BMS, das nach fester Verbindungsdauer hängen bleibt,
+      wird vorher neu verbunden. Jede Neuverbindung kostet einige Sekunden
+      Daten. Standardmäßig aus.
+  gui:
+    name: Weboberfläche
+    description: >-
+      Die batmon-Weboberfläche (Seitenleiste) bereitstellen. Unter Home
+      Assistant standardmäßig aus. Siehe doc/GUI.md.
+  gui_port:
+    name: Port der Weboberfläche
+    description: >-
+      Port für den Betrieb ohne Home Assistant. Unter Home Assistant ohne
+      Wirkung, dort stellt der Supervisor die Oberfläche über Ingress bereit.
+  gui_push_period:
+    name: Aktualisierungsintervall Weboberfläche (s)
+    description: Sekunden zwischen Live-Aktualisierungen der Weboberfläche. Standard ist das Veröffentlichungsintervall.
+  gui_allow_direct:
+    name: Direkter Zugriff auf die Weboberfläche
+    description: >-
+      Auch Verbindungen erlauben, die nicht über Home-Assistant-Ingress kommen.
+      Standardmäßig aus; eingeschaltet sind die Akkudaten im Netzwerk sichtbar.
