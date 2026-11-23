@@ -166,3 +166,12 @@ def test_ant_short_frame_leaves_the_trailing_fields_out():
     s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))
     assert 'ant/total_charged' not in s.extra_values and math.isnan(s.runtime)
     assert s.uptime == 59505998 and s.voltage == pytest.approx(27.36)
+
+
+def test_ant_frame_too_short_for_the_mandatory_fields_raises():
+    full = ant_fixtures.ANT24_8S["raw"]
+    n = 34 - 6 + 2 * 10 + 20  # ends inside the capacity fields
+    raw = bytearray(full[:6 + n]) + b"\0\0\xaa\x55"
+    raw[5] = n
+    with pytest.raises(ValueError, match="too short"):
+        run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))

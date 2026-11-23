@@ -226,7 +226,8 @@ Not to be sent to a pack that powers anything: `0x65` (off), `0x66` (reboot), `0
 reset, history erase), `0x68`/`0x69`/`0x6A` (overwrite every protection threshold with a chemistry preset),
 `0xFF` (firmware mode), `0x1C` (cell count), `0x21` (SCP delay up to 1 s), `0x64`/`0x67`/`0x26`/`0x6F`/`0x70`
 (calibration, marked "Factory only" in the app), `0x28`/`0x3F` (disable temperature protection),
-`0x35`/`0x36` (GPS lock), `0x9C`/`0xA0` (passwords).
+`0x35`/`0x36` (GPS lock), `0x9C`/`0xA0` (passwords), `0x6B` (emergency mode; the app warns that "improperly
+activating it may cause permanent damage to the battery", string `two_string_506`).
 
 ## Status frame (`02`)
 

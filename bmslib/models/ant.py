@@ -283,6 +283,10 @@ class AntBt(BtBms):
         num_cell = data[9]
         end = 6 + data[5]  # payload end; older firmware sends fewer of the trailing fields
         have = lambda o, n: o + n <= end
+        # everything up to the power field is read unconditionally: a shorter frame would misread trailer bytes
+        if end < 34 + 2 * (num_cell + num_temp) + 32 or len(data) < end:
+            raise ValueError('ANT status frame too short: payload %d bytes for %d cells, %d probes'
+                             % (data[5], num_cell, num_temp))
 
         protect, warning = int.from_bytes(data[10:18], 'little'), int.from_bytes(data[18:26], 'little')
         offset = 34

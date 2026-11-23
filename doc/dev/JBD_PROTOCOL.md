@@ -84,7 +84,8 @@ Request `DD A5 03 00 FF FD 77`.
 | q+12 | 2 | | | not decoded |
 | q+14 | 2 | bits | | BMS status, STATUS BITS below |
 
-Each field from q on is read only if the frame is long enough. Older firmware ends after the temperatures.
+The app reads humidity, alarm bits and learned capacity (q..q+4) unconditionally; only the fields after them are
+guarded by frame length. Older firmware ends after the temperatures.
 The current/capacity divisor is 10 instead of 100 when FET bit 7 is set or humidity is `0x88`
 (`dd.js`: `g = Number(fet[7]) || 136 == humidity ? 10 : 100`); Xiaoxiang 3.2.061 checks only the humidity byte.
 The app computes power = V × I and SoH = 100 % up to 100 cycles, then min(100, full-charge / nominal × 100).
@@ -319,8 +320,9 @@ Password and app-key encoding (new modules): random r (1..99, or from 0x17 on ol
 - Switch state compares the whole FET byte (`mos_byte == 1 or 3`); the app tests bits 0 and 1, so bits 3, 4, 6
   or 7 make batmon report both MOSFETs off.
 - 0x2C is published as mΩ unscaled; the raw unit is 0.1 mΩ (0.01 mΩ on some modules).
-- `problem_code` includes bit 12 (software MOS lock), which the app shows as a MOSFET switched off by hand, not as
-  a protection.
+- Bit 12 (software MOS lock) is labelled "MOSFET switched off by hand" in the app, but the app still counts it in
+  its protection status (`O=!(0===e[20]&&0===e[21])`), as batmon's `problem_code` does. Whether to exclude it from
+  `problem` is a batmon choice, not something the app does.
 - MOS control: batmon sends E1 inside factory mode and saves (`28 28`); the app sends FB, falls back to E1, and
   uses neither factory mode nor a save.
 - Not read: the 0x03 fields after the temperatures, 0x05, 0x06, 0x0F, 0xAA, 0xDE, 0xDF, history, and the new

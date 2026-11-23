@@ -94,8 +94,6 @@ These are implemented directly under `bmslib/models/`. Each decoder bypasses the
 
 **Fields decoded by batmon.** `voltage`, `current`, `soc`, `total_charge_throughput`, `capacity` (from settings frame), `charge`, `soh` (32S only), `aged_capacity` (32S only), `temperatures` (2 or 4 probes), `mos_temperature`, `balance_current`, `num_cycles`, `switches.{charge,discharge,balance,float_charge?}`, `uptime`, plus per-cell mV. Note #365: `capacity` is sourced from the settings frame; the cell-info frame value at 146+offset is BMS-aged and diverges on 11.x firmware.
 
-**No SOH register** in the 0x0000 block: offset 86 (register 0x2B) is the highest cell voltage in mV (vendor app; fixture `AIOBMSBLE_4S` reads 4157). Full register maps: [DALY_PROTOCOL.md](DALY_PROTOCOL.md).
-
 **Known on the wire but NOT decoded by batmon.** Per-cell internal resistance (one u16 per cell), per-cell ΔV / min-max indices, full alarm bitfield (OV/UV/OT/UT/OC/short/MOS-OT — bytes 166–167 area), individual charge-FET and discharge-FET state bytes (only the summary `switches` are populated), RTC / production date, full settings block (cell OV/UV thresholds, balance start V & Δ, OCP/SCP/OTP setpoints, capacity calibration) from the settings frame, balancing direction, and the "average cell V" derived field.
 
 **Links.**
@@ -186,6 +184,8 @@ These are implemented directly under `bmslib/models/`. Each decoder bypasses the
 **Wire protocol.** Modbus-RTU over BLE/RS485. Read frame: `D2 03 <addr-hi> <addr-lo> <count-hi> <count-lo> <CRC16-LE>`; response `D2 03 <bytecount> <data…> <CRC16-LE>`. CRC = standard Modbus CRC16 (poly 0xA001, init 0xFFFF), slave ID `0xD2`. Holding-register reads observed: `@0x0000 count=62` (battery status block), `@0x003E count=9` (MOS temp), `@0x00A9 count=32` (hw/sw/serial/model strings). Full register map at `syssi/esphome-daly-bms/docs/dalyModbusProtocol.xlsx`.
 
 **Fields decoded by batmon.** `voltage`, `current`, `soc`, `charge`, `num_cycles`, `temperatures`, `switches.{charge,discharge}` (from `mos_byte`).
+
+**No SOH register** in the 0x0000 block: offset 86 (register 0x2B) is the highest cell voltage in mV (vendor app; fixture `AIOBMSBLE_4S` reads 4157). Full register maps: [DALY_PROTOCOL.md](DALY_PROTOCOL.md).
 
 **Known on the wire but NOT decoded by batmon.** MOS temperature (separate register block `@0x003E`), 64-bit problem_code bitfield (offset 116, aiobmsble decodes as `% 2**64`), balancer state bitmask (offset 104), delta_voltage / min-max cell V (offset 112), individual `chrg_mosfet` and `dischrg_mosfet` register bits (offsets 106 / 108 — batmon collapses to its own `mos_byte` heuristic), hardware/firmware version strings, serial, model string, production date (the register block at `@0x00A9 count=32`). Per-cell voltages are emitted as raw mV in the same block but the `fetch_voltages` path is `NotImplementedError` — voltages are entirely lost on Daly2 today.
 
@@ -540,7 +540,7 @@ bonded still failed at service discovery until HA's Bluetooth integration was di
 
 **Fields decoded by aiobmsble (forwarded by wrap).** `voltage`, `current` (÷100, signed), `charge` ← `cycle_charge`, `capacity` ← `design_capacity`, `num_cycles`, `soc` (derived in `basebms._add_missing_values` from `cycle_charge/design_capacity`), `temperatures[0]`, per-cell mV.
 
-**Decoded by plugin, mapped by wrap.** `chrg_mosfet`/`dischrg_mosfet` (switches), `problem_code` and every probe in `temp_values` reach batmon; `heater` (self-heating element) is still dropped. No `battery_health` / `power` / `runtime` / `delta_voltage` / `balancer` emitted, so those are NaN regardless. App-side register map and differences: [RENOGY_PROTOCOL.md](RENOGY_PROTOCOL.md).
+**Decoded by plugin, mapped by wrap.** `chrg_mosfet`/`dischrg_mosfet` (switches), `problem_code` and every probe in `temp_values` reach batmon; `heater` (self-heating element) is still dropped. No `battery_health` / `delta_voltage` / `balancer` emitted; `power` and `runtime` are derived from voltage, current and charge. App-side register map and differences: [RENOGY_PROTOCOL.md](RENOGY_PROTOCOL.md).
 
 **Links.**
 - [aiobmsble — renogy_bms.py](https://github.com/patman15/aiobmsble/blob/main/aiobmsble/bms/renogy_bms.py)

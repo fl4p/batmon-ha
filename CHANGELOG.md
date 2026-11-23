@@ -1,6 +1,6 @@
 ## [unreleased]
 
-* ANT: cell voltages drop the active balancer's error bits (which read as 8 V or more); protections set `problem`; new sensors: balancer temperature, total charged/discharged, protection and status flags; BMS uptime goes to InfluxDB.
+* ANT: cell voltages drop the active balancer's error bits (which read as 8 V or more); protections set `problem`; new sensors: balancer temperature, total charged/discharged, protection and status flags, BMS uptime.
 * `cell_capacity_estimator`: Home Assistant sensors (and GUI rows) for each cell's capacity, the imbalance at full, and whether the weakest cell or the imbalance limits the pack. A charge or discharge in progress survives a restart.
 * The discharge limit (0 %) also fires under load: the lowest cell at 2.75 V or less for 30 s at up to 0.2C.
 * ANT (BLE): `tools/ant_settings.py` reads and writes settings registers (capacity, undervoltage protection, shutdown voltage).
