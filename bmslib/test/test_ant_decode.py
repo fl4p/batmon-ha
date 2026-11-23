@@ -112,3 +112,57 @@ def test_ant_reassembly_lost_header_fragment():
     bms = AntBt("00:11:22:33:44:55", name="ant")
     got = _feed(bms, chunks[1:] + chunks)
     assert got == [(0x11, raw)]
+
+
+def _with_crc(raw):
+    from bmslib.models.ant import calc_crc16
+    n = raw[5]
+    raw[6 + n:8 + n] = bytes(calc_crc16(raw[1:6 + n]))
+    return raw
+
+
+def test_ant24_fields_past_the_basics():
+    s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), ant_fixtures.ANT24_8S["raw"])
+    assert s.uptime == 59505998  # s; the next frame, 30.2 s later, read 59506029
+    assert s.extra_values['ant/balancer_temperature'] == 23
+    assert s.extra_values['ant/total_discharged'] == 27357.425
+    assert s.extra_values['ant/total_charged'] == 24553.663
+    assert math.isnan(s.runtime)  # this firmware's frame ends before the remaining-time field
+    assert s.problem is False and s.problem_code == 0
+    assert s.extra_values['ant/protection'] == 'none'
+    assert s.extra_values['ant/flags'] == ('charging, charger connected, charge MOSFET on, discharge MOSFET on, '
+                                           'balance spread')
+    for k in s.extra_values:
+        assert k in s.extra_desc
+
+
+def test_ant_cell_voltage_masks_balancer_error_bits():
+    raw = bytearray(ant_fixtures.ANT24_8S["raw"])
+    raw[35] |= 0xA0  # cell 1 = 0x0D88 | 0xA000: balancer error state 5
+    s_raw = _with_crc(raw)
+    bms = AntBt("00:11:22:33:44:55", name="ant")
+    run_fetch_with_response(bms, s_raw)
+    assert bms._voltages[0] == 3464
+
+
+def test_ant_protection_flags():
+    raw = bytearray(ant_fixtures.ANT24_8S["raw"])
+    raw[10 + 2] = 0x06  # protect bits 17, 18: discharge held off by command
+    s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(bytearray(raw)))
+    assert s.problem is False and s.problem_code == 0
+    assert s.extra_values['ant/protection'] == 'discharge switch control 1, discharge switch control 2'
+
+    raw[10] = 0x02  # bit 1: cell overvoltage
+    s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(bytearray(raw)))
+    assert s.problem is True and s.problem_code == 2
+    assert s.extra_values['ant/protection'].startswith('cell overvoltage, discharge switch control 1')
+
+
+def test_ant_short_frame_leaves_the_trailing_fields_out():
+    full = ant_fixtures.ANT24_8S["raw"]
+    n = full[5] - 32  # cut before the charged/discharged totals
+    raw = bytearray(full[:6 + n]) + b"\0\0\xaa\x55"
+    raw[5] = n
+    s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))
+    assert 'ant/total_charged' not in s.extra_values and math.isnan(s.runtime)
+    assert s.uptime == 59505998 and s.voltage == pytest.approx(27.36)

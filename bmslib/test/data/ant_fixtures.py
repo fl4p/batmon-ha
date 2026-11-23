@@ -32,4 +32,28 @@ INLINE_8S = dict(
 )
 
 
-ALL = [INLINE_8S]
+# ant24 (sw 20PHUB00-211026A, 8s LFP, 245 Ah), captured 2026-11-23 while charging at 6.2 A (raw current is
+# negative while charging on this pack; batmon's invert_current flips it). A 126-byte payload: ends after the
+# charge/discharge time totals, so there is no remaining-time field.
+ANT24_8S = dict(
+    name="ant24_8s_charging",
+    raw=bytearray.fromhex(
+        "7ea11100007e0502020800000000000000000000c411000000000000000000000000880d420d5a0d3f0d450d560da50d4c0d"
+        "d8ffd8ff14001700b00ac2ff5e0064000101020040679a0ee5c0930dd80c8c0157ffffff4efd8b0341000000a50d07003f0d"
+        "040066005d0dffff81007c00aa02f2faf170a101bfa8760122b97c010fb69d0014daaa55"),
+    expected=dict(
+        voltage=27.36,
+        current=-6.2,
+        charge=227.787,
+        capacity=245.0,
+        total_charge_throughput=25955.544,
+        soc=92.97,  # BmsSample's charge / capacity; the BMS itself says 94
+        soh=100.0,
+        mos_temperature=20,
+        switches=dict(charge=True, discharge=True),
+        cell_voltages_mv=[3464, 3394, 3418, 3391, 3397, 3414, 3493, 3404],
+    ),
+)
+
+
+ALL = [INLINE_8S, ANT24_8S]

@@ -71,6 +71,42 @@ ANT_SETTING_U32 = (0x00A2, 0x00A6, 0x00AA)
 ANT_COMMANDS = dict(save=0x0007, reset=0x0009)
 ANT_COMMAND_RESULT = {1: 'done', 2: 'failed', 3: 'permission denied', 4: 'address out of range'}
 
+# 0x11 status flag names (protectFlagBit, warningFlagBit), from the app's bms_0x11 parser and the vendor
+# JSON; full tables in doc/dev/ANT_PROTOCOL.md (tools/ant_protocol.py). Protection bits 17-24 are set while
+# a switch is held off by command (app or batmon), so they do not make a problem.
+ANT_PROTECT_BITS = (
+    'cell type not set', 'cell overvoltage', 'cell overvoltage L2', 'pack overvoltage', 'cell undervoltage',
+    'cell undervoltage L2', 'pack undervoltage', 'cell voltage spread', 'cell hot charging',
+    'cell hot discharging', 'MOSFET over-temperature', 'cell cold charging', 'cell cold discharging',
+    'charge overcurrent', 'discharge overcurrent', 'discharge overcurrent L2', 'short circuit',
+    'discharge switch control 1', 'discharge switch control 2', 'discharge switch control 3',
+    'discharge switch control 4', 'charge switch control 1', 'charge switch control 2', 'charge switch control 3',
+    'charge switch control 4', 'balance wire disconnected', 'current abnormal', 'discharge MOSFET fault',
+    'charge MOSFET fault', 'internal communication fault', 'precharge failed', 'BMS initialising', 'self-test 1',
+    'self-test 2', 'charge communication check', 'GPS lost', 'anti-spark active', 'self-test 3',
+    'firmware update required', 'relay precharge off', 'relay welded', 'discharge fuse fault', 'charge fuse fault',
+    'module lost', 'usage period expired', 'pre-discharge MOSFET fault', 'precharge MOSFET fault', 'load lock on',
+    'acquisition receive mode', 'bit 49', 'acquisition boot mode')
+ANT_PROTECT_SWITCH_CONTROL = 0xFF << 17
+ANT_WARNING_BITS = (
+    'cell overvoltage', 'pack overvoltage', 'cell undervoltage', 'pack undervoltage', 'cell voltage spread',
+    'cell hot charging', 'cell hot discharging', 'cell cold charging', 'cell cold discharging', 'MOSFET hot',
+    'charge overcurrent', 'discharge overcurrent', 'SoC level 1', 'SoC level 2', 'cell check abnormal',
+    'pack voltage check abnormal', 'precharge failed', 'battery full', 'charging', 'discharging',
+    'CAN charger connected', 'RS485 charger connected', 'charger connected', 'charge MOSFET on',
+    'discharge MOSFET on', 'balancer on', 'standby', 'balance limit', 'balance spread', 'balance auto',
+    'balancer over-temperature', 'voltage protection', 'temperature protection', 'system error', 'GPS lost',
+    'balance check', 'heater on', 'forced output', 'Bluetooth off', 'relay precharging', 'MOSFET precharging',
+    'charge relay on', 'discharge relay on', 'clock fault', 'charge forced on', 'debug mode', 'usage period expired',
+    'usage period ending', 'anti-spark', 'low-voltage shutdown imminent', 'ANT charger connected',
+    'balance waiting', 'test mode', 'internal communication unstable')
+
+
+def _flag_text(flags: int, names) -> str:
+    """Active flag names, comma separated, cut to fit a Home Assistant state (255 chars)."""
+    s = ', '.join(names[i] if i < len(names) else 'bit %d' % i for i in range(flags.bit_length()) if flags >> i & 1)
+    return (s or 'none')[:255]
+
 
 def _ant_setting_size(addr: int) -> int:
     return 4 if addr in ANT_SETTING_U32 else 2
@@ -238,7 +274,6 @@ class AntBt(BtBms):
         u16 = lambda i: int.from_bytes(data[i:(i + 2)], byteorder='little', signed=False)
         i16 = lambda i: int.from_bytes(data[i:(i + 2)], byteorder='little', signed=True)
         u32 = lambda i: int.from_bytes(data[i:(i + 4)], byteorder='little', signed=False)
-        i32 = lambda i: int.from_bytes(data[i:(i + 4)], byteorder='little', signed=True)
 
         # data[8] (temp-sensor count) reads back flaky on some units; a bogus
         # large value spawns junk temp entities and misaligns every field
@@ -246,9 +281,14 @@ class AntBt(BtBms):
         # so cap it to a sane upper bound.
         num_temp = min(data[8], 8)
         num_cell = data[9]
+        end = 6 + data[5]  # payload end; older firmware sends fewer of the trailing fields
+        have = lambda o, n: o + n <= end
+
+        protect, warning = int.from_bytes(data[10:18], 'little'), int.from_bytes(data[18:26], 'little')
         offset = 34
 
-        self._voltages = [u16(i * 2 + offset) for i in range(num_cell)]
+        # bits 13-15 of a cell voltage carry the active balancer's error state; the app masks them off
+        self._voltages = [u16(i * 2 + offset) & 0x1FFF for i in range(num_cell)]
         offset += num_cell * 2
 
         # temperatures are int16 (spec #431); -40 means no sensor
@@ -257,60 +297,59 @@ class AntBt(BtBms):
         offset += num_temp * 2
 
         mos_temp = i16(offset)
-        offset += 2
-
-        # balancer_temp = u16(offset)
-        offset += 2
+        balancer_temp = i16(offset + 2)
+        offset += 4
 
         voltage = u16(offset) * 0.01
-        offset += 2
+        current = i16(offset + 2) * 0.1
+        soc = u16(offset + 4)
+        soh = u16(offset + 6)  # verified against the ant_8s_2temp fixture (100)
+        offset += 8
 
-        current = i16(offset) * 0.1
-        offset += 2
-
-        soc = u16(offset)
-        offset += 2
-
-        # SOH lives directly after SOC (matches aiobmsble ant_bms layout and
-        # the prior commented-out hint here). Verified against ant_8s_2temp
-        # fixture: byte at this offset reads 100, matching a fresh-battery SOH.
-        soh = u16(offset)
-        offset += 2
-
-        # dsg mos state
         switch_dsg = data[offset]
-        offset += 1
-
-        # charge mos state
-        switch_chg = data[offset]
-        offset += 1
-
-        # bal state
-        offset += 1
-
-        # reserved ?
-        offset += 1
+        switch_chg = data[offset + 1]
+        # then the balancer state and the BMS type (1: active balancer current in 0.01 A)
+        offset += 4
 
         capacity = u32(offset) * 0.000001
-        offset += 4
+        charge = u32(offset + 4) * 0.000001
+        cycle_charge = u32(offset + 8) * 0.001
+        # then power (W, i32), the same sign as the raw current: left to BmsSample so invert_current applies
+        offset += 16
 
-        charge = u32(offset) * 0.000001
-        offset += 4
+        uptime = u32(offset) if have(offset, 4) else math.nan  # s (the app says ms; ant24 counts 31 in 30 s)
+        offset += 4 + 4 + 12  # balancer flags, highest/lowest cell, spread, mean
 
-        cycle_charge = u32(offset) * 0.001
-        offset += 4
+        offset += 8 + 2  # DSV, DV, CV, COM, battery type
+        extra, extra_desc = {}, {}
+        if have(offset, 8):
+            extra['ant/total_discharged'] = round(u32(offset) * 0.001, 3)
+            extra['ant/total_charged'] = round(u32(offset + 4) * 0.001, 3)
+            for k in ('discharged', 'charged'):
+                extra_desc['ant/total_' + k] = dict(name='Total ' + k.capitalize(), unit='Ah',
+                                                    state_class='total_increasing', icon='counter')
+        offset += 8 + 16  # then charge/discharge time totals, this charge's duration, time since the last
 
-        # power = i32(offset)
-        offset += 4
+        runtime = math.nan
+        if have(offset, 4) and u16(offset + 2) not in (0, 0xFFFF):
+            runtime = u16(offset + 2) * 60  # dischargeSurplusTime, min
+
+        extra['ant/balancer_temperature'] = balancer_temp
+        extra_desc['ant/balancer_temperature'] = dict(name='Balancer Temperature', unit='°C',
+                                                      device_class='temperature', state_class='measurement')
+        extra['ant/protection'] = _flag_text(protect, ANT_PROTECT_BITS)
+        extra['ant/flags'] = _flag_text(warning, ANT_WARNING_BITS)
+        extra_desc['ant/protection'] = dict(name='Protection', unit=None, icon='shield-alert-outline')
+        extra_desc['ant/flags'] = dict(name='Status Flags', unit=None, icon='flag-outline')
+
+        problem_code = protect & ~ANT_PROTECT_SWITCH_CONTROL
 
         sample = BmsSample(
             voltage=voltage,
             current=current,
-            # power=
             charge=charge,
             capacity=capacity,
             total_charge_throughput=cycle_charge,
-            # num_cycles=0,
             soc=soc,
             soh=soh,
 
@@ -322,8 +361,12 @@ class AntBt(BtBms):
                 charge=switch_chg == 1,
             ),
 
-            # charge_enabled
-            # discharge_enabled
+            problem=problem_code != 0,
+            problem_code=problem_code,
+            uptime=uptime,
+            runtime=runtime,
+            extra_values=extra,
+            extra_desc=extra_desc,
         )
         # self._switches = dict(sample.switches)
 
