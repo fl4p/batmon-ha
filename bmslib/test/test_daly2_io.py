@@ -334,8 +334,8 @@ def test_cells_above_32_come_from_register_0x47():
     bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
     bms.UUID_TX = "tx"
     bms.client = _RoutingClient(bms, {_read_request(0x0000, 0x003E): _reply(bytes(block)),
-                                      _read_request(0x0047, 8): _reply(hi)})
+                                      _read_request(0x0047, 16): _reply(hi + bytes(16))})
     asyncio.run(bms.fetch())
     v = asyncio.run(bms.fetch_voltages())
     assert v == [3300 + i for i in range(32)] + [3400 + i for i in range(8)]
-    assert bms.client.requests[-1] == _read_request(0x0047, 8)
+    assert bms.client.requests[-1] == _read_request(0x0047, 16)

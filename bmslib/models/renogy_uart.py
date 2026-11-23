@@ -29,6 +29,7 @@ Slave id: 0x30 (48) on most packs, 0xF7 on the RBT100LFP12SH-G1 per
 dbus-serialbattery. 9600 8N1. Untested on hardware.
 """
 import math
+import re
 from typing import Optional
 
 from bmslib.bms import BmsSample, DeviceInfo
@@ -51,8 +52,18 @@ CURRENT_DECI_AMP_MODELS = ('RBT12100LFP-BT', 'RBT12200LFP-BT', 'RBT12104LFP-SSL'
 WARNING_MASK_5107 = 0x00F5
 
 
+MODEL_READ_ATTEMPTS = 3  # then 0.01 A for good: a silent model register must not cost a timeout every sample
+
+
+def model_name(raw: bytes):
+    """The model from registers 5122-5129 as the app reads it (NULs dropped, upper case), or None if it does not look
+    like a model name, e.g. a stray reply of another request."""
+    s = raw.replace(b'\0', b'').decode('ascii', errors='replace').strip().upper()
+    return s if re.fullmatch(r'[A-Z][A-Z0-9 ._/-]{3,}', s) else None
+
+
 def current_divider(model: str) -> int:
-    return 10 if any(m in (model or '') for m in CURRENT_DECI_AMP_MODELS) else 100
+    return 10 if any(m in (model or '').upper() for m in CURRENT_DECI_AMP_MODELS) else 100
 
 
 def problem_code_5100_5107(data: bytes) -> int:
@@ -150,12 +161,14 @@ class RenogyUart(WiredBms):
 
     async def _current_divider(self) -> int:
         if getattr(self, '_divider', None) is None:
+            model = None
             try:
-                raw = await self._read(REG_MODEL, 8)
+                model = model_name(await self._read(REG_MODEL, 8))
             except Exception as exc:  # noqa: BLE001
-                self.logger.warning("%s renogy model read failed (%s), current in 0.01 A until it works", self.name, exc)
+                self.logger.warning("%s renogy model read failed: %s", self.name, exc)
+            self._model_reads = getattr(self, '_model_reads', 0) + 1
+            if model is None and self._model_reads < MODEL_READ_ATTEMPTS:
                 return 100
-            model = raw.split(b'\x00', 1)[0].decode('ascii', errors='replace').strip()
             self._divider = current_divider(model)
             self.logger.info("%s renogy model %r: current in %s A", self.name, model, 1 / self._divider)
         return self._divider

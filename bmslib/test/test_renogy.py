@@ -137,3 +137,55 @@ def test_plugin_model_read_failure_keeps_upstream_scale(monkeypatch):
     assert asyncio.run(bms._async_update())["current"] == pytest.approx(-1.25)
     asyncio.run(bms._async_update())
     assert len(sent) == 2
+
+
+@pytest.mark.parametrize("raw, model", [
+    (b"RBT12100LFP-BT\0\0", "RBT12100LFP-BT"), (b"rbt12100lfp-bt\0\0", "RBT12100LFP-BT"),
+    (b"\0RBT12100LFP-BT\0", "RBT12100LFP-BT"), (b"RBT12100\0LFP-BT\0", "RBT12100LFP-BT"),
+    (bytes(16), None), (bytes(14) + b"\x00\x06", None),  # an alarm reply: zeros and MOSFET bits
+])
+def test_model_name(raw, model):
+    from bmslib.models.renogy_uart import model_name
+    assert model_name(raw) == model
+
+
+def test_uart_gives_up_on_the_model_after_three_tries():
+    bms, reads = _uart(TimeoutError('no reply'))
+    for _ in range(5):
+        assert asyncio.run(bms.fetch()).current == pytest.approx(1.25)
+    assert reads.count(REG_MODEL) == 3
+
+
+def test_plugin_a_stray_alarm_reply_is_not_taken_for_the_model(monkeypatch):
+    bms, sent = _plugin("RBT12100LFP-BT", monkeypatch)
+    real = upstream.BMS._await_msg
+    stray = [True]
+
+    async def first_stray(self, cmd, *a, **kw):
+        if stray.pop() if stray else False:
+            sent.append(cmd)
+            self._msg = bytes([0x30, 0x03, 16]) + _alarm() + b"\0\0"  # a late duplicate alarm reply
+            return
+        await real(self, cmd, *a, **kw)
+    monkeypatch.setattr(upstream.BMS, "_await_msg", first_stray)
+    assert asyncio.run(bms._async_update())["current"] == pytest.approx(-1.25)  # not decided yet
+    assert asyncio.run(bms._async_update())["current"] == pytest.approx(-12.5)
+    assert len(sent) == 2
+
+
+def test_plugin_gives_up_on_the_model_after_three_tries(monkeypatch):
+    bms, sent = _plugin(TimeoutError("no reply"), monkeypatch)
+    for _ in range(5):
+        assert asyncio.run(bms._async_update())["current"] == pytest.approx(-1.25)
+    assert len(sent) == 3
+
+
+def test_plugin_ignores_a_short_alarm_reply(monkeypatch):
+    bms, _ = _plugin("RBT200LFP12-BT", monkeypatch)
+    short = bytes.fromhex("30030e00000000000000000000000000062a88")  # 7 registers: the CRC is no register 5107
+
+    async def upstream_update(self):
+        self._msg = short
+        return {"current": -1.25, "problem_code": 0}
+    monkeypatch.setattr(upstream.BMS, "_async_update", upstream_update)
+    assert asyncio.run(bms._async_update())["problem_code"] == 0

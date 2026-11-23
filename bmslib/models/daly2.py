@@ -245,7 +245,8 @@ class Daly2Bt(BtBms):
         # (SMART BMS / SMART BMS Pro, doc/dev/DALY_PROTOCOL.md)
         v = [int.from_bytes(buf[i * 2:i * 2 + 2], 'big') for i in range(min(num_cells, 32))]
         if num_cells > 32:
-            hi = (await self._q(_read_request(0x0047, num_cells - 32)))[3:]
+            # the same request SMART BMS sends (LiveDataActivity: getReadDataByLocNumber(71, 16))
+            hi = (await self._q(_read_request(0x0047, 16)))[3:]
             v += [int.from_bytes(hi[i * 2:i * 2 + 2], 'big') for i in range(num_cells - 32)]
         return v
 
