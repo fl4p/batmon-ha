@@ -13,3 +13,10 @@
 - Before adding to the README, check whether the fact is already in the CHANGELOG, the fact sheet or the code. If it
   is, link or leave it out.
 - Fixing a bug rarely needs a README change. Add one only if user-visible behaviour or configuration changed.
+
+# havan (shared host)
+
+havan also runs the MQTT broker, the console logger and the telemetry relay that the fugu converters depend on.
+Before rebooting it, or stopping its networking or services, take `~/bin/lock.sh acquire havan "<why>"` (check the
+result directly) and announce on the `fugu` channel; release the lock once it is back
+(`~/dev/kb/agent-ops/reboot-a-shared-host-only-under-its-lock.md`).
