@@ -121,7 +121,7 @@ def main():
                     help='register name (or address) = raw value; repeatable')
     ap.add_argument('--command', action='append', metavar='NAME|ADDR', type=_command, default=[],
                     help='after the writes, send a 0x51 command: save (0x0007, settings to flash), reset '
-                         '(0x0009, reboot), or a register address')
+                         '(0x0009, reboot), or a register address (doc/dev/ANT_PROTOCOL.md; some cannot be undone)')
     ap.add_argument('--trace', action='store_true', help='print every frame the BMS sends')
     args = ap.parse_args()
     proxies = _proxies()  # before anything imports bleak (bmslib.models.ant does)
