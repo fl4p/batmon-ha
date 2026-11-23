@@ -175,3 +175,12 @@ def test_ant_frame_too_short_for_the_mandatory_fields_raises():
     raw[5] = n
     with pytest.raises(ValueError, match="too short"):
         run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))
+
+
+def test_ant_frame_ending_after_the_cycled_capacity_decodes():
+    full = ant_fixtures.ANT24_8S["raw"]
+    n = 28 + 2 * 10 + 28  # header fields, 8 cells + 2 probes, up to the cycled capacity; no power field
+    raw = bytearray(full[:6 + n]) + b"\0\0\xaa\x55"
+    raw[5] = n
+    s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))
+    assert s.total_charge_throughput == pytest.approx(25955.544) and math.isnan(s.uptime)

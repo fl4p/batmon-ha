@@ -315,10 +315,10 @@ Password and app-key encoding (new modules): random r (1..99, or from 0x17 on ol
 
 `bmslib/models/jbd.py`, compared with 2.0.6:
 
-- Current, remaining and nominal capacity are always divided by 100; the app divides by 10 when FET bit 7 is set
-  or the humidity byte is `0x88`.
-- Switch state compares the whole FET byte (`mos_byte == 1 or 3`); the app tests bits 0 and 1, so bits 3, 4, 6
-  or 7 make batmon report both MOSFETs off.
+- Current, remaining and nominal capacity: divided by 10 when FET bit 7 is set or the humidity byte is `0x88`, else
+  by 100, as in the app (batmon since 4d7475e; before, always 100).
+- Switch state from FET bits 0 and 1, as in the app (since 4d7475e; before, the whole byte was compared, so bits 3,
+  4, 6 or 7 made batmon report both MOSFETs off).
 - 0x2C is published as mΩ unscaled; the raw unit is 0.1 mΩ (0.01 mΩ on some modules).
 - Bit 12 (software MOS lock) is labelled "MOSFET switched off by hand" in the app, but the app still counts it in
   its protection status (`O=!(0===e[20]&&0===e[21])`), as batmon's `problem_code` does. Whether to exclude it from
