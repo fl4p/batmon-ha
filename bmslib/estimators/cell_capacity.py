@@ -47,7 +47,8 @@ from bmslib.util import get_logger
 
 logger = get_logger()
 
-STATE_VERSION = 1
+STATE_VERSION = 2
+STATE_VERSIONS = (1, 2)  # 1: no charge / discharge in progress
 
 # Cell voltage fetches (BmsSampler asks wants_voltages()): every
 # VOLTAGE_PERIOD_S near a knee, every SLOW_PERIOD_S otherwise while current
@@ -84,6 +85,14 @@ TOP_SLOPE_AH = 5.0
 TOP_FROM_MV = 3370.0      # the first-full cell's climb into the knee must start below this ...
 TOP_MIN_CLIMB_AH, TOP_MIN_CLIMB_C = 2.0, 0.01  # ... at least this many Ah (or this fraction of C) before the end
 TOP_LB_MIN_AH, TOP_LB_MIN_C = 2.0, 0.01  # smaller top lower bounds are dropped
+# _end_top reads the first-full cell's history back only to its last crossing of a level at or above this
+# (TOP_FROM_MV, and the slope check's peak - TOP_MIN_SLOPE*TOP_SLOPE_AH once the climb passed TOP_FROM_MV):
+# what came before a sample with every cell below it is dropped
+TOP_PRUNE_MV = TOP_FROM_MV - TOP_MIN_SLOPE * TOP_SLOPE_AH
+
+# What balancing can recover is min_i(a_i + b_i): the weakest cell's capacity minus C_pack. Up to this
+# (Ah, or this fraction of the capacity) it is "the weakest cell" limiting the pack, not the imbalance.
+LIMIT_TOL_AH, LIMIT_TOL_C = 1.0, 0.005
 
 KEEP_TOP, KEEP_BOT, KEEP_PACK = 12, 8, 6
 SIGMA_MIN_AH = 0.5
@@ -360,12 +369,20 @@ class CellCapacityEstimator:
         if current < -self._rest():
             if tp is None or tp['epoch'] != self.epoch:
                 tp = self._top = dict(epoch=self.epoch, h=deque(), peak=None)
-            tp['h'].append((t, self.q, list(sm)))
-            while tp['h'] and t - tp['h'][0][0] > TOP_KEEP_S:
-                tp['h'].popleft()
+            h = tp['h']
+            h.append((t, self.q, list(sm)))
+            while h and t - h[0][0] > TOP_KEEP_S:
+                h.popleft()
             mx = max(v)
             if tp['peak'] is None or mx > tp['peak'][1]:
-                tp['peak'] = (t, mx, len(tp['h']) - 1, self.q, list(sm))
+                tp['peak'] = (t, mx, self.q, list(sm))
+                # nothing before the cut's last all-below-TOP_PRUNE_MV sample is read (TOP_PRUNE_MV): keeps the
+                # history, and the state saved at shutdown, to the knee
+                for j in range(len(h) - 1, 0, -1):
+                    if max(h[j][2]) < TOP_PRUNE_MV:
+                        for _ in range(j):
+                            h.popleft()
+                        break
 
     def _maybe_end_top(self, t, current):
         tp = self._top
@@ -382,7 +399,7 @@ class CellCapacityEstimator:
         pk = tp['peak']
         if pk is None or pk[1] < TOP_PEAK_MIN_MV:
             return
-        t_cut, _, _, q_cut, sm_cut = pk
+        t_cut, _, q_cut, sm_cut = pk
         # every full charge is where the next discharge's C_pack counts from, whether or not its leads are used
         self._last_cut = (tp['epoch'], t_cut, q_cut)
         h = [x for x in tp['h'] if x[0] <= t_cut]
@@ -460,8 +477,10 @@ class CellCapacityEstimator:
     @locked
     def result(self) -> Optional[Dict[str, Any]]:
         """{'cells': [{'ah', 'sigma', 'bound'[, 'soh', 'soh_sigma']} | None], 'pack_ah', 'pack_sigma',
-        'n_top', 'n_bottom', 'n_cycle', 'capacity'}; only the counts before anything is known, {'disabled': why}
-        when disabled. 'bound': the value is a lower bound. 'soh': ah in % of the `capacity:` option."""
+        'top_ah', 'bottom_ah', 'imbalance', 'limit', 'n_top', 'n_bottom', 'n_cycle', 'capacity'}; only the
+        counts before anything is known, {'disabled': why} when disabled. 'bound': the value is a lower bound.
+        'soh': ah in % of the `capacity:` option. 'imbalance' (_imbalance) and 'limit' (_limit) need no
+        full cycle; a key nothing is known for is absent."""
         if not self.enabled:
             return dict(disabled=self.disabled_reason)
         out = dict(n_top=len(self.tops), n_bottom=len(self.bottoms), n_cycle=len(self.packs))
@@ -491,6 +510,12 @@ class CellCapacityEstimator:
                          for x in terms[0]]
         out['bottom_ah'] = [None if x is None else dict(v=round(x[0], 2), s=round(x[1], 2), bound=x[2])
                             for x in terms[1]]
+        imb = _imbalance(terms[0])
+        if imb is not None:
+            out['imbalance'] = imb
+        lim = _limit(terms[0], terms[1], self.capacity)
+        if lim is not None:
+            out['limit'] = lim
         return out
 
     @locked
@@ -508,18 +533,37 @@ class CellCapacityEstimator:
     def get_state(self, full: bool = True) -> Dict[str, Any]:
         """Finished events and the charge count (with the BMS counter, so a
         restart bridges to the next sample; without one the count breaks
-        there). A charge or discharge in progress is not saved."""
-        return dict(version=STATE_VERSION, n_cells=self.n_cells,
-                    disabled_reason=None if self.enabled or not self._disable_persistent else self.disabled_reason,
-                    tops=list(self.tops), bottoms=list(self.bottoms), packs=list(self.packs),
-                    q=self.q, epoch=self.epoch, t=self._t, counter=self._counter,
-                    last_cut=None if self._last_cut is None else list(self._last_cut))
+        there), a discharge in progress and the per-cell R and smoothing. A
+        charge in progress only in the state saved at shutdown (full=True): its
+        history runs from below the knee (TOP_PRUNE_MV) for up to TOP_KEEP_S,
+        ~0.5 MB at 16 cells after hours of absorb. After a crash it starts
+        over, as qmax's rest does."""
+        st = dict(version=STATE_VERSION, n_cells=self.n_cells,
+                  disabled_reason=None if self.enabled or not self._disable_persistent else self.disabled_reason,
+                  tops=list(self.tops), bottoms=list(self.bottoms), packs=list(self.packs),
+                  q=self.q, epoch=self.epoch, t=self._t, counter=self._counter,
+                  last_cut=None if self._last_cut is None else list(self._last_cut),
+                  t_charge=self._t_charge, t_discharge=self._t_discharge,
+                  cells=[dict(r=[round(x, 3) for x in c.r], e=[round(x, 2) for x in c.e]) for c in self._cells],
+                  sm=None if self._sm is None else [round(x, 2) for x in self._sm],
+                  v_min=self._v_min, v_max=self._v_max)
+        b = self._bot
+        if b is not None:
+            # x per cell as [level, q] pairs: a JSON object would turn the levels into strings
+            st['bot'] = dict(b, env=[round(x, 2) for x in b['env']],
+                             x=[[[L, q] for L, q in xk.items()] for xk in b['x']])
+        tp = self._top
+        if full and tp is not None:
+            st['top'] = dict(epoch=tp['epoch'], h=[[t, q, [round(x, 2) for x in sm]] for t, q, sm in tp['h']],
+                             peak=None if tp['peak'] is None else [tp['peak'][0], tp['peak'][1], tp['peak'][2],
+                                                                    [round(x, 2) for x in tp['peak'][3]]])
+        return st
 
     @locked
     def restore(self, st) -> bool:
         try:
             new = type(self)(self.name, self.capacity)
-            if not isinstance(st, dict) or st.get('version') != STATE_VERSION:
+            if not isinstance(st, dict) or st.get('version') not in STATE_VERSIONS:
                 raise ValueError('state version %r' % (st.get('version') if isinstance(st, dict) else st))
             if st.get('disabled_reason'):
                 # persistent, so get_state() keeps writing it: with the flag left
@@ -551,9 +595,66 @@ class CellCapacityEstimator:
             logger.warning('%s: cell capacity state not restored (%s: %s), starting fresh', self.name,
                            type(e).__name__, e)
             return False
+        try:
+            new._restore_progress(st)
+        except Exception as e:
+            # the finished events stand without it
+            logger.warning('%s: cell capacity: charge / discharge in progress not restored (%s: %s)', self.name,
+                           type(e).__name__, e)
+            new._cells, new._sm, new._bot, new._top = [], None, None, None
         self.__dict__.update({k: v for k, v in new.__dict__.items() if k != '_lock'})
         self.rev += 1
         return True
+
+
+    def _restore_progress(self, st):
+        """restore()'s part for what was in progress (STATE_VERSION 2); raises on anything malformed."""
+        n = self.n_cells
+        self._t_charge = v_opt_fin(st.get('t_charge'), 't_charge')
+        self._t_discharge = v_opt_fin(st.get('t_discharge'), 't_discharge')
+        self._v_min = v_opt_fin(st.get('v_min'), 'v_min')
+        self._v_max = v_opt_fin(st.get('v_max'), 'v_max')
+        cells = st.get('cells') or []
+        if not cells:
+            return  # nothing in progress without the buffers: _voltages() would start both over anyway
+        if len(cells) != n:
+            raise ValueError('%d cell buffers for %s cells' % (len(cells), n))
+        sm = st.get('sm')
+        if sm is not None:
+            sm = [v_fin(x, 'sm') for x in sm]
+            if len(sm) != n:
+                raise ValueError('sm with %d cells' % len(sm))
+        out = []
+        for c in cells:
+            x = _Cell()
+            x.r.extend(v_fin(r, 'cells.r') for r in c['r'])
+            x.e.extend(v_fin(e, 'cells.e') for e in c['e'])
+            out.append(x)
+        bot = top = None
+        b = st.get('bot')
+        if b is not None:
+            if len(b['env']) != n or len(b['x']) != n:
+                raise ValueError('discharge in progress with %d cells' % len(b['env']))
+            bot = dict(t0=v_fin(b['t0'], 'bot.t0'), epoch=v_int(b['epoch'], 'bot.epoch'),
+                       env=[v_fin(x, 'bot.env') for x in b['env']],
+                       x=[{v_int(L, 'bot.level'): v_opt_fin(q, 'bot.x') for L, q in xk} for xk in b['x']],
+                       crossed=bool(b['crossed']), q_end=v_opt_fin(b['q_end'], 'bot.q_end'),
+                       t_end=v_opt_fin(b['t_end'], 'bot.t_end'), v_end=v_opt_fin(b['v_end'], 'bot.v_end'))
+        tp = st.get('top')
+        if tp is not None:
+            h = deque()
+            for t, q, e in tp['h']:
+                if len(e) != n:
+                    raise ValueError('charge history with %d cells' % len(e))
+                h.append((v_fin(t, 'top.t'), v_fin(q, 'top.q'), [v_fin(x, 'top.e') for x in e]))
+            pk = tp['peak']
+            if pk is not None:
+                if len(pk[3]) != n:
+                    raise ValueError('charge peak with %d cells' % len(pk[3]))
+                pk = (v_fin(pk[0], 'peak.t'), v_fin(pk[1], 'peak.mv'), v_fin(pk[2], 'peak.q'),
+                      [v_fin(x, 'peak.e') for x in pk[3]])
+            top = dict(epoch=v_int(tp['epoch'], 'top.epoch'), h=h, peak=pk)
+        self._cells, self._sm, self._bot, self._top = out, sm, bot, top
 
 
 def _term(events, k):
@@ -569,6 +670,54 @@ def _term(events, k):
     if lbs:
         return median(lbs), 0.0, True
     return None
+
+
+def _imbalance(tops) -> Optional[Dict[str, Any]]:
+    """The top imbalance: Ah the cell furthest behind still lacks when the first cell is full (its top lead).
+    {'ah', 'sigma', 'cell' (1-based), 'bound'}; bound: some cell is known only to lack at least its value, so
+    the imbalance may be larger, whichever is the largest now."""
+    est = [(x[0], k, x[1]) for k, x in enumerate(tops) if x is not None and not x[2]]
+    lbs = [(x[0], k, 0.0) for k, x in enumerate(tops) if x is not None and x[2]]
+    if not est and not lbs:
+        return None
+    v, k, s = max(est + lbs)
+    return dict(ah=round(v, 1), sigma=round(s, 1), cell=k + 1, bound=bool(lbs))
+
+
+def _limit(tops, bottoms, capacity) -> Optional[Dict[str, Any]]:
+    """Whether the weakest cell or the imbalance limits the pack. C_i - C_pack = a_i + b_i, so perfect
+    balancing would add min_i(a_i + b_i): 'recoverable_ah' (± 'recoverable_sigma'), from the cells with both
+    terms estimated. 'by': 'weakest_cell' when that plus its sigma is at most LIMIT_TOL ('cell': which one),
+    'imbalance' when every cell's a_i + b_i minus its sigma exceeds it (a cell without both terms could be
+    the weakest at no gain, so all are needed; 'bound': only lower bounds, the gain is at least
+    recoverable_ah), else 'undecided'. A cell known only by a lower bound below recoverable_ah may be the
+    weakest: 'recoverable_min_ah' then. None before any cell has both terms."""
+    tol = max(LIMIT_TOL_AH, LIMIT_TOL_C * capacity) if capacity else LIMIT_TOL_AH
+    sums, lo, lbs = [], math.inf, []
+    for k, (a, b) in enumerate(zip(tops, bottoms)):
+        if a is None or b is None:
+            lo = min(lo, 0.0)
+            continue
+        v, s = a[0] + b[0], math.sqrt(a[1] ** 2 + b[1] ** 2)
+        lo = min(lo, v - s)
+        if not (a[2] or b[2]):
+            sums.append((v, k, s))
+        else:
+            lbs.append(v)
+    if not sums and lo <= 0:
+        return None
+    best = min(sums, default=None)
+    if best is not None and best[0] + best[2] <= tol:
+        return dict(by='weakest_cell', cell=best[1] + 1, recoverable_ah=round(max(best[0], 0.0), 1),
+                    recoverable_sigma=round(best[2], 1))
+    out = dict(by='imbalance' if lo > tol else 'undecided')
+    if best is not None:
+        out.update(recoverable_ah=round(max(best[0], 0.0), 1), recoverable_sigma=round(best[2], 1))
+        if lbs and min(lbs) < best[0]:
+            out['recoverable_min_ah'] = round(max(min(lbs), 0.0), 1)
+    else:
+        out.update(recoverable_ah=round(max(lo, 0.0), 1), bound=True)
+    return out
 
 
 def _fmt_cells(cells):

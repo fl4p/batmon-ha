@@ -163,7 +163,21 @@ function renderCapacity(cc) {
   } else {
     h += '<div style="opacity:.6">collecting: needs a full charge and a discharge to 2.95 V';
   }
-  h += ` · ${esc(cc.n_top)} full charges, ${esc(cc.n_bottom)} knee discharges, ${esc(cc.n_cycle)} cycles</div></div>`;
+  h += ` · ${esc(cc.n_top)} full charges, ${esc(cc.n_bottom)} knee discharges, ${esc(cc.n_cycle)} cycles</div>`;
+  const imb = cc.imbalance;
+  if (imb) h += `<div title="${esc('when the first cell is full, cell ' + imb.cell + ' still lacks this much')}">` +
+    `imbalance at full: ${imb.bound ? '&gt;' : ''}${esc(imb.ah.toFixed(1))}` +
+    `${imb.bound ? '' : ' ± ' + esc(imb.sigma.toFixed(1))} Ah (cell ${esc(imb.cell)})</div>`;
+  const lim = cc.limit;
+  if (lim) {
+    const gain = lim.recoverable_ah === undefined ? '' : (lim.bound ? '≥' : '') +
+      (lim.recoverable_min_ah === undefined ? '' : lim.recoverable_min_ah.toFixed(1) + '–') + lim.recoverable_ah.toFixed(1) +
+      (lim.recoverable_sigma === undefined ? '' : ' ± ' + lim.recoverable_sigma.toFixed(1)) + ' Ah';
+    const txt = lim.by === 'weakest_cell' ? 'weakest cell ' + lim.cell
+              : lim.by === 'imbalance' ? 'imbalance, ' + gain + ' recoverable' : 'undecided (' + gain + ' recoverable)';
+    h += `<div title="${esc('capacity perfect balancing would add: ' + gain)}">limited by: ${esc(txt)}</div>`;
+  }
+  h += '</div>';
   return h;
 }
 

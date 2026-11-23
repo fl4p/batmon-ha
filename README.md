@@ -174,8 +174,8 @@ Add an entry under `devices` for each BMS. The add-on reads all of them.
     [doc/Cell Resistance.md](doc/Cell%20Resistance.md).
   * `soh_estimator`: present capacity of LiFePO4 packs as `Qmax (est.)` and `SoH (est.)`, against the device's
     `capacity:`. With the built-in OCV curve it gives no value yet, see [doc/SoH.md](doc/SoH.md).
-  * `cell_capacity_estimator`: capacity of each cell of LiFePO4 packs in Ah with its uncertainty, shown in the web
-    GUI only. Needs full charges and discharges into the knee. See [doc/Cell Capacity.md](doc/Cell%20Capacity.md).
+  * `cell_capacity_estimator`: capacity of each cell of LiFePO4 packs in Ah with its uncertainty, the imbalance at full,
+    and whether the weakest cell or the imbalance limits the pack. Needs full charges and discharges into the knee. See [doc/Cell Capacity.md](doc/Cell%20Capacity.md).
   * `pack_temp_estimator`: cell temperature for packs that only report a MOSFET temperature, as
     `Pack Temp (RC est.)`. Optional `pack_temp_room_topic` / `pack_temp_outdoor_topic` take ambient temperatures from
     MQTT. See [doc/PackTemp.md](doc/PackTemp.md).

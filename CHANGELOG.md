@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* `cell_capacity_estimator`: Home Assistant sensors (and GUI rows) for each cell's capacity, the imbalance at full, and whether the weakest cell or the imbalance limits the pack. A charge or discharge in progress survives a restart.
 * The discharge limit (0 %) also fires under load: the lowest cell at 2.75 V or less for 30 s at up to 0.2C.
 * ANT (BLE): `tools/ant_settings.py` reads and writes settings registers (capacity, undervoltage protection, shutdown voltage).
 * `soh_estimator`: a charge also ends full with only the highest cell at 3.45 V or more, so Qmax and SoH include a pack's imbalance.

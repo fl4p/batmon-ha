@@ -310,6 +310,47 @@ def publish_soc_count(client, device_topic, soc: float, attributes: dict):
     mqtt_single_out(client, f"{device_topic}/soc_batmon", round(soc, 1))
 
 
+# Per-cell capacity (bmslib/estimators/cell_capacity.py): published when the result changes and again
+# after every discovery (5 min), so a value that stops coming (estimator off, add-on stopped) goes
+# unavailable instead of staying.
+CELL_CAPACITY_EXPIRE_S = 3600
+
+
+def capacity_limit_text(lim: dict) -> str:
+    """The capacity_limit state: CellCapacityEstimator.result()['limit'] as a sentence."""
+    if lim['by'] == 'weakest_cell':
+        return 'weakest cell %d' % lim['cell']
+    if lim['by'] == 'imbalance':
+        lo = lim.get('recoverable_min_ah')
+        return 'imbalance, %s%.1f Ah recoverable' % ('≥' if lim.get('bound') else '' if lo is None else
+                                                     '%.1f–' % lo, lim['recoverable_ah'])
+    return 'undecided'
+
+
+def publish_cell_capacity(client, device_topic, res: Optional[dict], n_cells: Optional[int]):
+    """res: CellCapacityEstimator.result() (None or {'disabled': why}: every value unknown); n_cells: how
+    many cell_capacity/<n> entities there are. An unknown value goes out as "None", which an MQTT sensor
+    takes as unknown."""
+    res = res or {}  # {'disabled': why} has none of the keys below either
+    counts = {k: res.get(k) for k in ('n_top', 'n_bottom', 'n_cycle')}
+    cells = res.get('cells') or []
+    tops, bots = res.get('top_ah') or [], res.get('bottom_ah') or []
+    for k in range(n_cells or 0):
+        c = cells[k] if k < len(cells) else None
+        attrs = {x: c.get(x) for x in ('sigma', 'bound', 'soh', 'soh_sigma')} if c else {}
+        attrs.update(top_lead=tops[k] if k < len(tops) else None, bottom_lag=bots[k] if k < len(bots) else None)
+        mqtt_single_out(client, f"{device_topic}/cell_capacity/{k + 1}/attributes", json.dumps(attrs))
+        mqtt_single_out(client, f"{device_topic}/cell_capacity/{k + 1}", round(c['ah'], 1) if c else "None")
+    imb = res.get('imbalance')
+    mqtt_single_out(client, f"{device_topic}/cell_imbalance/attributes", json.dumps(dict(
+        imb or {}, top_leads=[None if x is None else x['v'] for x in tops], **counts)))
+    mqtt_single_out(client, f"{device_topic}/cell_imbalance", imb['ah'] if imb else "None")
+    lim = res.get('limit')
+    mqtt_single_out(client, f"{device_topic}/capacity_limit/attributes", json.dumps(dict(
+        lim or {}, pack_ah=res.get('pack_ah'), **counts)))
+    mqtt_single_out(client, f"{device_topic}/capacity_limit", capacity_limit_text(lim) if lim else "None")
+
+
 LINK_EXPIRE_S = 120  # 4 publish periods of BmsSampler.publish_link; more if samples are further apart
 LINK_DESC = {
     'link/connects': dict(name="Link connects", state_class="total_increasing", icon="connection"),
@@ -337,7 +378,7 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
                            temperatures,
                            device_info: DeviceInfo = None, set_soc=False, cell_resistance=False,
                            pack_temp_est=False, soh_est=False, display_name=None, temperature_names=None,
-                           link: Optional[dict] = None):
+                           link: Optional[dict] = None, cell_capacity=False):
     discovery_msg = {}
 
     # HA discovery node_id must match [a-zA-Z0-9_-] (no slashes), so flatten
@@ -455,6 +496,23 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
         _hass_discovery('soc_batmon', "battery", "%", state_class="measurement",
                         name="SoC (batmon)", precision=1, expire_after=SOC_COUNT_EXPIRE_S,
                         json_attributes_topic=f"{device_topic}/soc_batmon/attributes")
+
+    if cell_capacity:
+        # experimental, see bmslib/estimators/cell_capacity.py: each cell's capacity [Ah], how far the
+        # cell furthest behind is from full when the first is, and whether balancing would gain capacity
+        cc_expire = CELL_CAPACITY_EXPIRE_S if expire_after_seconds else None  # expire_values_after: 0 turns it off
+        for i in range(0, num_cells):
+            k = 'cell_capacity/%d' % (i + 1)
+            _hass_discovery(k, None, "Ah", state_class="measurement", icon="battery-heart-variant",
+                            name='Cell Capacity %0*d' % (1 + int(math.log10(num_cells)), i + 1), precision=1,
+                            expire_after=cc_expire, entity_category="diagnostic",
+                            json_attributes_topic=f"{device_topic}/{k}/attributes")
+        _hass_discovery('cell_imbalance', None, "Ah", state_class="measurement", icon="scale-balance",
+                        name="Cell imbalance (top)", precision=1, expire_after=cc_expire,
+                        json_attributes_topic=f"{device_topic}/cell_imbalance/attributes")
+        _hass_discovery('capacity_limit', None, None, icon="battery-alert-variant-outline",
+                        name="Capacity limited by", expire_after=cc_expire,
+                        json_attributes_topic=f"{device_topic}/capacity_limit/attributes")
 
     # keep_alive link diagnostics (bmslib/link_stats.py), published every 30 s. The age and
     # RSSI expire while the link is down instead of showing the last link's values.

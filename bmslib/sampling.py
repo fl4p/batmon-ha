@@ -24,7 +24,7 @@ from bmslib.link_stats import LinkStats
 from bmslib.mqtt_util import publish_sample, is_none_or_nan, publish_cell_voltages, publish_temperatures, publish_hass_discovery, \
     subscribe_switches, subscribe_set_soc, mqtt_single_out, publish_cell_resistance, publish_qmax, withdraw_qmax, \
     QMAX_CLEAR_REPEAT_S, MqttSettingsPublisher, hass_device_json, subscribe_jk_settings, publish_soc_gauge_error, \
-    publish_soc_count
+    publish_soc_count, publish_cell_capacity
 from bmslib.pwmath import Integrator, DiffAbsSum, LHQ
 from bmslib.util import get_logger, summarize_exc
 
@@ -140,7 +140,7 @@ class BmsSampleSink:
         raise NotImplementedError()
 
     def publish_cell_capacity(self, bms_name: str, result: Optional[dict]):
-        """Per-cell capacity estimate (CellCapacityEstimator.result()); only the GUI shows it."""
+        """Per-cell capacity estimate (CellCapacityEstimator.result()), on change; MQTT goes by the sampler."""
         pass
 
     def publish_estimates(self, bms_name: str, estimates: dict):
@@ -994,6 +994,7 @@ class BmsSampler:
                     display_name=getattr(bms, 'display_name', None),
                     temperature_names=getattr(bms, 'temperature_names', None),
                     link=self._link_values,
+                    cell_capacity=self.cellcap is not None and self.cellcap.enabled,
                 )
 
                 settings = getattr(bms, 'settings', None)
@@ -1008,6 +1009,10 @@ class BmsSampler:
                 if self.period_pub.period > 2:
                     await asyncio.sleep(1)
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
+                if self.cellcap is not None and self.cellcap.enabled:
+                    # published on change only: again on the next sample, for entities HA just created (not
+                    # now: HA may not have subscribed yet). Off, they are left to expire.
+                    self._cellcap_rev = None
                 if settings_discovered:
                     # settings states are not retained and only come with a refresh (5 min):
                     # send them again so entities HA just created show a value now
@@ -1084,11 +1089,19 @@ class BmsSampler:
         if est.rev != self._cellcap_rev:
             self._cellcap_rev = est.rev
             res = est.result()
+            self._publish_cellcap_mqtt(res)
             for sink in self.sinks:
                 try:
                     sink.publish_cell_capacity(self.bms.name, res)
                 except Exception as e:
                     logger.error('sink %s publish_cell_capacity failed: %s', type(sink).__name__, summarize_exc(e))
+
+    def _publish_cellcap_mqtt(self, res=None):
+        try:
+            publish_cell_capacity(self.mqtt_client, device_topic=self.mqtt_topic_prefix,
+                                  res=self.cellcap.result() if res is None else res, n_cells=self.cellcap.n_cells)
+        except Exception as e:
+            logger.error('%s: publishing the cell capacity failed: %s', self.bms.name, summarize_exc(e))
 
     def _estimates(self) -> dict:
         """What the estimators would publish now, for the GUI: read off their state each sample, so a
