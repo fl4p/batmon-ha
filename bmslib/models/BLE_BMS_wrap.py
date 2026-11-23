@@ -430,7 +430,10 @@ class BMS():
         s = self._last_sample
         if s is None:
             return []
-        v = [s['cell_voltages'][i] * 1000 for i in range(s['cell_count'])]
+        cv = s['cell_voltages']
+        # multi-pack drivers (seplos) join every pack's cells but set cell_count to one pack's
+        n = len(cv) if s.get('packs') else s['cell_count']
+        v = [cv[i] * 1000 for i in range(n)]
         for i in range(len(v)):
             if v[i] == int(v[i]):
                 v[i] = int(v[i])

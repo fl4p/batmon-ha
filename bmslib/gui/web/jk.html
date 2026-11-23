@@ -145,8 +145,10 @@ function decodeSample(status, settings) {
       ? Math.round(chargeRemaining / agedCapacity * 1e4) / 100   // sub-1% precision
       : status[141 + OFF];
 
-  const temps = [temp(i16(status, 130 + OFF)), temp(i16(status, 132 + OFF)),
-                 temp(i16(status, 224 + OFF)), temp(i16(status, 226 + OFF))];
+  // T3..T5 at 254/256/258, each only while its bit (3..5) of byte 294 is set, as in the JK app and jikong.py
+  const temps = [temp(i16(status, 130 + OFF)), temp(i16(status, 132 + OFF))];
+  for (let k = 0; k < 3; k++)
+    temps.push((status[262 + OFF] >> (3 + k)) & 1 ? temp(i16(status, 222 + 2 * k + OFF)) : NaN);
 
   const voltage = f32u(status, 118 + OFF);
   const current = -f32s(status, 126 + OFF);   // negative = charging, as batmon

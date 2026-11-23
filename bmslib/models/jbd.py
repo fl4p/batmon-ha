@@ -333,8 +333,13 @@ class JbdBt(BtBms):
         # bit per cell, set while that cell is being bled (#283).
         balancing_cells = int.from_bytes(buf[12:14], 'big') | (int.from_bytes(buf[14:16], 'big') << 16)
 
-        current = -int.from_bytes(buf[2:4], byteorder='big', signed=True) / 100
-        charge = int.from_bytes(buf[4:6], byteorder='big', signed=False) / 100
+        # High-range boards count current and capacities in 100 mA / 100 mAh: FET bit 7 set, or the humidity byte
+        # after the temperatures reads 0x88 (JBD BMS app 2.0.6 dd.js: `Number(fet[7])||136==humidity?10:100`).
+        q = 23 + 2 * num_temp
+        scale = 10 if mos_byte & 0x80 or (len(buf) > q and buf[q] == 0x88) else 100
+
+        current = -int.from_bytes(buf[2:4], byteorder='big', signed=True) / scale
+        charge = int.from_bytes(buf[4:6], byteorder='big', signed=False) / scale
 
         # `runtime` (estimated seconds-to-empty) is derived centrally by the
         # sampler from charge / smoothed discharge current, see
@@ -344,7 +349,7 @@ class JbdBt(BtBms):
             current=current,
 
             charge=charge,
-            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=False) / 100,
+            capacity=int.from_bytes(buf[6:8], byteorder='big', signed=False) / scale,
             soc=buf[19],
 
             num_cycles=int.from_bytes(buf[8:10], byteorder='big', signed=False),
@@ -352,8 +357,9 @@ class JbdBt(BtBms):
             temperatures=[(int.from_bytes(buf[23 + i * 2:i * 2 + 25], 'big') - 2731) / 10 for i in range(num_temp)],
 
             switches=dict(
-                discharge=mos_byte == 2 or mos_byte == 3,
-                charge=mos_byte == 1 or mos_byte == 3,
+                # bits 0/1 only: bits 3/4 heating, 6 factory mode, 7 current scale share the byte
+                discharge=bool(mos_byte & 0x02),
+                charge=bool(mos_byte & 0x01),
             ),
 
             problem_code=problem_code,

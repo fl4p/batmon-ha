@@ -884,3 +884,33 @@ def test_jbd_periodic_reconnect_waits_for_a_switch_write_in_flight():
 
     asyncio.run(run())
     assert events == [3]
+
+
+def _jbd_basic(mos=0x03, raw_current=1000, raw_charge=2000, raw_capacity=2000, trailer=b''):
+    data = bytearray()
+    data += (2600).to_bytes(2, 'big') + raw_current.to_bytes(2, 'big', signed=True)
+    data += raw_charge.to_bytes(2, 'big') + raw_capacity.to_bytes(2, 'big')
+    data += bytes(10) + bytes([0x80, 50, mos, 4, 1]) + (2981).to_bytes(2, 'big') + trailer
+    frame = bytes([0xDD, 0x03, 0x00, len(data)]) + data
+    return frame + ((0x10000 - sum(frame[2:])) & 0xFFFF).to_bytes(2, 'big') + bytes([0x77])
+
+
+@pytest.mark.parametrize("mos, trailer, scale", [
+    (0x03, b'', 100),
+    (0x83, b'', 10),             # FET bit 7: 100 mA / 100 mAh units
+    (0x03, b'\x88\x00\x00', 10),  # humidity byte 0x88 after the temperatures
+    (0x03, b'\x32\x00\x00', 100),
+])
+def test_jbd_high_range_scale(mos, trailer, scale):
+    s = run_fetch_with_response(JbdBt("00:11:22:33:44:55", name="jbd"), _jbd_basic(mos, trailer=trailer))
+    assert s.current == pytest.approx(-1000 / scale)  # JBD positive = charging, batmon negative
+    assert s.charge == pytest.approx(2000 / scale) and s.capacity == pytest.approx(2000 / scale)
+
+
+@pytest.mark.parametrize("mos, chg, dsg", [
+    (0x00, False, False), (0x01, True, False), (0x02, False, True), (0x03, True, True),
+    (0x83, True, True), (0x43, True, True), (0x19, True, False), (0x80, False, False),
+])
+def test_jbd_mos_bits(mos, chg, dsg):
+    s = run_fetch_with_response(JbdBt("00:11:22:33:44:55", name="jbd"), _jbd_basic(mos))
+    assert s.switches == dict(charge=chg, discharge=dsg)

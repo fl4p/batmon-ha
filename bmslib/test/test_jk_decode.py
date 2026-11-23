@@ -156,3 +156,22 @@ def test_jk_set_soc_register_write():
     assert frame[:7] == bytes([0xAA, 0x55, 0x90, 0xEB, 0x6E, 0x01, 42]) and len(frame) == 20
     bms.is_new_11fw_32s = False
     assert not bms.supports_set_soc()
+
+
+@pytest.mark.parametrize("flags, expected", [
+    (0x80, [31.1, 30.9]),                           # #432 as captured: no T3..T5 flagged, as the JK app shows it
+    (0x80 | 0x08, [31.1, 30.9, 33.0]),              # T3 at 254
+    (0x80 | 0x20, [31.1, 30.9, None, None, 50.0]),  # only T5: T3/T4 keep their numbers as nan
+])
+def test_jk_t3_t5_follow_the_presence_bits(flags, expected):
+    import math
+    fx = jk_fixtures.DISC_432_BD6A32S
+    status = bytearray(fx["status_frame"])
+    status[294] = flags
+    status[258:260] = (500).to_bytes(2, 'little', signed=True)
+    status[-1] = sum(status[:-1]) & 0xFF
+    bms = _make_jk(fx)
+    got = bms._decode_sample(status, t_buf=time.time(), has_float_charger=False).temperatures
+    assert len(got) == len(expected)
+    for g, e in zip(got, expected):
+        assert math.isnan(g) if e is None else g == pytest.approx(e)

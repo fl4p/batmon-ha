@@ -1,5 +1,8 @@
 ## [unreleased]
 
+* Fix: JBD boards that count in 100 mA (FET bit 7, or humidity byte 0x88) showed current and capacities 10× too small; MOSFET states read off when heating or factory-mode bits were set.
+* Fix: JK 32S-layout temperatures: probes 3 and 4 were the app's T4/T5; T3..T5 now appear only when the BMS flags them, as in the JK app.
+* Fix: Seplos V3 (BLE) multi-pack setups showed only the first pack's cells, and power-board temperature, short-circuit latch and cell failure alarms did not set `problem`.
 * ANT: cell voltages drop the active balancer's error bits (which read as 8 V or more); protections set `problem`; new sensors: balancer temperature, total charged/discharged, protection and status flags, BMS uptime.
 * `cell_capacity_estimator`: Home Assistant sensors (and GUI rows) for each cell's capacity, the imbalance at full, and whether the weakest cell or the imbalance limits the pack. A charge or discharge in progress survives a restart.
 * The discharge limit (0 %) also fires under load: the lowest cell at 2.75 V or less for 30 s at up to 0.2C.

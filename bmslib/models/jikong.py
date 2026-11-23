@@ -468,8 +468,13 @@ class JKBt(BtBms):
         temp = lambda x: float('nan') if x == -2000 else (x / 10)
 
         temperatures = [temp(i16(130 + offset)), temp(i16(132 + offset))]
-        if self.is_new_11fw_32s:
-            temperatures += [temp(i16(224 + offset)), temp(i16(226 + offset))]
+        if self.is_new_11fw_32s and len(buf) > 262 + offset:
+            # T3, T4, T5 at 254/256/258, each shown by the JK app only while its bit (3, 4, 5) of byte 294 is set
+            # (JK BMS 6.4.07 OneFragmentViewModel; doc/dev/JK_PROTOCOL.md). Absent probes below a present one stay
+            # in the list as nan, so a probe keeps its number.
+            present = [buf[262 + offset] >> b & 1 for b in (3, 4, 5)]
+            last = max((k for k in range(3) if present[k]), default=-1)
+            temperatures += [temp(i16(222 + 2 * k + offset)) if present[k] else float('nan') for k in range(last + 1)]
 
         # SOH and BMS-internal aged capacity only meaningful on 11.x firmware.
         # On legacy 24s firmware, offset 146 just mirrors the nominal capacity
