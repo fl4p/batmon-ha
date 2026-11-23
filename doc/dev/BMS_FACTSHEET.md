@@ -227,6 +227,22 @@ untested there.
 Both times the first status poll after the charge-on write went unanswered (one timeout, then normal samples; the first
 run also dropped the link once).
 
+**Settings: write, save, reset (2026-11-23, ant24: ANT-20PHB0TB120A, sw `20PHUB00-211026A`, via ESPHome proxy).**
+The vendor app (ANT BMS V2 3.5.1, a uni-app; logic in `assets/apps/__UNI__BD778C4/www/app-service.js`) builds
+frames from protocol definitions it downloads: POST `https://api.antbms.com/admin-api/business/protocol/getFormatProtocol`
+(empty body, no login) lists them, e.g. `mqtt_new` at `https://cert.antbms.com/dtu-v2/static/mqtt_new/<md5>.json`.
+Each command there has a `hex` template (`func addr-lo addr-hi len`) and a permission `level`.
+- Settings write: func `0x22` with addr, len, value LE; reply `0x42` echoes it. The setting lives in RAM.
+- Save to flash: `0x51` at `0x0007` (`saveAppParamters`, level 3). Reset: `0x51` at `0x0009` (`resetBms`, level 3),
+  reloads flash, so an unsaved write is lost.
+- A `0x51` command is answered with `0x61`, byte 6: 1 done, 2 failed, 3 permission denied, 4 address out of range.
+- Password checks (func `0x23`): `0x0162` level 4, `0x016A` level 5 (the `123456789abc` frame above), `0x0176` level 9
+  (root; the app gets its value from ANT's server).
+- `0x00A2` is `packPhysicsAhL`, the physical capacity (u32, µAh, write level 3). The status frame's capacity follows it
+  after a save (a write alone left it at the old value).
+- Tested: 245 Ah written and saved with `0x0007` survived `0x0009`; syssi's "save customer data" `0x002C` answered 3
+  (permission denied), and that write was gone after the next reset.
+
 **Fields decoded by batmon.** `voltage`, `current`, `charge`, `capacity`, `total_charge_throughput`, `soc`, `soh`, `temperatures` (6 probes, NaN sentinel 65496), `mos_temperature`, `switches.{charge,discharge}`, plus per-cell mV (up to 32). Device info exposes hardware + firmware strings (with UTF-8 `errors='replace'` for buggy firmware byte streams).
 
 **Known on the wire but NOT decoded by batmon.** Balancer temperature (read right after `mos_temp` but discarded via a bare `offset += 2`), balance state byte (bit-per-cell mask — currently skipped), balance enable / direction bits, reserved status byte after charge-MOS, instantaneous power register (signed i32, read but commented out — would let us populate `power` directly instead of `V·I`), 16-bit alarm / problem code, runtime / uptime seconds, ΔV (computable from cells but not emitted), serial number, settings/threshold registers from the `0x0000–0x017E` write space.

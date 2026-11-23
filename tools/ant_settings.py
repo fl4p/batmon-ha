@@ -12,7 +12,10 @@ The BMS takes one BLE link: stop batmon first. With `ble_stack: esphome` in
 Bluetooth proxies, as batmon does; run it with the esphome venv in that case:
 
     /app/venv_esphome/bin/python3 tools/ant_settings.py AA:BB:CC:DD:EE:FF
-    /app/venv_esphome/bin/python3 tools/ant_settings.py AA:BB:CC:DD:EE:FF --write nominal_capacity=245000000
+    /app/venv_esphome/bin/python3 tools/ant_settings.py AA:BB:CC:DD:EE:FF --write nominal_capacity=245000000 \
+        --command save
+
+A write lives in RAM until `--command save`; `--command reset` reboots the BMS and reloads the saved settings.
 
 Optional: BATMON_ADAPTER=hci1 selects the Bluetooth adapter (bleak stack).
 """
@@ -87,8 +90,11 @@ async def run(address, writes, proxies, adapter=None, trace=False, commands=()):
                 return 2
         if commands:
             print('status before: capacity %.1f Ah, charge %.1f Ah, SoC %.1f %%' % _status(await bms.fetch()))
+        from bmslib.models.ant import ANT_COMMAND_RESULT
         for a in commands:
-            print('COMMAND 0x%04X: reply %s' % (a, await bms.command(a)))
+            reply = await bms.command(a)
+            code = int(reply.split()[6], 16) if reply and len(reply.split()) > 6 else None  # unpadded hex
+            print('COMMAND 0x%04X: reply %s (%s)' % (a, reply, ANT_COMMAND_RESULT.get(code, code)))
             await asyncio.sleep(3)
             print('status after: capacity %.1f Ah, charge %.1f Ah, SoC %.1f %%' % _status(await bms.fetch()))
         return 0
@@ -97,6 +103,11 @@ async def run(address, writes, proxies, adapter=None, trace=False, commands=()):
         if proxies is not None:
             from bmslib.ble.esphome_proxy import stop_proxies
             await stop_proxies()
+
+
+def _command(x):
+    from bmslib.models.ant import ANT_COMMANDS
+    return ANT_COMMANDS[x] if x in ANT_COMMANDS else int(x, 0)
 
 
 def _status(s):
@@ -108,8 +119,9 @@ def main():
     ap.add_argument('address', help='BMS MAC address')
     ap.add_argument('--write', action='append', metavar='NAME=RAW',
                     help='register name (or address) = raw value; repeatable')
-    ap.add_argument('--command', action='append', metavar='ADDR', type=lambda x: int(x, 0), default=[],
-                    help='send a 0x51 command register (e.g. 0x002C save, 0x0009 restart), after the writes')
+    ap.add_argument('--command', action='append', metavar='NAME|ADDR', type=_command, default=[],
+                    help='after the writes, send a 0x51 command: save (0x0007, settings to flash), reset '
+                         '(0x0009, reboot), or a register address')
     ap.add_argument('--trace', action='store_true', help='print every frame the BMS sends')
     args = ap.parse_args()
     proxies = _proxies()  # before anything imports bleak (bmslib.models.ant does)

@@ -63,7 +63,13 @@ ANT_SETTINGS = dict(
     soc_method=0x00C4,
 )
 ANT_SETTING_U32 = (0x00A2, 0x00A6, 0x00AA)
-# 0x51 command registers (syssi components/ant_bms_ble/button): restart 0x0009, save customer data 0x002C
+# 0x51 command registers, from the vendor's protocol definition (ANT BMS V2 app, mqtt_new.json at
+# cert.antbms.com, 2026-11): saveAppParamters 0x0007 writes the settings to flash, resetBms 0x0009 reboots
+# and reloads them (a setting not saved is lost). Both need permission level 3; the 0x016A password check
+# (_ant_auth_frame) is level 5. The 0x61 reply's byte 6: 1 done, 2 failed, 3 permission denied, 4 address
+# out of range. syssi's 0x002C ("save customer data") answers 3 on ant24 (sw 20PHUB00-211026A).
+ANT_COMMANDS = dict(save=0x0007, reset=0x0009)
+ANT_COMMAND_RESULT = {1: 'done', 2: 'failed', 3: 'permission denied', 4: 'address out of range'}
 
 
 def _ant_setting_size(addr: int) -> int:
