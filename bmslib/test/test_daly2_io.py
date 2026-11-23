@@ -300,3 +300,42 @@ def test_modbus_exception_reply_is_surfaced_not_timed_out():
         asyncio.run(bms.fetch())
     assert bms.client.writes == 1
     assert bms._first_reply_pending is False
+
+
+def _reply(payload):
+    frame = bytes([0xD2, 0x03, len(payload)]) + payload
+    crc = _modbus_crc16(frame)
+    return frame + bytes([crc & 0xFF, crc >> 8])
+
+
+class _RoutingClient(_FakeClient):
+    """Answers each read request with its own reply."""
+
+    def __init__(self, bms, replies):
+        super().__init__(bms, b"")
+        self._replies = replies
+        self.requests = []
+
+    async def write_gatt_char(self, char, data, response=False):
+        self.requests.append(bytes(data))
+        self._response = self._replies[bytes(data)]
+        self._deliver()
+
+
+def test_cells_above_32_come_from_register_0x47():
+    """40 cells: 1-32 from the info block, 33-40 from 0x47 (not the temperatures at 0x20..)."""
+    block = bytearray(0x3E * 2)
+    for i in range(32):
+        block[2 * i:2 * i + 2] = (3300 + i).to_bytes(2, 'big')
+    for i in range(8):
+        block[64 + 2 * i:66 + 2 * i] = (65 + i).to_bytes(2, 'big')  # temperatures, +40 offset
+    block[98:100] = (40).to_bytes(2, 'big')
+    hi = b''.join((3400 + i).to_bytes(2, 'big') for i in range(8))
+    bms = Daly2Bt("00:11:22:33:44:55", name="daly2")
+    bms.UUID_TX = "tx"
+    bms.client = _RoutingClient(bms, {_read_request(0x0000, 0x003E): _reply(bytes(block)),
+                                      _read_request(0x0047, 8): _reply(hi)})
+    asyncio.run(bms.fetch())
+    v = asyncio.run(bms.fetch_voltages())
+    assert v == [3300 + i for i in range(32)] + [3400 + i for i in range(8)]
+    assert bms.client.requests[-1] == _read_request(0x0047, 8)

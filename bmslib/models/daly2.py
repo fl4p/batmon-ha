@@ -241,7 +241,13 @@ class Daly2Bt(BtBms):
         if not num_cells:
             num_cells = int.from_bytes(buf[98:100], 'big')
         num_cells = min(num_cells, 48)
-        return [int.from_bytes(buf[i * 2:i * 2 + 2], 'big') for i in range(num_cells)]
+        # registers 0x00-0x1F hold cells 1-32 (0x20.. are temperatures); cells 33-48 sit at 0x47-0x56
+        # (SMART BMS / SMART BMS Pro, doc/dev/DALY_PROTOCOL.md)
+        v = [int.from_bytes(buf[i * 2:i * 2 + 2], 'big') for i in range(min(num_cells, 32))]
+        if num_cells > 32:
+            hi = (await self._q(_read_request(0x0047, num_cells - 32)))[3:]
+            v += [int.from_bytes(hi[i * 2:i * 2 + 2], 'big') for i in range(num_cells - 32)]
+        return v
 
     async def set_switch(self, switch: str, state: bool):
         reg = SWITCH_REGISTERS.get(switch)
