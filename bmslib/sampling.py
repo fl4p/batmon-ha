@@ -937,6 +937,7 @@ class BmsSampler:
                 sample = self.downsampler.pop()
 
                 publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
+                mqtt_util.publish_device_info_values(mqtt_client, self.mqtt_topic_prefix, self.device_info)
                 log_data and logger.info('%s: %s', bms.name, sample)
 
                 voltages = await cached_fetch_voltages()
@@ -1009,6 +1010,7 @@ class BmsSampler:
                 if self.period_pub.period > 2:
                     await asyncio.sleep(1)
                     publish_sample(mqtt_client, device_topic=self.mqtt_topic_prefix, sample=sample)
+                    mqtt_util.publish_device_info_values(mqtt_client, self.mqtt_topic_prefix, self.device_info)
                 if self.cellcap is not None and self.cellcap.enabled:
                     # published on change only: again on the next sample, for entities HA just created (not
                     # now: HA may not have subscribed yet). Off, they are left to expire.

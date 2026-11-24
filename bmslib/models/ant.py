@@ -54,6 +54,12 @@ ANT_SETTINGS = dict(
     pack_uvp=0x0014,  # 0.1 V
     pack_uvp_recovery=0x0016,
     cell_uv_warning=0x0028,
+    balance_limit_voltage=0x008C,  # mV (balanceHigVoltage)
+    balance_start_voltage=0x008E,  # mV
+    balance_start_diff=0x0090,  # mV
+    balance_stop_diff=0x0092,  # mV
+    balance_current=0x0094,  # vendor unit "N"
+    balance_charge_current=0x0096,  # 0.1 A
     soc_low_warning_1=0x0084,
     soc_low_warning_2=0x0086,
     shutdown_voltage=0x009E,  # mV
@@ -63,6 +69,15 @@ ANT_SETTINGS = dict(
     soc_method=0x00C4,
 )
 ANT_SETTING_U32 = (0x00A2, 0x00A6, 0x00AA)
+# published as device info: register, scale, unit (balanceCurrent's unit is "N" in the vendor table, meaning unknown)
+ANT_BALANCE_SETTINGS = dict(
+    balance_limit_voltage=(0x008C, 0.001, 'V'),
+    balance_start_voltage=(0x008E, 0.001, 'V'),
+    balance_start_diff=(0x0090, 0.001, 'V'),
+    balance_stop_diff=(0x0092, 0.001, 'V'),
+    balance_current=(0x0094, 1, ''),
+    balance_charge_current=(0x0096, 0.1, 'A'),
+)
 # 0x51 command registers, from the vendor's protocol definition (ANT BMS V2 app, mqtt_new.json at
 # cert.antbms.com, 2026-11): saveAppParamters 0x0007 writes the settings to flash, resetBms 0x0009 reboots
 # and reloads them (a setting not saved is lost). Both need permission level 3; the 0x016A password check
@@ -265,6 +280,17 @@ class AntBt(BtBms):
             name=None,
             sn=None,
         )
+        # balancer settings, read once per connection: diagnostic entities in HA
+        for key, (addr, scale, unit) in ANT_BALANCE_SETTINGS.items():
+            try:
+                raw = await asyncio.wait_for(self.read_setting(addr), 3)
+            except Exception as e:  # noqa: BLE001 -- older firmware may not answer; the rest of the info stands
+                self.logger.info('%s: balance settings not read (0x%04X: %s)', self.name, addr,
+                                 str(e) or type(e).__name__)
+                break  # one wait per connection, not one per register
+            dev.values['ant/' + key] = round(raw * scale, 3)
+            dev.value_desc['ant/' + key] = dict(name=key.replace('_', ' ').title(), unit=unit or None,
+                                                entity_category='diagnostic', icon='scale-balance')
         return dev
 
     async def fetch(self) -> BmsSample:

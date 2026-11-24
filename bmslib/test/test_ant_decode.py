@@ -184,3 +184,22 @@ def test_ant_frame_ending_after_the_cycled_capacity_decodes():
     raw[5] = n
     s = run_fetch_with_response(AntBt("00:11:22:33:44:55", name="ant"), _with_crc(raw))
     assert s.total_charge_throughput == pytest.approx(25955.544) and math.isnan(s.uptime)
+
+
+def test_ant_device_info_carries_the_balance_settings():
+    import asyncio
+    bms = AntBt("00:11:22:33:44:55", name="ant")
+    info = bytearray(6) + b"20PHB0TB120A".ljust(16, b"\0") + b"20PHUB00-211026A".ljust(16, b"\0")
+
+    async def q(*a, **kw):
+        return info
+    regs = {0x008C: 3600, 0x008E: 3400, 0x0090: 10, 0x0092: 5, 0x0094: 1, 0x0096: 15}
+
+    async def read_setting(addr):
+        return regs[addr]
+    bms._q, bms.read_setting = q, read_setting
+    d = asyncio.run(bms.fetch_device_info())
+    assert d.values == {'ant/balance_limit_voltage': 3.6, 'ant/balance_start_voltage': 3.4,
+                        'ant/balance_start_diff': 0.01, 'ant/balance_stop_diff': 0.005, 'ant/balance_current': 1,
+                        'ant/balance_charge_current': 1.5}
+    assert d.value_desc['ant/balance_start_voltage']['unit'] == 'V'

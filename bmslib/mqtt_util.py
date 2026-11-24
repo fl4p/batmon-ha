@@ -127,6 +127,14 @@ def mqtt_last_publish_time():
     return _last_publish_time
 
 
+def publish_device_info_values(client, device_topic, device_info):
+    """Device info values (settings read on connect) go out with every sample like any state: sent once, they reach
+    the broker before HA has the entity and expire after long_expiry."""
+    for key, value in (device_info.values.items() if device_info else ()):
+        if not is_none_or_nan(value):
+            mqtt_single_out(client, f"{device_topic}/{key}", value)
+
+
 def publish_sample(client, device_topic, sample: BmsSample):
     # j: the <device>/json/sample object. Its keys are the per-metric topic
     # names; switches and alarms are nested objects; ON/OFF is true/false.
@@ -386,11 +394,6 @@ def publish_hass_discovery(client, device_topic, expire_after_seconds: int, samp
     node_id = device_topic.replace('/', '_')
 
     device_json = hass_device_json(device_topic, device_info, display_name)
-
-    if device_info:
-        for key, value in device_info.values.items():
-            if not is_none_or_nan(value):
-                mqtt_single_out(client, f"{device_topic}/{key}", value)
 
     def _hass_discovery(k, device_class, unit, state_class=None, icon=None, name=None, long_expiry=False,
                         precision=None, expire_after=None, json_attributes_topic=None, entity_category=None):

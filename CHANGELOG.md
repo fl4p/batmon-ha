@@ -1,5 +1,7 @@
 ## [unreleased]
 
+* ANT: the balancer settings (start voltage, start/stop spread, limit voltage, balance currents) appear as diagnostic sensors, read once per connection.
+* Fix: sensors from a BMS's device info went out once, before Home Assistant had created them, and stayed unavailable.
 * Fix: InfluxDB got the names, units and icons of a BMS's extra sensors (JBD, JBD HV, ANT) as fields on every sample.
 * Fix: Daly (`daly2`) packs with more than 32 cells showed temperature registers as cells 33 and up; those cells come from their own register block.
 * Fix: Renogy RBT12100LFP-BT, RBT12200LFP-BT and other models that count current in 0.1 A showed it 10× too small; undervoltage and temperature warnings (register 5107) now set `problem`.

@@ -122,7 +122,8 @@ def test_new_protocol_request_bytes_and_split_reply(serial_stub):
 def test_new_protocol_device_info(serial_stub):
     bms = au.AntUart('serial', name='ant', adapter='/dev/ttyUSB0')
     info = asyncio.run(_exchange(bms, _chunks(fx.NEW_DEVICE_INFO, 13), bms.fetch_device_info))
-    assert bms.client.written == [bytes.fromhex('7ea1026c022058c4aa55')]  # issue #18/#20 capture
+    assert bms.client.written[0] == bytes.fromhex('7ea1026c022058c4aa55')  # issue #18/#20 capture
+    assert len(bms.client.written) == 2  # then one balance setting read, unanswered: no more
     assert info.hw_version == '16ZM'
     assert info.sw_version == '16ZMUB00-211026A'
 

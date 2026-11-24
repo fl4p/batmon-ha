@@ -598,3 +598,25 @@ def test_states_go_out_again_after_discovery_even_if_unchanged(monkeypatch):
     mqtt_util.mqtt_single_out(c, 'other/voltage', 12.0)
     assert sent.count('dev/voltage') == 2
     assert sent.count('other/voltage') == 1  # another device keeps its dedupe
+
+
+def test_device_info_values_go_out_with_the_samples():
+    from bmslib.bms import DeviceInfo
+    from bmslib.mqtt_util import forget_published, publish_device_info_values
+    sent = []
+
+    class Result:
+        rc = paho.MQTT_ERR_SUCCESS
+
+    class Client:
+        def publish(self, topic, payload, retain=False):
+            sent.append((topic, payload))
+            return Result()
+
+    di = DeviceInfo('mnf', 'm', None, None, None)
+    di.values['ant/balance_start_voltage'] = 3.4
+    di.values['ant/balance_current'] = float('nan')
+    forget_published("test/di")
+    publish_device_info_values(Client(), "test/di", di)
+    assert sent == [("test/di/ant/balance_start_voltage", 3.4)]
+    publish_device_info_values(Client(), "test/di", None)  # not fetched yet
