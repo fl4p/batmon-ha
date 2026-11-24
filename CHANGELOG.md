@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* Fix: InfluxDB got the names, units and icons of a BMS's extra sensors (JBD, JBD HV, ANT) as fields on every sample.
 * Fix: Daly (`daly2`) packs with more than 32 cells showed temperature registers as cells 33 and up; those cells come from their own register block.
 * Fix: Renogy RBT12100LFP-BT, RBT12200LFP-BT and other models that count current in 0.1 A showed it 10× too small; undervoltage and temperature warnings (register 5107) now set `problem`.
 * Fix: JBD boards that count in 100 mA (FET bit 7, or humidity byte 0x88) showed current and capacities 10× too small; MOSFET states read off when heating or factory-mode bits were set.

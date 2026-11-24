@@ -147,7 +147,8 @@ class InfluxDBSink(BmsSampleSink):
                 self._enqueue(point)
 
     def publish_sample(self, bms_name, sample: BmsSample, tags=None):
-        fields = self._encode_fields(flatten({**sample.values(), "timestamp": None}))
+        # extra_desc is entity metadata (names, units, icons), not a reading
+        fields = self._encode_fields(flatten({**sample.values(), "timestamp": None, "extra_desc": None}))
         remove_none_values(fields)
         fields1 = dict(fields)
         if random.random() > (1 / 200):

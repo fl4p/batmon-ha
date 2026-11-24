@@ -112,3 +112,13 @@ def test_telemetry_sink_lines(monkeypatch):
 
 with open(os.path.join(os.path.dirname(__file__), "data", "sink_line_protocol_golden.json")) as fh:
     GOLDEN = json.load(fh)
+
+
+def test_extra_desc_is_not_written(monkeypatch):
+    """extra_desc is entity metadata: names and units must not become a field on every sample."""
+    s = sinks.InfluxDBSink(host="localhost", database="x", flush_interval=3600)
+    s._stop_event.set()
+    s.publish_sample("bms1", _sample(extra_values={"ant/flags": "charging"},
+                                     extra_desc={"ant/flags": dict(name="Status Flags", unit=None)}))
+    lines = "\n".join(_drain(s))
+    assert "extra_values_ant/flags" in lines and "extra_desc" not in lines
