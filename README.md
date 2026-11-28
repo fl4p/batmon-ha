@@ -198,11 +198,14 @@ Standalone on Linux, add your user to the `dialout` group. A network serial serv
 works as `adapter: tcp://192.168.1.108:8880` (raw TCP, set the baud rate on the server) or `rfc2217://host:port`.
 
 Types (baud rate in parentheses). Types with an address (`daly_uart`, `jbd_hv_uart`, `jk_pb_uart`, `seplos_uart`,
-`braunpwr_uart`, `renogy_uart`, `felicity_uart`) take it as `type:<addr>`; several packs on one bus then share the same
+`jk_pb_uart_passive`, `braunpwr_uart`, `renogy_uart`, `felicity_uart`) take it as `type:<addr>`; several packs on one bus then share the same
 `adapter:`, one entry each. The other types allow one pack per port.
 
 * `jk_uart` (115200): JK / Jikong UART protocol. Not for PB models.
 * `jk_pb_uart` (115200): JK-PB inverter BMS (PB1A16S, PB2A16S, …) on RS485-1. Address as set in the JK app, default 1.
+* `jk_pb_uart_passive` (115200): like `jk_pb_uart`, but listen-only, for a parallel group whose master BMS (address 0)
+  already polls the bus. One entry per pack, the master as `jk_pb_uart_passive:0`. No device info, no switches; see
+  [doc/dev/BMS_FACTSHEET.md](doc/dev/BMS_FACTSHEET.md).
 * `daly_uart` (9600): Daly. Address is the board number, see below.
 * `jbd_uart` (9600): JBD / Xiaoxiang / LLT, TTL header or RS485.
 * `jbd_hv_uart` (9600): JBD / LWS high-voltage BMS (HVBMS, up to 200 cells). Default address 1
