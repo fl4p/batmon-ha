@@ -1073,3 +1073,19 @@ bmslib/models/
 ```
 
 aiobmsble plugins ship as a separate PyPI package. The local `bmslib/ble/bms_ble/plugins/` directory holds batmon-only plugins (currently `cw20_bms` for the CW20 power meter).
+
+## JK-PB on RS485-1 with a master (`jk_pb_uart_passive`)
+
+Confirmed on live hardware with two JK-PB2A16S20P packs in parallel (master address 0, slave 1, Home Assistant OS, 5 s sample period): both appear as separate devices with their own cells, SoC and pack voltage.
+
+Capture of the same pair, 115200 8N1, 60 s, 15 400 bytes. The master (address 0, DIP switches)
+polls addresses 1..15 in a loop of about 6 s. Each address gets `<addr> 10 16 20 00 01 02 00 00 <crc16>` (status) and
+`<addr> 10 16 1E ...` (settings); only existing slaves answer, with the 300-byte `55 AA EB 90 <type>` frame. After the
+requests for address 15 the master sends its own status and settings frame, without a request in front. Frame type 0x03
+(device info) never appears. The frames carry no address, so the owner follows from the position in the loop
+(`bmslib/uart/jk_pb_bus.py`).
+
+An active `jk_pb_uart` on this bus (as a second master) does not work: address 0 never answers an outside request, so
+the device-info request times out and the unit is never created, and the replies of other units on the bus are taken
+for its own, so SoC and cells jump between the packs.
+

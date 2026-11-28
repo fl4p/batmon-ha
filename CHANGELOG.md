@@ -1,5 +1,6 @@
 ## [unreleased]
 
+* New wired type `jk_pb_uart_passive` for JK-PB parallel groups: listens to the master BMS's polling on RS485-1 and reads the master (address 0) and every slave without sending anything. `jk_pb_uart` collides with the master there.
 * ANT: the balancer settings (start voltage, start/stop spread, limit voltage, balance currents) appear as diagnostic sensors, read once per connection.
 * Fix: sensors from a BMS's device info went out once, before Home Assistant had created them, and stayed unavailable.
 * Fix: InfluxDB got the names, units and icons of a BMS's extra sensors (JBD, JBD HV, ANT) as fields on every sample.

@@ -33,6 +33,7 @@ def get_bms_model_class(name: str):
         jbd_uart='models.jbd_uart.JbdUart',  # JBD over TTL UART / RS485; same DD..77 frames as BLE
         jbd_hv_uart='models.jbd_hv_uart.JbdHvUart',  # JBD / LWS high-voltage BMS (up to 200 cells), 3F 55 frames (#424)
         jk_pb_uart='models.jk_pb_uart.JkPbUart',  # JK-PB inverter BMS over RS485 (Modbus trigger, JK02_32S frame)
+        jk_pb_uart_passive='models.jk_pb_uart_passive.JkPbUartPassive',  # JK-PB on a bus with a master: listen only
         seplos_uart='models.seplos_uart.SeplosUart',  # Seplos V2 ASCII protocol over RS485
         braunpwr_uart='models.braunpwr_uart.BraunPwrUart',  # BraunPWR / KS48100 rack BMS, YD/T 1363 over UART (#403)
         renogy_uart='models.renogy_uart.RenogyUart',  # Renogy smart lithium over RS485 Modbus RTU
